@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -42,6 +44,13 @@ type Config struct {
 	// the nginx deployment; a bare `ssh` client never sends the header, so local
 	// development needs PROXY_PROTOCOL=false.
 	ProxyProtocol bool
+	// ProxyTrustedCIDRs, when set, are the only peers whose PROXY header is honored;
+	// empty trusts every peer, which is only safe while 6969 is never published.
+	ProxyTrustedCIDRs []netip.Prefix
+	// RegistrationLimit accounts per client network per RegistrationWindow. Five an
+	// hour in production; make loadtest needs far more.
+	RegistrationLimit  int
+	RegistrationWindow time.Duration
 }
 
 // intEnvs accumulates integer env lookups so one error check covers all of them
@@ -58,19 +67,19 @@ func (e *intEnvs) get(key string, fallback int) int {
 	return value
 }
 
-// resolveEnv reads ENV, loads .env outside production, and falls back to
-// development for any unrecognised value.
-func resolveEnv() string {
+// resolveEnv reads ENV and loads .env outside production. An unrecognised value is
+// an error: falling back to development turned a typo like ENV=prod into a production
+// server with every production check off.
+func resolveEnv() (string, error) {
 	env := getEnv("ENV", "development")
-	if env != "production" {
-		_ = godotenv.Load()
-	}
 	switch env {
-	case "production", "development", "staging":
-		return env
+	case "production":
+	case "development", "staging":
+		_ = godotenv.Load()
 	default:
-		return "development"
+		return "", fmt.Errorf("invalid ENV %q: want production, staging or development", env)
 	}
+	return env, nil
 }
 
 // otelInsecure defaults to plaintext outside production, overridable by env.
@@ -82,7 +91,10 @@ func otelInsecure(env string) bool {
 }
 
 func Load() (*Config, error) {
-	env := resolveEnv()
+	env, err := resolveEnv()
+	if err != nil {
+		return nil, err
+	}
 
 	ints := &intEnvs{}
 	serverPort := ints.get("SERVER_PORT", 6969)
@@ -93,8 +105,17 @@ func Load() (*Config, error) {
 	rateLimitCount := ints.get("RATE_LIMIT_CONNECTIONS", 5)
 	rateLimitWindowMS := ints.get("RATE_LIMIT_WINDOW_MS", 1000)
 	apiRequestsPerMinute := ints.get("API_REQUESTS_PER_MINUTE", 120)
+	registrationLimit := ints.get("REGISTRATION_LIMIT", 5)
 	if ints.err != nil {
 		return nil, ints.err
+	}
+	registrationWindow, err := time.ParseDuration(getEnv("REGISTRATION_WINDOW", "1h"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid REGISTRATION_WINDOW: %w", err)
+	}
+	trustedCIDRs, err := parsePrefixes(getEnv("PROXY_TRUSTED_CIDRS", ""))
+	if err != nil {
+		return nil, fmt.Errorf("invalid PROXY_TRUSTED_CIDRS: %w", err)
 	}
 
 	logLevel, err := parseLogLevel(getEnv("LOG_LEVEL", ""))
@@ -120,6 +141,9 @@ func Load() (*Config, error) {
 		// publishes the API port, so nginx is the only source there, and it opts in.
 		APITrustProxy:        getEnv("API_TRUST_PROXY", "false") == "true",
 		ProxyProtocol:        getEnv("PROXY_PROTOCOL", "true") != "false",
+		ProxyTrustedCIDRs:    trustedCIDRs,
+		RegistrationLimit:    registrationLimit,
+		RegistrationWindow:   registrationWindow,
 		MaxConnections:       maxConnections,
 		SSHKeyPath:           getEnv("SSH_KEY_PATH", ".wishlist/server"),
 		DBHost:               getEnv("DB_HOST", "localhost"),
@@ -146,35 +170,68 @@ func Load() (*Config, error) {
 
 // Validate checks production-critical configuration.
 func (c *Config) Validate() error {
-	if c.Env == "production" && c.DBPassword == "" {
-		return errors.New("DB_PASSWORD is required when ENV=production")
-	}
-	if c.Env == "production" && c.DBSSLMode == "disable" {
-		allowInsecure := os.Getenv("ALLOW_INSECURE_DB") == "true"
-		internalHost := c.DBHost == "db" || c.DBHost == "localhost" || c.DBHost == "127.0.0.1"
-		if !allowInsecure && !internalHost {
-			return fmt.Errorf("DB_SSLMODE=disable is not allowed in production for host %q; "+
-				"set ALLOW_INSECURE_DB=true only for trusted networks", c.DBHost)
+	if c.Env == "production" {
+		if err := c.validateProductionDB(); err != nil {
+			return err
 		}
 	}
-	if c.RateLimitCount < 1 {
-		return errors.New("RATE_LIMIT_CONNECTIONS must be at least 1")
-	}
-	if c.RateLimitWindow < time.Millisecond {
-		return errors.New("RATE_LIMIT_WINDOW_MS must be at least 1")
-	}
-	if c.APIRequestsPerMinute < 1 {
-		return errors.New("API_REQUESTS_PER_MINUTE must be at least 1")
-	}
-	if c.DBMaxOpenConnections < 1 {
-		return errors.New("DB_MAX_OPEN_CONNS must be at least 1")
-	}
-	// netutil.LimitListener treats a non-positive limit as "accept nothing", so the
-	// server would bind the port and then refuse every player.
-	if c.MaxConnections < 1 {
-		return errors.New("MAX_CONNECTIONS must be at least 1")
+	for _, check := range []struct {
+		bad bool
+		msg string
+	}{
+		{c.RateLimitCount < 1, "RATE_LIMIT_CONNECTIONS must be at least 1"},
+		{c.RateLimitWindow < time.Millisecond, "RATE_LIMIT_WINDOW_MS must be at least 1"},
+		{c.APIRequestsPerMinute < 1, "API_REQUESTS_PER_MINUTE must be at least 1"},
+		{c.DBMaxOpenConnections < 1, "DB_MAX_OPEN_CONNS must be at least 1"},
+		// netutil.LimitListener treats a non-positive limit as "accept nothing", so the
+		// server would bind the port and then refuse every player.
+		{c.MaxConnections < 1, "MAX_CONNECTIONS must be at least 1"},
+		{c.RegistrationLimit < 1, "REGISTRATION_LIMIT must be at least 1"},
+		{c.RegistrationWindow < time.Second, "REGISTRATION_WINDOW must be at least 1s"},
+	} {
+		if check.bad {
+			return errors.New(check.msg)
+		}
 	}
 	return nil
+}
+
+// validateProductionDB insists on a TLS mode that refuses plaintext. prefer and allow
+// quietly fall back to it whenever the server declines TLS, so they are disable with
+// extra steps.
+func (c *Config) validateProductionDB() error {
+	if c.DBPassword == "" {
+		return errors.New("DB_PASSWORD is required when ENV=production")
+	}
+	switch c.DBSSLMode {
+	case "require", "verify-ca", "verify-full":
+		return nil
+	}
+	allowInsecure := os.Getenv("ALLOW_INSECURE_DB") == "true"
+	internalHost := c.DBHost == "db" || c.DBHost == "localhost" || c.DBHost == "127.0.0.1"
+	if allowInsecure || internalHost {
+		return nil
+	}
+	return fmt.Errorf("DB_SSLMODE=%s is not allowed in production for host %q; use require, verify-ca "+
+		"or verify-full, or set ALLOW_INSECURE_DB=true only for trusted networks", c.DBSSLMode, c.DBHost)
+}
+
+// parsePrefixes reads a comma-separated CIDR list. One bad entry fails the whole list:
+// silently dropping it would trust fewer peers than configured, or none.
+func parsePrefixes(raw string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for field := range strings.SplitSeq(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(field)
+		if err != nil {
+			return nil, fmt.Errorf("parse %q: %w", field, err)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 // DSN carries DBPassword in clear text. Never log the result; log the Config

@@ -241,13 +241,121 @@ func TestResolveEnv_DotEnvLoadedOutsideProductionOnly(t *testing.T) {
 	}
 }
 
-// An unrecognised ENV is not a reason to guess production behavior.
-func TestResolveEnv_UnknownFallsBackToDevelopment(t *testing.T) {
-	t.Setenv("ENV", "wat")
+// A mistyped ENV used to mean development, which silently switched off every
+// production check - the password requirement, the TLS default - on the one
+// deployment that needed them.
+func TestResolveEnv_UnknownIsAnError(t *testing.T) {
+	for _, env := range []string{"wat", "prod", "Production"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("ENV", env)
 
-	cfg, err := config.Load()
-	require.NoError(t, err)
-	assert.Equal(t, "development", cfg.Env)
+			_, err := config.Load()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ENV")
+		})
+	}
+}
+
+// prefer and allow fall back to plaintext whenever the server declines TLS, so in
+// production they are disable with extra steps.
+func TestValidate_ProductionNeedsAnSSLModeThatRequiresTLS(t *testing.T) {
+	base := func(mode, host string) *config.Config {
+		return &config.Config{
+			Env: "production", DBPassword: "secret", DBHost: host, DBSSLMode: mode,
+			RateLimitCount: 5, RateLimitWindow: time.Second, DBMaxOpenConnections: 25,
+			MaxConnections: 1, APIRequestsPerMinute: 1,
+			RegistrationLimit: 1, RegistrationWindow: time.Hour,
+		}
+	}
+
+	tests := []struct {
+		mode, host string
+		wantErr    bool
+	}{
+		{mode: "require", host: "db.example.com"},
+		{mode: "verify-ca", host: "db.example.com"},
+		{mode: "verify-full", host: "db.example.com"},
+		{mode: "prefer", host: "db.example.com", wantErr: true},
+		{mode: "allow", host: "db.example.com", wantErr: true},
+		{mode: "disable", host: "db.example.com", wantErr: true},
+		{mode: "prefer", host: "db"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode+"@"+tt.host, func(t *testing.T) {
+			t.Setenv("ALLOW_INSECURE_DB", "")
+			err := base(tt.mode, tt.host).Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "DB_SSLMODE="+tt.mode)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// make loadtest registers one account per session, far past the production budget
+// of five an hour, so the budget has to be settable without a rebuild.
+func TestLoad_RegistrationBudget(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("REGISTRATION_LIMIT", "")
+		t.Setenv("REGISTRATION_WINDOW", "")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, 5, cfg.RegistrationLimit)
+		assert.Equal(t, time.Hour, cfg.RegistrationWindow)
+	})
+	t.Run("override", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("REGISTRATION_LIMIT", "10000")
+		t.Setenv("REGISTRATION_WINDOW", "1m")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, 10000, cfg.RegistrationLimit)
+		assert.Equal(t, time.Minute, cfg.RegistrationWindow)
+	})
+	t.Run("an unparsable window fails the boot", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("REGISTRATION_WINDOW", "an hour")
+
+		_, err := config.Load()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "REGISTRATION_WINDOW")
+	})
+}
+
+// The PROXY header names the client address every limiter keys on, so accepting it
+// from anyone lets anyone choose their own address.
+func TestLoad_ProxyTrustedCIDRs(t *testing.T) {
+	t.Run("unset trusts every peer, as before", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("PROXY_TRUSTED_CIDRS", "")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Empty(t, cfg.ProxyTrustedCIDRs)
+	})
+	t.Run("a list is parsed", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("PROXY_TRUSTED_CIDRS", "172.30.0.0/24, fd00:30::/64")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		require.Len(t, cfg.ProxyTrustedCIDRs, 2)
+		assert.Equal(t, "172.30.0.0/24", cfg.ProxyTrustedCIDRs[0].String())
+		assert.Equal(t, "fd00:30::/64", cfg.ProxyTrustedCIDRs[1].String())
+	})
+	t.Run("a typo fails the boot rather than trusting nobody or everybody", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("PROXY_TRUSTED_CIDRS", "172.30.0.0/33")
+
+		_, err := config.Load()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PROXY_TRUSTED_CIDRS")
+	})
 }
 
 // Each of these limits is "at least one", so one itself has to pass.
@@ -262,6 +370,8 @@ func TestValidate_LowestAllowedValuesAreValid(t *testing.T) {
 			DBMaxOpenConnections: 1,
 			MaxConnections:       1,
 			APIRequestsPerMinute: 1,
+			RegistrationLimit:    1,
+			RegistrationWindow:   time.Second,
 		}
 	}
 
@@ -284,6 +394,12 @@ func TestValidate_LowestAllowedValuesAreValid(t *testing.T) {
 		// server would come up healthy and refuse every player.
 		{name: "no connections at all", breakIt: func(c *config.Config) { c.MaxConnections = 0 }, want: "MAX_CONNECTIONS"},
 		{name: "negative connections", breakIt: func(c *config.Config) { c.MaxConnections = -1 }, want: "MAX_CONNECTIONS"},
+		{name: "no registrations", breakIt: func(c *config.Config) { c.RegistrationLimit = 0 }, want: "REGISTRATION_LIMIT"},
+		{
+			name:    "sub-second registration window",
+			breakIt: func(c *config.Config) { c.RegistrationWindow = time.Millisecond },
+			want:    "REGISTRATION_WINDOW",
+		},
 	}
 
 	for _, tt := range tests {
