@@ -197,29 +197,38 @@ func (q *gormMatchRepository) updateRankingsTx(
 		return nil, err
 	}
 
-	if err := seedRankingRows(tx, gameID, orderedUserIDs); err != nil {
+	// Read under the seat locks eraseUserLocked also takes, so an erasure either
+	// committed before this or waits for this transaction to finish.
+	seats, seatPlaces, err := unerasedSeats(tx, orderedUserIDs, places)
+	if err != nil {
+		return nil, err
+	}
+	deltas := make(map[uuid.UUID]int, len(seats))
+	if len(seats) == 0 {
+		return deltas, nil
+	}
+
+	if err := seedRankingRows(tx, gameID, seats); err != nil {
 		return nil, err
 	}
 
-	rankingMap, err := q.fetchRankings(tx, gameID, orderedUserIDs)
+	rankingMap, err := q.fetchRankings(tx, gameID, seats)
 	if err != nil {
 		return nil, fmt.Errorf("fetch rankings: %w", err)
 	}
 
-	pairings, err := repeatedPairCountLast24h(tx, orderedUserIDs)
+	pairings, err := repeatedPairCountLast24h(tx, seats)
 	if err != nil {
 		return nil, err
 	}
 	damped := pairings >= maxSamePairingPerDay
 	if damped {
 		slog.WarnContext(ctx, "ranked match damped: these players have already met inside 24h",
-			"user_ids", orderedUserIDs, "game_id", gameID, "recent_pairings", pairings)
+			"user_ids", seats, "game_id", gameID, "recent_pairings", pairings)
 	}
 
-	newRatings := q.calculateNewElos(orderedUserIDs, places, rankingMap)
-
-	deltas := make(map[uuid.UUID]int, len(orderedUserIDs))
-	for _, userID := range orderedUserIDs {
+	newRatings := q.calculateNewElos(seats, seatPlaces, rankingMap)
+	for _, userID := range seats {
 		// Every seat was just seeded, so a miss is a soft-deleted row, not a new player.
 		r, ok := rankingMap[userID]
 		if !ok {
@@ -230,31 +239,69 @@ func (q *gormMatchRepository) updateRankingsTx(
 		if !ok {
 			return nil, fmt.Errorf("no elo result for user %s", userID)
 		}
-
-		// The increment rides the row this transaction already holds FOR UPDATE, and
-		// happens whether or not the rating moved: a damped or unpaid match is still a
-		// match played, and it is what lets a provisional account graduate.
-		update := map[string]any{"matches_played": gorm.Expr("matches_played + 1")}
-
-		// Who gets paid against a provisional seat is elo.Calculate's decision, per
-		// pair; here a damped table is the only reason a rating stays put.
+		delta, err := writeRanking(tx, r, newRating, damped)
+		if err != nil {
+			return nil, err
+		}
 		if !damped {
-			stored := elo.ToUint32(newRating)
-			update["elo"] = stored
-			deltas[userID] = int(stored) - int(r.Elo)
-		}
-		res := tx.Model(r).Updates(update)
-		if res.Error != nil {
-			return nil, fmt.Errorf("update ranking: %w", res.Error)
-		}
-		// This transaction holds the row FOR UPDATE, so zero rows means it is gone
-		// underneath us. Carrying on would write the computed elo_delta into history for
-		// a rating that never moved.
-		if res.RowsAffected == 0 {
-			return nil, fmt.Errorf("ranking for user %s in game %d was not updated", userID, gameID)
+			deltas[userID] = delta
 		}
 	}
 	return deltas, nil
+}
+
+// writeRanking stores one seat's result and returns the delta it wrote.
+func writeRanking(tx *gorm.DB, r *db.Ranking, newRating float64, damped bool) (int, error) {
+	// The increment rides the row this transaction already holds FOR UPDATE, and
+	// happens whether or not the rating moved: a damped or unpaid match is still a
+	// match played, and it is what lets a provisional account graduate.
+	update := map[string]any{"matches_played": gorm.Expr("matches_played + 1")}
+
+	// Who gets paid against a provisional seat is elo.Calculate's decision, per
+	// pair; here a damped table is the only reason a rating stays put.
+	delta := 0
+	if !damped {
+		stored := elo.ToUint32(newRating)
+		update["elo"] = stored
+		delta = int(stored) - int(r.Elo)
+	}
+	res := tx.Model(r).Updates(update)
+	if res.Error != nil {
+		return 0, fmt.Errorf("update ranking: %w", res.Error)
+	}
+	// This transaction holds the row FOR UPDATE, so zero rows means it is gone
+	// underneath us. Carrying on would write the computed elo_delta into history for
+	// a rating that never moved.
+	if res.RowsAffected == 0 {
+		return 0, fmt.Errorf("ranking for user %s in game %d was not updated", r.UserID, r.GameID)
+	}
+	return delta, nil
+}
+
+// unerasedSeats drops the seats whose account was erased while the match ran, with
+// their places kept alongside so ties still line up. Seeding an erased seat would put
+// the account back on the leaderboard under its anonymised name; it keeps its
+// participant row, which is other players' history (decision #22), and nothing else.
+//
+// The anonymised prefix is safe to match on: ValidateUsername refuses it, so no chosen
+// name starts with it. Unscoped because an operator soft-delete does not make the
+// account any less erased.
+func unerasedSeats(tx *gorm.DB, userIDs []uuid.UUID, places []int) ([]uuid.UUID, []int, error) {
+	var erased []string
+	if err := tx.Unscoped().Model(&db.User{}).
+		Where(`id IN ? AND username LIKE 'deleted\_%'`, uuidStrings(userIDs)).
+		Pluck("id", &erased).Error; err != nil {
+		return nil, nil, fmt.Errorf("query erased seats: %w", err)
+	}
+	seats := make([]uuid.UUID, 0, len(userIDs))
+	seatPlaces := make([]int, 0, len(userIDs))
+	for i, id := range userIDs {
+		if !slices.Contains(erased, id.String()) {
+			seats = append(seats, id)
+			seatPlaces = append(seatPlaces, placeAt(places, i))
+		}
+	}
+	return seats, seatPlaces, nil
 }
 
 // repeatedPairCountLast24h is the most ranked matches any single pair of players at
@@ -328,9 +375,17 @@ func worstPairCount(seats map[uint][]uuid.UUID) int {
 // different sets can share one.
 func lockPairing(tx *gorm.DB, userIDs []uuid.UUID) error {
 	for _, id := range sortedUserIDs(userIDs) {
-		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", seatAdvisoryKey(id)).Error; err != nil {
-			return fmt.Errorf("lock seat %s: %w", id, err)
+		if err := lockSeat(tx, id); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// lockSeat is the per-user advisory lock both a ranked finalize and an erasure hold.
+func lockSeat(tx *gorm.DB, id uuid.UUID) error {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", seatAdvisoryKey(id)).Error; err != nil {
+		return fmt.Errorf("lock seat %s: %w", id, err)
 	}
 	return nil
 }

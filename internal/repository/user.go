@@ -303,6 +303,12 @@ func (q *gormUserRepository) DeleteAccount(ctx context.Context, userID uuid.UUID
 }
 
 func eraseUserLocked(tx *gorm.DB, userID uuid.UUID) error {
+	// The seat lock a ranked finalize holds for this user: without it a finalize that
+	// read the name before this commit seeds a ranking for the erased account, and it
+	// is back on the leaderboard.
+	if err := lockSeat(tx, userID); err != nil {
+		return err
+	}
 	// Unscoped, not a soft delete: the fingerprint column is unique, so a lingering
 	// key row would keep the returning player from ever registering again - and a
 	// soft-deleted ranking still holds the (user_id, game_id) primary key.
