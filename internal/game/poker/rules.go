@@ -33,7 +33,9 @@ var (
 
 // TimeoutAction never risks chips on an absent player's behalf: it checks when that
 // is free and folds when it is not, which is what every real poker client does with
-// a player who has stopped responding.
+// a player who has stopped responding. A call is also free when no opponent can put
+// in more than the player already has out: everything past that is refunded at
+// showdown, and folding would forfeit a bet the player had already covered.
 //
 // Between hands it deals the next one instead. The player holding the button is the
 // only one who can, so an absent dealer would otherwise freeze the match for
@@ -52,8 +54,12 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	if state.CurrentTurn < 0 || state.CurrentTurn >= len(state.Players) {
 		return nil
 	}
-	if ToCall(extra, state.Players[state.CurrentTurn].ID) == 0 {
+	p := state.Players[state.CurrentTurn]
+	if ToCall(extra, p.ID) == 0 {
 		return ActionCheck{}
+	}
+	if largestCallableBet(state, extra, p) <= extra.PlayerBets[p.ID] {
+		return ActionCall{}
 	}
 	return ActionFold{}
 }

@@ -364,7 +364,7 @@ func TestRules_TimeoutAction(t *testing.T) {
 		},
 		{
 			name:  "facing a bet folds rather than paying with chips they did not commit",
-			extra: &State{CurrentBet: DefaultBigBlind},
+			extra: &State{CurrentBet: DefaultBigBlind, PlayerChips: map[string]uint{"villain": DefaultStack}},
 			want:  ActionFold{},
 		},
 		{
@@ -500,4 +500,25 @@ func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
 	require.ErrorIs(t, rules.AfterAction(state, ActionFold{}), game.ErrInvalidState)
 	assert.NotPanics(t, func() { rules.OnPlayerLeave(state, "a") })
 	assert.NotPanics(t, func() { rules.AfterPlayerRemoved(state, 0) })
+}
+
+// A call that no opponent can make the player pay for is free: the short big blind
+// is all-in for 10, so everything the button adds past that comes straight back at
+// showdown. Folding there hands the blind a pot the button had already covered.
+func TestRules_TimeoutAction_CallsWhenTheCallIsRefundedInFull(t *testing.T) {
+	t.Parallel()
+	state, extra := tableWithChips(1000, 10)
+	rules := &Rules{}
+	require.NoError(t, rules.beginHand(state, extra, 0))
+	require.Equal(t, 0, state.CurrentTurn, "heads-up the button acts first")
+
+	action := rules.TimeoutAction(state)
+
+	require.Equal(t, ActionCall{}, action)
+	require.NoError(t, rules.ValidateAction(state, action))
+	require.NoError(t, rules.ApplyAction(state, action))
+	require.NoError(t, rules.AfterAction(state, action))
+	assert.True(t, extra.ReachedShowdown, "the hand is shown down, not folded")
+	assert.Equal(t, uint(1010), extra.PlayerChips["p0"]+extra.PlayerChips["p1"])
+	assert.GreaterOrEqual(t, extra.PlayerChips["p0"], uint(990), "the button risked only the 10 the blind covered")
 }
