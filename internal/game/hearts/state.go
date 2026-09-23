@@ -78,11 +78,14 @@ type State struct {
 	HandNumber       int
 	DealerIndex      int
 	TargetScore      int
-	HandComplete     bool
 	MatchComplete    bool
 
 	LastTrickWinner string
 }
+
+// HandComplete is derived from Stage rather than kept beside it, so the two cannot
+// disagree about whether the hand is over.
+func (s *State) HandComplete() bool { return s.Stage == StageHandOver }
 
 // leadingTrick reports whether the next card played opens a trick. A won trick
 // still sitting on the table is not one in progress.
@@ -115,6 +118,5 @@ func resetHandState(extra *State) {
 	// Fresh rather than cleared: every read is by index, so an absent seat already
 	// reads zero and beginHand does not have to seed one key per player.
 	extra.HandPoints = make(map[string]int, playerCount)
-	extra.HandComplete = false
 	extra.LastTrickWinner = ""
 }

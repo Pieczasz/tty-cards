@@ -266,7 +266,6 @@ func (r *Rules) afterPlay(state *game.State, extra *State) error {
 
 	scoreHand(extra, state.Players)
 	extra.Stage = StageHandOver
-	extra.HandComplete = true
 
 	if game.AnyScoreAtLeast(extra.CumulativeScores, extra.TargetScore) {
 		extra.MatchComplete = true
@@ -359,7 +358,7 @@ func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
 	if !ok {
 		return 0
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		return extra.CumulativeScores[p.ID]
 	}
 	return extra.CumulativeScores[p.ID] + extra.HandPoints[p.ID]

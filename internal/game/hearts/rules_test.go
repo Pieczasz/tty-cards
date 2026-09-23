@@ -741,14 +741,14 @@ func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 		extra := s.Extra.(*State)
 		extra.CumulativeScores = map[string]int{"p1": 0, "p2": 0, "p3": 0, "p4": 0}
 		extra.HandPoints = map[string]int{"p1": 0, "p2": 0, "p3": 0, "p4": 25}
-		extra.HandComplete = false
+		extra.Stage = StageTrickPlay
 
 		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "mid-hand, the live hand counts")
 		assert.Equal(t, 0, rules.StandingScore(s, s.Players[0]))
 
 		// scoreHand has run: totals now hold the hand, and HandPoints still does too.
 		extra.CumulativeScores["p4"] = 25
-		extra.HandComplete = true
+		extra.Stage = StageHandOver
 		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "scored once, not twice")
 	})
 }
@@ -808,7 +808,6 @@ func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 	engine.WithState(func(s *game.State) {
 		extra := s.Extra.(*State)
 		extra.Stage = StageTrickPlay
-		extra.HandComplete = false
 		extra.CumulativeScores = map[string]int{"p1": 10, "p2": 0, "p3": 10, "p4": 10}
 		// p3 took the queen this hand, so on the totals alone they would tie p1 and p4
 		// and place ahead of both on seat order.

@@ -72,7 +72,6 @@ func (r *Rules) OnGameStart(state *game.State) error {
 
 func (r *Rules) beginHand(state *game.State, extra *State) error {
 	extra.HandNumber++
-	extra.HandComplete = false
 	extra.LastHandResult = nil
 	extra.HandPhase = AwaitingDraw
 	extra.TakenUpcard = nil
@@ -108,7 +107,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	}
 
 	if _, isNext := action.(ActionNextHand); isNext {
-		if !extra.HandComplete {
+		if !extra.HandComplete() {
 			return errors.New("hand is still being played")
 		}
 		if extra.MatchComplete {
@@ -116,7 +115,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		}
 		return nil
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		return errors.New("hand is over")
 	}
 
@@ -237,7 +236,6 @@ func (r *Rules) applyKnock(state *game.State, extra *State, action ActionKnock) 
 	state.Discard = deck.New([]deck.Card{})
 	extra.TakenUpcard = nil
 	extra.HandPhase = HandOver
-	extra.HandComplete = true
 	extra.LastHandResult = result
 
 	extra.CumulativeScores[result.Winner] += result.ScoreDelta
@@ -368,7 +366,6 @@ func (r *Rules) settleWall(state *game.State, extra *State, cause string) {
 		"turns", extra.TurnsThisHand,
 		"stock", state.Deck.Size())
 
-	extra.HandComplete = true
 	extra.HandPhase = HandOver
 	extra.LastHandResult = &HandResult{Wall: true}
 
@@ -405,7 +402,7 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	if !ok {
 		return nil
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		if extra.MatchComplete {
 			return nil
 		}
@@ -481,7 +478,7 @@ func ginDiscard(hand []deck.Card, forbidden *deck.Card) (deck.Card, bool) {
 // "engine default", not "no clock".
 func (r *Rules) TurnTimeout(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
-	if !ok || !extra.HandComplete {
+	if !ok || !extra.HandComplete() {
 		return 0
 	}
 	return handOverTimeout

@@ -375,7 +375,7 @@ func TestRules_Wall_AfterDiscard(t *testing.T) {
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds)) // 11 cards
 	rules.ApplyAction(state, ActionDiscard{Card: card})
 	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-	assert.True(t, extra.HandComplete)
+	assert.True(t, extra.HandComplete())
 	require.NotNil(t, extra.LastHandResult)
 	assert.True(t, extra.LastHandResult.Wall)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
@@ -394,7 +394,7 @@ func TestRules_Wall_StockThreeDoesNotTrigger(t *testing.T) {
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds))
 	rules.ApplyAction(state, ActionDiscard{Card: card})
 	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-	assert.False(t, extra.HandComplete)
+	assert.False(t, extra.HandComplete())
 	assert.Equal(t, AwaitingDraw, extra.HandPhase)
 }
 
@@ -455,7 +455,7 @@ func TestRules_TimeoutAction_NextHand(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state, extra := startedState(t)
-	extra.HandComplete = true
+	extra.HandPhase = HandOver
 	assert.Equal(t, ActionNextHand{}, rules.TimeoutAction(state))
 }
 
@@ -463,7 +463,7 @@ func TestRules_TimeoutAction_MatchOver(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state, extra := startedState(t)
-	extra.HandComplete = true
+	extra.HandPhase = HandOver
 	extra.MatchComplete = true
 	assert.Nil(t, rules.TimeoutAction(state))
 }
@@ -554,7 +554,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 		card := state.Players[state.CurrentTurn].Cards[0]
 		rules.ApplyAction(state, ActionDiscard{Card: card})
 		require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-		require.True(t, extra.HandComplete)
+		require.True(t, extra.HandComplete())
 		require.True(t, extra.LastHandResult.Wall)
 
 		if extra.MatchComplete {
@@ -666,7 +666,9 @@ func TestRules_TurnTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state, extra := startedState(t)
-			extra.HandComplete = tt.handComplete
+			if tt.handComplete {
+				extra.HandPhase = HandOver
+			}
 			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
 		})
 	}
