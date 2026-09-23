@@ -69,6 +69,35 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 	})
 }
 
+func TestValidateShedPlay(t *testing.T) {
+	t.Parallel()
+	held := deck.Card{Rank: deck.Ace, Suit: deck.Spades} // shedState deals p1 this card
+	top := deck.Card{Rank: deck.Two, Suit: deck.Hearts}
+	matchSaw := func(saw *deck.Card) func(deck.Card) error {
+		return func(c deck.Card) error { *saw = c; return nil }
+	}
+
+	t.Run("no card in play refuses before the game's rule runs", func(t *testing.T) {
+		t.Parallel()
+		var saw deck.Card
+		require.ErrorContains(t, ValidateShedPlay(shedState(nil, nil), held, matchSaw(&saw)), "no cards in discard")
+		assert.Zero(t, saw)
+	})
+	t.Run("a card not in the hand is refused", func(t *testing.T) {
+		t.Parallel()
+		var saw deck.Card
+		err := ValidateShedPlay(shedState(nil, []deck.Card{top}), top, matchSaw(&saw))
+		require.ErrorContains(t, err, "you don't have that card")
+		assert.Zero(t, saw)
+	})
+	t.Run("the game's rule decides against the top card", func(t *testing.T) {
+		t.Parallel()
+		var saw deck.Card
+		require.NoError(t, ValidateShedPlay(shedState(nil, []deck.Card{top}), held, matchSaw(&saw)))
+		assert.Equal(t, top, saw)
+	})
+}
+
 func TestDrawWithReshuffle(t *testing.T) {
 	t.Parallel()
 	two := deck.Card{Rank: deck.Two, Suit: deck.Hearts}

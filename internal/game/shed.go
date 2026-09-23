@@ -2,6 +2,7 @@ package game
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 )
@@ -21,6 +22,21 @@ func ReshuffleDiscardIntoStock(state *State) {
 	state.Discard = deck.New([]deck.Card{top})
 	state.Deck.AddCard(rest...)
 	state.Deck.Shuffle()
+}
+
+// ValidateShedPlay is the half of a shedding game's play check both games share: a card
+// in play to match against, and the played card in the hand of the seat on turn. match
+// is the game's own rule against the top card. A draw is always legal and never gets
+// here: gating it on the discard would freeze a seat on a board that has none.
+func ValidateShedPlay(state *State, card deck.Card, match func(top deck.Card) error) error {
+	top, ok := state.Discard.Peek()
+	if !ok {
+		return errors.New("no cards in discard pile")
+	}
+	if !slices.Contains(state.Players[state.CurrentTurn].Cards, card) {
+		return errors.New("you don't have that card")
+	}
+	return match(top)
 }
 
 // DrawWithReshuffle is a shedding game's draw: off the stock, refilled from under the

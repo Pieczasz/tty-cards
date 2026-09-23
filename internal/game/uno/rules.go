@@ -92,46 +92,42 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 
 	switch a := action.(type) {
 	case ActionPlayCard:
-		// Peeked here, not above the switch: a draw is legal whatever is on the pile,
-		// and TimeoutAction plays a draw, so making it depend on the top card is what
-		// would freeze a seat on a board that somehow has no discard.
-		topCard, ok := state.Discard.Peek()
-		if !ok {
-			return errors.New("no cards in discard")
-		}
-		hand := state.Players[state.CurrentTurn].Cards
-		if !slices.Contains(hand, a.Card) {
-			return errors.New("you don't have that card")
-		}
-		if isWild(a.Card.Rank) {
-			if !deck.IsSuit(a.ChosenColor) {
-				return errors.New("must choose a valid color")
-			}
-			// A Wild Draw Four is the one card the official rules gate on the hand
-			// behind it: it may only be played by someone with nothing of the
-			// current colour to play instead.
-			//
-			// Deviation: the paper game lets the next player challenge a suspect
-			// WD4 and inspect the hand. Here the server holds every hand already,
-			// so the gate is enforced up front instead - the illegal play is
-			// refused rather than punished, and there is nothing to challenge.
-			if a.Card.Rank == WildDrawFour && hasColor(hand, extra.CurrentColor) {
-				return errors.New("wild draw four needs a hand with no card of the current color")
-			}
-			return nil
-		}
-		if a.Card.Suit == extra.CurrentColor {
-			return nil
-		}
-		if a.Card.Rank == topCard.Rank && !isWild(topCard.Rank) {
-			return nil
-		}
-		return errors.New("card doesn't match color, number, or symbol")
+		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
+		return game.ValidateShedPlay(state, a.Card, func(topCard deck.Card) error {
+			return validatePlay(state.Players[state.CurrentTurn].Cards, extra, a, topCard)
+		})
 
 	case ActionDrawCard:
 		return nil
 	}
 	return errors.New("unknown action")
+}
+
+func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck.Card) error {
+	if isWild(a.Card.Rank) {
+		if !deck.IsSuit(a.ChosenColor) {
+			return errors.New("must choose a valid color")
+		}
+		// A Wild Draw Four is the one card the official rules gate on the hand
+		// behind it: it may only be played by someone with nothing of the
+		// current colour to play instead.
+		//
+		// Deviation: the paper game lets the next player challenge a suspect
+		// WD4 and inspect the hand. Here the server holds every hand already,
+		// so the gate is enforced up front instead - the illegal play is
+		// refused rather than punished, and there is nothing to challenge.
+		if a.Card.Rank == WildDrawFour && hasColor(hand, extra.CurrentColor) {
+			return errors.New("wild draw four needs a hand with no card of the current color")
+		}
+		return nil
+	}
+	if a.Card.Suit == extra.CurrentColor {
+		return nil
+	}
+	if a.Card.Rank == topCard.Rank && !isWild(topCard.Rank) {
+		return nil
+	}
+	return errors.New("card doesn't match color, number, or symbol")
 }
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {

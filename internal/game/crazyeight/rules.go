@@ -3,7 +3,6 @@ package crazyeight
 import (
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
@@ -75,32 +74,20 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 
 	switch action := action.(type) {
 	case ActionPlayCard:
-		// Peeked here, not above the switch: a draw is legal whatever is on the pile,
-		// and TimeoutAction plays a draw, so making it depend on the top card is what
-		// would freeze a seat on a board that somehow has no discard.
-		topCard, ok := state.Discard.Peek()
-		if !ok {
-			return errors.New("no cards in discard pile")
-		}
 		card := action.Card
-
-		if !slices.Contains(state.Players[state.CurrentTurn].Cards, card) {
-			return errors.New("you don't have that card")
-		}
-
-		if card.Rank == deck.Eight {
-			if !deck.IsSuit(action.Suit) {
-				return errors.New("must choose a suit when playing an eight")
+		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
+		return game.ValidateShedPlay(state, card, func(topCard deck.Card) error {
+			if card.Rank == deck.Eight {
+				if !deck.IsSuit(action.Suit) {
+					return errors.New("must choose a suit when playing an eight")
+				}
+				return nil
 			}
-			return nil
-		}
-		if card.Suit == extra.CurrentSuit {
-			return nil
-		}
-		if card.Rank == topCard.Rank {
-			return nil
-		}
-		return errors.New("card doesn't match top discard")
+			if card.Suit == extra.CurrentSuit || card.Rank == topCard.Rank {
+				return nil
+			}
+			return errors.New("card doesn't match top discard")
+		})
 
 	case ActionDrawCard:
 		// Always legal: with cards available it draws, otherwise it is a forced
