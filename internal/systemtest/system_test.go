@@ -64,7 +64,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 
 	engine := awaitGameStart(t, events)
 	require.NotNil(t, engine)
-	assert.False(t, l.IsWaiting(), "a started lobby is no longer waiting")
+	assert.NotNil(t, l.ActiveGame(), "a started lobby is in game")
 	assert.NotContains(t, browseCodes(manager, leader), l.Code(),
 		"and stops being offered to anyone browsing for a seat")
 
@@ -112,7 +112,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	err = l.ToggleReady(leader, registry)
 	require.ErrorContains(t, err, "at least 2 players")
 	assert.True(t, l.IsReady(leader), "the ready flag still toggles")
-	assert.True(t, l.IsWaiting(), "one ready player cannot start a two-player game")
+	assert.Nil(t, l.ActiveGame(), "one ready player cannot start a two-player game")
 
 	require.NoError(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob")))
 	assert.Error(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(3), "carol")),

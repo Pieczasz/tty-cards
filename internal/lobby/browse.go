@@ -4,7 +4,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Pieczasz/terminal-card/internal/elo"
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
@@ -96,13 +95,6 @@ func (f BrowseFilter) limit() int {
 		return DefaultBrowseLimit
 	}
 	return min(f.Limit, MaxBrowseLimit)
-}
-
-func ratingFor(ratings map[string]uint32, gameName string) uint32 {
-	if rating := ratings[gameName]; rating != 0 {
-		return rating
-	}
-	return elo.ToUint32(elo.DefaultRating)
 }
 
 // browseEntry is false for a table no longer on offer. The cache holds pointers, and

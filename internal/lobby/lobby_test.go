@@ -165,10 +165,6 @@ func TestLobby_SettersAndGetters(t *testing.T) {
 
 	require.NoError(t, l.SetMaxPlayers(leader, 5, 2, 6))
 	assert.Equal(t, 5, l.MaxPlayers())
-
-	newGame := "Poker"
-	require.NoError(t, l.SetCardGame(leader, newGame))
-	assert.Equal(t, newGame, l.options.cardGame)
 }
 
 func TestLobby_DefaultCasual(t *testing.T) {
@@ -791,7 +787,7 @@ func TestLobby_FinishedGameReopensTheTableForSettings(t *testing.T) {
 	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
 	l.releaseFinishedGame()
 
-	assert.True(t, l.IsWaiting(), "the table is open again")
+	assert.True(t, isWaiting(l), "the table is open again")
 	require.NoError(t, l.SetRanked(leader, true), "and the leader can change settings")
 	assert.True(t, l.IsRanked())
 
@@ -835,7 +831,7 @@ func TestLobby_ReleaseFinishedGameIsANoOpOtherwise(t *testing.T) {
 	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
 
 	require.NotPanics(t, l.releaseFinishedGame)
-	assert.True(t, l.IsWaiting(), "a lobby that never started is left alone")
+	assert.True(t, isWaiting(l), "a lobby that never started is left alone")
 
 	require.NoError(t, l.ToggleReady(l.Leader(), registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -849,7 +845,7 @@ func TestLobby_ReleaseFinishedGameIsANoOpOtherwise(t *testing.T) {
 
 	l.releaseFinishedGame()
 	require.NotPanics(t, l.releaseFinishedGame)
-	assert.True(t, l.IsWaiting())
+	assert.True(t, isWaiting(l))
 }
 
 // The watcher runs after the game ends, by which point the lobby may have reopened

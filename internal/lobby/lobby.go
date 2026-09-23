@@ -141,14 +141,6 @@ func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int, rulesMin, rulesMax 
 	})
 }
 
-// SetCardGame updates the selected game. Only the leader may change it while waiting.
-func (l *Lobby) SetCardGame(actor *game.Player, name string) error {
-	return l.withLeaderSettings(actor, func() error {
-		l.options.cardGame = name
-		return nil
-	})
-}
-
 // withLeaderSettings runs mutate under l.mu once the actor is confirmed as leader of a
 // Waiting lobby, then broadcasts SETTINGS_UPDATED.
 func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) error {
@@ -311,7 +303,7 @@ func (l *Lobby) ToggleReady(p *game.Player, registry *game.Registry) error {
 		return nil
 	}
 
-	if _, err := l.startGameLocked(registry); err != nil {
+	if err := l.startGameLocked(registry); err != nil {
 		// The ready flip is already committed, so the other clients have to see it even
 		// though the start failed, or their rosters disagree with the server.
 		l.broadcastLocked(Event{Type: EventPlayersUpdated})
@@ -366,18 +358,12 @@ func (l *Lobby) IsPrivate() bool {
 
 // ActiveGame is the running engine, or nil; a reconnecting view lands back through it.
 func (l *Lobby) ActiveGame() *game.Engine {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if l.state != InGame {
 		return nil
 	}
 	return l.activeEngine
-}
-
-func (l *Lobby) IsWaiting() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.state == Waiting
 }
 
 func (l *Lobby) Leader() *game.Player {
@@ -417,11 +403,11 @@ func (l *Lobby) IsLeader(p *game.Player) bool {
 	return l.leader.Equal(p)
 }
 
-func playerEloForGame(p *game.Player, gameName string) uint32 {
-	if p == nil {
-		return elo.ToUint32(elo.DefaultRating)
-	}
-	if rating, ok := p.Ratings[gameName]; ok {
+// ratingFor is a player's rating in gameName. Missing and zero both mean unrated: no
+// stored rating can be zero (elo.MinRating is the floor), so a zero is a map that was
+// never filled in, and it is matched at the starting rating like any newcomer.
+func ratingFor(ratings map[string]uint32, gameName string) uint32 {
+	if rating := ratings[gameName]; rating != 0 {
 		return rating
 	}
 	return elo.ToUint32(elo.DefaultRating)
@@ -433,10 +419,10 @@ func (l *Lobby) averageEloLocked(gameName string) uint32 {
 	if gameName == "" {
 		return elo.ToUint32(elo.DefaultRating)
 	}
-	totalElo := playerEloForGame(l.leader, gameName)
+	totalElo := ratingFor(l.leader.Ratings, gameName)
 	count := uint32(1)
 	for _, g := range l.guests {
-		totalElo += playerEloForGame(g, gameName)
+		totalElo += ratingFor(g.Ratings, gameName)
 		count++
 	}
 	return totalElo / count
@@ -481,35 +467,35 @@ func (l *Lobby) hasPlayerLocked(p *game.Player) bool {
 }
 
 // startGameLocked starts a match. Caller must hold l.mu.
-func (l *Lobby) startGameLocked(registry *game.Registry) (*game.Engine, error) {
+func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	if l.state != Waiting {
-		return nil, errors.New("lobby is not in waiting state")
+		return errors.New("lobby is not in waiting state")
 	}
 	if !l.allReadyLocked() {
-		return nil, errors.New("not all players are ready")
+		return errors.New("not all players are ready")
 	}
 	if l.options.cardGame == "" {
-		return nil, errors.New("no card game selected")
+		return errors.New("no card game selected")
 	}
 
 	rules, err := registry.Create(l.options.cardGame)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create game rules: %w", err)
+		return fmt.Errorf("failed to create game rules: %w", err)
 	}
 
 	totalPlayers := len(l.guests) + 1
 	if totalPlayers < rules.MinPlayers() {
-		return nil, fmt.Errorf("need at least %d players to start", rules.MinPlayers())
+		return fmt.Errorf("need at least %d players to start", rules.MinPlayers())
 	}
 	if totalPlayers > rules.MaxPlayers() {
-		return nil, errors.New("too many players for this game")
+		return errors.New("too many players for this game")
 	}
 
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
 	engine := game.NewEngine(rules, players, rules.InitialDeck())
 
 	if err := engine.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start game engine: %w", err)
+		return fmt.Errorf("failed to start game engine: %w", err)
 	}
 
 	// Before watchGameLocked, which snapshots it for the finalize.
@@ -533,7 +519,7 @@ func (l *Lobby) startGameLocked(registry *game.Registry) (*game.Engine, error) {
 		Payload: engine,
 	})
 
-	return engine, nil
+	return nil
 }
 
 // watchGameLocked starts the goroutine that persists the result and counts engine

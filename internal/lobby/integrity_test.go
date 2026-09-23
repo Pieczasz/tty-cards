@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func isWaiting(l *Lobby) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.state == Waiting
+}
+
 // A guest readied up for the table they saw. Once the leader changes what the table
 // is - ranked, capacity, visibility - that consent no longer covers it, and the
 // leader's own ready must not start a match the guests never agreed to.

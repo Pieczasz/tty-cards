@@ -296,7 +296,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	// The lobby never had enough players to start, so it must still be Waiting,
 	// with an intact roster and every ready flag a well-defined bool.
-	assert.True(t, l.IsWaiting(), "lobby must remain in Waiting; a start should never have succeeded")
+	assert.True(t, isWaiting(l), "lobby must remain in Waiting; a start should never have succeeded")
 	assert.Equal(t, members, l.CurrentPlayers(), "roster must be unchanged")
 	for _, p := range roster {
 		_ = l.IsReady(p) // must not race or panic
