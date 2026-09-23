@@ -123,6 +123,17 @@ func TestSession_SubmitWithoutASeatIsRefused(t *testing.T) {
 	require.ErrorIs(t, s.Submit(nil), errNotSeated)
 }
 
+// Only a live table holds the session past the router's idle limit: a finished one is
+// a game-over screen with nothing left to forfeit.
+func TestSession_IdleExemptOnlyWhilePlaying(t *testing.T) {
+	t.Parallel()
+
+	for phase, want := range map[game.Phase]bool{game.Waiting: false, game.Playing: true, game.Finished: false} {
+		s := Session{Base: BaseState{Phase: phase}}
+		assert.Equal(t, want, s.IdleExempt(), "phase %v", phase)
+	}
+}
+
 func TestSession_UnsubscribeIsIdempotent(t *testing.T) {
 	t.Parallel()
 	var s Session

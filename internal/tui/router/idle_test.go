@@ -117,6 +117,8 @@ func TestRouter_IdleQuit(t *testing.T) {
 		route    string
 		idleFor  time.Duration
 		keyPress bool
+		// exempt, when set, is the active view's IdleExempt answer.
+		exempt   *bool
 		wantQuit bool
 	}{
 		{name: "idle at a menu is dropped", route: RouteHome, idleFor: 6 * time.Minute, wantQuit: true},
@@ -124,7 +126,12 @@ func TestRouter_IdleQuit(t *testing.T) {
 		{name: "just inside the threshold stays", route: RouteHome, idleFor: 5*time.Minute - 30*time.Second},
 		// The player is watching other seats act; the engine's own turn clock is what
 		// removes someone who has genuinely stopped playing.
-		{name: "idle at a table is not dropped", route: GameRoute("poker"), idleFor: time.Hour},
+		{name: "idle at a live table is not dropped", route: GameRoute("poker"), idleFor: time.Hour, exempt: new(true)},
+		// A game-over screen is a menu: nothing is left to forfeit, and it used to hold
+		// the connection and a subscriber slot forever because its route is a game's.
+		{name: "idle at a finished table is dropped", route: GameRoute("poker"), idleFor: 6 * time.Minute,
+			exempt: new(false), wantQuit: true},
+		{name: "a game route alone exempts nothing", route: GameRoute("poker"), idleFor: 6 * time.Minute, wantQuit: true},
 		{name: "a key press resets the clock", route: RouteHome, idleFor: time.Hour, keyPress: true},
 	}
 
@@ -133,7 +140,12 @@ func TestRouter_IdleQuit(t *testing.T) {
 			t.Parallel()
 
 			r := New(GlobalContext{})
-			r.Register(tt.route, func(GlobalContext, any) tea.Model { return MockModel{} })
+			r.Register(tt.route, func(GlobalContext, any) tea.Model {
+				if tt.exempt != nil {
+					return exemptModel{exempt: *tt.exempt}
+				}
+				return MockModel{}
+			})
 			r.Goto(tt.route, nil)
 
 			r.lastActivity = time.Now().Add(-tt.idleFor)
@@ -149,6 +161,13 @@ func TestRouter_IdleQuit(t *testing.T) {
 		})
 	}
 }
+
+type exemptModel struct {
+	MockModel
+	exempt bool
+}
+
+func (m exemptModel) IdleExempt() bool { return m.exempt }
 
 // A mouse click is activity too - a player navigating with the mouse alone would
 // otherwise be dropped mid-menu.

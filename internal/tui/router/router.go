@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -114,6 +113,19 @@ type Closer interface {
 	Close()
 }
 
+// IdleExempt is implemented by a view whose player may rightly send no input for a
+// while: a seat watching other players act is not idle, and dropping it mid-game
+// forfeits the match. Asked on every idle check, so a view answers for its current
+// state - a game-over screen is exempt from nothing.
+type IdleExempt interface {
+	IdleExempt() bool
+}
+
+func (r *Router) activeIdleExempt() bool {
+	e, ok := r.active.(IdleExempt)
+	return ok && e.IdleExempt()
+}
+
 // closeActive releases the current view's resources if it holds any.
 func (r *Router) closeActive() {
 	if c, ok := r.active.(Closer); ok {
@@ -160,7 +172,7 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg, tea.MouseMsg:
 		r.lastActivity = time.Now()
 	case tickMsg:
-		if time.Since(r.lastActivity) > 5*time.Minute && !strings.HasPrefix(r.activeKey, RouteGamePrefix) {
+		if time.Since(r.lastActivity) > 5*time.Minute && !r.activeIdleExempt() {
 			return r, tea.Quit
 		}
 		cmds = append(cmds, tick())

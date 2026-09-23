@@ -181,6 +181,15 @@ func (s *Session) Close() {
 	s.Unsubscribe()
 }
 
+// IdleExempt implements router.IdleExempt. A seat watching other players act is not
+// idle, and the engine's own turn clock removes one that stopped playing; a game-over
+// screen is a menu like any other.
+func (s *Session) IdleExempt() bool {
+	return s.Base.Phase == game.Playing
+}
+
+var _ router.IdleExempt = (*Session)(nil)
+
 // Leave navigates away from the table: back to the lobby once the game has finished,
 // otherwise out of the lobby entirely, since leaving mid-game forfeits the seat.
 func (s *Session) Leave() tea.Cmd {
