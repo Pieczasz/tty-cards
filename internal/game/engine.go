@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"time"
@@ -157,11 +159,20 @@ func (e *Engine) IsFinished() bool {
 // The *Player values alias live engine state, so only the fields nothing writes after
 // the seat was taken - ID, UserID, Name - are safe to read once the lock is gone.
 // Cards and anything the rules keep may change under a caller that holds them.
-func (e *Engine) StandingsWithPlaces() ([]*Player, []int) {
+//
+// A rules panic returns nil, nil, which finalize drops as unrecordable: the lobby's
+// finalize goroutine has nothing above it to recover.
+func (e *Engine) StandingsWithPlaces() (standings []*Player, places []int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("rules panicked computing standings", "panic", r, "stack", string(debug.Stack()))
+			standings, places = nil, nil
+		}
+	}()
 
-	standings := e.standingsLocked()
+	standings = e.standingsLocked()
 	return standings, e.placesLocked(standings)
 }
 
@@ -308,9 +319,20 @@ func cryptoIntN(n int) (int, error) {
 
 // SubmitAction applies action for playerID, who must be on turn. Acting for yourself
 // clears your missed-turn count.
-func (e *Engine) SubmitAction(playerID string, action Action) error {
+//
+// A rules panic ends the table as a rules error and comes back as an error rather than
+// unwinding into the session, whose recover would leave the table running on
+// half-applied state. The recover is a direct defer and runs before the unlock, so the
+// lock is still held.
+func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			e.endOnRulesPanicLocked(r)
+			err = errors.New("the game hit an internal error and has ended")
+		}
+	}()
 	return e.submitActionLocked(playerID, action, true)
 }
 
