@@ -1153,3 +1153,56 @@ func TestAwardUncontested_DeadMoneyGoesToTheWinner(t *testing.T) {
 	assert.Equal(t, uint(700), extra.PlayerChips["w"])
 	assert.Zero(t, extra.MainPool)
 }
+
+// Hole cards only separate two equal stacks when they were actually shown down, and
+// only between players still at the table: a pot won face-down and a leaver's hand
+// were never contested, so ranking on them splits a draw by cards nobody played.
+func TestStandingScore_HandsOnlySeparateSeatedShowdowns(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+
+	tests := []struct {
+		name      string
+		showdown  bool
+		leave     bool
+		wantShare bool
+	}{
+		{name: "two leavers at 1000 share a place", showdown: true, leave: true, wantShare: true},
+		{name: "a hand won face-down does not rank the cards", showdown: false, wantShare: true},
+		{name: "a seated showdown still ranks the better hand higher", showdown: true, wantShare: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state := createTestState()
+			extra := state.Extra.(*State)
+			// Ace-high for everyone; the kickers are K, Q and J, so every hand differs.
+			extra.Table = []deck.Card{
+				{Rank: deck.Ace, Suit: deck.Hearts}, {Rank: deck.Nine, Suit: deck.Diamonds},
+				{Rank: deck.Seven, Suit: deck.Spades}, {Rank: deck.Five, Suit: deck.Clubs},
+				{Rank: deck.Eight, Suit: deck.Hearts},
+			}
+			extra.ReachedShowdown = tt.showdown
+			extra.PlayerChips["p1"] = 500 // out of the tie, first either way
+			if tt.leave {
+				state.LeftPlayers = state.Players[1:]
+				state.Players = state.Players[:1]
+			}
+			p2, p3 := findPlayer(state, "p2"), findPlayer(state, "p3")
+
+			shared := rules.StandingScore(state, p2) == rules.StandingScore(state, p3)
+
+			assert.Equal(t, tt.wantShare, shared)
+		})
+	}
+}
+
+func findPlayer(state *game.State, id string) *game.Player {
+	for _, p := range slices.Concat(state.Players, state.LeftPlayers) {
+		if p.ID == id {
+			return p
+		}
+	}
+	return nil
+}

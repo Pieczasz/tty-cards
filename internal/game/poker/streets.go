@@ -387,8 +387,16 @@ func resultOrder(state *game.State, extra *State) func(a, b *game.Player) int {
 // decided by the stack a player walks away with; everyone who busted is level on
 // chips, so how long they lasted is what separates them. The hand-level keys only
 // matter for players who finished holding equal stacks. Zero is a genuine draw.
+//
+// Hand score counts only for a hand that was shown down between two players still
+// seated: a pot won face-down was never contested on the cards, and a leaver's hand
+// was never played out, so ranking on either splits a draw by cards nobody showed.
 func resultLevel(state *game.State, extra *State) func(a, b *game.Player) int {
 	scores := handScores(slices.Concat(state.Players, state.LeftPlayers), extra)
+	seated := make(map[string]bool, len(state.Players))
+	for _, p := range state.Players {
+		seated[p.ID] = true
+	}
 	return func(a, b *game.Player) int {
 		if c := cmp.Compare(extra.PlayerChips[b.ID], extra.PlayerChips[a.ID]); c != 0 {
 			return c
@@ -403,7 +411,7 @@ func resultLevel(state *game.State, extra *State) func(a, b *game.Player) int {
 			}
 			return -1
 		}
-		if !fa && len(extra.Table) >= 3 {
+		if !fa && extra.ReachedShowdown && seated[a.ID] && seated[b.ID] {
 			return cmp.Compare(scores[b.ID], scores[a.ID])
 		}
 		return 0

@@ -474,6 +474,7 @@ func TestRankPlayers_Order(t *testing.T) {
 	t.Run("level stacks are separated by the hand", func(t *testing.T) {
 		t.Parallel()
 		state, extra := tableWithChips(500, 500)
+		extra.ReachedShowdown = true
 		state.Players[0].Cards = []deck.Card{
 			{Rank: deck.Two, Suit: deck.Clubs}, {Rank: deck.Three, Suit: deck.Diamonds},
 		}

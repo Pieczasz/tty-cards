@@ -243,6 +243,7 @@ func TestRules_Standings(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		extra := state.Extra.(*State)
+		extra.ReachedShowdown = true
 		extra.Table = []deck.Card{
 			{Rank: deck.Ten, Suit: deck.Spades},
 			{Rank: deck.Jack, Suit: deck.Hearts},
