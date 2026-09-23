@@ -50,24 +50,21 @@ func DrawWithReshuffle(state *State) (deck.Card, bool) {
 // returnHandToStock keeps the deck whole when a player leaves, reshuffling so the cards
 // they were seen holding are not the next ones dealt.
 func returnHandToStock(state *State, playerID string) {
-	for _, p := range state.Players {
-		if p == nil || p.ID != playerID {
-			continue
-		}
-		state.Deck.AddCard(p.Cards...)
-		p.Cards = nil
-		state.Deck.Shuffle()
+	i := slices.IndexFunc(state.Players, func(p *Player) bool { return p.ID == playerID })
+	if i < 0 {
 		return
 	}
+	p := state.Players[i]
+	state.Deck.AddCard(p.Cards...)
+	p.Cards = nil
+	state.Deck.Shuffle()
 }
 
 // HandEmptyOrAllPassed is the shedding-game win check: a hand is out, or every seat in
 // succession could not draw, which is a board with no legal move left rather than a loop.
 func HandEmptyOrAllPassed(state *State, passes int) bool {
-	for _, p := range state.Players {
-		if p != nil && len(p.Cards) == 0 {
-			return true
-		}
+	if slices.ContainsFunc(state.Players, func(p *Player) bool { return len(p.Cards) == 0 }) {
+		return true
 	}
 	return len(state.Players) > 0 && passes >= len(state.Players)
 }
