@@ -103,7 +103,7 @@ terminal-card/
 │   │   ├── errors.go           the auth sentinels internal/ssh matches on
 │   │   ├── gorm.go             Connect(): pool, slow-query threshold
 │   │   ├── migrations.go       //go:embed migrations/*.sql
-│   │   └── migrations/         000001_init … 000005_game_slug (up + down each)
+│   │   └── migrations/         000001_init … 000007_ranked_matches_window (up + down each)
 │   ├── deck/                   builder.go, card.go, deck.go - shared card mechanics
 │   ├── elo/elo.go              multiplayer Elo over adjacent pairs, bounded transfers
 │   ├── game/                   PURE rules/engine. no db, no tui, no routes
@@ -114,21 +114,23 @@ terminal-card/
 │   │   ├── rules.go            Rules + the four optional handler interfaces
 │   │   ├── action.go           Action, Event, EndReason, StateSnapshot
 │   │   ├── bound.go            BoundEngine - the per-player façade
-│   │   ├── shed.go             what crazy eights and uno share
+│   │   ├── shed.go             what crazy eights and uno share (play check, draw, standings)
 │   │   ├── registry.go         name -> Module lookup
 │   │   ├── crazyeight/         rules.go, state.go
 │   │   ├── uno/                rules.go, state.go, deck.go
 │   │   ├── hearts/             rules.go, state.go, trick.go
 │   │   ├── ginrummy/           rules.go, state.go, melds.go, layoffs.go
-│   │   └── poker/              rules.go, streets.go, evaluator.go, state.go
+│   │   └── poker/              rules.go, hand.go, betting.go, leave.go, streets.go,
+│   │                           evaluator.go, state.go
 │   ├── httpapi/httpapi.go      read-only JSON: /v1/stats, /v1/leaderboard, /healthz
 │   ├── lobby/
-│   │   ├── manager.go          lobby registry, codes, join limiter, grace release,
-│   │   │                       finalizer drain
-│   │   ├── lobby.go            one table: roster, ready, start, watcher
-│   │   ├── finalize.go         persist a finished match; the rating gate
-│   │   ├── disconnect.go       the 90s mid-game grace state machine
-│   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies
+│   │   ├── manager.go          lobby registry, codes, join limiter, leave, kick
+│   │   ├── lobby.go            one table: roster, settings, ready, start
+│   │   ├── watch.go            the engine watcher: register, reopen, persist
+│   │   ├── finalize.go         persist a finished match; the rating gate; the
+│   │   │                       finalizer registry, BeginShutdown, WaitForFinalizers
+│   │   ├── disconnect.go       the 90s mid-game grace state machine, ResumePlayer
+│   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies + the cache
 │   │   └── player.go           db.User -> game.Player, the only such place
 │   ├── observability/
 │   │   ├── otel.go             SetupOTel: logs + traces + metrics over OTLP gRPC
@@ -140,8 +142,10 @@ terminal-card/
 │   │   ├── user.go             register, profile, leaderboard cache, DeleteAccount
 │   │   └── match.go            FinalizeRankedMatch: advisory locks, SELECT … FOR UPDATE
 │   ├── ssh/
-│   │   ├── server.go           SetupServer, PTY clamp, SessionTracker,
-│   │   │                       sessionLifecycle, recoverSession, reportingModel
+│   │   ├── server.go           SetupServer, PTY clamp, channel and env caps,
+│   │   │                       sessionRegistry, sessionLifecycle, recoverSession,
+│   │   │                       reportingModel
+│   │   ├── tracker.go          SessionTracker: generations, ReleaseWith
 │   │   └── auth.go             fingerprint auth, LoadOrRegisterUser
 │   ├── systemtest/             cross-package tests through public APIs only; only
 │   │                           persistence_test.go is behind //go:build integration
@@ -311,7 +315,7 @@ are things a reader coming from a real-time game server would reasonably expect.
 | **Mimir** | Not deployed. Metrics land in Prometheus' own TSDB via remote write |
 | **Alloy scraping the Go process** | Inverted: the app **pushes** OTLP to Alloy. Alloy scrapes only the host, via `prometheus.exporter.unix` |
 | **Frame-render-time metrics** | Not instrumented. There are counters and four histograms (session duration, game duration, lobby time-to-start), but nothing times a render |
-| **Tracing across game events** | Only `ssh.session`, nine `db.*` spans and the stats API's `otelhttp` spans. `game`, `lobby` and `tui` are untraced |
+| **Tracing across game events** | Only `ssh.session` and ten `db.*` spans; the stats API is deliberately untraced. `game`, `lobby` and `tui` are untraced |
 | **`tea.Every` subscription loops** | Not used. Periodic work is self-rescheduling `tea.Tick`, which is what lets the countdown change rate mid-turn |
 | **A WebSocket or HTTP game path to replace** | There never was one. `internal/httpapi` is a read-only stats feed for the marketing site |
 
