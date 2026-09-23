@@ -1,8 +1,6 @@
 package game
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -34,25 +32,21 @@ func (b *BoundEngine) PlayerID() string {
 // view holding it could Broadcast or Close the feed for the whole table.
 func (b *BoundEngine) Subscribe() (<-chan Event, error) {
 	if b == nil {
-		return nil, errors.New("no active game")
+		return nil, errNoGame
 	}
-	ch, err := b.engine.broadcaster.Subscribe()
-	if err != nil {
-		return nil, fmt.Errorf("subscribe to game events: %w", err)
-	}
-	return ch, nil
+	return b.engine.Subscribe()
 }
 
 func (b *BoundEngine) Unsubscribe(events <-chan Event) {
 	if b == nil || events == nil {
 		return
 	}
-	b.engine.broadcaster.Unsubscribe(events)
+	b.engine.Unsubscribe(events)
 }
 
 func (b *BoundEngine) Submit(action Action) error {
 	if b == nil {
-		return errors.New("no active game")
+		return errNoGame
 	}
 	return b.engine.SubmitAction(b.playerID, action)
 }

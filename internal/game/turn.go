@@ -9,8 +9,9 @@ func (s *State) SetTurn(seat int) {
 	s.OverrideTurn(seat)
 }
 
-// OverrideTurn names the seat applyNextTurnLocked hands the turn to next. The pointer
-// is to this call's own copy, never into the rules' Extra, which could move under it.
+// OverrideTurn names the seat the engine hands the turn to once the action settles.
+// The pointer is to this call's own copy, never into the rules' Extra, which could
+// move under it.
 func (s *State) OverrideTurn(seat int) {
 	s.OverrideNextTurn = &seat
 }

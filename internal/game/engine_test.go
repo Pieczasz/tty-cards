@@ -127,7 +127,7 @@ func TestEngine_Start_Failures(t *testing.T) {
 		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
 		t.Cleanup(engine.Close)
 
-		require.ErrorContains(t, engine.Start(), "failed to setup game")
+		require.ErrorContains(t, engine.Start(), "set up game")
 		assert.True(t, engine.TurnDeadline().IsZero(), "a table that never opened arms no clock")
 	})
 }

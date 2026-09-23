@@ -23,6 +23,11 @@ var ErrInvalidState = errors.New("invalid state type")
 // the lock and the submit re-acquiring it. Internal: a non-event, not a failure.
 var errStaleTurn = errors.New("turn already settled")
 
+var (
+	errClosed = errors.New("game is closed")
+	errNoGame = errors.New("no active game")
+)
+
 // errActionRefused is an auto-play ValidateAction refused: a rules bug, logged and
 // re-armed, where an apply failure has already ended the game.
 var errActionRefused = errors.New("auto-play refused")
@@ -278,7 +283,7 @@ func (e *Engine) Start() error {
 	defer e.mu.Unlock()
 
 	if e.closed {
-		return errors.New("game is closed")
+		return errClosed
 	}
 	if e.state.Phase != Waiting {
 		return errors.New("game already started")
@@ -307,14 +312,10 @@ func (e *Engine) Start() error {
 	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret, see above
 
 	if err := e.state.Rules.OnGameStart(e.state); err != nil {
-		return fmt.Errorf("failed to setup game: %w", err)
+		return fmt.Errorf("set up game: %w", err)
 	}
-	e.applyNextTurnLocked(false)
-
-	e.broadcaster.Broadcast(Event{
-		Type: EventGameStarted,
-	})
-
+	e.settleTurnLocked()
+	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
 	return nil
 }
 
@@ -334,7 +335,14 @@ func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 			err = errors.New("the game hit an internal error and has ended")
 		}
 	}()
-	return e.submitActionLocked(playerID, action, true)
+	current, err := e.checkTurnLocked(playerID, action)
+	if err != nil {
+		return err
+	}
+	// Cleared only on a move the rules accept: clearing on any keypress would let a
+	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
+	delete(e.missedTurns, playerID)
+	return e.applyActionLocked(current, action)
 }
 
 // submitTimedOutAction plays a move resolveTurnTimeout computed for turn generation
@@ -346,49 +354,51 @@ func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64
 	if seq != e.turnSeq {
 		return errStaleTurn
 	}
-	err := e.submitActionLocked(playerID, action, false)
-	if err != nil && e.state.Phase == Playing {
-		// Still playing after a failure means ValidateAction refused the move: an apply
-		// failure ends the game, and seq rules out a wrong seat. Re-armed on this lock
-		// hold, because after it is dropped a player's own move may already have armed
-		// the next seat's clock, and re-arming then would reset it. The re-armed turn
-		// is chargeable again, or a rules set that always refuses would never lose
-		// the seat.
-		e.turnMissCharged = false
-		e.armTurnTimerLocked()
-		return fmt.Errorf("%w: %w", errActionRefused, err)
-	}
-	return err
-}
-
-// playerPresent is false when playing for an absent player: that timeout is already
-// counted, and clearing it would mean somebody who never comes back is never removed.
-func (e *Engine) submitActionLocked(playerID string, action Action, playerPresent bool) error {
-	if e.closed {
-		return errors.New("game is closed")
+	// The miss count is left alone: this timeout is already counted, and clearing it
+	// would mean somebody who never comes back is never removed.
+	current, err := e.checkTurnLocked(playerID, action)
+	if err == nil {
+		return e.applyActionLocked(current, action)
 	}
 	if e.state.Phase != Playing {
-		return errors.New("game not in playing phase")
+		return err
 	}
+	// Still playing after a refusal means ValidateAction refused the move: seq rules
+	// out a wrong seat. Re-armed on this lock hold, because after it is dropped a
+	// player's own move may already have armed the next seat's clock, and re-arming
+	// then would reset it. The re-armed turn is chargeable again, or a rules set that
+	// always refuses would never lose the seat.
+	e.turnMissCharged = false
+	e.armTurnTimerLocked()
+	return fmt.Errorf("%w: %w", errActionRefused, err)
+}
 
-	currentPlayer := e.currentPlayerLocked()
-	if currentPlayer == nil || currentPlayer.ID != playerID {
-		return errors.New("wait for your turn to perform an action")
+// checkTurnLocked is everything an action is refused on before it touches the state:
+// a live table, playerID on turn, and the rules' ValidateAction. It returns the seat on
+// turn.
+func (e *Engine) checkTurnLocked(playerID string, action Action) (*Player, error) {
+	if e.closed {
+		return nil, errClosed
 	}
-
+	if e.state.Phase != Playing {
+		return nil, errors.New("game not in playing phase")
+	}
+	current := e.currentPlayerLocked()
+	if current == nil || current.ID != playerID {
+		return nil, errors.New("wait for your turn to perform an action")
+	}
 	if err := e.state.Rules.ValidateAction(e.state, action); err != nil {
-		return fmt.Errorf("you can't perform that action: %w", err)
+		return nil, fmt.Errorf("you can't perform that action: %w", err)
 	}
+	return current, nil
+}
 
-	// Cleared only on a move the rules accept: clearing on any keypress would let a
-	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
-	if playerPresent {
-		delete(e.missedTurns, playerID)
-	}
-
+// applyActionLocked plays an action checkTurnLocked accepted for current and moves the
+// table on. Any error has already ended the game.
+func (e *Engine) applyActionLocked(current *Player, action Action) error {
 	if err := e.state.Rules.ApplyAction(e.state, action); err != nil {
 		// State may be half-applied, so the game cannot be played on.
-		e.finishGameLocked(currentPlayer, EndReasonRulesError)
+		e.finishGameLocked(current, EndReasonRulesError)
 		return fmt.Errorf("apply action: %w", err)
 	}
 
@@ -398,26 +408,22 @@ func (e *Engine) submitActionLocked(playerID string, action Action, playerPresen
 	// the broadcast every client sits on a frame that never updates and the lobby never
 	// records the match.
 	if err := e.state.Rules.AfterAction(e.state, action); err != nil {
-		e.finishGameLocked(currentPlayer, EndReasonRulesError)
-		return fmt.Errorf("post-action rules failed: %w", err)
+		e.finishGameLocked(current, EndReasonRulesError)
+		return fmt.Errorf("after action: %w", err)
 	}
 
 	e.broadcaster.Broadcast(Event{
 		Type:     EventActionApplied,
-		PlayerID: playerID,
+		PlayerID: current.ID,
 	})
 
 	if e.state.Rules.CheckWinCondition(e.state) {
-		e.finishGameLocked(currentPlayer, EndReasonWin)
+		e.finishGameLocked(current, EndReasonWin)
 		return nil
 	}
 
-	e.applyNextTurnLocked(true)
-
-	e.broadcaster.Broadcast(Event{
-		Type: EventTurnAdvanced,
-	})
-
+	e.advanceTurnLocked()
+	e.broadcaster.Broadcast(Event{Type: EventTurnAdvanced})
 	return nil
 }
 
@@ -500,44 +506,35 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	}
 
 	e.broadcaster.Broadcast(Event{Type: EventPlayerLeft, PlayerID: playerID})
+	e.settleAfterLeaveLocked()
+}
 
+// settleAfterLeaveLocked decides what a leave leaves behind: an abandoned table, a win,
+// a forfeit to the last seat, or the next turn. Caller holds e.mu.
+func (e *Engine) settleAfterLeaveLocked() {
 	// A table that never started cannot be won: "any hand empty wins" would report a
 	// bogus win over undealt hands.
 	if e.state.Phase != Playing {
 		return
 	}
 
-	if len(e.state.Players) == 0 {
+	switch {
+	case len(e.state.Players) == 0:
 		e.endGameLocked(nil, EndReasonAbandoned)
-		return
-	}
-
-	if e.state.Rules.CheckWinCondition(e.state) {
+	case e.state.Rules.CheckWinCondition(e.state):
 		reason := EndReasonWin
 		if e.state.Interrupted {
 			reason = EndReasonInterrupted
 		}
 		e.finishGameLocked(nil, reason)
-		return
-	}
-
-	if len(e.state.Players) == 1 {
-		// A leave handler may keep the hand open (poker all-in leavers still
-		// contest the pot). OverrideNextTurn means the last seat still has work.
-		if e.state.OverrideNextTurn != nil {
-			e.applyNextTurnLocked(false)
-			e.broadcaster.Broadcast(Event{Type: EventTurnAdvanced})
-			return
-		}
+	// A leave handler may keep the hand open (poker all-in leavers still contest the
+	// pot). OverrideNextTurn means the last seat still has work.
+	case len(e.state.Players) == 1 && e.state.OverrideNextTurn == nil:
 		e.endGameLocked(e.state.Players[0], EndReasonForfeit)
-		return
+	default:
+		e.settleTurnLocked()
+		e.broadcaster.Broadcast(Event{Type: EventTurnAdvanced})
 	}
-
-	e.applyNextTurnLocked(false)
-
-	e.broadcaster.Broadcast(Event{
-		Type: EventTurnAdvanced,
-	})
 }
 
 // Close stops the turn clock and releases the broadcaster. Safe to call repeatedly; the
@@ -558,13 +555,21 @@ func (e *Engine) currentPlayerLocked() *Player {
 	return e.state.Players[e.state.CurrentTurn]
 }
 
-func (e *Engine) applyNextTurnLocked(advance bool) {
-	switch {
-	case e.state.OverrideNextTurn != nil:
+// advanceTurnLocked moves the cursor on after an accepted action: State.OverrideNextTurn
+// wins, else the next seat.
+func (e *Engine) advanceTurnLocked() {
+	if e.state.OverrideNextTurn == nil {
+		e.state.CurrentTurn++
+	}
+	e.settleTurnLocked()
+}
+
+// settleTurnLocked honors State.OverrideNextTurn, else leaves State.CurrentTurn where it
+// is, then clamps the cursor and arms the clock for the seat it lands on.
+func (e *Engine) settleTurnLocked() {
+	if e.state.OverrideNextTurn != nil {
 		e.state.CurrentTurn = *e.state.OverrideNextTurn
 		e.state.OverrideNextTurn = nil
-	case advance:
-		e.state.CurrentTurn++
 	}
 	e.clampTurnLocked()
 	e.armTurnTimerLocked()
@@ -573,10 +578,5 @@ func (e *Engine) applyNextTurnLocked(advance bool) {
 // clampTurnLocked forces State.CurrentTurn into [0, len(Players)) so a stale index
 // from a leave handler or a rules override cannot name a seat that is gone.
 func (e *Engine) clampTurnLocked() {
-	n := len(e.state.Players)
-	if n <= 0 {
-		e.state.CurrentTurn = 0
-		return
-	}
-	e.state.CurrentTurn = ((e.state.CurrentTurn % n) + n) % n
+	e.state.CurrentTurn = SeatAt(e.state.CurrentTurn, len(e.state.Players))
 }
