@@ -244,7 +244,7 @@ func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	_, cmd := m.Update(gameview.EventMsg{
-		Event:  game.Event{Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1)},
+		Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1),
 		Source: m.Events,
 	})
 

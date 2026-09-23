@@ -194,7 +194,7 @@ func TestRenderFigureASCII_CachedAnswerMatchesAFreshOne(t *testing.T) {
 	styles.ResetFigureCacheForTest()
 	for i, size := range sizes {
 		assert.Equal(t, fresh[i], styles.RenderFigureASCII("Join Game", size[0], size[1]),
-			fmt.Sprintf("%dx%d", size[0], size[1]))
+			"%dx%d", size[0], size[1])
 	}
 }
 

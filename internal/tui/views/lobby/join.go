@@ -116,7 +116,8 @@ func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.refresh()
-		return m, m.refreshTick()
+		next := m.refreshTick()
+		return m, next
 	}
 
 	// The shared handler claims resizes, the theme switch and ctrl+c, and nothing

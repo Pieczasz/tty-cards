@@ -88,7 +88,7 @@ func TestHandleFrame_ReArmsTheClockWhenTheTableStartsPlaying(t *testing.T) {
 	// lands, so the cached phase moves to Playing.
 	sync := func() { s.Base.Phase = game.Playing }
 
-	cmd, handled := s.HandleFrame(EventMsg{Event: game.Event{Type: game.EventGameStarted}, Source: events}, sync, nil)
+	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventGameStarted, Source: events}, sync, nil)
 	require.True(t, handled)
 	require.NotNil(t, cmd, "the event has to arm both the listener and the clock")
 
@@ -101,7 +101,7 @@ func TestHandleFrame_DoesNotStartASecondClock(t *testing.T) {
 	t.Parallel()
 
 	s := &Session{Base: BaseState{Phase: game.Playing}}
-	cmd, handled := s.HandleFrame(EventMsg{Event: game.Event{Type: game.EventTurnAdvanced}}, func() {}, nil)
+	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced}, func() {}, nil)
 	require.True(t, handled)
 	assert.False(t, hasClockTick(cmd), "the running chain is not doubled")
 }
@@ -129,7 +129,7 @@ func TestHandleFrame_OnEventRunsOnlyForEvents(t *testing.T) {
 	s.HandleFrame(ClockTickMsg{}, func() {}, onEvent)
 	assert.Zero(t, calls, "a clock tick is not a table change")
 
-	s.HandleFrame(EventMsg{Event: game.Event{Type: game.EventTurnAdvanced}}, func() {}, onEvent)
+	s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced}, func() {}, onEvent)
 	assert.Equal(t, 1, calls)
 }
 
@@ -141,7 +141,7 @@ func TestHandleFrame_UnknownEventTypesStillResync(t *testing.T) {
 	s := &Session{Base: BaseState{Phase: game.Playing}}
 	synced := false
 	cmd, handled := s.HandleFrame(
-		EventMsg{Event: game.Event{Type: game.EventPlayerLeft, Reason: game.EndReasonAbandoned}},
+		EventMsg{Type: game.EventPlayerLeft, Reason: game.EndReasonAbandoned},
 		func() { synced = true }, nil)
 
 	require.True(t, handled)
