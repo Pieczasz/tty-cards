@@ -10,9 +10,19 @@ import (
 const (
 	DefaultTurnTimeout = 30 * time.Second
 	MaxMissedTurns     = 3
+	// minTurnRemaining is the least a seat keeping the turn is left with, so a turn
+	// that carries on (gin's draw then discard, an auto-play, a leave elsewhere) never
+	// lands on a clock already at zero.
+	minTurnRemaining = 10 * time.Second
 )
 
+// armTurnTimerLocked (re)starts the clock for the seat on turn. The same seat with the
+// same turn length is the same turn carrying on - gin's draw then discard, a re-armed
+// auto-play, somebody else leaving - and keeps its running deadline, floored at
+// minTurnRemaining. Anything else is a fresh turn with the full length, and only a
+// fresh turn can be charged a new miss.
 func (e *Engine) armTurnTimerLocked() {
+	prevDeadline, prevPlayer, prevLength := e.turnDeadline, e.turnPlayerID, e.turnLength
 	e.stopTurnTimerLocked()
 
 	if e.closed || e.turnTimeout <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
@@ -29,9 +39,21 @@ func (e *Engine) armTurnTimerLocked() {
 		}
 	}
 
+	playerID := ""
+	if current := e.currentPlayerLocked(); current != nil {
+		playerID = current.ID
+	}
+	wait := timeout
+	if !prevDeadline.IsZero() && playerID == prevPlayer && timeout == prevLength {
+		wait = max(time.Until(prevDeadline), min(minTurnRemaining, timeout))
+	} else {
+		e.turnMissCharged = false
+	}
+	e.turnPlayerID, e.turnLength = playerID, timeout
+
 	seq := e.turnSeq
-	e.turnDeadline = time.Now().Add(timeout)
-	e.turnTimer = time.AfterFunc(timeout, func() { e.onTurnTimeout(seq) })
+	e.turnDeadline = time.Now().Add(wait)
+	e.turnTimer = time.AfterFunc(wait, func() { e.onTurnTimeout(seq) })
 }
 
 func (e *Engine) stopTurnTimerLocked() {
@@ -135,7 +157,12 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 		return "", nil, false
 	}
 
-	e.missedTurns[current.ID]++
+	// One miss per seat-turn, not per expiry: a turn that carries on after an
+	// auto-play (gin's draw, then its discard) is still the one turn missed.
+	if !e.turnMissCharged {
+		e.missedTurns[current.ID]++
+		e.turnMissCharged = true
+	}
 	if e.missedTurns[current.ID] >= MaxMissedTurns {
 		return current.ID, nil, true
 	}

@@ -41,6 +41,11 @@ type Engine struct {
 	turnTimer    *time.Timer
 	turnDeadline time.Time
 	missedTurns  map[string]int
+	// The seat and length the running deadline was armed for, and whether that
+	// seat-turn has been charged its miss: armTurnTimerLocked's continuation check.
+	turnPlayerID    string
+	turnLength      time.Duration
+	turnMissCharged bool
 }
 
 type EngineOption func(*Engine)
@@ -354,7 +359,10 @@ func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64
 		// Still playing after a failure means ValidateAction refused the move: an apply
 		// failure ends the game, and seq rules out a wrong seat. Re-armed on this lock
 		// hold, because after it is dropped a player's own move may already have armed
-		// the next seat's clock, and re-arming then would reset it.
+		// the next seat's clock, and re-arming then would reset it. The re-armed turn
+		// is chargeable again, or a rules set that always refuses would never lose
+		// the seat.
+		e.turnMissCharged = false
 		e.armTurnTimerLocked()
 		return fmt.Errorf("%w: %w", errActionRefused, err)
 	}
