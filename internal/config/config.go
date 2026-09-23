@@ -1,3 +1,6 @@
+// Package config reads the server's environment into one validated Config. Every
+// malformed value fails the boot: a typo that silently meant the default is how an
+// operator ends up believing a setting is on.
 package config
 
 import (
@@ -17,6 +20,13 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// DefaultAPIPort is the stats API's port when API_PORT is unset. The container
+// healthcheck runs without a loaded Config and has to agree with it.
+const DefaultAPIPort = 6970
+
+const envProduction = "production"
+
+// Config is the whole of the server's configuration, as Load reads it.
 type Config struct {
 	Env                  string
 	ServerHost           string
@@ -34,12 +44,15 @@ type Config struct {
 	DBPassword           string
 	DBSSLMode            string
 	DBMaxOpenConnections int
-	OTelEndpoint         string
-	OTelInsecure         bool
-	ServiceVersion       string
-	RateLimitCount       int
-	RateLimitWindow      time.Duration
-	LogLevel             slog.Level
+	// AllowInsecureDB lets production use a plaintext DB_SSLMODE against a remote
+	// host. Only for a network the operator trusts end to end.
+	AllowInsecureDB bool
+	OTelEndpoint    string
+	OTelInsecure    bool
+	ServiceVersion  string
+	RateLimitCount  int
+	RateLimitWindow time.Duration
+	LogLevel        slog.Level
 	// ProxyProtocol keeps the PROXY-header requirement on the ssh listener. True matches
 	// the nginx deployment; a bare `ssh` client never sends the header, so local
 	// development needs PROXY_PROTOCOL=false.
@@ -53,18 +66,88 @@ type Config struct {
 	RegistrationWindow time.Duration
 }
 
-// intEnvs accumulates integer env lookups so one error check covers all of them
-// instead of one per variable. The first failure is the one reported.
-type intEnvs struct {
+// IsProduction reports whether the production-only checks and defaults apply.
+func (c *Config) IsProduction() bool { return c.Env == envProduction }
+
+// envReader parses env values and keeps every failure, so one boot reports every
+// bad variable instead of the first. An unset or empty variable means the fallback.
+type envReader struct {
 	err error
 }
 
-func (e *intEnvs) get(key string, fallback int) int {
-	value, err := getEnvAsInt(key, fallback)
-	if err != nil && e.err == nil {
-		e.err = fmt.Errorf("invalid %s: %w", key, err)
+func (r *envReader) fail(key string, err error) {
+	r.err = errors.Join(r.err, fmt.Errorf("invalid %s: %w", key, err))
+}
+
+func (r *envReader) int(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
 	}
-	return value
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		r.fail(key, err)
+	}
+	return v
+}
+
+func (r *envReader) duration(key string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil {
+		r.fail(key, err)
+	}
+	return v
+}
+
+// bool takes what strconv.ParseBool does (1, t, true, 0, f, false, any case of
+// those words). Anything else fails the boot: "yes" used to mean false for some
+// variables and true for others.
+func (r *envReader) bool(key string, fallback bool) bool {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		r.fail(key, err)
+	}
+	return v
+}
+
+// prefixes reads a comma-separated CIDR list. One bad entry fails the whole list:
+// silently dropping it would trust fewer peers than configured, or none.
+func (r *envReader) prefixes(key string) []netip.Prefix {
+	var prefixes []netip.Prefix
+	for field := range strings.SplitSeq(os.Getenv(key), ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(field)
+		if err != nil {
+			r.fail(key, err)
+			return nil
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes
+}
+
+// level takes the names slog understands (DEBUG, INFO, WARN, ERROR, +N/-N).
+func (r *envReader) level(key string) slog.Level {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return slog.LevelInfo
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(raw)); err != nil {
+		r.fail(key, err)
+	}
+	return level
 }
 
 // resolveEnv reads ENV and loads .env outside production. An unrecognised value is
@@ -73,7 +156,7 @@ func (e *intEnvs) get(key string, fallback int) int {
 func resolveEnv() (string, error) {
 	env := getEnv("ENV", "development")
 	switch env {
-	case "production":
+	case envProduction:
 	case "development", "staging":
 		_ = godotenv.Load()
 	default:
@@ -82,95 +165,66 @@ func resolveEnv() (string, error) {
 	return env, nil
 }
 
-// otelInsecure defaults to plaintext outside production, overridable by env.
-func otelInsecure(env string) bool {
-	if v, ok := os.LookupEnv("OTEL_EXPORTER_OTLP_INSECURE"); ok && v != "" {
-		return v == "1" || v == "true" || v == "TRUE"
-	}
-	return env != "production"
-}
-
+// Load reads the environment (and .env outside production) into a validated Config.
 func Load() (*Config, error) {
 	env, err := resolveEnv()
 	if err != nil {
 		return nil, err
 	}
-
-	ints := &intEnvs{}
-	serverPort := ints.get("SERVER_PORT", 6969)
-	apiPort := ints.get("API_PORT", 6970)
-	maxConnections := ints.get("MAX_CONNECTIONS", 1000)
-	dbPort := ints.get("DB_PORT", 5432)
-	dbMaxOpenConnections := ints.get("DB_MAX_OPEN_CONNS", 25)
-	rateLimitCount := ints.get("RATE_LIMIT_CONNECTIONS", 5)
-	rateLimitWindowMS := ints.get("RATE_LIMIT_WINDOW_MS", 1000)
-	apiRequestsPerMinute := ints.get("API_REQUESTS_PER_MINUTE", 120)
-	registrationLimit := ints.get("REGISTRATION_LIMIT", 5)
-	if ints.err != nil {
-		return nil, ints.err
-	}
-	registrationWindow, err := time.ParseDuration(getEnv("REGISTRATION_WINDOW", "1h"))
-	if err != nil {
-		return nil, fmt.Errorf("invalid REGISTRATION_WINDOW: %w", err)
-	}
-	trustedCIDRs, err := parsePrefixes(getEnv("PROXY_TRUSTED_CIDRS", ""))
-	if err != nil {
-		return nil, fmt.Errorf("invalid PROXY_TRUSTED_CIDRS: %w", err)
-	}
-
-	logLevel, err := parseLogLevel(getEnv("LOG_LEVEL", ""))
-	if err != nil {
-		return nil, err
-	}
-
+	production := env == envProduction
 	defaultSSLMode := "disable"
-	if env == "production" {
+	if production {
 		defaultSSLMode = "require"
 	}
 
+	r := &envReader{}
 	cfg := &Config{
 		Env:            env,
 		ServerHost:     getEnv("SERVER_HOST", "0.0.0.0"),
-		ServerPort:     serverPort,
-		APIPort:        apiPort,
+		ServerPort:     r.int("SERVER_PORT", 6969),
+		APIPort:        r.int("API_PORT", DefaultAPIPort),
 		APIAllowOrigin: getEnv("API_ALLOW_ORIGIN", "*"),
 		// Per network, not per visitor, and tunable without a rebuild.
-		APIRequestsPerMinute: apiRequestsPerMinute,
+		APIRequestsPerMinute: r.int("API_REQUESTS_PER_MINUTE", 120),
 		// Off by default: trusting X-Forwarded-For on a directly reachable listener lets
 		// any caller forge an address and walk past the rate limit. compose never
 		// publishes the API port, so nginx is the only source there, and it opts in.
-		APITrustProxy:        getEnv("API_TRUST_PROXY", "false") == "true",
-		ProxyProtocol:        getEnv("PROXY_PROTOCOL", "true") != "false",
-		ProxyTrustedCIDRs:    trustedCIDRs,
-		RegistrationLimit:    registrationLimit,
-		RegistrationWindow:   registrationWindow,
-		MaxConnections:       maxConnections,
+		APITrustProxy:        r.bool("API_TRUST_PROXY", false),
+		ProxyProtocol:        r.bool("PROXY_PROTOCOL", true),
+		ProxyTrustedCIDRs:    r.prefixes("PROXY_TRUSTED_CIDRS"),
+		RegistrationLimit:    r.int("REGISTRATION_LIMIT", 5),
+		RegistrationWindow:   r.duration("REGISTRATION_WINDOW", time.Hour),
+		MaxConnections:       r.int("MAX_CONNECTIONS", 1000),
 		SSHKeyPath:           getEnv("SSH_KEY_PATH", ".wishlist/server"),
 		DBHost:               getEnv("DB_HOST", "localhost"),
-		DBPort:               dbPort,
+		DBPort:               r.int("DB_PORT", 5432),
 		DBUser:               getEnv("DB_USER", "postgres"),
 		DBName:               getEnv("DB_NAME", "terminal_card"),
 		DBPassword:           getEnv("DB_PASSWORD", ""),
 		DBSSLMode:            getEnv("DB_SSLMODE", defaultSSLMode),
-		DBMaxOpenConnections: dbMaxOpenConnections,
+		DBMaxOpenConnections: r.int("DB_MAX_OPEN_CONNS", 25),
+		AllowInsecureDB:      r.bool("ALLOW_INSECURE_DB", false),
 		OTelEndpoint:         getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
-		OTelInsecure:         otelInsecure(env),
-		ServiceVersion:       getEnv("SERVICE_VERSION", detectVersion()),
-		RateLimitCount:       rateLimitCount,
-		RateLimitWindow:      time.Duration(rateLimitWindowMS) * time.Millisecond,
-		LogLevel:             logLevel,
+		// Plaintext to the collector outside production, where it is on localhost.
+		OTelInsecure:    r.bool("OTEL_EXPORTER_OTLP_INSECURE", !production),
+		ServiceVersion:  getEnv("SERVICE_VERSION", detectVersion()),
+		RateLimitCount:  r.int("RATE_LIMIT_CONNECTIONS", 5),
+		RateLimitWindow: time.Duration(r.int("RATE_LIMIT_WINDOW_MS", 1000)) * time.Millisecond,
+		LogLevel:        r.level("LOG_LEVEL"),
+	}
+	if r.err != nil {
+		return nil, r.err
 	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-
 	return cfg, nil
 }
 
 // Validate checks production-critical configuration.
 func (c *Config) Validate() error {
-	if c.Env == "production" {
+	if c.IsProduction() {
 		if err := c.validateProductionDB(); err != nil {
 			return err
 		}
@@ -207,31 +261,12 @@ func (c *Config) validateProductionDB() error {
 	case "require", "verify-ca", "verify-full":
 		return nil
 	}
-	allowInsecure := os.Getenv("ALLOW_INSECURE_DB") == "true"
 	internalHost := c.DBHost == "db" || c.DBHost == "localhost" || c.DBHost == "127.0.0.1"
-	if allowInsecure || internalHost {
+	if c.AllowInsecureDB || internalHost {
 		return nil
 	}
 	return fmt.Errorf("DB_SSLMODE=%s is not allowed in production for host %q; use require, verify-ca "+
 		"or verify-full, or set ALLOW_INSECURE_DB=true only for trusted networks", c.DBSSLMode, c.DBHost)
-}
-
-// parsePrefixes reads a comma-separated CIDR list. One bad entry fails the whole list:
-// silently dropping it would trust fewer peers than configured, or none.
-func parsePrefixes(raw string) ([]netip.Prefix, error) {
-	var prefixes []netip.Prefix
-	for field := range strings.SplitSeq(raw, ",") {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			continue
-		}
-		prefix, err := netip.ParsePrefix(field)
-		if err != nil {
-			return nil, fmt.Errorf("parse %q: %w", field, err)
-		}
-		prefixes = append(prefixes, prefix.Masked())
-	}
-	return prefixes, nil
 }
 
 // DSN carries DBPassword in clear text. Never log the result; log the Config
@@ -291,34 +326,8 @@ func normalizeVersion(version string) string {
 
 // getEnv returns the environment value for key, falling back when it is unset or
 // empty. An empty value must not win: a blank SSH_KEY_PATH or DB_HOST in a .env or
-// compose file would otherwise silently defeat the default. This matches
-// getEnvAsInt, which already treats "" as absent.
+// compose file would otherwise silently defeat the default. envReader treats "" the
+// same way.
 func getEnv(key string, fallback string) string {
 	return cmp.Or(os.Getenv(key), fallback)
-}
-
-// parseLogLevel takes the names slog understands (DEBUG, INFO, WARN, ERROR, +N/-N). A
-// typo fails the boot rather than silently meaning info, which is how an operator ends
-// up believing debug logging is on.
-func parseLogLevel(raw string) (slog.Level, error) {
-	if raw == "" {
-		return slog.LevelInfo, nil
-	}
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(raw)); err != nil {
-		return slog.LevelInfo, fmt.Errorf("invalid LOG_LEVEL %q: %w", raw, err)
-	}
-	return level, nil
-}
-
-func getEnvAsInt(name string, fallback int) (int, error) {
-	valStr := getEnv(name, "")
-	if valStr == "" {
-		return fallback, nil
-	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil {
-		return 0, fmt.Errorf("trying to parse env value failed: %w", err)
-	}
-	return val, nil
 }

@@ -89,7 +89,7 @@ func TestValidate_RateLimit(t *testing.T) {
 // Every field has to survive the trip, whatever the password looks like: the old
 // keyword/value DSN let a blank or spaced password absorb the keywords after it, and
 // the server connected to a different database than the one it was configured with.
-func TestDSN(t *testing.T) {
+func TestConfig_DSN(t *testing.T) {
 	t.Parallel()
 
 	passwords := []struct {
@@ -129,7 +129,7 @@ func TestDSN(t *testing.T) {
 }
 
 func TestValidate_InsecureDBRemoteHost(t *testing.T) {
-	t.Setenv("ALLOW_INSECURE_DB", "")
+	t.Parallel()
 	cfg := &config.Config{
 		Env:                  "production",
 		DBPassword:           "secret",
@@ -186,7 +186,6 @@ func TestLoad_StatsAPIDefaults(t *testing.T) {
 	require.ErrorContains(t, err, "API_REQUESTS_PER_MINUTE")
 }
 
-// Trusting X-Forwarded-For on a directly reachable listener lets any caller forge an
 // X-Forwarded-For on a directly reachable listener can be forged, so off is the only
 // safe default and turning it on takes an explicit opt-in.
 func TestLoad_TrustProxyDefaultsToOff(t *testing.T) {
@@ -197,9 +196,9 @@ func TestLoad_TrustProxyDefaultsToOff(t *testing.T) {
 	}{
 		{name: "unset", value: "", want: false},
 		{name: "explicitly false", value: "false", want: false},
-		{name: "anything else is not an opt-in", value: "1", want: false},
-		{name: "yes is not an opt-in either", value: "yes", want: false},
+		{name: "zero", value: "0", want: false},
 		{name: "opted in", value: "true", want: true},
+		{name: "opted in with a one", value: "1", want: true},
 	}
 
 	for _, tt := range tests {
@@ -211,6 +210,53 @@ func TestLoad_TrustProxyDefaultsToOff(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, cfg.APITrustProxy)
 		})
+	}
+}
+
+// The four switches used to spell "true" four ways: == "true", != "false", a three-word
+// allow-list and a plain string compare. So PROXY_PROTOCOL=off kept the PROXY header
+// on and API_TRUST_PROXY=yes left it off. A value ParseBool refuses now fails the boot.
+func TestLoad_BoolEnvTypoFailsTheBoot(t *testing.T) {
+	for _, key := range []string{"API_TRUST_PROXY", "PROXY_PROTOCOL", "OTEL_EXPORTER_OTLP_INSECURE", "ALLOW_INSECURE_DB"} {
+		for _, value := range []string{"yes", "off", "ture"} {
+			t.Run(key+"="+value, func(t *testing.T) {
+				t.Setenv("ENV", "development")
+				t.Setenv(key, value)
+
+				_, err := config.Load()
+				require.ErrorContains(t, err, "invalid "+key)
+			})
+		}
+	}
+}
+
+func TestLoad_BoolEnvs(t *testing.T) {
+	t.Setenv("ENV", "production")
+	t.Setenv("DB_PASSWORD", "secret")
+	t.Setenv("DB_HOST", "db.example.com")
+	t.Setenv("DB_SSLMODE", "disable")
+	t.Setenv("PROXY_PROTOCOL", "0")
+	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "TRUE")
+	t.Setenv("ALLOW_INSECURE_DB", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err, "ALLOW_INSECURE_DB lets a remote plaintext database through")
+	assert.False(t, cfg.ProxyProtocol)
+	assert.True(t, cfg.OTelInsecure)
+	assert.True(t, cfg.AllowInsecureDB)
+}
+
+// Every bad variable is reported at once, so a broken .env is fixed in one pass.
+func TestLoad_ReportsEveryInvalidVariable(t *testing.T) {
+	t.Setenv("ENV", "development")
+	t.Setenv("SERVER_PORT", "x")
+	t.Setenv("REGISTRATION_WINDOW", "an hour")
+	t.Setenv("LOG_LEVEL", "loud")
+
+	_, err := config.Load()
+	require.Error(t, err)
+	for _, key := range []string{"SERVER_PORT", "REGISTRATION_WINDOW", "LOG_LEVEL"} {
+		assert.ErrorContains(t, err, "invalid "+key)
 	}
 }
 
@@ -277,6 +323,7 @@ func TestResolveEnv_UnknownIsAnError(t *testing.T) {
 // prefer and allow fall back to plaintext whenever the server declines TLS, so in
 // production they are disable with extra steps.
 func TestValidate_ProductionNeedsAnSSLModeThatRequiresTLS(t *testing.T) {
+	t.Parallel()
 	base := func(mode, host string) *config.Config {
 		return &config.Config{
 			Env: "production", DBPassword: "secret", DBHost: host, DBSSLMode: mode,
@@ -300,7 +347,7 @@ func TestValidate_ProductionNeedsAnSSLModeThatRequiresTLS(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode+"@"+tt.host, func(t *testing.T) {
-			t.Setenv("ALLOW_INSECURE_DB", "")
+			t.Parallel()
 			err := base(tt.mode, tt.host).Validate()
 			if tt.wantErr {
 				require.Error(t, err)
