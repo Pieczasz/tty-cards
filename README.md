@@ -45,13 +45,25 @@ press Ready. Ranked tables move Elo; casual tables only record history.
 Seat limits come from each game's `MinPlayers`/`MaxPlayers`
 (`internal/game/*/rules.go`); the lobby clamps its own capacity to them.
 
+Where the tables differ from the rules you may know: Crazy Eights deals seven
+cards at every table size; Uno ranks the other seats by fewest cards left and has
+no "UNO" call; Gin Rummy scores the gin and undercut bonuses (25 each) and nothing
+else - no big gin, no box or game bonus. In Hearts one seat leaving ends the match
+for everyone: only the leaver's rating moves, and only down.
+
 ### Rules that apply at every table
 
 - **30 seconds a turn** (`game.DefaultTurnTimeout`). When it runs out the rules
-  play a safe move for you - poker checks or folds, Uno and Crazy Eights draw,
-  Hearts plays its first legal card, Gin Rummy sheds its priciest deadwood.
-- **Three consecutive misses loses the seat** (`game.MaxMissedTurns`). Acting
+  play a safe move for you - poker checks, or calls when nobody can bet more than
+  you already have in, and otherwise folds; Uno and Crazy Eights draw; Hearts
+  passes its most dangerous cards and plays its first legal card; Gin Rummy knocks
+  when it holds gin and otherwise sheds its priciest deadwood. A turn that carries
+  on - Gin's draw then discard, an Uno skip that comes back to you - keeps its
+  clock, with at least 10 seconds left.
+- **Three missed turns in a row loses the seat** (`game.MaxMissedTurns`). Acting
   clears the count; a move the rules *reject* does not.
+- **esc asks before you forfeit.** Mid-game, esc shows "Leave and forfeit this
+  game?" and only `y` leaves; any other key keeps you playing.
 - **A dropped connection holds your seat for 90 seconds**
   (`lobby.DisconnectGrace`). Reconnect inside that and you land back at the
   table mid-hand. A waiting-lobby seat leaves at once.
@@ -196,9 +208,10 @@ Full list with comments in [`.env.example`](.env.example).
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | logs, metrics, traces |
 | `LOG_LEVEL` | `INFO` | stderr and OTLP both |
 
-New accounts are separately capped at 5 per hour per client network
-(`registrationLimit` in `internal/ssh/server.go`); returning players never spend
-that budget.
+New accounts are separately capped at `REGISTRATION_LIMIT` per
+`REGISTRATION_WINDOW` per client network; returning players never spend that
+budget, and neither does a name that fails validation - that player is told why.
+Usernames are unique regardless of case.
 
 ## Observability
 
@@ -213,14 +226,16 @@ Retention is explicit: **logs 14 days** (`internal/config/loki/loki.yaml`),
 
 ## Self-hosting
 
-1. A VM with Docker. 12 GB / 6 cores is what `compose.yaml` is sized against; the
-   stack itself wants 5.5 GiB.
+1. A VM with Docker, with IPv6 enabled for user-defined networks (the `edge`
+   network sets `enable_ipv6: true`, so an IPv6 player keeps their own address).
+   12 GB / 6 cores is what `compose.yaml` is sized against; the stack itself wants
+   5.5 GiB.
 2. Move the host's own `sshd` off port 22 (`Port 2222` in `/etc/ssh/sshd_config`)
    and reconnect there - the game proxy owns 22.
 3. Firewall: allow 22 and 80, plus your admin SSH port from trusted addresses
    only. Do not open Postgres, Grafana, `6969` or `6970`.
-4. `cp .env.example .env` and set `DB_PASSWORD`.
-   Compose sets `ENV=production` on the backend.
+4. `cp .env.example .env` and set `DB_PASSWORD`; compose refuses to start
+   without it. Compose sets `ENV=production` on the backend.
 5. `docker compose up -d --build`.
 6. Optional: install `zstd` and cron `./scripts/backup.sh` (see its header).
    Protect `backups/`.
@@ -233,7 +248,14 @@ Notes worth reading before you deploy:
   community put it behind a firewall, a VPN or an allowlist -
   [`docs/SECURITY.md`](docs/SECURITY.md).
 - Compose sets `DB_SSLMODE=disable` for the internal Postgres network. For an
-  external managed database set `DB_SSLMODE=require` and supply CA-trusted TLS.
+  external managed database set `DB_SSLMODE=require` (or `verify-ca` /
+  `verify-full`) and supply CA-trusted TLS; production refuses anything weaker for
+  a non-internal host.
+- The `edge` network's subnets (`172.29.69.0/24`, `fd6b:1e37:9a52:6969::/64`) are
+  what the backend's `PROXY_TRUSTED_CIDRS` trusts. If they collide with a network
+  on your host, change both in `compose.yaml` together.
+- Grafana answers only to `Host: localhost` (DNS-rebinding protection): tunnel
+  with `ssh -L 3000:127.0.0.1:3000 <host>` and open `http://localhost:3000`.
 
 ## Docs
 
