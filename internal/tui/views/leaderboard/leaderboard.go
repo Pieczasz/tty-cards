@@ -83,6 +83,9 @@ type loadedMsg struct {
 	err      error
 	gameSlug string
 	wantPage int
+	// limit is what was asked for: judging the answer against anything else is how a
+	// filter change that asked for a screenful read five rows as the end of the feed.
+	limit int
 }
 
 func (m model) gameFilter() string {
@@ -145,7 +148,7 @@ func (m model) load(limit int, wantPage int) tea.Cmd {
 		ctx, cancel := context.WithTimeout(m.global.RequestContext(), 5*time.Second)
 		defer cancel()
 		rankings, err := m.global.UserRepository.BestPlayers(ctx, limit, gameSlug)
-		return loadedMsg{rankings: rankings, err: err, gameSlug: gameSlug, wantPage: wantPage}
+		return loadedMsg{rankings: rankings, err: err, gameSlug: gameSlug, wantPage: wantPage, limit: limit}
 	}
 }
 
@@ -162,7 +165,7 @@ func (m model) cycleFilter(delta int) (tea.Model, tea.Cmd) {
 	m.page = 0
 	m.exhausted = false
 	m.loading = true
-	return m, m.load(m.rowsPerPage(), 0)
+	return m, m.load(maxRowsPerPage, 0)
 }
 
 func (m model) goPage(delta int) (tea.Model, tea.Cmd) {
@@ -199,8 +202,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Fewer rows than the request (or the hard cap) means there is nothing left to page into.
-		asked := min(max((msg.wantPage+1)*m.rowsPerPage(), maxRowsPerPage), maxLeaderboardPlayers)
-		m.exhausted = len(msg.rankings) < asked || len(msg.rankings) >= maxLeaderboardPlayers
+		m.exhausted = len(msg.rankings) < msg.limit || len(msg.rankings) >= maxLeaderboardPlayers
 		m.page = min(msg.wantPage, max(m.pageCount()-1, 0))
 	case tea.KeyPressMsg:
 		switch msg.String() {

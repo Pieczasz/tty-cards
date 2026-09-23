@@ -320,7 +320,7 @@ func TestUpdate_Loaded(t *testing.T) {
 		m := board(t, 0)
 		m.loading = true
 
-		next, _ := m.Update(loadedMsg{rankings: rankings(3)})
+		next, _ := m.Update(loadedMsg{rankings: rankings(3), limit: maxRowsPerPage})
 		nm := next.(model)
 
 		assert.False(t, nm.loading)
@@ -541,6 +541,32 @@ func TestRenderPlayerRow_HighlightsTheViewer(t *testing.T) {
 	assert.NotEqual(t, stripANSI(mine), mine, "the viewer's own row is styled")
 	assert.Equal(t, stripANSI(theirs), theirs, "another player's row is plain")
 	assert.Contains(t, stripANSI(mine), "player02")
+}
+
+// A filter change used to ask for a screenful and judge the answer against a full
+// page: at 80x24 five rows came back, five is fewer than twenty, and a board of a
+// hundred players was declared exhausted after its first page.
+func TestCycleFilter_StillPagesAt80x24(t *testing.T) {
+	t.Parallel()
+
+	all := rankings(100)
+	m := board(t, 0)
+	m.global.Width, m.global.Height = 80, 24
+	m.global.UserRepository = fakeUsers{
+		best: func(_ context.Context, limit int, _ string) ([]db.Ranking, error) {
+			return all[:min(limit, len(all))], nil
+		},
+	}
+	require.Less(t, m.rowsPerPage(), maxRowsPerPage, "the bug needs a page shorter than the cap")
+
+	next, cmd := m.cycleFilter(1)
+	require.NotNil(t, cmd)
+	next, _ = next.(model).Update(cmd())
+	nm := next.(model)
+	require.False(t, nm.exhausted, "a full answer is not the end of the feed")
+
+	next, _ = nm.goPage(1)
+	assert.Equal(t, 1, next.(model).page, "the second page has to be reachable")
 }
 
 func keyPress(key string) tea.KeyPressMsg {
