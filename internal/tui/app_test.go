@@ -222,12 +222,7 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 			t.Parallel()
 
 			rules := e.Factory()
-			players := make([]*game.Player, 0, rules.MinPlayers())
-			for i := range rules.MinPlayers() {
-				players = append(players, &game.Player{
-					ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1), Name: fmt.Sprintf("p%d", i+1),
-				})
-			}
+			players := testutil.Players(rules.MinPlayers())
 			engine := game.NewEngine(rules, players, rules.InitialDeck())
 			require.NoError(t, engine.Start())
 			t.Cleanup(engine.Close)

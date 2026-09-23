@@ -223,8 +223,7 @@ func TestSeatNames_CannotCarryATerminalEscape(t *testing.T) {
 func TestSession_SubmitCountsARejection(t *testing.T) {
 	t.Parallel()
 
-	players := []*game.Player{{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"}, {ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}}
-	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&crazyeight.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

@@ -42,12 +42,11 @@ func BenchmarkJoinView_Render(b *testing.B) {
 // The in-lobby view redraws on every roster and settings event.
 func BenchmarkLobbyView_Render(b *testing.B) {
 	manager := lobby.NewManager(b.Context(), nil)
-	leader := &game.Player{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"}
-	l, err := manager.CreateLobby(leader, lobby.WithMaxPlayers(4), lobby.WithPrivate(false),
+	seats := testutil.NamedPlayers("alice", "p2", "p3", "p4")
+	l, err := manager.CreateLobby(seats[0], lobby.WithMaxPlayers(4), lobby.WithPrivate(false),
 		lobby.WithCardGame(testGameName))
 	require.NoError(b, err)
-	for i := 2; i <= 4; i++ {
-		g := &game.Player{ID: testutil.SeatID(i), UserID: testutil.UID(i), Name: fmt.Sprintf("p%d", i)}
+	for _, g := range seats[1:] {
 		_, err := manager.JoinLobbyByCode(l.Code(), g)
 		require.NoError(b, err)
 	}

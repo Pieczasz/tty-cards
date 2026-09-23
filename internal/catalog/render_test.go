@@ -135,20 +135,13 @@ func seatedView(t *testing.T, entry Entry, seats, width, height int) tea.Model {
 func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*game.Engine, tea.Model) {
 	t.Helper()
 
-	players := make([]*game.Player, 0, seats)
-	for i := range seats {
-		players = append(players, &game.Player{
-			ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1),
-			Name: fmt.Sprintf("player%d", i+1),
-		})
-	}
 	rules := entry.Factory()
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, testutil.Players(seats), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{
-		User:   &db.User{ID: testutil.UID(1), Username: "player1"},
+		User:   &db.User{ID: testutil.UID(1), Username: "p1"},
 		Theme:  styles.NewTheme(true),
 		Width:  width,
 		Height: height,

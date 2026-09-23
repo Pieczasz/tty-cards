@@ -19,13 +19,7 @@ import (
 // per-frame cost every client pays, so it is the number that decides table capacity.
 func benchTable(b *testing.B, n int) *model {
 	b.Helper()
-	players := make([]*game.Player, 0, n)
-	for i := range n {
-		players = append(players, &game.Player{
-			ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1), Name: fmt.Sprintf("p%d", i+1),
-		})
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 

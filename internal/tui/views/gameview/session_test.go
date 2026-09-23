@@ -475,11 +475,7 @@ func TestSyncBaseState_OpponentsExcludeTheHero(t *testing.T) {
 func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 	t.Parallel()
 
-	players := make([]*game.Player, 0, 4)
-	for i := 1; i <= 4; i++ {
-		players = append(players, &game.Player{ID: testutil.SeatID(i), UserID: testutil.UID(i), Name: "p"})
-	}
-	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&crazyeight.Rules{}, testutil.Players(4), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
