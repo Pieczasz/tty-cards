@@ -244,18 +244,17 @@ func (e *Engine) placesLocked(standings []*Player) []int {
 		left[p.ID] = true
 	}
 
-	places := make([]int, len(standings))
 	scorer, ok := e.state.Rules.(StandingScorer)
+	tied := func(a, b *Player) bool {
+		return ok && a != nil && b != nil && left[a.ID] == left[b.ID] &&
+			scorer.StandingScore(e.state, a) == scorer.StandingScore(e.state, b)
+	}
+
+	places := make([]int, len(standings))
 	for i, p := range standings {
-		switch {
-		case i == 0:
-			places[i] = 1
-		case ok && p != nil && standings[i-1] != nil &&
-			left[p.ID] == left[standings[i-1].ID] &&
-			scorer.StandingScore(e.state, p) == scorer.StandingScore(e.state, standings[i-1]):
+		places[i] = i + 1
+		if i > 0 && tied(p, standings[i-1]) {
 			places[i] = places[i-1]
-		default:
-			places[i] = i + 1
 		}
 	}
 	return places
