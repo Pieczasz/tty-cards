@@ -588,3 +588,19 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 type noStandingsRules struct{ stubRules }
 
 func (noStandingsRules) Standings(*game.State) []*game.Player { return nil }
+
+// The label is a metric attribute: a reason falling through to "unknown" hides a whole
+// class of endings from the dashboard.
+func TestEndReasonLabel_NamesEveryReason(t *testing.T) {
+	t.Parallel()
+	for reason, want := range map[game.EndReason]string{
+		game.EndReasonWin:         "win",
+		game.EndReasonRulesError:  "rules_error",
+		game.EndReasonForfeit:     "forfeit",
+		game.EndReasonAbandoned:   "abandoned",
+		game.EndReasonInterrupted: "interrupted",
+		game.EndReasonUnknown:     "unknown",
+	} {
+		assert.Equal(t, want, endReasonLabel(reason))
+	}
+}

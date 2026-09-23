@@ -67,7 +67,7 @@ func unratedReason(reason game.EndReason) string {
 		return "rules error ended the match; recording without Elo"
 	case game.EndReasonAbandoned:
 		return "every seat left the match; recording without Elo"
-	case game.EndReasonWin, game.EndReasonForfeit, game.EndReasonUnknown:
+	case game.EndReasonWin, game.EndReasonForfeit, game.EndReasonInterrupted, game.EndReasonUnknown:
 	}
 	return "server is shutting down; recording the ranked match without Elo"
 }
@@ -82,6 +82,8 @@ func endReasonLabel(reason game.EndReason) string {
 		return "forfeit"
 	case game.EndReasonAbandoned:
 		return "abandoned"
+	case game.EndReasonInterrupted:
+		return "interrupted"
 	case game.EndReasonUnknown:
 		return "unknown"
 	default:
