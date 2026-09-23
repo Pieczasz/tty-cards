@@ -430,25 +430,46 @@ func worstPairCount(seats map[uint][]uuid.UUID) int {
 	return worst
 }
 
-// lockPairing serializes finalizes that share any seat, taking the locks in user-id
-// order so two overlapping tables cannot grab them in opposite orders and deadlock.
+// lockPairing serializes finalizes that share any seat, taking the locks in key order
+// so two overlapping tables cannot grab them in opposite orders and deadlock.
 // Ranking row locks are per (user, game), so the same accounts finalizing Poker and
 // Hearts at the same moment would both read an undamped pair count without this. One
 // lock per seat rather than one per exact set, because the cap is now per pair and two
 // different sets can share one.
 func lockPairing(tx *gorm.DB, userIDs []uuid.UUID) error {
-	for _, id := range sortedUserIDs(userIDs) {
-		if err := lockSeat(tx, id); err != nil {
+	for _, key := range seatLockKeys(userIDs) {
+		if err := lockKey(tx, key); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// seatLockKeys is the lock order: by folded key, deduplicated. Sorting by user id was
+// not enough once two seats can fold onto one key - that key then sat at a different
+// point in each transaction's order, and two of them could deadlock on it.
+func seatLockKeys(userIDs []uuid.UUID) []int64 {
+	keys := make([]int64, 0, len(userIDs))
+	for _, id := range userIDs {
+		keys = append(keys, seatAdvisoryKey(id))
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
 // lockSeat is the per-user advisory lock both a ranked finalize and an erasure hold.
 func lockSeat(tx *gorm.DB, id uuid.UUID) error {
-	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", seatAdvisoryKey(id)).Error; err != nil {
-		return fmt.Errorf("lock seat %s: %w", id, err)
+	return lockKey(tx, seatAdvisoryKey(id))
+}
+
+// lockKey takes the two-int4 form of the advisory lock, with the 64-bit key split in
+// half. Postgres keeps the two forms apart (objsubid 2, not 1), and golang-migrate takes
+// the single-bigint form, so a seat key can never collide with a migration's lock.
+func lockKey(tx *gorm.DB, key int64) error {
+	//nolint:gosec // G115: splitting an advisory key into its two halves, not an id
+	hi, lo := int32(key>>32), int32(key)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?::int4, ?::int4)", hi, lo).Error; err != nil {
+		return fmt.Errorf("lock seat key %d: %w", key, err)
 	}
 	return nil
 }

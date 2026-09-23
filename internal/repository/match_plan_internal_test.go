@@ -39,3 +39,20 @@ func TestRecentRankedMatchesCanUseTheWindowIndex(t *testing.T) {
 	joined := strings.Join(plan, "\n")
 	assert.Contains(t, joined, "idx_matches_ranked_created", "plan:\n%s", joined)
 }
+
+// golang-migrate holds a single-bigint advisory lock while it migrates. The seat locks
+// use the two-int4 form, which Postgres keeps in a separate key space (objsubid 2).
+func TestSeatLocksDoNotShareMigratesKeySpace(t *testing.T) {
+	t.Parallel()
+	gormDB := testutil.SetupTestDB(t)
+
+	var spaces []int
+	require.NoError(t, gormDB.Transaction(func(tx *gorm.DB) error {
+		if err := lockSeat(tx, testutil.UID(1)); err != nil {
+			return err
+		}
+		return tx.Raw(`SELECT objsubid FROM pg_locks
+			WHERE locktype = 'advisory' AND pid = pg_backend_pid()`).Scan(&spaces).Error
+	}))
+	assert.Equal(t, []int{2}, spaces)
+}

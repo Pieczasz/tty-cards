@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/testutil"
@@ -122,6 +123,21 @@ func TestSeatAdvisoryKey(t *testing.T) {
 		assert.NotEqual(t, seatAdvisoryKey(a), seatAdvisoryKey(b),
 			"two seats collapsed onto one advisory lock")
 	})
+}
+
+// Two seats can fold onto one key. Locking in user-id order then took the same key at
+// two different points, so two finalizes sharing those seats could grab the locks in
+// opposite orders and deadlock. The order - and the dedupe - has to be by key.
+func TestSeatLockKeys(t *testing.T) {
+	t.Parallel()
+	var swapped uuid.UUID // high word 1, low word 0: folds to the same key as UID(1)
+	swapped[7] = 1
+	require.Equal(t, seatAdvisoryKey(testutil.UID(1)), seatAdvisoryKey(swapped), "the fixture must collide")
+
+	keys := seatLockKeys([]uuid.UUID{testutil.UID(9), swapped, testutil.UID(1)})
+
+	assert.Len(t, keys, 2, "a colliding pair must be locked once")
+	assert.True(t, slices.IsSorted(keys), "locks must be taken in key order: %v", keys)
 }
 
 // A lost registration race arrives as 23505 from the driver, and the only honest way
