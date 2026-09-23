@@ -100,10 +100,11 @@ func TestSessionLifecycle_PanicClosingTheViewStillReleasesTheSession(t *testing.
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
 
-	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil)}
+	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil), Tracker: tracker}
+	reg := &sessionRegistry{}
 	srv := &ssh.Server{
-		Handler: sessionLifecycle(deps, tracker)(func(s ssh.Session) {
-			st, ok := lookupSessionState(s)
+		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
+			st, ok := reg.load(s)
 			require.True(t, ok)
 			st.owns = true
 			st.user = user

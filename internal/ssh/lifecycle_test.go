@@ -19,7 +19,7 @@ import (
 )
 
 // fakeSession is enough of an ssh.Session for the teardown helpers, which only ever
-// look the session up in sessionStates. Embedding the interface leaves every other
+// look the session up in the registry. Embedding the interface leaves every other
 // method nil on purpose: calling one is a bug in the test, not a silent pass.
 type fakeSession struct {
 	ssh.Session
@@ -43,27 +43,24 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 	user := &db.User{ID: testutil.UID(11), Username: "shared"}
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
-	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil)}
+	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil), Tracker: tracker}
+	reg := &sessionRegistry{}
 
 	// Both channels of one connection, so they would share an ssh.Context.
 	accepted := &fakeSession{}
 	rejected := &fakeSession{}
 
 	modelClosed := false
-	sessionStates.Store(accepted, &sessionState{
+	reg.store(accepted, &sessionState{
 		owns:  true,
 		user:  user,
 		gen:   gen,
 		model: recordingCloser{closed: &modelClosed},
 	})
-	sessionStates.Store(rejected, &sessionState{})
-	t.Cleanup(func() {
-		sessionStates.Delete(accepted)
-		sessionStates.Delete(rejected)
-	})
+	reg.store(rejected, &sessionState{})
 
-	closeSessionModel(rejected)
-	releaseSession(rejected, deps, tracker)
+	reg.closeSessionModel(rejected)
+	reg.releaseSession(rejected, deps)
 
 	assert.False(t, modelClosed, "the rejected channel closed the accepted channel's view")
 	assert.Equal(t, 1, tracker.Count(), "and freed the accepted channel's session slot")
@@ -87,7 +84,8 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	tracker := NewSessionTracker(0)
 	oldGen, err := tracker.Connect(guest.ID, nil)
 	require.NoError(t, err)
-	deps := ServerDependencies{LobbyManager: manager}
+	deps := ServerDependencies{LobbyManager: manager, Tracker: tracker}
+	reg := &sessionRegistry{}
 
 	// The reconnect displaces the zombie session before teardown runs, so
 	// releaseSession sees a stale generation and leaves the seat alone.
@@ -107,8 +105,8 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	}
 
 	srv := &ssh.Server{
-		Handler: sessionLifecycle(deps, tracker)(func(s ssh.Session) {
-			st, ok := lookupSessionState(s)
+		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
+			st, ok := reg.load(s)
 			require.True(t, ok)
 			st.owns = true
 			st.user = guest
@@ -223,10 +221,10 @@ func TestReportingModel_RecordsPanicsAndLetsThemUnwind(t *testing.T) {
 
 			s := &fakeSession{}
 			st := &sessionState{traceCtx: context.Background()}
-			sessionStates.Store(s, st)
-			t.Cleanup(func() { sessionStates.Delete(s) })
+			reg := &sessionRegistry{}
+			reg.store(s, st)
 
-			m := reportingModel{Model: panicModel{on: method}, session: s}
+			m := reportingModel{Model: panicModel{on: method}, session: s, reg: reg}
 			require.Panics(t, func() {
 				switch method {
 				case "init":
@@ -248,10 +246,10 @@ func TestReportingModel_PassesThroughWhenNothingPanics(t *testing.T) {
 	t.Parallel()
 
 	s := &fakeSession{}
-	sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	reg := &sessionRegistry{}
+	reg.store(s, &sessionState{traceCtx: context.Background()})
 
-	m := reportingModel{Model: panicModel{on: "none"}, session: s}
+	m := reportingModel{Model: panicModel{on: "none"}, session: s, reg: reg}
 
 	assert.Nil(t, m.Init())
 	got, cmd := m.Update(nil)

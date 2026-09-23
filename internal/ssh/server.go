@@ -73,17 +73,25 @@ type sessionState struct {
 	panicked bool
 }
 
-// sessionStates maps a live ssh.Session to its state. sessionLifecycle creates the
+// sessionRegistry maps a live ssh.Session to its state. sessionLifecycle creates the
 // entry and deletes it last; sessionModel and the teardown defers look it up.
-var sessionStates sync.Map
+// SetupServer makes one per server rather than sharing a package global, so servers
+// in one process (every test that starts one) cannot see each other's sessions.
+type sessionRegistry struct {
+	states sync.Map
+}
 
-func lookupSessionState(s ssh.Session) (*sessionState, bool) {
-	st, ok := sessionStates.Load(s)
+func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
+	st, ok := reg.states.Load(s)
 	if !ok {
 		return nil, false
 	}
 	state, ok := st.(*sessionState)
 	return state, ok
+}
+
+func (reg *sessionRegistry) store(s ssh.Session, st *sessionState) {
+	reg.states.Store(s, st)
 }
 
 type ServerDependencies struct {
@@ -99,8 +107,7 @@ type ServerDependencies struct {
 var ErrNoTracker = errors.New("ssh server needs a session tracker")
 
 func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
-	tracker := deps.Tracker
-	if tracker == nil {
+	if deps.Tracker == nil {
 		return nil, ErrNoTracker
 	}
 	key, err := keygen.New(deps.Config.SSHKeyPath, keygen.WithKeyType(keygen.Ed25519))
@@ -117,6 +124,7 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 		return nil, err
 	}
 
+	reg := &sessionRegistry{}
 	rateLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
 	// Registration gets its own, far tighter budget than authentication. The auth
 	// limiter is sized so an ssh-agent offering every key it holds still gets in;
@@ -139,9 +147,9 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 		// wish's logging middleware: that one writes through the charm logger, which
 		// bypasses slog and so never reaches the OTLP handler.
 		wish.WithMiddleware(
-			bm.MiddlewareWithProgramHandler(sessionProgram(deps, tracker, registerLimiter)),
+			bm.MiddlewareWithProgramHandler(sessionProgram(deps, reg, registerLimiter)),
 			activeterm.Middleware(),
-			sessionLifecycle(deps, tracker),
+			sessionLifecycle(deps, reg),
 		),
 	)
 	if err != nil {
@@ -204,8 +212,8 @@ func rateLimitAuth(limiter *ratelimit.SlidingWindowLimiter, next ssh.PublicKeyHa
 	}
 }
 
-func sessionTraceContext(s ssh.Session) context.Context {
-	if st, ok := lookupSessionState(s); ok && st.traceCtx != nil {
+func (reg *sessionRegistry) sessionTraceContext(s ssh.Session) context.Context {
+	if st, ok := reg.load(s); ok && st.traceCtx != nil {
 		return st.traceCtx
 	}
 	return s.Context()
@@ -213,9 +221,9 @@ func sessionTraceContext(s ssh.Session) context.Context {
 
 // failSession reports a refusal on the session span as well as to the client, so a
 // trace shows why a connection never got a screen.
-func failSessionf(s ssh.Session, outcome string, err error, format string, args ...any) {
-	ctx := sessionTraceContext(s)
-	if st, ok := lookupSessionState(s); ok && st.span != nil {
+func (reg *sessionRegistry) failSessionf(s ssh.Session, outcome string, err error, format string, args ...any) {
+	ctx := reg.sessionTraceContext(s)
+	if st, ok := reg.load(s); ok && st.span != nil {
 		st.span.RecordError(err)
 		st.span.SetStatus(codes.Error, outcome)
 	}
@@ -224,19 +232,19 @@ func failSessionf(s ssh.Session, outcome string, err error, format string, args 
 }
 
 func sessionModel(
-	deps ServerDependencies, tracker *SessionTracker, registerLimiter *ratelimit.SlidingWindowLimiter,
+	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindowLimiter,
 ) func(ssh.Session) (tea.Model, []tea.ProgramOption) {
 	return func(s ssh.Session) (tea.Model, []tea.ProgramOption) {
-		traceCtx := sessionTraceContext(s)
+		traceCtx := reg.sessionTraceContext(s)
 		fingerprint, err := AuthenticateSession(s)
 		if err != nil {
-			failSessionf(s, "auth_failed", err, "%v\n", err)
+			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil, nil
 		}
 		user, err := LoadOrRegisterUser(traceCtx, deps.UserRepository, s.User(), fingerprint,
 			func() bool { return allowRegistration(traceCtx, registerLimiter, s) })
 		if err != nil {
-			failSessionf(s, "auth_failed", err, "%v\n", err)
+			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil, nil
 		}
 		// Built before the slot is claimed: a panic in here, or a session whose state
@@ -249,28 +257,28 @@ func sessionModel(
 			LobbyManager: deps.LobbyManager,
 			GameRegistry: deps.GameRegistry,
 		})
-		st, ok := lookupSessionState(s)
+		st, ok := reg.load(s)
 		if !ok {
 			err := errors.New("session state missing before the model was installed")
 			slog.ErrorContext(traceCtx, err.Error(), "remote_addr", s.RemoteAddr().String())
 			model.Close()
-			failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
+			reg.failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
 			return nil, nil
 		}
 
 		// The connection, not the session: closing a channel leaves the socket and any
 		// other channel on it up until the peer notices.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		gen, err := tracker.Connect(user.ID, conn)
+		gen, err := deps.Tracker.Connect(user.ID, conn)
 		switch {
 		case errors.Is(err, ErrServerFull):
 			model.Close()
-			failSessionf(s, "rejected_full", err,
+			reg.failSessionf(s, "rejected_full", err,
 				"The server is full right now - please try again in a few minutes.\n")
 			return nil, nil
 		case err != nil:
 			model.Close()
-			failSessionf(s, "rejected", err, "%v\n", err)
+			reg.failSessionf(s, "rejected", err, "%v\n", err)
 			return nil, nil
 		}
 		observability.SSHSession(traceCtx, "accepted")
@@ -289,7 +297,7 @@ func sessionModel(
 		// catching stays enabled all the same: it is the only thing covering the
 		// goroutines bubbletea spawns per Cmd, and an unrecovered panic there takes
 		// down the process for every connected player, not just this session.
-		return reportingModel{Model: model, session: s}, nil
+		return reportingModel{Model: model, session: s, reg: reg}, nil
 	}
 }
 
@@ -300,24 +308,25 @@ func sessionModel(
 type reportingModel struct {
 	tea.Model
 	session ssh.Session
+	reg     *sessionRegistry
 }
 
 func (m reportingModel) Init() tea.Cmd {
-	defer reportPanic(m.session)
+	defer m.reg.reportPanic(m.session)
 	return m.Model.Init()
 }
 
 func (m reportingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// A recovered Update leaves the model on the state the panic interrupted, so
 	// the session quits rather than rendering on from a half-applied message.
-	defer reportPanic(m.session)
+	defer m.reg.reportPanic(m.session)
 	inner, cmd := m.Model.Update(msg)
 	m.Model = inner
 	return m, cmd
 }
 
 func (m reportingModel) View() tea.View {
-	defer reportPanic(m.session)
+	defer m.reg.reportPanic(m.session)
 	return m.Model.View()
 }
 
@@ -329,12 +338,12 @@ func (m reportingModel) View() tea.View {
 // screen and is about to tear it down. Without it the panic is written to the server's
 // stderr and the client just sees the connection close on a frozen screen - the
 // recoverSession message never runs, because nothing panics out of bubbletea.
-func reportPanic(s ssh.Session) {
+func (reg *sessionRegistry) reportPanic(s ssh.Session) {
 	r := recover()
 	if r == nil {
 		return
 	}
-	recordSessionPanic(s, r)
+	reg.recordSessionPanic(s, r)
 	notifySessionPanic(s)
 	panic(r)
 }
@@ -357,9 +366,9 @@ func boundedPty() ssh.Option {
 }
 
 func sessionProgram(
-	deps ServerDependencies, tracker *SessionTracker, registerLimiter *ratelimit.SlidingWindowLimiter,
+	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindowLimiter,
 ) bm.ProgramHandler {
-	newModel := sessionModel(deps, tracker, registerLimiter)
+	newModel := sessionModel(deps, reg, registerLimiter)
 	return func(s ssh.Session) *tea.Program {
 		model, opts := newModel(s)
 		if model == nil {
@@ -444,21 +453,21 @@ func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error)
 	return ch, out, nil
 }
 
-func sessionLifecycle(deps ServerDependencies, tracker *SessionTracker) wish.Middleware {
+func sessionLifecycle(deps ServerDependencies, reg *sessionRegistry) wish.Middleware {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
-			st := startSession(s)
-			defer finishSession(s, st)
-			defer recoverSession(s)
-			defer releaseSession(s, deps, tracker)
-			defer closeSessionModel(s)
+			st := reg.startSession(s)
+			defer reg.finishSession(s, st)
+			defer reg.recoverSession(s)
+			defer reg.releaseSession(s, deps)
+			defer reg.closeSessionModel(s)
 
 			sh(s)
 		}
 	}
 }
 
-func startSession(s ssh.Session) *sessionState {
+func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
 	pty, _, _ := s.Pty()
 	tracer := otel.Tracer("terminal-card/ssh")
 	//nolint:spancheck // the span outlives this function: finishSession ends it as the last deferred step
@@ -473,7 +482,7 @@ func startSession(s ssh.Session) *sessionState {
 		))
 
 	st := &sessionState{traceCtx: ctx, span: span, started: time.Now()}
-	sessionStates.Store(s, st)
+	reg.store(s, st)
 
 	slog.InfoContext(ctx, "ssh session connected",
 		"client_net", clientNet(s.RemoteAddr()),
@@ -482,8 +491,8 @@ func startSession(s ssh.Session) *sessionState {
 	return st //nolint:spancheck // the span outlives this call: finishSession ends it, as the outermost deferred step of sessionLifecycle
 }
 
-func finishSession(s ssh.Session, st *sessionState) {
-	defer sessionStates.Delete(s)
+func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
+	defer reg.states.Delete(s)
 
 	outcome := "normal"
 	if st.panicked {
@@ -505,22 +514,22 @@ func finishSession(s ssh.Session, st *sessionState) {
 	st.span.End()
 }
 
-func recoverSession(s ssh.Session) {
+func (reg *sessionRegistry) recoverSession(s ssh.Session) {
 	r := recover()
 	if r == nil {
 		return
 	}
-	recordSessionPanic(s, r)
+	reg.recordSessionPanic(s, r)
 	wish.Fatalf(s, "%s", panicNotice)
 }
 
 // recordSessionPanic puts a recovered panic on the session span, the metric and the
 // log, all against the session's own trace context. It reports only: whether the
 // session can be told about it is the caller's business.
-func recordSessionPanic(s ssh.Session, r any) {
+func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
 	err := fmt.Errorf("panic during ssh session: %v", r)
-	ctx := sessionTraceContext(s)
-	if st, ok := lookupSessionState(s); ok {
+	ctx := reg.sessionTraceContext(s)
+	if st, ok := reg.load(s); ok {
 		st.panicked = true
 		if st.span != nil {
 			st.span.RecordError(err, trace.WithStackTrace(true))
@@ -534,8 +543,8 @@ func recordSessionPanic(s ssh.Session, r any) {
 	)
 }
 
-func closeSessionModel(s ssh.Session) {
-	if st, ok := lookupSessionState(s); ok && st.model != nil {
+func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
+	if st, ok := reg.load(s); ok && st.model != nil {
 		st.model.Close()
 	}
 }
@@ -545,14 +554,14 @@ func closeSessionModel(s ssh.Session) {
 // between, and this session's DisconnectPlayer would then arm a grace timer on the
 // seat the replacement is playing. A displaced session (stale generation) touches
 // neither.
-func releaseSession(s ssh.Session, deps ServerDependencies, tracker *SessionTracker) {
-	st, ok := lookupSessionState(s)
+func (reg *sessionRegistry) releaseSession(s ssh.Session, deps ServerDependencies) {
+	st, ok := reg.load(s)
 	if !ok || !st.owns || st.user == nil {
 		return
 	}
 	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
 	// for the grace window, so a reconnect resumes the match instead of forfeiting.
-	tracker.ReleaseWith(st.user.ID, st.gen, func() {
+	deps.Tracker.ReleaseWith(st.user.ID, st.gen, func() {
 		deps.LobbyManager.DisconnectPlayer(lobby.NewPlayer(st.user))
 	})
 }

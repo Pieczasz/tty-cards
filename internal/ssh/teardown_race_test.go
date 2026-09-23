@@ -50,20 +50,21 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		tracker := NewSessionTracker(0)
 		oldGen, err := tracker.Connect(user.ID, nil)
 		require.NoError(t, err)
+		reg := &sessionRegistry{}
 		old := &stubSession{addr: stubAddr{"10.0.0.1:1"}}
-		sessionStates.Store(old, &sessionState{owns: true, user: user, gen: oldGen})
+		reg.store(old, &sessionState{owns: true, user: user, gen: oldGen})
 
 		deps := newSessionDeps(stubUserRepo{user: user})
 		deps.LobbyManager = manager
 		deps.Tracker = tracker
 		fresh := &stubSession{addr: stubAddr{"10.0.0.1:2"}, pubKey: testPublicKey(t)}
 		freshState := &sessionState{traceCtx: context.Background()}
-		sessionStates.Store(fresh, freshState)
-		newModel := sessionModel(deps, tracker, ratelimit.NewSlidingWindowLimiter(100, 1))
+		reg.store(fresh, freshState)
+		newModel := sessionModel(deps, reg, ratelimit.NewSlidingWindowLimiter(100, 1))
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})
-		wg.Go(func() { <-start; releaseSession(old, deps, tracker) })
+		wg.Go(func() { <-start; reg.releaseSession(old, deps) })
 		wg.Go(func() { <-start; newModel(fresh) })
 		close(start)
 		wg.Wait()
@@ -76,8 +77,6 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		require.True(t, table.HasPlayer(player), "the reconnected player's seat was left on a grace timer")
 		manager.LeaveLobby(player)
 		manager.LeaveLobby(host)
-		sessionStates.Delete(old)
-		sessionStates.Delete(fresh)
 	}
 }
 
@@ -97,10 +96,11 @@ func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	deps := newSessionDeps(stubUserRepo{user: user})
 	deps.LobbyManager = manager
 	s := &stubSession{addr: stubAddr{"10.0.0.2:1"}, pubKey: testPublicKey(t)}
-	sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	deps.Tracker = fullTracker(t)
+	reg := &sessionRegistry{}
+	reg.store(s, &sessionState{traceCtx: context.Background()})
 
-	model, _ := sessionModel(deps, fullTracker(t), ratelimit.NewSlidingWindowLimiter(100, 1))(s)
+	model, _ := sessionModel(deps, reg, ratelimit.NewSlidingWindowLimiter(100, 1))(s)
 	require.Nil(t, model, "the full server admitted the session")
 
 	// BeginShutdown gives up every seat still on a grace timer.
