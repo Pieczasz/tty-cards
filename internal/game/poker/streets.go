@@ -318,21 +318,15 @@ func handScores(players []*game.Player, extra *State) map[string]int {
 	return scores
 }
 
-// awardUncontested pays the last live player when everyone else folded or left. A
-// player can only win from an opponent what they risked themselves, so anything
-// nobody matched goes back first - refundUncalled does the same job on the showdown
-// path, and without this the fold-out path pays the winner chips no one called.
+// awardUncontested pays the last live player when everyone else folded or left. The
+// pot is split the way the showdown path splits it: refundUncalled hands back the one
+// slice nobody matched - the top contributor's excess over the second-highest - and
+// everything else, dead money from folders included, goes to the winner, just as
+// buildSidePots rides it with the last live layer. Refunding each folder their excess
+// over the winner instead would let a player who called and folded take back chips
+// the showdown path would have paid out.
 func awardUncontested(extra *State, winner *game.Player) {
-	matched := extra.TotalContributed[winner.ID]
-	for id, contributed := range extra.TotalContributed {
-		if id == winner.ID || contributed <= matched {
-			continue
-		}
-		uncalled := contributed - matched
-		extra.PlayerChips[id] += uncalled
-		extra.MainPool -= uncalled
-	}
-
+	refundUncalled(extra)
 	extra.PlayerChips[winner.ID] += extra.MainPool
 	extra.MainPool = 0
 	extra.Pots = nil

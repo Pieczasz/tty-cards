@@ -1131,3 +1131,25 @@ func TestLeave_TheOnlyPlayerWithChipsBehindStillPaysTheAllIns(t *testing.T) {
 		"the departed player's called chips stay in the pot")
 	assert.Equal(t, uint(400), extra.PlayerChips["c"], "leaving forfeits the pot, not the stack behind it")
 }
+
+// Only the top contributor's excess over the second-highest contribution was never
+// matched; everything below that line is dead money from players who folded, and it
+// goes to the winner exactly as buildSidePots rides it with the last live layer (D-2).
+// A (500) bet and left, C (300) called and folded, W (100) is the last one standing:
+// A gets back the 200 nobody matched, C gets nothing back.
+func TestAwardUncontested_DeadMoneyGoesToTheWinner(t *testing.T) {
+	t.Parallel()
+	winner := &game.Player{ID: "w"}
+	extra := &State{
+		PlayerChips:      map[string]uint{"w": 0, "a": 0, "c": 0},
+		TotalContributed: map[string]uint{"w": 100, "a": 500, "c": 300},
+		MainPool:         900,
+	}
+
+	awardUncontested(extra, winner)
+
+	assert.Equal(t, uint(200), extra.PlayerChips["a"], "only the unmatched top of A's bet comes back")
+	assert.Zero(t, extra.PlayerChips["c"], "C's folded 300 is dead money")
+	assert.Equal(t, uint(700), extra.PlayerChips["w"])
+	assert.Zero(t, extra.MainPool)
+}
