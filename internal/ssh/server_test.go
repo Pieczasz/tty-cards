@@ -3,7 +3,6 @@
 package ssh
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"net"
@@ -19,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	cryptossh "golang.org/x/crypto/ssh"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 func listenLocal(t *testing.T) net.Listener {
@@ -30,12 +29,12 @@ func listenLocal(t *testing.T) net.Listener {
 	return l
 }
 
-func generateSigner(t *testing.T) cryptossh.Signer {
+func generateSigner(t *testing.T) gossh.Signer {
 	t.Helper()
 	_, privKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
-	signer, err := cryptossh.NewSignerFromKey(privKey)
+	signer, err := gossh.NewSignerFromKey(privKey)
 	require.NoError(t, err)
 	return signer
 }
@@ -55,7 +54,7 @@ func setupTestEnvironment(t *testing.T) testEnv {
 	listener := listenLocal(t)
 	addr := listener.Addr().String()
 
-	deps := ServerDependencies{
+	deps := Deps{
 		Config: &config.Config{
 			ServerPort:         listener.Addr().(*net.TCPAddr).Port,
 			SSHKeyPath:         t.TempDir() + "/id_ed25519",
@@ -65,12 +64,12 @@ func setupTestEnvironment(t *testing.T) testEnv {
 			RegistrationWindow: time.Hour,
 		},
 		UserRepository: userRepo,
-		LobbyManager:   lobby.NewManager(context.Background(), matchRepo),
+		LobbyManager:   lobby.NewManager(t.Context(), matchRepo),
 		GameRegistry:   game.NewRegistry(),
 		Tracker:        NewSessionTracker(0),
 	}
 
-	server, err := SetupServer(deps)
+	server, err := NewServer(deps)
 	require.NoError(t, err)
 
 	go func() {
@@ -103,22 +102,22 @@ func TestServer_NewUserConnection(t *testing.T) {
 	defer env.cleanup()
 
 	signer := generateSigner(t)
-	clientConfig := &cryptossh.ClientConfig{
+	clientConfig := &gossh.ClientConfig{
 		User: "testuser_new",
-		Auth: []cryptossh.AuthMethod{
-			cryptossh.PublicKeys(signer),
+		Auth: []gossh.AuthMethod{
+			gossh.PublicKeys(signer),
 		},
-		HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	}
 
-	client, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+	client, err := gossh.Dial("tcp", env.addr, clientConfig)
 	require.NoError(t, err)
 
 	session, err := client.NewSession()
 	require.NoError(t, err)
 	defer session.Close()
 
-	err = session.RequestPty("xterm", 80, 40, cryptossh.TerminalModes{})
+	err = session.RequestPty("xterm", 80, 40, gossh.TerminalModes{})
 	require.NoError(t, err)
 	err = session.Shell()
 	require.NoError(t, err)
@@ -126,7 +125,7 @@ func TestServer_NewUserConnection(t *testing.T) {
 	var user *db.User
 	var key *db.PublicKey
 	require.Eventually(t, func() bool {
-		user, key, _ = env.userRepo.LoadUserByFingerprint(context.Background(), cryptossh.FingerprintSHA256(signer.PublicKey()))
+		user, key, _ = env.userRepo.LoadUserByFingerprint(t.Context(), gossh.FingerprintSHA256(signer.PublicKey()))
 		return user != nil
 	}, 2*time.Second, 50*time.Millisecond, "user was not registered")
 
@@ -145,28 +144,28 @@ func TestServer_SecondSessionDisplaces(t *testing.T) {
 	defer env.cleanup()
 
 	signer := generateSigner(t)
-	clientConfig := &cryptossh.ClientConfig{
+	clientConfig := &gossh.ClientConfig{
 		User:            "testuser_dup",
-		Auth:            []cryptossh.AuthMethod{cryptossh.PublicKeys(signer)},
-		HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	}
 
-	client1, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+	client1, err := gossh.Dial("tcp", env.addr, clientConfig)
 	require.NoError(t, err)
 	defer client1.Close()
 	session1, err := client1.NewSession()
 	require.NoError(t, err)
 	defer session1.Close()
 
-	_ = session1.RequestPty("xterm", 80, 40, cryptossh.TerminalModes{})
+	_ = session1.RequestPty("xterm", 80, 40, gossh.TerminalModes{})
 	_ = session1.Shell()
 
 	require.Eventually(t, func() bool {
-		user, _, _ := env.userRepo.LoadUserByFingerprint(context.Background(), cryptossh.FingerprintSHA256(signer.PublicKey()))
+		user, _, _ := env.userRepo.LoadUserByFingerprint(t.Context(), gossh.FingerprintSHA256(signer.PublicKey()))
 		return user != nil
 	}, 2*time.Second, 50*time.Millisecond)
 
-	client2, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+	client2, err := gossh.Dial("tcp", env.addr, clientConfig)
 	require.NoError(t, err)
 	defer client2.Close()
 
@@ -174,7 +173,7 @@ func TestServer_SecondSessionDisplaces(t *testing.T) {
 	require.NoError(t, err)
 	defer session2.Close()
 
-	_ = session2.RequestPty("xterm", 80, 40, cryptossh.TerminalModes{})
+	_ = session2.RequestPty("xterm", 80, 40, gossh.TerminalModes{})
 	err = session2.Shell()
 	require.NoError(t, err, "a second session displaces the first instead of being refused")
 
@@ -200,21 +199,21 @@ func TestServer_ExistingUserConnection(t *testing.T) {
 	defer env.cleanup()
 
 	signer := generateSigner(t)
-	clientConfig := &cryptossh.ClientConfig{
+	clientConfig := &gossh.ClientConfig{
 		User:            "testuser_exist",
-		Auth:            []cryptossh.AuthMethod{cryptossh.PublicKeys(signer)},
-		HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	}
 
-	client1, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+	client1, err := gossh.Dial("tcp", env.addr, clientConfig)
 	require.NoError(t, err)
 	session1, err := client1.NewSession()
 	require.NoError(t, err)
-	_ = session1.RequestPty("xterm", 80, 40, cryptossh.TerminalModes{})
+	_ = session1.RequestPty("xterm", 80, 40, gossh.TerminalModes{})
 	_ = session1.Shell()
 
 	require.Eventually(t, func() bool {
-		user, _, _ := env.userRepo.LoadUserByFingerprint(context.Background(), cryptossh.FingerprintSHA256(signer.PublicKey()))
+		user, _, _ := env.userRepo.LoadUserByFingerprint(t.Context(), gossh.FingerprintSHA256(signer.PublicKey()))
 		return user != nil
 	}, 2*time.Second, 50*time.Millisecond)
 
@@ -222,7 +221,7 @@ func TestServer_ExistingUserConnection(t *testing.T) {
 	client1.Close()
 
 	require.Eventually(t, func() bool {
-		client2, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+		client2, err := gossh.Dial("tcp", env.addr, clientConfig)
 		if err != nil {
 			return false
 		}
@@ -248,15 +247,15 @@ func TestServer_RateLimit(t *testing.T) {
 	defer env.cleanup()
 
 	signer := generateSigner(t)
-	clientConfig := &cryptossh.ClientConfig{
+	clientConfig := &gossh.ClientConfig{
 		User:            "testuser_limit",
-		Auth:            []cryptossh.AuthMethod{cryptossh.PublicKeys(signer)},
-		HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	}
 
 	var failed bool
 	for range 6 {
-		client, err := cryptossh.Dial("tcp", env.addr, clientConfig)
+		client, err := gossh.Dial("tcp", env.addr, clientConfig)
 		if err != nil {
 			failed = true
 			break

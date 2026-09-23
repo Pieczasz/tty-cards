@@ -41,15 +41,20 @@ func main() {
 		os.Exit(healthcheck())
 	}
 	if err := run(); err != nil {
-		// A config or OTel failure happens before the slog handler is installed, so
-		// stderr is the only place it can still be seen.
-		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
 }
 
+// fatal reports a failure from before OTel is up. slog's stderr copy of a record is
+// dropped by the log pipeline as a duplicate of its OTLP copy, and there is no OTLP
+// copy yet, so a plain line is the only one that reaches Loki.
+func fatal(err error) error {
+	fmt.Fprintln(os.Stderr, "fatal:", err)
+	return err
+}
+
 func healthcheck() int {
-	port := cmp.Or(os.Getenv("API_PORT"), "6970")
+	port := cmp.Or(os.Getenv("API_PORT"), strconv.Itoa(config.DefaultAPIPort))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	target := "http://127.0.0.1:" + port + "/healthz"
@@ -86,7 +91,7 @@ func run() (err error) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
+		return fatal(fmt.Errorf("load configuration: %w", err))
 	}
 	logLevel.Set(cfg.LogLevel)
 
@@ -96,9 +101,10 @@ func run() (err error) {
 	// This defer chain is LIFO and load-bearing; do not reorder it.
 	otelCleanup, err := setupOTel(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("setup OpenTelemetry: %w", err)
+		return fatal(err)
 	}
 	defer otelCleanup()
+	// Every later failure is reported here, once, and before the flush above.
 	defer func() {
 		if err != nil {
 			slog.ErrorContext(ctx, "server exited with error", "error", err)
@@ -128,7 +134,12 @@ func run() (err error) {
 
 	defer waitForFinalizers(lobbyManager)
 
-	server, tracker, err := newSSHServer(cfg, userRepo, lobbyManager)
+	// MaxConnections is the player-visible session cap: the tracker refuses the
+	// overflow with a message, while the TCP LimitListener in serve only backstops
+	// handshake floods at twice that, so a full server says so instead of hanging.
+	// The stats api shares it to count who is online.
+	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, tracker)
 	if err != nil {
 		return err
 	}
@@ -220,17 +231,13 @@ func waitForFinalizers(lobbyManager *lobby.Manager) {
 	}
 }
 
-// The tracker comes back because the stats api shares it to count who is online.
 func newSSHServer(
 	cfg *config.Config,
 	userRepo db.UserRepository,
 	lobbyManager *lobby.Manager,
-) (*charmssh.Server, *ssh.SessionTracker, error) {
-	// MaxConnections is the player-visible session cap: the tracker refuses the
-	// overflow with a message, while the TCP LimitListener below only backstops
-	// handshake floods at twice that, so a full server says so instead of hanging.
-	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := ssh.SetupServer(ssh.ServerDependencies{
+	tracker *ssh.SessionTracker,
+) (*charmssh.Server, error) {
+	server, err := ssh.NewServer(ssh.Deps{
 		Config:         cfg,
 		UserRepository: userRepo,
 		LobbyManager:   lobbyManager,
@@ -238,9 +245,9 @@ func newSSHServer(
 		Tracker:        tracker,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("setup ssh server: %w", err)
+		return nil, fmt.Errorf("setup ssh server: %w", err)
 	}
-	return server, tracker, nil
+	return server, nil
 }
 
 // startStatsAPI takes interfaces, not the concrete tracker and manager: a nil
@@ -280,7 +287,7 @@ func startStatsAPI(
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), apiDrainTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("stats api shutdown was not clean", "error", err)
+			slog.WarnContext(shutdownCtx, "stats api shutdown was not clean", "error", err)
 		}
 	}, serveErr, nil
 }
@@ -302,7 +309,7 @@ type serveDeps struct {
 
 func serve(ctx context.Context, d serveDeps) error {
 	cfg, server := d.config, d.sshServer
-	addr := fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort)
+	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.ServerPort))
 	lc := net.ListenConfig{}
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
@@ -334,23 +341,20 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
+	// Every way out drains, and a failure's teardown ends live matches the same way a
+	// deploy does, so they must not be rated either.
+	defer drainServer(d.onShutdown, server)
 	select {
 	case err := <-serveErr:
-		drainServer(d.onShutdown, server)
 		if err != nil {
 			return fmt.Errorf("ssh accept loop failed: %w", err)
 		}
 		return errors.New("ssh server stopped accepting connections unexpectedly")
 	case err := <-d.apiErr:
-		// This teardown ends live matches the same way a deploy does, so they
-		// must not be rated either.
-		drainServer(d.onShutdown, server)
 		return err
 	case <-d.signals:
+		return nil
 	}
-
-	drainServer(d.onShutdown, server)
-	return nil
 }
 
 // proxyListener puts the PROXY protocol in front of the ssh listener. proxyproto
@@ -400,6 +404,6 @@ func stopServer(server sshServer) {
 	}
 	// Shutdown waits, Close is what lets go, so it runs on both paths.
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-		slog.Warn("failed to close ssh server", "error", err)
+		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
 	}
 }

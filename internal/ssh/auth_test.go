@@ -1,4 +1,4 @@
-package ssh_test
+package ssh
 
 import (
 	"context"
@@ -6,31 +6,17 @@ import (
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/ssh"
 
-	"uuid"
-
-	charmssh "charm.land/ssh"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-type MockSession struct {
-	charmssh.Session
-	mock.Mock
-}
-
-func (m *MockSession) PublicKey() charmssh.PublicKey {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil
-	}
-	return args.Get(0).(charmssh.PublicKey)
-}
-
+// MockUserRepository mocks the three methods LoadOrRegisterUser calls. The embedded
+// interface is nil, so a call to anything else is a panic, not a silent zero.
 type MockUserRepository struct {
+	db.UserRepository
 	mock.Mock
 }
 
@@ -56,33 +42,15 @@ func (m *MockUserRepository) RegisterUserWithKey(ctx context.Context, username, 
 	return args.Get(0).(*db.User), args.Get(1).(*db.PublicKey), args.Error(2)
 }
 
-func (m *MockUserRepository) BestPlayers(_ context.Context, _ int, _ string) ([]db.Ranking, error) {
-	return nil, nil
+func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, user *db.User, key *db.PublicKey) error {
+	return m.Called(ctx, user, key).Error(0)
 }
 
-func (m *MockUserRepository) UserProfile(_ context.Context, _ uuid.UUID) (*db.User, error) {
-	return nil, nil
-}
-
-func (m *MockUserRepository) UpdateUserActivity(_ context.Context, _ *db.User, _ *db.PublicKey) error {
-	return nil
-}
-
-func (m *MockUserRepository) UserMatchHistory(_ context.Context, _ uuid.UUID, _ int) ([]db.MatchParticipant, error) {
-	return nil, nil
-}
-
-func (m *MockUserRepository) DeleteAccount(_ context.Context, _ uuid.UUID) error {
-	return nil
-}
-
-func TestAuthenticateSession_NoPublicKey(t *testing.T) {
+func TestSessionFingerprint_NoPublicKey(t *testing.T) {
 	t.Parallel()
-	m := new(MockSession)
-	m.On("PublicKey").Return(nil)
 
-	_, err := ssh.AuthenticateSession(m)
-	assert.ErrorIs(t, err, ssh.ErrNoPublicKey)
+	_, err := SessionFingerprint(&stubSession{})
+	assert.ErrorIs(t, err, ErrNoPublicKey)
 }
 
 func TestLoadOrRegisterUser_LoadError(t *testing.T) {
@@ -90,8 +58,8 @@ func TestLoadOrRegisterUser_LoadError(t *testing.T) {
 	repo := new(MockUserRepository)
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, errors.New("db error"))
 
-	_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ssh.ErrInternal)
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
+	assert.ErrorIs(t, err, ErrInternal)
 }
 
 func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
@@ -100,8 +68,8 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 	repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("reg error"))
 
-	_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ssh.ErrRegistrationFailed)
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
+	assert.ErrorIs(t, err, ErrRegistrationFailed)
 }
 
 // The caller here is unauthenticated, so "that name is taken" must not be told apart
@@ -119,7 +87,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	}{
 		{
 			name: "a taken username", cause: db.ErrUsernameTaken,
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
+			want: ErrNameUnavailable, wantText: "could not register that name",
 		},
 		{
 			name: "the caller's own key", cause: db.ErrKeyAlreadyRegistered,
@@ -127,7 +95,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 		},
 		{
 			name: "anything else", cause: errors.New("disk on fire"),
-			want: ssh.ErrRegistrationFailed, wantText: "registration failed",
+			want: ErrRegistrationFailed, wantText: "registration failed",
 		},
 	}
 
@@ -138,7 +106,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 			repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, tt.cause)
 
-			_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
+			_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
 
 			require.ErrorIs(t, err, tt.want)
 			require.ErrorContains(t, err, tt.wantText)
@@ -172,7 +140,7 @@ func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing
 			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 
 			asked := 0
-			_, err := ssh.LoadOrRegisterUser(context.Background(), repo, tt.username, "fp",
+			_, err := LoadOrRegisterUser(t.Context(), repo, tt.username, "fp",
 				func() bool { asked++; return true })
 
 			require.ErrorIs(t, err, db.ErrInvalidUsername)
@@ -194,10 +162,10 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo := new(MockUserRepository)
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 
-		_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp",
+		_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
 			func() bool { return false })
 
-		require.ErrorIs(t, err, ssh.ErrTooManyRegistrations)
+		require.ErrorIs(t, err, ErrTooManyRegistrations)
 		repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
 	})
 
@@ -209,7 +177,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("UpdateUserActivity", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		asked := 0
-		user, err := ssh.LoadOrRegisterUser(context.Background(), repo, "known", "fp",
+		user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp",
 			func() bool { asked++; return false })
 
 		require.NoError(t, err, "an existing account is not a registration")
@@ -224,7 +192,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 		repo.On("RegisterUserWithKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicKey{}, nil)
 
-		user, err := ssh.LoadOrRegisterUser(context.Background(), repo, "new", "fp",
+		user, err := LoadOrRegisterUser(t.Context(), repo, "new", "fp",
 			func() bool { return true })
 
 		require.NoError(t, err)

@@ -63,7 +63,7 @@ func runServe(t *testing.T, server sshServer) error {
 	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{config: testConfig(), sshServer: server})
+		errCh <- serve(t.Context(), serveDeps{config: testConfig(), sshServer: server})
 	}()
 
 	select {
@@ -129,7 +129,7 @@ func TestServe_StatsAPIFailureStopsTheServer(t *testing.T) {
 	server := &fakeServer{serveErr: make(chan error)}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{
+		errCh <- serve(t.Context(), serveDeps{
 			config:    testConfig(),
 			sshServer: server,
 			apiErr:    apiErr,
@@ -158,7 +158,7 @@ func TestServe_SignalDrainsAndReturnsCleanly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{
+		errCh <- serve(t.Context(), serveDeps{
 			config:     testConfig(),
 			sshServer:  server,
 			signals:    signals,
@@ -174,6 +174,24 @@ func TestServe_SignalDrainsAndReturnsCleanly(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve ignored the signal")
 	}
+}
+
+// "%s:%d" turned SERVER_HOST=:: into ":::6969", which no listener accepts, so an
+// IPv6 literal host could never bind.
+func TestServe_ListensOnAnIPv6LiteralHost(t *testing.T) {
+	t.Parallel()
+	probe, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback here:", err)
+	}
+	require.NoError(t, probe.Close())
+
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGTERM
+	cfg := &config.Config{ServerHost: "::1", MaxConnections: 4}
+
+	err = serve(t.Context(), serveDeps{config: cfg, sshServer: &fakeServer{serveErr: make(chan error)}, signals: signals})
+	require.NoError(t, err, "the listener never bound")
 }
 
 func TestHealthcheck(t *testing.T) {
@@ -211,7 +229,7 @@ func TestHealthcheck(t *testing.T) {
 // happy path has to actually return rather than burn both windows on every shutdown.
 func TestWaitForFinalizers_ReturnsWhenThereIsNothingToWaitFor(t *testing.T) {
 	t.Parallel()
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(t.Context(), nil)
 
 	start := time.Now()
 	waitForFinalizers(manager)
@@ -230,13 +248,13 @@ func TestInstallLogging_LevelIsLiveAndGatesBothSinks(t *testing.T) {
 	level := installLogging()
 	require.NotNil(t, level)
 
-	assert.False(t, slog.Default().Enabled(context.Background(), slog.LevelDebug),
+	assert.False(t, slog.Default().Enabled(t.Context(), slog.LevelDebug),
 		"debug must be off until configuration says otherwise")
 
 	// config.Load is read after the handler is installed, so the level has to be
 	// changeable afterwards or LOG_LEVEL=DEBUG would never take effect.
 	level.Set(slog.LevelDebug)
-	assert.True(t, slog.Default().Enabled(context.Background(), slog.LevelDebug))
+	assert.True(t, slog.Default().Enabled(t.Context(), slog.LevelDebug))
 }
 
 type onlineCount int
@@ -274,7 +292,7 @@ func TestStartStatsAPI_ServesAndStops(t *testing.T) {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
 	require.Eventually(t, func() bool {
-		req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		if reqErr != nil {
 			return false
 		}

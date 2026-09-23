@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -39,7 +38,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 	t.Parallel()
 
 	for range 200 {
-		manager := lobby.NewManager(context.Background(), nil)
+		manager := lobby.NewManager(t.Context(), nil)
 		user := &db.User{ID: testutil.UID(7), Username: "comeback"}
 		player := lobby.NewPlayer(user)
 		host := lobby.NewPlayer(&db.User{ID: testutil.UID(8), Username: "host"})
@@ -50,13 +49,13 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		require.NoError(t, err)
 		reg := &sessionRegistry{}
 		old := &stubSession{addr: stubAddr{"10.0.0.1:1"}}
-		reg.store(old, &sessionState{owns: true, user: user, gen: oldGen})
+		reg.store(old, &sessionState{user: user, gen: oldGen})
 
-		deps := newSessionDeps(stubUserRepo{user: user})
+		deps := newSessionDeps(t, stubUserRepo{user: user})
 		deps.LobbyManager = manager
 		deps.Tracker = tracker
 		fresh := &stubSession{addr: stubAddr{"10.0.0.1:2"}, pubKey: testPublicKey(t)}
-		freshState := &sessionState{traceCtx: context.Background()}
+		freshState := &sessionState{traceCtx: t.Context()}
 		reg.store(fresh, freshState)
 		newModel := sessionModel(deps, reg, ratelimit.New(100, 1))
 
@@ -84,21 +83,21 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(t.Context(), nil)
 	user := &db.User{ID: testutil.UID(9), Username: "refused"}
 	player := lobby.NewPlayer(user)
 	host := lobby.NewPlayer(&db.User{ID: testutil.UID(10), Username: "host"})
 	table := startedTable(t, manager, host, player)
 	manager.DisconnectPlayer(player)
 
-	deps := newSessionDeps(stubUserRepo{user: user})
+	deps := newSessionDeps(t, stubUserRepo{user: user})
 	deps.LobbyManager = manager
 	s := &stubSession{addr: stubAddr{"10.0.0.2:1"}, pubKey: testPublicKey(t)}
 	deps.Tracker = fullTracker(t)
 	reg := &sessionRegistry{}
-	reg.store(s, &sessionState{traceCtx: context.Background()})
+	reg.store(s, &sessionState{traceCtx: t.Context()})
 
-	model, _ := sessionModel(deps, reg, ratelimit.New(100, 1))(s)
+	model := sessionModel(deps, reg, ratelimit.New(100, 1))(s)
 	require.Nil(t, model, "the full server admitted the session")
 
 	// BeginShutdown gives up every seat still on a grace timer.

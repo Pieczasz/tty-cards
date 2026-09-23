@@ -135,8 +135,8 @@ func TestOTel_Integration(t *testing.T) {
 	assert.Contains(t, names, "go.memory.used", "runtime.Start was not wired to this provider")
 }
 
-// The one failure Setup can actually hit at boot, and the reason main prints to
-// stderr: nothing has a slog handler yet when it happens.
+// The one failure Setup can actually hit at boot, and the reason cmd/server reports it
+// as a plain stderr line: there is no OTLP pipeline yet to carry a log record.
 //
 //nolint:paralleltest // Setup touches process-global providers
 func TestOTel_UnusableEndpointIsAFatalError(t *testing.T) {

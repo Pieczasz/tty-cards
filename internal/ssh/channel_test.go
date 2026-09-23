@@ -16,18 +16,18 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-// startInProcessServer runs the real SetupServer over a loopback listener, with a
+// startInProcessServer runs the real NewServer over a loopback listener, with a
 // user repository that answers every fingerprint with user.
 func startInProcessServer(t *testing.T, user *db.User) (string, *SessionTracker) {
 	t.Helper()
-	deps := newSessionDeps(stubUserRepo{user: user})
+	deps := newSessionDeps(t, stubUserRepo{user: user})
 	deps.Config = &config.Config{
 		SSHKeyPath:      t.TempDir() + "/id_ed25519",
 		RateLimitCount:  100,
 		RateLimitWindow: time.Minute,
 	}
 	deps.Tracker = NewSessionTracker(0)
-	server, err := SetupServer(deps)
+	server, err := NewServer(deps)
 	require.NoError(t, err)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -61,7 +61,7 @@ func dialInProcess(t *testing.T, addr, user string) *gossh.Client {
 // A channel that never asks for a shell never reaches the middleware, so a cap
 // enforced there bounds nothing: one connection could hold channels open without
 // limit, each with its own request goroutine and buffers.
-func TestSetupServer_CapsSessionChannelsBeforeAccept(t *testing.T) {
+func TestNewServer_CapsSessionChannelsBeforeAccept(t *testing.T) {
 	t.Parallel()
 	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(1), Username: "flooder"})
 	client := dialInProcess(t, addr, "flooder")
@@ -80,7 +80,7 @@ func TestSetupServer_CapsSessionChannelsBeforeAccept(t *testing.T) {
 
 // Closing a channel has to give its slot back, or a client that reconnects its
 // session channel a few times locks itself out of its own connection.
-func TestSetupServer_ClosedChannelFreesItsSlot(t *testing.T) {
+func TestNewServer_ClosedChannelFreesItsSlot(t *testing.T) {
 	t.Parallel()
 	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(2), Username: "cycler"})
 	client := dialInProcess(t, addr, "cycler")
@@ -99,7 +99,7 @@ func TestSetupServer_ClosedChannelFreesItsSlot(t *testing.T) {
 
 // Every accepted env request is appended to the session for its whole life, so an
 // unbounded stream of them is unbounded memory from one channel.
-func TestSetupServer_CapsEnvRequests(t *testing.T) {
+func TestNewServer_CapsEnvRequests(t *testing.T) {
 	t.Parallel()
 	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(3), Username: "envy"})
 	client := dialInProcess(t, addr, "envy")
@@ -149,7 +149,7 @@ func openShell(t *testing.T, client *gossh.Client) {
 // Displacement has to hang up on the old connection, not just its channel: closing
 // the channel leaves the TCP connection, and any other channel on it, open until the
 // peer goes away on its own.
-func TestSetupServer_DisplacementClosesTheOldConnection(t *testing.T) {
+func TestNewServer_DisplacementClosesTheOldConnection(t *testing.T) {
 	t.Parallel()
 	user := &db.User{ID: testutil.UID(4), Username: "twice"}
 	addr, tracker := startInProcessServer(t, user)
