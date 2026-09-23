@@ -214,8 +214,11 @@ func (q *gormUserRepository) fetchBestPlayers(
 ) ([]db.Ranking, error) {
 	// Provisional accounts stay on the board: a player's first ranked win should show
 	// up, and hiding it made the board empty on a young server. The anti-farm rules
-	// live in the finalize path - an established player gains nothing from a fresh
-	// account - so a pumped alt cannot carry rating anywhere that matters.
+	// live in the finalize path, and they bound a pumped account rather than rule it
+	// out: an established player gains nothing from a fresh alt, but alts that have
+	// played their five provisional matches among themselves are established too, and
+	// each still pays up to maxSamePairingPerDay wins a day. The ceiling is linear in
+	// the graduated alts someone is willing to run (decision #10).
 	//
 	// user_id breaks the tie: equal Elo is common at the starting rating, and without
 	// it Postgres is free to return those rows in a different order every time the

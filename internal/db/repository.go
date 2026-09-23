@@ -31,9 +31,9 @@ type MatchRepository interface {
 	// creating the game row on first sight. orderedUserIDs is the finish order.
 	RecordCasualMatch(ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID) error
 	// FinalizeRankedMatch moves Elo and writes history in one transaction. places is
-	// parallel to orderedUserIDs and 1-based; equal entries are a draw and settle
-	// without moving rating between the tied players. A nil places means a strict
-	// finish order.
+	// parallel to orderedUserIDs and 1-based; equal entries are scored as a draw, which
+	// still moves rating from the higher-rated of the pair to the lower. A nil places
+	// means a strict finish order.
 	FinalizeRankedMatch(ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int) error
 	// FinalizeInterruptedMatch settles a ranked match that a leave ended early for
 	// everyone (game.EndReasonInterrupted). Elo is computed as for FinalizeRankedMatch,
