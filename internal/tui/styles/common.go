@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/common-nighthawk/go-figure"
@@ -117,13 +116,17 @@ func PadTruncate(s string, width int) string {
 	return string(runes[:width-3]) + "..."
 }
 
-// figureKey is a title at a terminal size. Widths are bounded by maxBoxWidth, heights
-// by maxBoxHeight, and the titles are a fixed handful, so the cache cannot grow
-// without limit.
+// figureKey is a title in one font. The size it has to fit is not part of it: a
+// banner's measurements do not depend on the box, so keying on the box stored the same
+// three banners once per terminal size.
 type figureKey struct {
-	text      string
-	maxWidth  int
-	maxHeight int
+	text string
+	font string
+}
+
+type figureBanner struct {
+	art           string
+	width, height int
 }
 
 // TitleHeightBudget is how many lines a screen may spend on its figlet title: a fifth
@@ -135,47 +138,38 @@ func TitleHeightBudget(screenHeight int) int {
 }
 
 // figureCache memoises rendered banners. go-figure re-reads and re-parses the whole
-// figlet font on every call, which measured as 85% of the allocations in a menu frame
-// - and a banner is a pure function of its text and the width it has to fit.
+// figlet font on every call, which measured as 85% of the allocations in a menu frame.
 //
-// Every key is now a fixed screen title at a bounded size, so the cache cannot grow
-// with the player base - the home screen used to banner the username itself, which let
-// any account mint entries. The cap stays as the backstop that made that harmless:
-// titles times sizes is still thousands of entries, and past the cap banners simply
-// stop being remembered rather than failing.
-var (
-	figureCache   sync.Map // figureKey -> string
-	figureCached  atomic.Int64
-	maxFigureKeys = int64(512)
-)
+// It holds at most three entries per title and has no cap, which is safe only because
+// every banner text is a fixed string in the source. Nothing player-controlled may be
+// banner text: the home screen used to banner the username, which let any account
+// mint entries.
+var figureCache sync.Map // figureKey -> figureBanner
+
+var figureFonts = []string{"slant", "small", "mini"}
 
 // RenderFigureASCII is text as the largest figlet banner that fits both bounds, or
-// the text itself when none does.
+// the text itself when none does. Fonts are tried largest first and only rendered
+// when reached, so a roomy terminal never pays for the smaller two.
 func RenderFigureASCII(text string, maxWidth, maxHeight int) string {
-	key := figureKey{text: text, maxWidth: maxWidth, maxHeight: maxHeight}
-	if cached, ok := figureCache.Load(key); ok {
-		banner, _ := cached.(string)
-		return banner
-	}
-
-	banner := renderFigureASCII(text, maxWidth, maxHeight)
-	if figureCached.Load() < maxFigureKeys {
-		if _, loaded := figureCache.LoadOrStore(key, banner); !loaded {
-			figureCached.Add(1)
-		}
-	}
-	return banner
-}
-
-func renderFigureASCII(text string, maxWidth, maxHeight int) string {
-	fonts := []string{"slant", "small", "mini"}
-	for _, font := range fonts {
-		fig := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
-		if lg.Width(fig) <= maxWidth && lg.Height(fig) <= maxHeight {
-			return fig
+	for _, font := range figureFonts {
+		if b := figureFor(text, font); b.width <= maxWidth && b.height <= maxHeight {
+			return b.art
 		}
 	}
 	return text // no font fits; plain text always does
+}
+
+func figureFor(text, font string) figureBanner {
+	key := figureKey{text: text, font: font}
+	if cached, ok := figureCache.Load(key); ok {
+		b, _ := cached.(figureBanner)
+		return b
+	}
+	art := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
+	b := figureBanner{art: art, width: lg.Width(art), height: lg.Height(art)}
+	figureCache.Store(key, b)
+	return b
 }
 
 func (t Theme) RenderMainLayout(width, height int, header, content, footer string) string {
@@ -231,13 +225,17 @@ func (t Theme) RenderActionFooter(actions []string) string {
 
 var GlobalActions = []string{"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard", "ctrl+c - Quit"}
 
-// ResetFigureCacheForTest empties the banner cache. Exported for the cap test, which
-// cannot observe a bound it shares with every other test in the package.
+// ResetFigureCacheForTest empties the banner cache. Exported for the cache-size tests,
+// which cannot observe a count they share with every other test in the package.
 func ResetFigureCacheForTest() {
 	figureCache.Clear()
-	figureCached.Store(0)
 }
 
 func FigureCacheLenForTest() int {
-	return int(figureCached.Load())
+	n := 0
+	figureCache.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
 }
