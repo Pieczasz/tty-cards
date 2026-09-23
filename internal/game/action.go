@@ -39,6 +39,11 @@ const (
 	EndReasonForfeit
 	// EndReasonAbandoned is a table every seat left.
 	EndReasonAbandoned
+	// EndReasonInterrupted is a match that one seat's leave ended early for everyone
+	// else (Hearts cannot continue three-handed). The seats still playing are not
+	// rated on a result nobody finished; the leaver still takes the loss, or quitting
+	// a losing match would be free.
+	EndReasonInterrupted
 )
 
 type PlayerSnapshot struct {
