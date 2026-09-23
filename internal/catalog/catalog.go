@@ -21,10 +21,11 @@ import (
 )
 
 // Entry pairs a game's Module with the view that renders it, so neither can be
-// declared without the other.
+// declared without the other. View is handed the entry's Slug, which labels the
+// view's metrics exactly as the lobby labels the same game's.
 type Entry struct {
 	game.Module
-	View func(router.GlobalContext, *game.Engine) tea.Model
+	View func(global router.GlobalContext, engine *game.Engine, slug string) tea.Model
 }
 
 // NewRegistry is the registry of every game in All, in catalog order.

@@ -33,7 +33,7 @@ func benchTable(b *testing.B, n int) *model {
 		User:  &db.User{ID: testutil.UID(1), Username: "p1"},
 		Width: 120, Height: 40, Theme: styles.NewTheme(true),
 	}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "crazy_eights").(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m

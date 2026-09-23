@@ -200,7 +200,7 @@ func startedSession(t *testing.T) (*game.Engine, Session) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	s, err := NewSession(global, engine, "crazy eights")
+	s, err := NewSession(global, engine, "crazy_eights")
 	require.NoError(t, err)
 	return engine, s
 }
@@ -217,7 +217,7 @@ func TestNewSession_BindsAndSubscribes(t *testing.T) {
 
 func TestNewSession_WithoutAUserStillBuildsAView(t *testing.T) {
 	t.Parallel()
-	s, err := NewSession(router.GlobalContext{}, nil, "crazy eights")
+	s, err := NewSession(router.GlobalContext{}, nil, "crazy_eights")
 	require.NoError(t, err)
 	assert.Nil(t, s.Bound)
 	assert.Nil(t, s.Events)
@@ -485,7 +485,7 @@ func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 
 	// The hero is the third seat, so their left is the fourth and the order wraps.
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(3)}}
-	s, err := NewSession(global, engine, "crazy eights")
+	s, err := NewSession(global, engine, "crazy_eights")
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	s.Sync(nil)

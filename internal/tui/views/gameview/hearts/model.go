@@ -36,10 +36,11 @@ type model struct {
 	lastTrickWinner  string
 }
 
-// New creates a Hearts TUI view bound to the session player.
-func New(global router.GlobalContext, engine *game.Engine) tea.Model {
+// New creates a Hearts TUI view bound to the session player; slug is its catalog
+// slug, the game_type its metrics carry.
+func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, "hearts")
+	session, _ := gameview.NewSession(global, engine, slug)
 	m := &model{
 		Session:          session,
 		passSelected:     map[deck.Card]struct{}{},

@@ -83,7 +83,7 @@ func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 		User:         &db.User{ID: id, Username: "hero"},
 		LobbyManager: lobby.NewManager(t.Context(), nil),
 	}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "crazy_eights").(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m
@@ -130,7 +130,7 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "crazy_eights").(*model)
 	require.True(t, ok)
 	require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
 

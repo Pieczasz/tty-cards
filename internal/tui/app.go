@@ -94,7 +94,7 @@ func registerGameViews(r *router.Router) {
 			if !ok {
 				return home.New(g)
 			}
-			return e.View(g, engine)
+			return e.View(g, engine, e.Slug)
 		})
 	}
 }

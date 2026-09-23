@@ -28,7 +28,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 	require.NoError(t, engine.Start())
 
 	global := router.GlobalContext{User: testUser("alice")}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "poker").(*model)
 	require.True(t, ok)
 	// The view first: closing it unsubscribes, which a closed engine no longer needs.
 	t.Cleanup(engine.Close)
@@ -144,7 +144,7 @@ func tableOnTurn(t *testing.T, seats int) (*game.Engine, *model) {
 	id, err := uuid.Parse(engine.CurrentPlayerID())
 	require.NoError(t, err)
 
-	m, ok := New(router.GlobalContext{User: &db.User{ID: id, Username: "hero"}}, engine).(*model)
+	m, ok := New(router.GlobalContext{User: &db.User{ID: id, Username: "hero"}}, engine, "poker").(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m
@@ -180,7 +180,7 @@ func TestSyncState_KeepsTheRaisePromptWhileTheTurnIsStillYours(t *testing.T) {
 
 func TestSyncState_NilBoundIsInert(t *testing.T) {
 	t.Parallel()
-	m, ok := New(router.GlobalContext{}, nil).(*model)
+	m, ok := New(router.GlobalContext{}, nil, "poker").(*model)
 	require.True(t, ok)
 
 	assert.Empty(t, m.seats)

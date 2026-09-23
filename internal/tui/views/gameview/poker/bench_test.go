@@ -25,7 +25,7 @@ func benchTable(b *testing.B, n int) *model {
 	b.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "poker").(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m
@@ -79,7 +79,7 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	first, ok := New(global, engine).(*model)
+	first, ok := New(global, engine, "poker").(*model)
 	require.True(t, ok)
 	t.Cleanup(first.Close)
 
@@ -97,7 +97,7 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	const sessions = 8
 	views := make([]*model, 0, sessions)
 	for range sessions {
-		m, okView := New(global, engine).(*model)
+		m, okView := New(global, engine, "poker").(*model)
 		require.True(t, okView)
 		views = append(views, m)
 	}
@@ -152,7 +152,7 @@ func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
 		b.Error(err)
 	}
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "poker").(*model)
 	if !ok {
 		b.Error("unexpected model type")
 	}

@@ -43,7 +43,7 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 	parentCtx := m.shutdownCtx()
 
 	if !req.startedAt.IsZero() {
-		observability.GameFinished(parentCtx, req.game.Name, req.isRanked, reason.String(), time.Since(req.startedAt))
+		observability.GameFinished(parentCtx, req.game.Slug, req.isRanked, reason.String(), time.Since(req.startedAt))
 	}
 	if req.game.Slug == "" {
 		// Every other bail-out says so; this one used to drop a finished match in

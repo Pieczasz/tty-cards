@@ -561,9 +561,9 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	l.activeEngine = engine
 	clear(l.ready)
 
-	observability.GameStarted(context.Background(), l.options.cardGame, l.options.isRanked)
+	observability.GameStarted(context.Background(), mod.Slug, l.options.isRanked)
 	if !l.createdAt.IsZero() {
-		observability.LobbyStarted(context.Background(), l.options.cardGame, time.Since(l.createdAt))
+		observability.LobbyStarted(context.Background(), mod.Slug, time.Since(l.createdAt))
 	}
 
 	l.broadcastLocked(Event{Type: EventGameStarted, Engine: engine})

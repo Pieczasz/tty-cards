@@ -38,7 +38,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 		Width:        80,
 		Height:       40,
 	}
-	m, ok := New(global, engine).(*model)
+	m, ok := New(global, engine, "hearts").(*model)
 	require.True(t, ok)
 	return engine, m
 }

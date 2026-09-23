@@ -154,7 +154,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 		Width:  width,
 		Height: height,
 	}
-	model := entry.View(global, engine)
+	model := entry.View(global, engine, entry.Slug)
 	requireSameGame(t, rules, model)
 	return engine, model
 }

@@ -29,10 +29,11 @@ var suitPicker = gameview.ChoicePicker{
 	},
 }
 
-// New creates a new Crazy Eights TUI view bound to the session player.
-func New(global router.GlobalContext, engine *game.Engine) tea.Model {
+// New creates a new Crazy Eights TUI view bound to the session player; slug is its catalog
+// slug, the game_type its metrics carry.
+func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, "crazy eights")
+	session, _ := gameview.NewSession(global, engine, slug)
 	m := &model{Session: session, suit: suitPicker}
 	m.syncState()
 	return m

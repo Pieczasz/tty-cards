@@ -37,8 +37,8 @@ type Session struct {
 	Global router.GlobalContext
 	Bound  *game.BoundEngine
 	Events <-chan game.Event
-	// gameName labels the rejected-action metric with the name db.Game.Name stores.
-	gameName string
+	// slug is the catalog slug, the game_type label every game metric carries.
+	slug string
 
 	Base BaseState
 	// Selected indexes Base.Hand and is clamped by Sync as the hand shrinks.
@@ -55,10 +55,10 @@ type Session struct {
 // NewSession binds engine to the session player and subscribes to its events. The error
 // is for display, not a failure: an unsubscribed view still renders, it just never
 // updates, so it tells the player to rejoin.
-func NewSession(global router.GlobalContext, engine *game.Engine, gameName string) (Session, error) {
+func NewSession(global router.GlobalContext, engine *game.Engine, slug string) (Session, error) {
 	playerID := views.SessionPlayerID(global)
 
-	s := Session{Global: global, Bound: game.Bind(engine, playerID), gameName: gameName}
+	s := Session{Global: global, Bound: game.Bind(engine, playerID), slug: slug}
 	if s.Bound == nil {
 		return s, nil
 	}
@@ -66,7 +66,7 @@ func NewSession(global router.GlobalContext, engine *game.Engine, gameName strin
 	ch, err := s.Bound.Subscribe()
 	if err != nil {
 		slog.Error("game view could not subscribe to engine events",
-			"error", err, "game", gameName, "player_id", playerID)
+			"error", err, "game", slug, "player_id", playerID)
 		s.ActionErr = fmt.Errorf("live table updates unavailable, leave and rejoin: %w", err)
 		return s, s.ActionErr
 	}
@@ -180,7 +180,7 @@ func (s *Session) Submit(action game.Action) error {
 	if s.ActionErr != nil {
 		// Background, not the session context: a rejection counts even when the
 		// disconnect itself caused it.
-		observability.ActionRejected(context.Background(), s.gameName)
+		observability.ActionRejected(context.Background(), s.slug)
 	}
 	return s.ActionErr
 }

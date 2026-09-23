@@ -247,7 +247,7 @@ func TestSession_SubmitCountsARejection(t *testing.T) {
 	if engine.CurrentPlayerID() == offTurn {
 		offTurn = testutil.SeatID(2)
 	}
-	s := Session{Bound: game.Bind(engine, offTurn), gameName: "crazy eights"}
+	s := Session{Bound: game.Bind(engine, offTurn), slug: "crazy_eights"}
 	require.Error(t, s.Submit(crazyeight.ActionDrawCard{}))
 
 	var unseated Session

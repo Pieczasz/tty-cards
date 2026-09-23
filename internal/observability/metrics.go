@@ -36,7 +36,7 @@ func mustHistogram(name, desc string) metric.Float64Histogram {
 	return h
 }
 
-// Attribute values here are bounded sets only (game names, small enums, route
+// Attribute values here are bounded sets only (game slugs, small enums, route
 // patterns) - never a user ID, session ID, or address, which belong on spans
 // and log lines where cardinality is free.
 var (

@@ -44,7 +44,7 @@ func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
 
 func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
 	ctx := l.manager.shutdownCtx()
-	gameName := req.game.Name
+	slug := req.game.Slug
 	defer func() {
 		if n := engine.Dropped(); n > 0 {
 			observability.BroadcastDropped(ctx, "game", n)
@@ -54,9 +54,9 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 	for event := range ch {
 		switch event.Type {
 		case game.EventTurnTimedOut:
-			observability.TurnTimedOut(ctx, gameName)
+			observability.TurnTimedOut(ctx, slug)
 		case game.EventPlayerIdle:
-			observability.PlayerIdleRemoved(ctx, gameName)
+			observability.PlayerIdleRemoved(ctx, slug)
 			// The engine took the seat, so the roster follows, or a player kicked for
 			// idling reconnects into a lobby whose game no longer has them. Equal falls
 			// back to ID, so a zero-UserID stub still matches.
