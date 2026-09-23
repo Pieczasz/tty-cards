@@ -86,14 +86,14 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 	// table ends unrated and the rest keep playing.
 	defer e.recoverRulesPanic()
 
-	playerID, action, takeSeat := e.resolveTurnTimeout(seq)
-	if playerID == "" {
+	outcome, playerID, action := e.resolveTurnTimeout(seq)
+	switch outcome {
+	case timeoutIgnored:
 		return
-	}
-
-	if takeSeat {
+	case timeoutTakeSeat:
 		e.removeIfStillIdle(seq, playerID)
 		return
+	case timeoutAutoPlay:
 	}
 
 	err := e.submitTimedOutAction(playerID, action, seq)
@@ -139,17 +139,29 @@ func (e *Engine) endOnRulesPanicLocked(r any) {
 	}
 }
 
-func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action, takeSeat bool) {
+// timeoutOutcome is what resolveTurnTimeout decided an expiry means.
+type timeoutOutcome uint8
+
+const (
+	// timeoutIgnored is a timer for a turn that is already over, or a table that is.
+	timeoutIgnored timeoutOutcome = iota
+	// timeoutAutoPlay plays the rules' safe move for the seat.
+	timeoutAutoPlay
+	// timeoutTakeSeat removes the seat, once removeIfStillIdle re-checks it.
+	timeoutTakeSeat
+)
+
+func (e *Engine) resolveTurnTimeout(seq uint64) (outcome timeoutOutcome, playerID string, action Action) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if seq != e.clock.seq || e.state.Phase != Playing || len(e.state.Players) == 0 {
-		return "", nil, false
+		return timeoutIgnored, "", nil
 	}
 
 	current := e.currentPlayerLocked()
 	if current == nil {
-		return "", nil, false
+		return timeoutIgnored, "", nil
 	}
 
 	// One miss per seat-turn, not per expiry: a turn that carries on after an
@@ -159,7 +171,7 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 		e.clock.missCharged = true
 	}
 	if e.clock.missed[current.ID] >= MaxMissedTurns {
-		return current.ID, nil, true
+		return timeoutTakeSeat, current.ID, nil
 	}
 
 	// armTurnTimerLocked never arms without a TurnTimeoutHandler and Rules is set once
@@ -176,13 +188,13 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 		slog.Warn("rules returned no safe timeout move; taking the seat",
 			"player_id", current.ID, "phase", e.state.Phase)
 		e.clock.missed[current.ID] = MaxMissedTurns
-		return current.ID, nil, true
+		return timeoutTakeSeat, current.ID, nil
 	}
 	// Broadcast under the same lock hold that charged the miss. Outside it, a player
 	// whose action lands in the gap has the miss refunded while the "timed out" they
 	// disproved still ships.
 	e.broadcaster.Broadcast(Event{Type: EventTurnTimedOut, PlayerID: current.ID})
-	return current.ID, safe, false
+	return timeoutAutoPlay, current.ID, safe
 }
 
 // removeIfStillIdle re-checks the idle decision and removes under one lock hold.

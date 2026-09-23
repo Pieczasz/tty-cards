@@ -195,8 +195,8 @@ func TestEngine_TurnTimeout_MovingBeforeRemovalKeepsTheSeat(t *testing.T) {
 			seq := engine.clock.seq
 			engine.mu.Unlock()
 
-			id, _, takeSeat := engine.resolveTurnTimeout(seq)
-			require.True(t, takeSeat, "one more miss reaches the limit")
+			outcome, id, _ := engine.resolveTurnTimeout(seq)
+			require.Equal(t, timeoutTakeSeat, outcome, "one more miss reaches the limit")
 			require.Equal(t, victim, id)
 
 			if tt.act {
@@ -335,8 +335,8 @@ func TestEngine_TurnTimeout_RefusedMoveBeforeRemovalStillLosesTheSeat(t *testing
 	seq := engine.clock.seq
 	engine.mu.Unlock()
 
-	_, _, takeSeat := engine.resolveTurnTimeout(seq)
-	require.True(t, takeSeat, "one more miss reaches the limit")
+	outcome, _, _ := engine.resolveTurnTimeout(seq)
+	require.Equal(t, timeoutTakeSeat, outcome, "one more miss reaches the limit")
 
 	// The refusal lands in the window resolveTurnTimeout had to drop the lock for.
 	rules.reject = true
@@ -374,8 +374,8 @@ func TestEngine_TurnTimeout_EventShipsWithTheMiss(t *testing.T) {
 	seq := engine.clock.seq
 	engine.mu.Unlock()
 
-	expired, _, takeSeat := engine.resolveTurnTimeout(seq)
-	require.False(t, takeSeat)
+	outcome, expired, _ := engine.resolveTurnTimeout(seq)
+	require.Equal(t, timeoutAutoPlay, outcome)
 
 	select {
 	case ev := <-events:
@@ -530,8 +530,8 @@ func TestEngine_TurnTimeout_RefusalRearmsUnderTheSameLock(t *testing.T) {
 	seq := engine.clock.seq
 	engine.mu.Unlock()
 
-	id, action, takeSeat := engine.resolveTurnTimeout(seq)
-	require.False(t, takeSeat)
+	outcome, id, action := engine.resolveTurnTimeout(seq)
+	require.Equal(t, timeoutAutoPlay, outcome)
 	err := engine.submitTimedOutAction(id, action, seq)
 	require.ErrorIs(t, err, errActionRefused, "a refusal is told apart from an apply failure")
 
