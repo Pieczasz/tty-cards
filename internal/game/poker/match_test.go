@@ -150,6 +150,7 @@ func tableWithChips(stacks ...uint) (*game.State, *State) {
 		PlayerBets:       map[string]uint{},
 		TotalContributed: map[string]uint{},
 		ActedThisRound:   map[string]bool{},
+		LastBetLevel:     map[string]uint{},
 	}
 	for i, chips := range stacks {
 		id := fmt.Sprintf("p%d", i)

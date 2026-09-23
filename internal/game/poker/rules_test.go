@@ -47,6 +47,7 @@ func createTestState() *game.State {
 		ActedThisRound: map[string]bool{
 			"p1": false, "p2": false, "p3": false,
 		},
+		LastBetLevel: map[string]uint{},
 	}
 	state.CurrentTurn = 0
 	state.Phase = game.Playing

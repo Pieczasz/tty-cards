@@ -120,6 +120,7 @@ func (r *Rules) OnGameStart(state *game.State) error {
 		PlayerBets:       make(map[string]uint, nPlayers),
 		TotalContributed: make(map[string]uint, nPlayers),
 		ActedThisRound:   make(map[string]bool, nPlayers),
+		LastBetLevel:     make(map[string]uint, nPlayers),
 	}
 	for _, p := range state.Players {
 		extra.PlayerChips[p.ID] = DefaultStack
@@ -193,6 +194,7 @@ func resetForHand(state *game.State, extra *State) {
 	clear(extra.PlayerBets)
 	clear(extra.TotalContributed)
 	clear(extra.ActedThisRound)
+	clear(extra.LastBetLevel)
 	extra.Table = extra.Table[:0]
 	extra.Pots = nil
 	extra.Winners = nil
@@ -575,11 +577,14 @@ func validateNextHand(extra *State) error {
 }
 
 // checkBettingReopened refuses a raise from a player who has already acted this
-// round. Only a full-size raise clears ActedThisRound (see applyBetIncrease), so a
-// player still on turn with it set is facing the uncalled part of a sub-minimum
-// all-in: they owe the difference and may only call or fold.
+// round unless the bet has since risen by at least a full MinRaise over the level
+// they acted on. A full raise clears ActedThisRound outright (see applyBetIncrease);
+// the level is what catches several short all-ins that only reach a full raise
+// together, which reopen the betting just the same (the TDA rule). Anyone else still
+// on turn with ActedThisRound set is facing less than a full raise: they owe the
+// difference and may only call or fold.
 func checkBettingReopened(extra *State, p *game.Player) error {
-	if extra.ActedThisRound[p.ID] {
+	if extra.ActedThisRound[p.ID] && extra.CurrentBet-extra.LastBetLevel[p.ID] < extra.MinRaise {
 		return errors.New("betting is not reopened, you may only call or fold")
 	}
 	return nil
@@ -636,16 +641,11 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	switch action := action.(type) {
 	case ActionFold:
 		extra.Folded[p.ID] = true
-		extra.ActedThisRound[p.ID] = true
-	case ActionCheck:
-		extra.ActedThisRound[p.ID] = true
 	case ActionCall:
 		commitTo(extra, p, extra.CurrentBet)
-		extra.ActedThisRound[p.ID] = true
 	case ActionRaiseTo:
 		commitTo(extra, p, action.Amount)
 		applyBetIncrease(extra, state, p, extra.PlayerBets[p.ID])
-		extra.ActedThisRound[p.ID] = true
 	case ActionAllIn:
 		newBet := extra.PlayerBets[p.ID] + extra.PlayerChips[p.ID]
 		wasRaise := newBet > extra.CurrentBet
@@ -653,8 +653,9 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		if wasRaise {
 			applyBetIncrease(extra, state, p, extra.PlayerBets[p.ID])
 		}
-		extra.ActedThisRound[p.ID] = true
 	}
+	extra.ActedThisRound[p.ID] = true
+	extra.LastBetLevel[p.ID] = extra.CurrentBet
 	return nil
 }
 
@@ -676,8 +677,10 @@ func commitTo(extra *State, p *game.Player, streetTotal uint) {
 }
 
 // applyBetIncrease raises CurrentBet to newBet. Only a full-size raise
-// (>= MinRaise) reopens the round; a sub-minimum all-in advances the amount
-// owed without granting already-acted players fresh action.
+// (>= MinRaise) reopens the round for everyone; a sub-minimum all-in advances the
+// amount owed without granting already-acted players fresh action, unless it and
+// the short all-ins before it add up to a full raise over what that player last
+// acted on (checkBettingReopened).
 //
 // Deviation worth naming: MinRaise becomes the size of the last full raise, so after
 // a sub-minimum all-in the next legal raise is measured from the raised CurrentBet.

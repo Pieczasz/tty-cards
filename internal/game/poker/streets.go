@@ -62,6 +62,7 @@ func settleAndAdvance(state *game.State, extra *State) error {
 		extra.PlayerBets[p.ID] = 0
 		extra.ActedThisRound[p.ID] = false
 	}
+	clear(extra.LastBetLevel)
 	extra.CurrentBet = 0
 	extra.MinRaise = extra.BigBlind
 

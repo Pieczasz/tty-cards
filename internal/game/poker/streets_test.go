@@ -203,6 +203,7 @@ func TestBetting_AllInShortStackSidePotAward(t *testing.T) {
 		PlayerBets:       map[string]uint{"short": 0, "mid": 0, "big": 0},
 		TotalContributed: map[string]uint{"short": 0, "mid": 0, "big": 0},
 		ActedThisRound:   map[string]bool{"short": false, "mid": false, "big": false},
+		LastBetLevel:     map[string]uint{},
 	}
 	state.Extra = extra
 
@@ -633,6 +634,7 @@ func sidePotState(t testingT, contributed map[string]uint, folded ...string) (*g
 		PlayerBets:       map[string]uint{},
 		TotalContributed: maps.Clone(contributed),
 		ActedThisRound:   map[string]bool{},
+		LastBetLevel:     map[string]uint{},
 	}
 	for _, id := range folded {
 		extra.Folded[id] = true
@@ -732,6 +734,7 @@ func TestRunShowdown_NamesTheWinnersItPaid(t *testing.T) {
 		PlayerBets:       map[string]uint{},
 		TotalContributed: map[string]uint{"p0": 100, "p1": 500, "p2": 500},
 		ActedThisRound:   map[string]bool{},
+		LastBetLevel:     map[string]uint{},
 	}
 	state.Extra = extra
 	before := maps.Clone(extra.PlayerChips)
@@ -977,6 +980,7 @@ func TestRunShowdown_UncalledBetComesBackToADepartedOverBettor(t *testing.T) {
 		PlayerBets:       map[string]uint{},
 		TotalContributed: map[string]uint{"a": 100, "b": 1100, "d": 100},
 		ActedThisRound:   map[string]bool{},
+		LastBetLevel:     map[string]uint{},
 		MainPool:         1300,
 	}
 	state.Extra = extra
@@ -1108,6 +1112,7 @@ func TestLeave_TheOnlyPlayerWithChipsBehindStillPaysTheAllIns(t *testing.T) {
 		PlayerBets:       map[string]uint{},
 		TotalContributed: map[string]uint{"a": 300, "b": 300, "c": 300},
 		ActedThisRound:   map[string]bool{"a": true, "b": true, "c": true},
+		LastBetLevel:     map[string]uint{},
 		MainPool:         900,
 	}
 	state.Extra = extra

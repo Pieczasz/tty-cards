@@ -33,6 +33,10 @@ type State struct {
 	PlayerBets       map[string]uint // chips committed this street
 	TotalContributed map[string]uint // chips committed this hand (for side pots)
 	ActedThisRound   map[string]bool
+	// LastBetLevel is the CurrentBet a player last acted on this street. Several
+	// short all-ins that together raise it by a full MinRaise reopen the betting for
+	// that player, which no single one of them does.
+	LastBetLevel map[string]uint
 
 	Pots         []Pot
 	HandComplete bool
