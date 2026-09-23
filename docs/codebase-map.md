@@ -6,16 +6,16 @@ owner of facts. Every section links to the document that owns the detail
 ([`docs/README.md`](README.md) "Which document owns which fact"). When this file
 and the code disagree, the code wins and this file is the one to fix.
 
-*Snapshot: commit `6526fb8` (2026-09-22). Regenerate the numbers with the commands
-in [Keeping this current](#9-keeping-this-current).*
+*Snapshot: commit `ed376bc` (2026-09-23, branch `fix/review-2026-09`). Regenerate
+the numbers with the commands in [Keeping this current](#9-keeping-this-current).*
 
 | | |
 |---|---|
-| Go packages | 37 (97 non-test files, ~17.5k lines) |
-| Test files | 128 (~31k lines) - tests outweigh code almost 2:1 |
+| Go packages | 37 (102 non-test files, ~18.2k lines) |
+| Test files | 140 (~33.9k lines) - tests outweigh code almost 2:1 |
 | Games | 5: Crazy Eights, Poker (NL Hold'em), Uno, Hearts, Gin Rummy |
-| Migrations | 5 up/down pairs |
-| Design records | 37 in [`decisions.md`](decisions.md) |
+| Migrations | 7 up/down pairs |
+| Design records | 48 in [`decisions.md`](decisions.md) |
 | Tagged releases | none - `main` is what runs |
 
 ---
@@ -52,11 +52,12 @@ C4Container
     Person(visitor, "Visitor")
 
     Container_Boundary(host, "One VPS, docker compose") {
-        Container(nginx, "nginx 1.27", "stream + http", "Publishes 22 and 80 only. limit_conn by /64, PROXY protocol to backend")
+        Container(nginx, "nginx 1.28", "stream + http", "Publishes 22 and 80 only, IPv4 and IPv6. limit_conn by /64, PROXY protocol to backend")
         Container(backend, "backend", "Go 1.27, cmd/server", "Wish SSH :6969 + Bubble Tea TUI + lobby/engine in RAM + stats API :6970")
         Container(migrate, "migrate", "golang-migrate", "Applies internal/db/migrations before backend starts")
         ContainerDb(pg, "Postgres 18", "SQL", "users, public_keys, games, rankings, matches, match_participants")
         Container(alloy, "Alloy", "OTLP receiver", "Receives pushed logs/metrics/traces, scrapes host")
+        Container(sockproxy, "docker-socket-proxy", "haproxy", "GET-only containers and networks, internal network shared with Alloy alone")
         ContainerDb(loki, "Loki", "logs", "14 days")
         ContainerDb(tempo, "Tempo", "traces", "48 hours")
         ContainerDb(prom, "Prometheus", "metrics", "30 days")
@@ -65,8 +66,9 @@ C4Container
 
     Rel(player, nginx, "SSH", ":22")
     Rel(visitor, nginx, "GET /api/", ":80")
-    Rel(nginx, backend, "SSH + PROXY header", ":6969")
+    Rel(nginx, backend, "SSH + PROXY header, edge network only", ":6969")
     Rel(nginx, backend, "HTTP, X-Forwarded-For from $remote_addr", ":6970")
+    Rel(alloy, sockproxy, "container discovery and logs", ":2375")
     Rel(migrate, pg, "DDL")
     Rel(backend, pg, "GORM / pgx")
     Rel(backend, alloy, "OTLP push", "gRPC :4317")
@@ -79,6 +81,10 @@ C4Container
 ```
 
 Why `:6969`/`:6970` are never published: [`decisions.md` #19](decisions.md#19-the-backend-speaks-proxy-protocol-and-6969-is-never-published).
+nginx and the backend share the `edge` network (IPv6 on, fixed subnets), and the
+backend believes a PROXY header or `X-Forwarded-For` only from it:
+[#43](decisions.md#43-the-edge-network-runs-ipv6),
+[#47](decisions.md#47-proxy-and-x-forwarded-for-are-believed-only-from-the-proxys-networks).
 Limits at each layer: [`architecture.md` §2](architecture.md#2-topology).
 
 ## 3. Components inside the backend (C4 level 3)
@@ -180,9 +186,11 @@ sequenceDiagram
     S->>S: rateLimitAuth (per /64), accept any key
     S->>R: LoadOrRegisterUser(fingerprint)
     Note right of R: registration budget spent<br/>only on the user == nil branch
+    Note right of S: an invalid name is refused<br/>with its reason, before the budget
     S->>TUI: build model first
     S->>T: Connect(userID) -> generation
     Note right of T: second session displaces<br/>AND closes the first
+    S->>TUI: ResumeSeat, only once the slot is owned
     TUI->>M: ResumePlayer (reconnect lands at table)
     P->>TUI: create / browse / join by code
     TUI->>M: New / JoinLobbyByCode / ToggleReady
@@ -194,10 +202,10 @@ sequenceDiagram
         TUI->>E: Session.Sync -> Frame (one lock hold)
     end
     E-->>M: EventGameEnded (lobby watcher)
-    M->>M: reopen table first, persist second
+    M->>M: register finalizer, reopen table, persist
     P--xS: disconnect
-    S->>M: DisconnectPlayer (90 s grace mid-game)
-    S->>T: Release(gen) after the seat
+    S->>T: ReleaseWith(gen, fn) - under the tracker lock
+    T->>M: fn = DisconnectPlayer (90 s grace mid-game)
 ```
 
 Owner: [`architecture.md` §3](architecture.md#3-the-spine-end-to-end).
@@ -217,12 +225,14 @@ sequenceDiagram
     E->>Ru: ValidateAction
     alt rejected
         Ru-->>V: error (miss count NOT cleared)
+    else rules panic
+        E->>Bc: finishAfterPanicLocked - EventGameEnded (RulesError), no Standings call
     else accepted
         E->>Ru: ApplyAction
         E->>Ru: AfterAction
         Note over E,Ru: error here = EndReasonRulesError,<br/>state may be half-applied, match unrated
         E->>Ru: CheckWinCondition
-        E->>E: applyNextTurnLocked<br/>OverrideNextTurn > advance > stay<br/>re-arm 30 s timer, turnSeq++
+        E->>E: applyNextTurnLocked<br/>OverrideNextTurn > advance > stay<br/>re-arm timer, turnSeq++ (same seat keeps its deadline)
         E->>Bc: EventActionApplied / EventTurnAdvanced / EventGameEnded
     end
 ```
@@ -239,10 +249,11 @@ sequenceDiagram
     Tm->>E: onTurnTimeout(seq)
     Note over E: defer recoverRulesPanic:<br/>a panic ends this table only
     E->>E: lock, seq == turnSeq? else stale, drop
+    E->>E: missedTurns[player]++ once per seat-turn (turnMissCharged)
     E->>Ru: TimeoutAction(state)
-    E->>E: missedTurns[player]++
     E->>Bc: EventTurnTimedOut (same lock hold)
     E->>E: submitTimedOutAction(seq) -> ValidateAction...
+    Note over E: refused: re-arm on the same hold,<br/>chargeable again, 10 s floor
     alt missedTurns >= 3
         E->>E: removeIfStillIdle (re-check under lock)
         E->>Bc: EventPlayerIdle
@@ -257,12 +268,14 @@ Owner: [`architecture.md` §4.2](architecture.md#42-turn-cursor-and-clock---appl
 
 ```mermaid
 flowchart LR
-    ended["EventGameEnded<br/>(or feed closed and IsFinished)"] --> release["releaseFinishedGame<br/>table back to Waiting"]
-    release --> req["requestFinalize<br/>snapshot taken at START"]
-    req --> reg{"registerFinalizer<br/>ok?"}
-    reg -- no --> dropped["dropped<br/>(ERROR log + metric)"]
-    reg -- yes --> gate{"rated?<br/>ranked AND not shutting down<br/>AND not RulesError<br/>AND not Abandoned"}
-    gate -- yes --> ranked["FinalizeRankedMatch<br/>one tx: advisory locks per seat,<br/>seed, SELECT FOR UPDATE,<br/>provisional + pair damp, Elo"]
+    ended["EventGameEnded<br/>(or feed closed and IsFinished)"] --> req["requestFinalize<br/>snapshot taken at START"]
+    req --> reg["registerFinalizer<br/>before the reopen"]
+    reg --> release["releaseFinishedGame<br/>table back to Waiting"]
+    release --> fin{"registered?"}
+    fin -- no --> dropped["dropped<br/>(ERROR log + metric)"]
+    fin -- yes --> gate{"rated?<br/>ranked AND not shutting down<br/>AND not RulesError<br/>AND not Abandoned"}
+    gate -- "yes, Interrupted" --> interrupted["FinalizeInterruptedMatch<br/>only the leavers' losses written"]
+    gate -- yes --> ranked["FinalizeRankedMatch<br/>one tx: advisory locks per seat,<br/>drop erased seats, seed,<br/>SELECT FOR UPDATE,<br/>provisional + pair damp, Elo"]
     gate -- no --> casual["RecordCasualMatch<br/>history only"]
 ```
 
@@ -355,20 +368,27 @@ classDiagram
         Phase
         Deck *Pile
         Discard *Pile
+        Interrupted bool
         Extra any
     }
     class BoundEngine {
         Submit(Action) error
         Frame(fn)
         Subscribe() (chan Event, error)
-        Engine() *Engine
+        Unsubscribe(chan Event)
     }
     class Session {
         <<embedded in every game view>>
+        ActionErr error
         HandleFrame()
+        ClockTick()
         Sync(fn)
+        Submit(Action) error
         MoveCursor(delta)
         SelectedCard()
+        HandleLeaveKey(key)
+        LeaveConfirmScreen()
+        IdleExempt() bool
         Leave()
         Close()
     }
@@ -420,7 +440,7 @@ erDiagram
 
     users {
         uuid id PK "uuidv7()"
-        varchar40 username UK "CHECK 1-16 chars or deleted_+32hex"
+        varchar40 username UK "CHECK 1-16 chars or deleted_+32hex; unique on lower() (000006)"
         timestamptz last_seen_at
         timestamptz deleted_at "soft delete"
     }
@@ -445,6 +465,7 @@ erDiagram
         bigint id PK
         bigint game_id FK
         bool ranked
+        timestamptz created_at "partial index WHERE ranked (000007)"
     }
     match_participants {
         bigint match_id PK
@@ -463,8 +484,8 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Strategy | `game.Rules`, five implementations | a sixth game touches the engine in no way |
 | Optional interface (capability probe) | `TurnTimeoutHandler`, `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface. No timeout handler means no clock |
 | Single registration point | `catalog.All` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs |
-| Facade | `game.BoundEngine` | the safe path is the default; reaching past it is a visible detour ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
-| Embedded base type | `gameview.Session` | every view gets binding, update loop, cursor and `Close` for free |
+| Facade | `game.BoundEngine` | the safe path is the default; `Frame`'s callback is the one way to whole-table state, and there is no `Engine()` escape hatch ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
+| Embedded base type | `gameview.Session` | every view gets binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free |
 | Observer, latest-wins | `broadcaster.Broadcaster[T]` | a slow SSH client can never stall the engine ([#3](decisions.md#3-latest-wins-broadcaster-and-subscribe-returns-an-error)) |
 | Event as cue, not payload | `game.Event{Type, PlayerID, Reason}` | a dropped event costs nothing, the next `Frame` re-reads the truth |
 | Snapshot / DTO | `StateSnapshot`, `BrowseEntry` | built under one lock, rendered lock-free. Hand sizes only |
@@ -473,11 +494,15 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Functional options | `lobby.Option`, `game.EngineOption` | |
 | Middleware chain | `wish.WithMiddleware` (runs last-first), `withCORS`/`withRateLimit` | |
 | Elm architecture | every `tui/views/**` model | Bubble Tea |
-| Double-checked lock + TTL cache | `repository.BestPlayers` (5 min), public lobby list (2 s, atomic dirty flag) | the atomic flag exists to avoid inverting lock order |
+| TTL cache + singleflight + generation | `repository.BestPlayers` (5 min; concurrent misses share one query; erasure bumps the generation) | a cold board is read by every lobby screen and the site at once, and an erased name must not be re-cached |
+| TTL cache + dirty flag | public lobby list (2 s, atomic dirty flag, each entry re-checked on read) | the atomic flag exists to avoid inverting lock order |
 | Single mutex per engine | `Engine.mu` | clock + state are always read together ([#1](decisions.md#1-one-mutex-per-engine)) |
 
-Lock order, which every concurrency argument rests on: **manager `m.mu` -> lobby
-`l.mu` -> engine `e.mu`**. `State` has no lock. See [`architecture.md` §4.6](architecture.md#46-lock-order).
+Lock order, which every concurrency argument rests on: **tracker `t.mu` -> manager
+`m.mu` -> lobby `l.mu` -> engine `e.mu`**. `State` has no lock. In Postgres, the
+per-seat advisory lock comes before any row lock. See
+[`architecture.md` §4.6](architecture.md#46-lock-order) and
+[#45](decisions.md#45-the-session-tracker-lock-comes-before-the-managers).
 
 The one decision most of the rest follows from: **one process holds the table.**
 No Redis, no broker, no shared cache. Postgres keeps only what must outlive the
