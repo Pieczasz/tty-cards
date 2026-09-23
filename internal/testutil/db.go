@@ -47,6 +47,22 @@ func RequireContainer(t *testing.T, err error) {
 
 func SetupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	gormDB := SetupEmptyTestDB(t)
+
+	// Up, down, up. A down file is never exercised in CI otherwise, so a broken one
+	// is only found during the rollback that needed it. The container is already
+	// paid for; a second pass over a handful of DDL statements is not.
+	runMigrations(t, gormDB, "*.up.sql")
+	runMigrations(t, gormDB, "*.down.sql")
+	runMigrations(t, gormDB, "*.up.sql")
+
+	return gormDB
+}
+
+// SetupEmptyTestDB is a fresh Postgres with no schema, for a test that drives the
+// migrations itself - one that has to plant data a migration must refuse.
+func SetupEmptyTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping DB integration test in short mode")
 	}
@@ -99,13 +115,6 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			t.Errorf("failed to close the database pool: %v", err)
 		}
 	})
-
-	// Up, down, up. A down file is never exercised in CI otherwise, so a broken one
-	// is only found during the rollback that needed it. The container is already
-	// paid for; a second pass over a handful of DDL statements is not.
-	runMigrations(t, gormDB, "*.up.sql")
-	runMigrations(t, gormDB, "*.down.sql")
-	runMigrations(t, gormDB, "*.up.sql")
 
 	return gormDB
 }

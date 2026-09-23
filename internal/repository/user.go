@@ -90,8 +90,11 @@ func (q *gormUserRepository) RegisterUserWithKey(
 	var dbKey db.PublicKey
 
 	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Case-folded, matching idx_users_username_lower (decision D-4), which is also
+		// what catches a concurrent registration this read cannot see. Unscoped: the
+		// index covers soft-deleted rows too, so a hidden one still owns its name.
 		var existingUser db.User
-		err := tx.Where("username = ?", username).First(&existingUser).Error
+		err := tx.Unscoped().Where("lower(username) = lower(?)", username).First(&existingUser).Error
 		if err == nil {
 			return db.ErrUsernameTaken
 		}

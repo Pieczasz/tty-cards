@@ -44,6 +44,17 @@ func TestUserRepository_RegisterUserWithKey(t *testing.T) {
 		require.ErrorContains(t, err, "username already taken")
 	})
 
+	// D-4: "Alice" and "alice" read as one player on a leaderboard.
+	t.Run("a case variant of a taken name is taken", func(t *testing.T) {
+		t.Parallel()
+		first, _, err := repo.RegisterUserWithKey(context.Background(), "Case_Name", "fp_case_1")
+		require.NoError(t, err, "seed the name first")
+		assert.Equal(t, "Case_Name", first.Username, "the display case is kept")
+
+		_, _, err = repo.RegisterUserWithKey(context.Background(), "case_NAME", "fp_case_2")
+		require.ErrorIs(t, err, db.ErrUsernameTaken)
+	})
+
 	t.Run("invalid username length", func(t *testing.T) {
 		t.Parallel()
 		_, _, err := repo.RegisterUserWithKey(context.Background(), "this_username_is_way_too_long", "fp_too_long")
