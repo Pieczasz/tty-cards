@@ -111,14 +111,3 @@ func (t *SessionTracker) Owns(userID uuid.UUID, gen uint64) bool {
 	defer t.mu.Unlock()
 	return t.active[userID].gen == gen
 }
-
-// Disconnect is Release without a generation check - tests and paths that never
-// displaced. Prefer Release from session teardown.
-func (t *SessionTracker) Disconnect(userID uuid.UUID) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if _, ok := t.active[userID]; ok {
-		delete(t.active, userID)
-		observability.SSHSessionsActive.Add(-1)
-	}
-}

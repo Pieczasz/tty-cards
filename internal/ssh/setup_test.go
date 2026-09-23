@@ -30,10 +30,22 @@ func TestSetupServer_Errors(t *testing.T) {
 	t.Parallel()
 
 	deps := ServerDependencies{
-		Config: &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+		Config:  &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+		Tracker: NewSessionTracker(0),
 	}
 	_, err := SetupServer(deps)
 	assert.ErrorContains(t, err, "error while saving keypair")
+}
+
+// The tracker is shared with the stats API, which counts who is online from it. A
+// server that quietly built its own would leave that count at zero forever.
+func TestSetupServer_RequiresATracker(t *testing.T) {
+	t.Parallel()
+
+	_, err := SetupServer(ServerDependencies{
+		Config: &config.Config{SSHKeyPath: t.TempDir() + "/id_ed25519", RateLimitCount: 5, RateLimitWindow: time.Second},
+	})
+	require.ErrorIs(t, err, ErrNoTracker)
 }
 
 func TestSetupServer_SetsConnectionTimeouts(t *testing.T) {
@@ -45,6 +57,7 @@ func TestSetupServer_SetsConnectionTimeouts(t *testing.T) {
 			RateLimitCount:  5,
 			RateLimitWindow: time.Second,
 		},
+		Tracker: NewSessionTracker(0),
 	}
 
 	server, err := SetupServer(deps)

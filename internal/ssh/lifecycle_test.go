@@ -129,7 +129,7 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	tracker := NewSessionTracker(2)
 	_, err := tracker.Connect(testutil.UID(1), nil)
 	require.NoError(t, err)
-	_, err = tracker.Connect(testutil.UID(2), nil)
+	gen, err := tracker.Connect(testutil.UID(2), nil)
 	require.NoError(t, err)
 	_, err = tracker.Connect(testutil.UID(3), nil)
 	require.ErrorIs(t, err, ErrServerFull)
@@ -145,7 +145,7 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	assert.Equal(t, 2, tracker.Count())
 	assert.True(t, tracker.Release(testutil.UID(1), gen2))
 
-	tracker.Disconnect(testutil.UID(2))
+	assert.True(t, tracker.Release(testutil.UID(2), gen))
 	_, err = tracker.Connect(testutil.UID(3), nil)
 	require.NoError(t, err, "capacity frees with the seat")
 }

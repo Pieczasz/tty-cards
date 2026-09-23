@@ -94,7 +94,15 @@ type ServerDependencies struct {
 	Tracker        *SessionTracker
 }
 
+// ErrNoTracker refuses a server with no session tracker. A default one used to be
+// built here, and the stats API, holding its own, then counted nobody online.
+var ErrNoTracker = errors.New("ssh server needs a session tracker")
+
 func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
+	tracker := deps.Tracker
+	if tracker == nil {
+		return nil, ErrNoTracker
+	}
 	key, err := keygen.New(deps.Config.SSHKeyPath, keygen.WithKeyType(keygen.Ed25519))
 	if err != nil {
 		return nil, fmt.Errorf("generating a keygen pair error: %w", err)
@@ -109,10 +117,6 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 		return nil, err
 	}
 
-	tracker := deps.Tracker
-	if tracker == nil {
-		tracker = NewSessionTracker(deps.Config.MaxConnections)
-	}
 	rateLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
 	// Registration gets its own, far tighter budget than authentication. The auth
 	// limiter is sized so an ssh-agent offering every key it holds still gets in;
