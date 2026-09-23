@@ -206,9 +206,9 @@ func TestEngine_SubmitAction_PostConditionBeforeBroadcast(t *testing.T) {
 	engine := NewEngine(m, players, deck.StandardDeck())
 	t.Cleanup(engine.Close)
 
-	ch, subErr := engine.Broadcaster().Subscribe()
+	ch, subErr := engine.Subscribe()
 	require.NoError(t, subErr)
-	t.Cleanup(func() { engine.Broadcaster().Unsubscribe(ch) })
+	t.Cleanup(func() { engine.Unsubscribe(ch) })
 
 	require.NoError(t, engine.Start())
 
@@ -569,7 +569,7 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 
 	engine := NewEngine(m, []*Player{loser, winner}, deck.StandardDeck())
 	t.Cleanup(engine.Close)
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 	require.NoError(t, engine.Start())
 
@@ -601,11 +601,11 @@ func TestEngine_SubscriberHeadroomAbovePlayerCount(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	for i := range len(players) + 8 {
-		_, err := engine.Broadcaster().Subscribe()
+		_, err := engine.Subscribe()
 		require.NoErrorf(t, err, "subscriber %d must fit", i)
 	}
 
-	_, err := engine.Broadcaster().Subscribe()
+	_, err := engine.Subscribe()
 	require.ErrorIs(t, err, broadcaster.ErrAtCapacity, "the cap is players plus headroom, not unbounded")
 }
 
@@ -617,7 +617,7 @@ func TestEngine_CloseClosesTheBroadcaster(t *testing.T) {
 
 	engine.Close()
 
-	_, err := engine.Broadcaster().Subscribe()
+	_, err := engine.Subscribe()
 	assert.ErrorIs(t, err, broadcaster.ErrClosed)
 }
 
@@ -651,13 +651,11 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	// Action submitters: every seat repeatedly tries to act. Most calls lose the
 	// turn race and error out; that is expected and must never panic.
 	for _, id := range ids {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 50 {
 				_ = engine.SubmitAction(id, MockAction{name: "Move"})
 			}
-		}(id)
+		})
 	}
 
 	// Readers: concurrent snapshot / standings / current-player queries.
@@ -674,11 +672,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	// Removers: drop a subset of seats concurrently, always leaving at least two
 	// so the game never collapses to a trivial single-player finish here.
 	for _, id := range ids[:playerCount-2] {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			engine.RemovePlayer(id)
-		}(id)
+		wg.Go(func() { engine.RemovePlayer(id) })
 	}
 
 	wg.Wait()
@@ -812,7 +806,7 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	engine := NewEngine(m, players, deck.StandardDeck())
 	t.Cleanup(engine.Close)
 
-	ch, err := engine.Broadcaster().Subscribe()
+	ch, err := engine.Subscribe()
 	require.NoError(t, err)
 	require.NoError(t, engine.Start())
 	require.Equal(t, []EventType{EventGameStarted}, eventTypes(drainEvents(ch)))
@@ -887,7 +881,7 @@ func TestEngine_GameEndedCarriesItsReason(t *testing.T) {
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 
-			ch, err := engine.Broadcaster().Subscribe()
+			ch, err := engine.Subscribe()
 			require.NoError(t, err)
 
 			for _, id := range tt.leave {

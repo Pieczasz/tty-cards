@@ -22,8 +22,7 @@ func (r *twoStepRules) ApplyAction(state *State, action Action) error {
 	_ = r.timeoutRules.ApplyAction(state, action)
 	r.drawn = action.Name() == "draw"
 	if r.drawn {
-		cur := state.CurrentTurn
-		state.OverrideNextTurn = &cur
+		state.OverrideTurn(state.CurrentTurn)
 	}
 	return nil
 }

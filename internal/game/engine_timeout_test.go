@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -114,7 +115,7 @@ func TestEngine_TurnTimeout_TakesTheSeatAfterMaxMissesInARow(t *testing.T) {
 	t.Parallel()
 	rules := &timeoutRules{safe: namedAction{name: "safe"}}
 	engine := newTimeoutEngine(t, rules, "a", "b")
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	firstToAct := engine.CurrentPlayerID()
@@ -245,17 +246,23 @@ func TestEngine_TurnTimeout_RefusedSafeMoveRearmsRatherThanStalling(t *testing.T
 		"a fresh clock must be running, or this seat stalls the table forever")
 }
 
+// Real timers under a fake clock: synctest runs every expiry the wait covers, so the
+// check neither sleeps nor flakes under load.
 func TestEngine_TurnTimeout_RefusedSafeMoveStillLosesTheSeat(t *testing.T) {
 	t.Parallel()
-	rules := &timeoutRules{safe: namedAction{name: "safe"}, reject: true}
-	engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-		deck.StandardDeck(), WithTurnTimeout(20*time.Millisecond))
-	t.Cleanup(engine.Close)
-	require.NoError(t, engine.Start())
+	synctest.Test(t, func(t *testing.T) {
+		rules := &timeoutRules{safe: namedAction{name: "safe"}, reject: true}
+		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
+			deck.StandardDeck(), WithTurnTimeout(20*time.Millisecond))
+		t.Cleanup(engine.Close)
+		require.NoError(t, engine.Start())
 
-	require.Eventually(t, engine.IsFinished, 5*time.Second, 5*time.Millisecond,
-		"each refusal must re-arm the clock until the idle seat is taken")
-	assert.Empty(t, rules.appliedActions(), "nothing was ever accepted")
+		time.Sleep(MaxMissedTurns * time.Second)
+		synctest.Wait()
+
+		require.True(t, engine.IsFinished(), "each refusal must re-arm the clock until the idle seat is taken")
+		assert.Empty(t, rules.appliedActions(), "nothing was ever accepted")
+	})
 }
 
 func TestEngine_TurnTimeout_ClockLifecycle(t *testing.T) {
@@ -309,15 +316,22 @@ func TestEngine_TurnTimeout_ClockLifecycle(t *testing.T) {
 
 func TestEngine_TurnTimeout_TimerActuallyFires(t *testing.T) {
 	t.Parallel()
-	rules := &timeoutRules{safe: namedAction{name: "safe"}}
-	engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-		deck.StandardDeck(), WithTurnTimeout(20*time.Millisecond))
-	t.Cleanup(engine.Close)
-	require.NoError(t, engine.Start())
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 20 * time.Millisecond
+		rules := &timeoutRules{safe: namedAction{name: "safe"}}
+		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
+			deck.StandardDeck(), WithTurnTimeout(timeout))
+		t.Cleanup(engine.Close)
+		require.NoError(t, engine.Start())
 
-	require.Eventually(t, func() bool {
-		return len(rules.appliedActions()) > 0
-	}, 2*time.Second, 5*time.Millisecond, "the armed timer must play the safe move on its own")
+		time.Sleep(timeout - time.Millisecond)
+		synctest.Wait()
+		require.Empty(t, rules.appliedActions(), "nothing plays before the deadline")
+
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		assert.Len(t, rules.appliedActions(), 1, "the armed timer must play the safe move on its own, once")
+	})
 }
 
 // Spamming moves the rules refuse must not read as presence. A rejected action
@@ -367,7 +381,7 @@ func TestEngine_TurnTimeout_EventShipsWithTheMiss(t *testing.T) {
 	rules := &timeoutRules{safe: namedAction{name: "safe"}}
 	engine := newTimeoutEngine(t, rules, "a", "b")
 	// Subscribed after Start, so the feed holds nothing yet.
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	engine.mu.Lock()
@@ -401,7 +415,7 @@ func TestEngine_TurnTimeout_TakingTheSeatSkipsTheTimedOutEvent(t *testing.T) {
 	seq := engine.clock.seq
 	engine.mu.Unlock()
 
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	engine.onTurnTimeout(seq)
@@ -493,7 +507,7 @@ func TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable(t *testing.T) {
 	rules := &panickingRules{&timeoutRules{safe: namedAction{name: "safe"}}}
 	engine := newTimeoutEngine(t, rules, "a", "b")
 
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 	engine.mu.Lock()
 	seq := engine.clock.seq

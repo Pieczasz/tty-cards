@@ -35,7 +35,7 @@ func endedEvent(t *testing.T, events []Event) Event {
 func TestEngine_SubmitAction_RulesPanicEndsTheTable(t *testing.T) {
 	t.Parallel()
 	engine := newTimeoutEngine(t, &applyPanicRules{&timeoutRules{safe: namedAction{name: "safe"}}}, "a", "b")
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	var submitErr error
@@ -52,7 +52,7 @@ func TestEngine_SubmitAction_RulesPanicEndsTheTable(t *testing.T) {
 func TestEngine_TurnTimeout_PanickingStandingsDoesNotEscape(t *testing.T) {
 	t.Parallel()
 	engine := newTimeoutEngine(t, &standingsPanicRules{&timeoutRules{safe: namedAction{name: "safe"}}}, "a", "b")
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	require.NotPanics(t, func() { fireTurnTimeout(t, engine) })
