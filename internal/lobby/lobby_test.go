@@ -466,7 +466,8 @@ func TestLobby_ChangesAreBroadcast(t *testing.T) {
 
 		require.NoError(t, l.SetPrivate(l.Leader(), false))
 
-		assert.Equal(t, []string{EventSettingsUpdated}, drainEventTypes(ch))
+		assert.Equal(t, []string{EventSettingsUpdated, EventPlayersUpdated}, drainEventTypes(ch),
+			"the change un-readies the table, so the rosters hear it too")
 	})
 
 	t.Run("a rejected settings change is not announced", func(t *testing.T) {

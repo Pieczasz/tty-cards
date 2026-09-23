@@ -165,6 +165,9 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 		l.mu.Unlock()
 		return err
 	}
+	// A ready was consent to the table as it was. Keeping it lets the leader flip a
+	// setting after everyone readied and start a match nobody agreed to.
+	clear(l.ready)
 	// Visibility is one of these settings: a cached browse would keep offering a table
 	// that just went private.
 	l.manager.invalidatePublicCache()
@@ -172,6 +175,7 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 	l.mu.Unlock()
 	if bc != nil {
 		bc.Broadcast(Event{Type: EventSettingsUpdated})
+		bc.Broadcast(Event{Type: EventPlayersUpdated})
 	}
 	return nil
 }
