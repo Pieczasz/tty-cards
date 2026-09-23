@@ -125,25 +125,18 @@ func (e *Engine) recoverRulesPanic() {
 	e.endOnRulesPanicLocked(r)
 }
 
-// endOnRulesPanicLocked is the shared body of both recovers. It does not check for
-// Playing: a panic inside finishGameLocked's Standings call has already set Finished
-// without announcing it, and every rules hook runs only on a table that was Playing.
+// endOnRulesPanicLocked is the shared body of both recovers. It ends the table without
+// asking the rules anything: the state a hook panicked on cannot be trusted to rank a
+// winner, and a second panic from Standings inside a recover would take the process
+// down. It does not check for Playing: a panic inside finishGameLocked's Standings call
+// has already set Finished without announcing it, and every rules hook runs only on a
+// table that was Playing.
 func (e *Engine) endOnRulesPanicLocked(r any) {
 	slog.Error("rules panicked; ending the table as a rules error",
 		"panic", r, "stack", string(debug.Stack()))
 	if !e.closed {
-		e.finishAfterPanicLocked()
+		e.endGameLocked(nil, EndReasonRulesError)
 	}
-}
-
-// finishAfterPanicLocked ends the table without asking the rules anything: the state a
-// hook panicked on cannot be trusted to rank a winner, and a second panic from
-// Standings inside a recover would take the process down. finishGameLocked is the
-// normal path and stays untouched.
-func (e *Engine) finishAfterPanicLocked() {
-	e.state.Phase = Finished
-	e.stopTurnTimerLocked()
-	e.broadcaster.Broadcast(Event{Type: EventGameEnded, Reason: EndReasonRulesError})
 }
 
 func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action, takeSeat bool) {

@@ -421,26 +421,36 @@ func (e *Engine) submitActionLocked(playerID string, action Action, playerPresen
 	return nil
 }
 
-// finishGameLocked settles the winner from the rules standings and announces the end of
-// the game; fallback names the winner when the rules rank nobody. Caller holds e.mu.
+// finishGameLocked settles the winner from the rules standings and ends the table;
+// fallback names the winner when the rules rank nobody. Caller holds e.mu.
 func (e *Engine) finishGameLocked(fallback *Player, reason EndReason) {
+	// Finished and the clock stopped before the rules are asked anything: a panic in
+	// Standings then leaves a table that cannot auto-play, for endOnRulesPanicLocked
+	// to announce.
 	e.state.Phase = Finished
-	// A clock left running would auto-play into a finished game.
 	e.stopTurnTimerLocked()
 
-	standings := e.state.Rules.Standings(e.state)
-	switch {
+	winner := fallback
+	switch standings := e.state.Rules.Standings(e.state); {
 	case len(standings) > 0:
-		e.state.Winner = standings[0]
-	case fallback != nil:
-		e.state.Winner = fallback
-	case len(e.state.Players) > 0:
-		e.state.Winner = e.state.Players[0]
+		winner = standings[0]
+	case fallback == nil && len(e.state.Players) > 0:
+		winner = e.state.Players[0]
 	}
+	e.endGameLocked(winner, reason)
+}
+
+// endGameLocked is the one way a table ends: Finished, the clock stopped (one left
+// running would auto-play into a finished game), the winner recorded and the end
+// announced. Caller holds e.mu.
+func (e *Engine) endGameLocked(winner *Player, reason EndReason) {
+	e.state.Phase = Finished
+	e.stopTurnTimerLocked()
+	e.state.Winner = winner
 
 	winnerID := ""
-	if e.state.Winner != nil {
-		winnerID = e.state.Winner.ID
+	if winner != nil {
+		winnerID = winner.ID
 	}
 	e.broadcaster.Broadcast(Event{
 		Type:     EventGameEnded,
@@ -498,10 +508,7 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	}
 
 	if len(e.state.Players) == 0 {
-		e.state.Winner = nil
-		e.state.Phase = Finished
-		e.stopTurnTimerLocked()
-		e.broadcaster.Broadcast(Event{Type: EventGameEnded, Reason: EndReasonAbandoned})
+		e.endGameLocked(nil, EndReasonAbandoned)
 		return
 	}
 
@@ -522,14 +529,7 @@ func (e *Engine) removePlayerLocked(playerID string) {
 			e.broadcaster.Broadcast(Event{Type: EventTurnAdvanced})
 			return
 		}
-		e.state.Phase = Finished
-		e.stopTurnTimerLocked()
-		e.state.Winner = e.state.Players[0]
-		e.broadcaster.Broadcast(Event{
-			Type:     EventGameEnded,
-			PlayerID: e.state.Winner.ID,
-			Reason:   EndReasonForfeit,
-		})
+		e.endGameLocked(e.state.Players[0], EndReasonForfeit)
 		return
 	}
 
