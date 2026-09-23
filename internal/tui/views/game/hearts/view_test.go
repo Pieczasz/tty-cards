@@ -316,7 +316,7 @@ func TestView_ShowsTheLastRejectedActionAndStillFits(t *testing.T) {
 	t.Parallel()
 
 	m := fourHanded(styles.MinWidth, styles.MinHeight)
-	m.lastActionErr = errNeedThreeCards
+	m.ActionErr = errNeedThreeCards
 
 	out := m.View().Content
 	assert.Contains(t, out, "exactly 3 cards")

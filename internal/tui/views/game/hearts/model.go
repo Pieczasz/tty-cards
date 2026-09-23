@@ -34,13 +34,12 @@ type Model struct {
 	lastTrickWinner  string
 	seatOrder        []string // player IDs clockwise from engine seat 0
 	seatNames        map[string]string
-
-	lastActionErr error
 }
 
 // New creates a Hearts TUI view bound to the session player.
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
-	session, err := gameview.NewSession(global, engine, "hearts")
+	// A subscribe failure is already in Session.ActionErr for the hero band.
+	session, _ := gameview.NewSession(global, engine, "hearts")
 	m := &Model{
 		Session:          session,
 		passSelected:     map[deck.Card]struct{}{},
@@ -48,7 +47,6 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 		handPoints:       map[string]int{},
 		cumulativeScores: map[string]int{},
 		seatNames:        map[string]string{},
-		lastActionErr:    err,
 	}
 	m.syncState()
 	return m

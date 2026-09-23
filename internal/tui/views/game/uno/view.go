@@ -110,7 +110,7 @@ func (m *Model) renderPlayerSection() string {
 	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.pickingColor,
 		handWidth, handRows)
 
-	return gameview.RenderHeroBand(m.Global.Theme, m.lastActionErr, statusView, colorRow, handView)
+	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, colorRow, handView)
 }
 
 // renderHandColorRow paints a Uno color glyph above each card so four colors stay

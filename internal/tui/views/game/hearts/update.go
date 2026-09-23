@@ -93,7 +93,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m *Model) submitPass() (tea.Model, tea.Cmd) {
 	if len(m.passSelected) != 3 {
-		m.lastActionErr = errNeedThreeCards
+		m.ActionErr = errNeedThreeCards
 		return m, nil
 	}
 	return m.submit(logic.ActionPassCards{Cards: slices.Collect(maps.Keys(m.passSelected))})
@@ -102,7 +102,7 @@ func (m *Model) submitPass() (tea.Model, tea.Cmd) {
 var errNeedThreeCards = errors.New("select exactly 3 cards (space to toggle)")
 
 func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
-	if m.lastActionErr = m.Submit(action); m.lastActionErr == nil {
+	if m.Submit(action) == nil {
 		m.passSelected = map[deck.Card]struct{}{}
 	}
 	return m, nil

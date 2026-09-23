@@ -144,10 +144,10 @@ func TestHandleKnock_OnlyFiresWhenAKnockIsLegal(t *testing.T) {
 			if tc.wantReach {
 				// The seat holds ten cards, so the engine rejects the knock - which is
 				// what proves the key reached it rather than being swallowed.
-				assert.Error(t, m.lastActionErr)
+				assert.Error(t, m.ActionErr)
 				return
 			}
-			assert.NoError(t, m.lastActionErr, "the key must not reach the engine")
+			assert.NoError(t, m.ActionErr, "the key must not reach the engine")
 		})
 	}
 }
@@ -163,13 +163,13 @@ func TestDrawKeys_OnlyActOnYourOwnTurn(t *testing.T) {
 			m.Base.MyTurn = false
 
 			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
-			require.NoError(t, m.lastActionErr, "an off-turn draw never reaches the engine")
+			require.NoError(t, m.ActionErr, "an off-turn draw never reaches the engine")
 
 			m.Base.MyTurn = true
 			m.handPhase = logic.AwaitingDraw
 			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 			m.syncState()
-			assert.True(t, m.handPhase == logic.AwaitingDiscard || m.lastActionErr != nil,
+			assert.True(t, m.handPhase == logic.AwaitingDiscard || m.ActionErr != nil,
 				"on turn the draw either lands or is rejected, but it is not swallowed")
 		})
 	}
@@ -197,7 +197,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.Nil(t, cmd)
-		assert.NoError(t, m.lastActionErr, "waiting for the other seat is not an error")
+		assert.NoError(t, m.ActionErr, "waiting for the other seat is not an error")
 	})
 
 	t.Run("before drawing there is nothing to discard", func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.handPhase = logic.AwaitingDraw
 
 		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		assert.NoError(t, m.lastActionErr, "the discard never reaches the engine")
+		assert.NoError(t, m.ActionErr, "the discard never reaches the engine")
 	})
 }
 

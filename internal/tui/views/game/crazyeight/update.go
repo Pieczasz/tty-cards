@@ -102,7 +102,7 @@ func (m *Model) handleDraw() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
-	m.lastActionErr = m.Submit(action)
+	_ = m.Submit(action) // kept in ActionErr, which the hero band renders
 	return m, nil
 }
 

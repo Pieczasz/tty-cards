@@ -14,16 +14,16 @@ type Model struct {
 	gameview.Session
 
 	// Crazy Eights specific
-	currentSuit   deck.Suit
-	pickingSuit   bool
-	suitCursor    int
-	lastActionErr error
+	currentSuit deck.Suit
+	pickingSuit bool
+	suitCursor  int
 }
 
 // New creates a new Crazy Eights TUI view bound to the session player.
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
-	session, err := gameview.NewSession(global, engine, "crazy eights")
-	m := &Model{Session: session, lastActionErr: err}
+	// A subscribe failure is already in Session.ActionErr for the hero band.
+	session, _ := gameview.NewSession(global, engine, "crazy eights")
+	m := &Model{Session: session}
 	m.syncState()
 	return m
 }

@@ -258,7 +258,7 @@ func TestView_ShowsTheLastRejectedActionAndStillFits(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(styles.MinWidth, styles.MinHeight)
-	m.lastActionErr = errors.New("you have to draw before you discard")
+	m.ActionErr = errors.New("you have to draw before you discard")
 
 	out := m.View().Content
 	assert.Contains(t, out, "draw before")

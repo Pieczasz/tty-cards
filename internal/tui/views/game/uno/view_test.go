@@ -230,7 +230,7 @@ func TestView_ShowsTheLastRejectedActionAndStillFits(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(styles.MinWidth, styles.MinHeight, "bob")
-	m.lastActionErr = errors.New("that card does not match the colour")
+	m.ActionErr = errors.New("that card does not match the colour")
 
 	out := m.View().Content
 	assert.Contains(t, out, "does not match")

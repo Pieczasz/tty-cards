@@ -233,7 +233,7 @@ func TestHandleEnter_AWildOpensThePickerAndTheNextEnterCommits(t *testing.T) {
 			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			assert.False(t, m.pickingColor, "committing closes the picker whatever the engine says")
 			// A rejected move has to surface a message rather than fail silently.
-			assert.Error(t, m.lastActionErr)
+			assert.Error(t, m.ActionErr)
 		})
 	}
 }
@@ -254,7 +254,7 @@ func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
 
 	before := engine.Snapshot().DeckSize
 	_, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	require.NoError(t, m.lastActionErr)
+	require.NoError(t, m.ActionErr)
 	require.Less(t, engine.Snapshot().DeckSize, before, "drawing takes a card off the stock")
 
 	m.syncState()

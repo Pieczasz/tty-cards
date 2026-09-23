@@ -207,7 +207,7 @@ func TestSubmitPass_RefusesAnythingButThreeCards(t *testing.T) {
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.ErrorIs(t, m.lastActionErr, errNeedThreeCards)
+	require.ErrorIs(t, m.ActionErr, errNeedThreeCards)
 	assert.Len(t, m.passSelected, 1, "the staging survives a refused pass")
 }
 
@@ -231,7 +231,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.Nil(t, cmd)
-		assert.NoError(t, m.lastActionErr, "waiting for another seat is not an error")
+		assert.NoError(t, m.ActionErr, "waiting for another seat is not an error")
 	})
 
 	t.Run("off turn nothing is played", func(t *testing.T) {
@@ -241,7 +241,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.Base.MyTurn = false
 
 		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		assert.NoError(t, m.lastActionErr, "the play never reaches the engine")
+		assert.NoError(t, m.ActionErr, "the play never reaches the engine")
 	})
 }
 

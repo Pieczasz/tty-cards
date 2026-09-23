@@ -206,7 +206,7 @@ func (m *Model) renderPlayerSection() string {
 		handView = gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, false, handWidth, handRows)
 	}
 
-	return gameview.RenderHeroBand(m.Global.Theme, m.lastActionErr, statusView, handView)
+	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
 }
 
 func (m *Model) renderHandOver() string {
