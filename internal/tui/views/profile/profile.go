@@ -57,6 +57,10 @@ type deletePhase int
 const (
 	deleteIdle deletePhase = iota
 	deleteConfirming
+	// deleteRunning is the round trip itself. It swallows every key but ctrl+c: backing
+	// out now would let the player navigate away and keep playing on an account that is
+	// already being erased, and a second enter would issue the delete twice.
+	deleteRunning
 	deleteDone
 )
 
@@ -140,8 +144,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Error("database error while loading match history", "error", msg.historyErr)
 		}
 	case tea.KeyPressMsg:
-		if m.phase == deleteConfirming {
+		switch m.phase {
+		case deleteConfirming:
 			return m.confirmKey(msg)
+		case deleteRunning, deleteDone:
+			return m, nil
+		case deleteIdle:
 		}
 		m.notice = ""
 		switch msg.String() {
@@ -170,6 +178,8 @@ func (m model) renderContent(contentHeight int) string {
 	switch m.phase {
 	case deleteConfirming:
 		return m.renderConfirm()
+	case deleteRunning:
+		return "Deleting your account..."
 	case deleteDone:
 		return "Your account has been deleted. Goodbye."
 	case deleteIdle:
@@ -374,6 +384,7 @@ func (m model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.notice = "Type " + deleteConfirmWord + " exactly, then press enter."
 			return m, nil
 		}
+		m.phase = deleteRunning
 		return m, deleteAccount(m.global.RequestContext(), m.global.UserRepository, m.global.User.ID)
 	case "backspace":
 		if runes := []rune(m.typed); len(runes) > 0 {
@@ -394,6 +405,7 @@ func (m model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		slog.Error("database error while deleting account", "error", msg.err)
+		m.phase = deleteConfirming
 		m.typed = ""
 		m.notice = "Could not delete the account. Please try again."
 		return m, nil

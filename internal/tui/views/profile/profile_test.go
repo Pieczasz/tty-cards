@@ -180,6 +180,9 @@ func TestView_FitsTheTerminal(t *testing.T) {
 			typo.typed = "DELETEDEL"
 			typo.notice = "Type DELETE exactly, then press enter."
 			states["confirming with a notice"] = typo
+			running := m
+			running.phase = deleteRunning
+			states["deleting"] = running
 			done := m
 			done.phase = deleteDone
 			states["deleted"] = done
@@ -620,7 +623,7 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		require.NotNil(t, cmd, "the confirmed word has to issue the delete")
 		m, ok := after.(model)
 		require.True(t, ok)
-		assert.Equal(t, deleteConfirming, m.phase, "still confirming until the query answers")
+		assert.Equal(t, deleteRunning, m.phase, "running until the query answers")
 
 		msg, ok := cmd().(accountDeletedMsg)
 		require.True(t, ok)
@@ -654,6 +657,30 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		assert.Equal(t, deleteConfirming, m.phase)
 		assert.Contains(t, m.notice, "Could not delete")
 		assert.Empty(t, m.typed, "the word is retyped rather than resubmitted by accident")
+	})
+
+	// Once the delete is issued the player cannot back out of it, navigate away and
+	// keep playing on an account that is being erased, or issue it a second time.
+	t.Run("the running delete swallows every key until it answers", func(t *testing.T) {
+		t.Parallel()
+		m, calls := deletingModel(t, nil)
+		next, _ := m.Update(key('x'))
+		m = typeWord(t, next.(model), deleteConfirmWord)
+		after, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.NotNil(t, cmd)
+		m = after.(model)
+
+		for _, k := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, key('q'), key('t'), {Code: tea.KeyEnter}} {
+			after, swallowed := m.Update(k)
+			m = after.(model)
+			assert.Nil(t, swallowed, "%q must not act while the delete runs", k.String())
+		}
+		assert.Equal(t, deleteRunning, m.phase)
+		assert.Zero(t, *calls, "nothing issued a second delete")
+
+		done, quit := m.Update(cmd())
+		assert.Equal(t, deleteDone, done.(model).phase)
+		require.NotNil(t, quit)
 	})
 
 	t.Run("esc cancels", func(t *testing.T) {
