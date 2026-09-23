@@ -111,16 +111,18 @@ linters:
           deny:
             - pkg: github.com/Pieczasz/terminal-card/internal/repository
               desc: only cmd/server (the composition root) may import the GORM implementations; depend on the internal/db interfaces
+        # An allow-list, so a new dependency is a decision rather than a default: the
+        # rules and engine know nothing of the database, the TUI or lobbies. gametest
+        # is test support and may use the test libraries.
         game-is-pure:
-          list-mode: lax
-          files: ["**/internal/game/**", "!$test"]
-          deny:
-            - pkg: github.com/Pieczasz/terminal-card/internal/db
-              desc: internal/game knows nothing about the database
-            - pkg: github.com/Pieczasz/terminal-card/internal/tui
-              desc: internal/game knows nothing about the TUI
-            - pkg: github.com/Pieczasz/terminal-card/internal/lobby
-              desc: internal/game knows nothing about lobbies
+          list-mode: strict
+          files: ["**/internal/game/**", "!**/internal/game/gametest/**", "!$test"]
+          allow:
+            - $gostd
+            - github.com/Pieczasz/terminal-card/internal/deck
+            - github.com/Pieczasz/terminal-card/internal/broadcaster
+            - github.com/Pieczasz/terminal-card/internal/game
+            - uuid
     dupl:
       threshold: 120
     gocritic:
