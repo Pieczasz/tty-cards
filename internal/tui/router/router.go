@@ -212,7 +212,8 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// falls through to the active view too (see views.HandleCommonMsg).
 		r.Global.Theme = styles.NewTheme(msg.IsDark())
 	case ChangeViewMsg:
-		return r, r.Goto(msg.ViewName, msg.Context)
+		cmd := r.Goto(msg.ViewName, msg.Context)
+		return r, cmd
 	}
 
 	if r.active == nil {

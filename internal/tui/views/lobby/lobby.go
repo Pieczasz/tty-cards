@@ -138,7 +138,8 @@ const (
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.currentLobby == nil {
-		return m, m.goHome()
+		cmd := m.goHome()
+		return m, cmd
 	}
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
@@ -222,7 +223,8 @@ func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 	case "y", "Y":
 		m.global.LobbyManager.LeaveLobby(views.SessionPlayer(m.global))
 		m.unsubscribe()
-		return m, m.goHome()
+		cmd := m.goHome()
+		return m, cmd
 	case "n", "N", "esc":
 		m.showLeaveConfirm = false
 	}
@@ -267,7 +269,8 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case lobby.EventLobbyClosed:
 		m.unsubscribe()
-		return m, m.goHome()
+		cmd := m.goHome()
+		return m, cmd
 	case lobby.EventGameStarted:
 		engine := msg.Engine
 		if engine == nil {
@@ -288,7 +291,8 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 		self := views.SessionPlayer(m.global)
 		if !m.currentLobby.Leader().Equal(self) && !slices.ContainsFunc(m.currentLobby.Guests(), self.Equal) {
 			m.unsubscribe()
-			return m, m.goHome()
+			cmd := m.goHome()
+			return m, cmd
 		}
 		m.isPrivate = m.currentLobby.IsPrivate()
 		m.isRanked = m.currentLobby.IsRanked()
