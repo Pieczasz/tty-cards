@@ -390,7 +390,7 @@ func TestHandleKey_DispatchesEveryAdvertisedAction(t *testing.T) {
 			m.Base.MyTurn = false
 
 			_, _ = m.Update(tea.KeyPressMsg{Code: rune(tc.key[0]), Text: tc.key})
-			require.NoError(t, m.lastActionErr, "off turn the key never reaches the engine")
+			require.NoError(t, m.ActionErr, "off turn the key never reaches the engine")
 
 			// With no engine bound, submit stops at the nil check - which is the same
 			// guard that keeps a key from acting for a seat this session does not hold.
@@ -452,6 +452,8 @@ func TestHandleEscape_AsksThenLeavesTheTableWhenNoPromptIsOpen(t *testing.T) {
 	m := tableOf(120, 50, 3)
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.Nil(t, cmd, "esc asks before forfeiting")
+	assert.Contains(t, m.View().Content, "Leave and forfeit this game?",
+		"the question has to be on screen, or the next key forfeits blind")
 	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	assert.NotNil(t, cmd)
 }

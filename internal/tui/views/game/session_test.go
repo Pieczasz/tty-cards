@@ -48,6 +48,9 @@ func TestHandleFrame_DropsWhatAnotherSessionArmed(t *testing.T) {
 	for name, msg := range map[string]tea.Msg{
 		"an event":     EventMsg{Event: game.Event{Type: game.EventTurnAdvanced}, Source: theirs},
 		"a clock tick": ClockTickMsg{Source: theirs},
+		// Every view arms its first tick through Session.ClockTick, so an untagged one
+		// can only be stale.
+		"an untagged clock tick": ClockTickMsg{},
 	} {
 		cmd, handled := s.HandleFrame(msg, sync, nil)
 		assert.True(t, handled, "%s is still consumed", name)

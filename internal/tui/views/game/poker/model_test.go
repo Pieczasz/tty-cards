@@ -251,5 +251,5 @@ func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
 	assert.Equal(t, uint(30), m.raiseAmount, "nothing past what the opponent can call")
 
 	_, _ = m.confirm()
-	require.NoError(t, m.lastActionErr, "the engine accepts the amount the view offered")
+	require.NoError(t, m.ActionErr, "the engine accepts the amount the view offered")
 }

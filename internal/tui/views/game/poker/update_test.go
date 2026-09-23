@@ -306,7 +306,7 @@ func TestNew_HealthyTableReportsNoError(t *testing.T) {
 	engine, m := startedTable(t)
 	t.Cleanup(engine.Close)
 
-	require.NoError(t, m.lastActionErr, "a successful subscription is not an error")
+	require.NoError(t, m.ActionErr, "a successful subscription is not an error")
 	assert.NotNil(t, m.Events, "and the feed is live")
 }
 
@@ -400,7 +400,7 @@ func TestSubmit(t *testing.T) {
 		t.Cleanup(engine.Close)
 		heroOnTurn(t, engine, m)
 
-		m.lastActionErr = assert.AnError
+		m.ActionErr = assert.AnError
 		m.raising = true
 
 		// Which of the two is free depends on where the button landed.
@@ -413,7 +413,7 @@ func TestSubmit(t *testing.T) {
 		assert.Nil(t, cmd)
 		// Submit returns nil only when the engine applied the move, so a clear
 		// error line is also the proof the action reached the engine.
-		require.NoError(t, m.lastActionErr, "a successful move clears the previous complaint")
+		require.NoError(t, m.ActionErr, "a successful move clears the previous complaint")
 		assert.False(t, m.raising, "and closes the raise prompt")
 	})
 
@@ -427,7 +427,7 @@ func TestSubmit(t *testing.T) {
 		_, cmd := m.submit(logic.ActionRaiseTo{Amount: 1})
 
 		assert.Nil(t, cmd)
-		require.Error(t, m.lastActionErr, "the player has to be told why nothing happened")
+		require.Error(t, m.ActionErr, "the player has to be told why nothing happened")
 		assert.Equal(t, street, m.street, "and the table has not moved")
 	})
 
@@ -436,12 +436,12 @@ func TestSubmit(t *testing.T) {
 		engine, m := startedTable(t)
 		t.Cleanup(engine.Close)
 		m.Base.MyTurn = false
-		m.lastActionErr = nil
+		m.ActionErr = nil
 
 		_, cmd := m.submit(logic.ActionFold{})
 
 		assert.Nil(t, cmd)
-		require.NoError(t, m.lastActionErr, "there is nothing to report, the key is simply not ours")
+		require.NoError(t, m.ActionErr, "there is nothing to report, the key is simply not ours")
 		assert.False(t, m.handComplete, "and the hand is untouched")
 	})
 }

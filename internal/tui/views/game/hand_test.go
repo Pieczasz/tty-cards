@@ -201,7 +201,8 @@ func TestRenderWaitingScreen_FitsTheTerminal(t *testing.T) {
 
 func TestClockTick_StartsBeforeADeadlineIsKnown(t *testing.T) {
 	t.Parallel()
-	assert.NotNil(t, ClockTick())
+	s := &Session{}
+	assert.NotNil(t, s.ClockTick())
 }
 
 // A username is the one string on a table that a player chooses, so the belt-and-

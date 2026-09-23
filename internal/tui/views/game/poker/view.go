@@ -16,6 +16,9 @@ import (
 )
 
 func (m *Model) View() tea.View {
+	if screen, ok := m.LeaveConfirmScreen(); ok {
+		return tea.NewView(screen)
+	}
 	if m.handComplete || m.matchComplete {
 		return tea.NewView(styles.Clamp(m.Global.Width, m.Global.Height, m.renderHandOver()))
 	}
@@ -322,7 +325,7 @@ func (m *Model) renderHero(compact bool) string {
 	status := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
 	actions := m.renderActionBar()
 
-	block := gameview.RenderHeroBand(m.Global.Theme, m.lastActionErr, seatBlock, status, actions)
+	block := gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, seatBlock, status, actions)
 	if !compact {
 		return lg.NewStyle().MarginBottom(1).Render(block)
 	}

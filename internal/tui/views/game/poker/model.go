@@ -45,7 +45,6 @@ type Model struct {
 	handNumber    int
 	handsTotal    int
 	winnerName    string
-	lastActionErr error
 
 	// raiseMin..raiseMax is what logic.RaiseBounds allows the hero; raiseOK is false
 	// when there is no raise to make at all.
@@ -58,14 +57,15 @@ type Model struct {
 
 // New creates a Hold'em TUI view bound to the session player.
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
-	session, err := gameview.NewSession(global, engine, "poker")
-	m := &Model{Session: session, lastActionErr: err}
+	// A subscribe failure is kept on the Session's ActionErr, which the hero band shows.
+	session, _ := gameview.NewSession(global, engine, "poker")
+	m := &Model{Session: session}
 	m.syncState()
 	return m
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), gameview.ClockTick())
+	return tea.Batch(m.Listen(), m.ClockTick())
 }
 
 func (m *Model) syncState() {

@@ -12,7 +12,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The table has moved on, so a complaint about a move the player tried against
 	// the old one has nothing left to refer to. Only on an event: clearing it on the
 	// clock tick too would wipe the message inside a second of it being shown.
-	clearErr := func() { m.lastActionErr = nil }
+	clearErr := func() { m.ActionErr = nil }
 	if cmd, handled := m.HandleFrame(msg, m.syncState, clearErr); handled {
 		return m, cmd
 	}
@@ -135,12 +135,10 @@ func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if err := m.Submit(action); err != nil {
-		m.lastActionErr = err
 		return m, nil
 	}
 	// Re-sync immediately so the turn indicator and actions reflect the applied
 	// move without waiting for the broadcast event to round-trip.
-	m.lastActionErr = nil
 	m.raising = false
 	m.syncState()
 	return m, nil

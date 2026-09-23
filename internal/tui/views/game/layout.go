@@ -385,11 +385,6 @@ func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) 
 	return tea.Tick(interval, func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
 }
 
-// ClockTick is Session.ClockTick for a view that has not switched to it. Its tick
-// carries no Source, so a stale one cannot be told apart from a live one; prefer the
-// method.
-func ClockTick() tea.Cmd { return clockTickFrom(nil, 0, false) }
-
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
 	content := "Waiting for game to start..."
 	if phase == game.Finished {

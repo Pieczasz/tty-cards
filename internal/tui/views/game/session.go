@@ -115,7 +115,7 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func(), onEvent func()) (tea.Cmd
 		}
 		return s.handleEvent(msg.Event, sync, onEvent), true
 	case ClockTickMsg:
-		if msg.Source != nil && msg.Source != s.Events {
+		if msg.Source != s.Events {
 			return nil, true
 		}
 		return s.handleClockTick(sync), true
