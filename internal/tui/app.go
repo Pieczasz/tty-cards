@@ -68,16 +68,20 @@ func Model(deps ModelDependencies) *router.Router {
 
 	registerGameViews(r)
 
-	// A player who reconnected inside the disconnect grace window still occupies a
-	// lobby seat; start them there (the lobby view routes onward into a running
-	// game) instead of at a home screen that pretends nothing is happening.
-	if l := deps.LobbyManager.ResumePlayer(views.SessionPlayer(global)); l != nil {
-		r.SetInitialRoute(router.RouteLobby, l)
-	}
-
 	// No Goto here: the router builds its first view in Init, so that view's Init
 	// runs exactly once. See Router.Init.
 	return r
+}
+
+// ResumeSeat cancels the disconnect grace holding this session's seat, if any, and
+// starts the session there (the lobby view routes onward into a running game)
+// instead of at a home screen that pretends nothing is happening. It is separate
+// from Model because the ssh layer may only call it once the session owns its
+// tracker slot, and must run before the router's Init.
+func ResumeSeat(r *router.Router) {
+	if l := r.Global.LobbyManager.ResumePlayer(views.SessionPlayer(r.Global)); l != nil {
+		r.SetInitialRoute(router.RouteLobby, l)
+	}
 }
 
 func registerGameViews(r *router.Router) {

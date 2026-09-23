@@ -171,6 +171,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 		GameRegistry: registry,
 	})
 	r.Global.Width, r.Global.Height = 120, 50
+	ResumeSeat(r)
 	r.Init()
 	t.Cleanup(r.Close)
 

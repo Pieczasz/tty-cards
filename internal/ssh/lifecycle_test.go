@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
@@ -147,6 +148,43 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	tracker.Disconnect(testutil.UID(2))
 	_, err = tracker.Connect(testutil.UID(3), nil)
 	require.NoError(t, err, "capacity frees with the seat")
+}
+
+// ReleaseWith is what orders an old session's teardown before a reconnect: while
+// the teardown's DisconnectPlayer runs, the reconnect's Connect has to wait, or it
+// resumes a seat the teardown then puts on a grace timer.
+func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(0)
+	user := testutil.UID(21)
+	gen, err := tracker.Connect(user, nil)
+	require.NoError(t, err)
+
+	inTeardown, finish := make(chan struct{}), make(chan struct{})
+	released := make(chan bool, 1)
+	go func() {
+		released <- tracker.ReleaseWith(user, gen, func() { close(inTeardown); <-finish })
+	}()
+	<-inTeardown
+
+	reconnected := make(chan struct{})
+	go func() {
+		_, _ = tracker.Connect(user, nil)
+		close(reconnected)
+	}()
+	select {
+	case <-reconnected:
+		t.Fatal("the reconnect ran while the old session was still tearing down")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finish)
+	<-reconnected
+	assert.True(t, <-released)
+	assert.Equal(t, 1, tracker.Count(), "the reconnect's slot survived the teardown")
+
+	ran := false
+	assert.False(t, tracker.ReleaseWith(user, gen, func() { ran = true }), "a stale generation freed the slot")
+	assert.False(t, ran, "and ran its teardown against the live session's seat")
 }
 
 // panicModel panics from whichever method the test asks for.

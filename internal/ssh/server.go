@@ -172,6 +172,23 @@ func (t *SessionTracker) Release(userID uuid.UUID, gen uint64) bool {
 	return true
 }
 
+// ReleaseWith runs fn and then frees the slot, both under the tracker lock, only if
+// gen is still the live generation. Holding the lock across fn is the point: a
+// reconnect's Connect waits for the old session's teardown to finish, so the
+// teardown can never act on a seat the new session has already resumed. That makes
+// the lock order tracker, then lobby manager; nothing takes them the other way.
+func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.active[userID].gen != gen {
+		return false
+	}
+	fn()
+	delete(t.active, userID)
+	observability.SSHSessionsActive.Add(-1)
+	return true
+}
+
 // Owns reports whether gen is still the live generation for userID.
 func (t *SessionTracker) Owns(userID uuid.UUID, gen uint64) bool {
 	t.mu.Lock()
@@ -370,6 +387,10 @@ func sessionModel(
 			return nil, nil
 		}
 		observability.SSHSession(traceCtx, "accepted")
+		// Only once the slot is ours: a refused session must not cancel the grace
+		// timer holding this player's seat, and a displaced one has finished its
+		// teardown by now, so any timer it armed is there to cancel.
+		tui.ResumeSeat(model)
 
 		st.owns = true
 		st.user = user
@@ -632,22 +653,21 @@ func closeSessionModel(s ssh.Session) {
 	}
 }
 
-// releaseSession gives up the seat before the tracker slot. The other order lets a
-// fast reconnect take the slot and then have its lobby seat torn down by the old
-// session's LeaveLobby. A displaced session (stale generation) must touch neither:
-// the replacement still occupies the seat.
+// releaseSession gives up the seat and the tracker slot as one step under the
+// tracker lock. Separately, a reconnect could take the slot and resume the seat in
+// between, and this session's DisconnectPlayer would then arm a grace timer on the
+// seat the replacement is playing. A displaced session (stale generation) touches
+// neither.
 func releaseSession(s ssh.Session, deps ServerDependencies, tracker *SessionTracker) {
 	st, ok := lookupSessionState(s)
 	if !ok || !st.owns || st.user == nil {
 		return
 	}
-	if !tracker.Owns(st.user.ID, st.gen) {
-		return
-	}
 	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
 	// for the grace window, so a reconnect resumes the match instead of forfeiting.
-	deps.LobbyManager.DisconnectPlayer(lobby.NewPlayer(st.user))
-	tracker.Release(st.user.ID, st.gen)
+	tracker.ReleaseWith(st.user.ID, st.gen, func() {
+		deps.LobbyManager.DisconnectPlayer(lobby.NewPlayer(st.user))
+	})
 }
 
 // allowRegistration answers whether this network may mint another account. An
