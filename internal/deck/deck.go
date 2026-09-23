@@ -16,7 +16,6 @@ func New(cards []Card) *Pile {
 	}
 }
 
-// Shuffle uses crypto/rand for unpredictable deal order in ranked play.
 // Shuffle is a uniform permutation from a stdlib shuffle seeded once per call from
 // crypto/rand, so the order is unpredictable to a player who has seen every previous
 // deal. It cannot fail: since Go 1.24 crypto/rand.Read never returns an error (it

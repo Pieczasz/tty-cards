@@ -44,7 +44,7 @@ type State struct {
 
 	HandNumber int
 
-	// TurnsThisHand counts completed draw-and-discard turns, bounded by MaxHandTurns.
+	// TurnsThisHand counts completed draw-and-discard turns, bounded by maxHandTurns.
 	TurnsThisHand int
 
 	// CumulativeScores: higher is better. Standings sorts descending.

@@ -23,7 +23,7 @@ const (
 	WildDrawFour = deck.WildDrawFour
 )
 
-// InitialDeck builds the standard 108-card Uno deck.
+// initialDeck builds the standard 108-card Uno deck.
 func initialDeck() []deck.Card {
 	colors := []deck.Suit{ColorRed, ColorYellow, ColorGreen, ColorBlue}
 	cards := make([]deck.Card, 0, 108)
