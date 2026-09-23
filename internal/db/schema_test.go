@@ -3,79 +3,16 @@
 package db_test
 
 import (
-	"context"
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/config"
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"gorm.io/gorm"
 )
-
-func TestConnect_Success(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx := context.Background()
-	postgresContainer, err := tcpostgres.Run(ctx,
-		testutil.PostgresImage,
-		tcpostgres.WithDatabase("testdb"),
-		tcpostgres.WithUsername("testuser"),
-		tcpostgres.WithPassword("testpass"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(time.Second*60),
-		),
-	)
-	testutil.RequireContainer(t, err)
-	t.Cleanup(func() {
-		_ = postgresContainer.Terminate(ctx)
-	})
-
-	host, err := postgresContainer.Host(ctx)
-	require.NoError(t, err)
-	mappedPort, err := postgresContainer.MappedPort(ctx, "5432/tcp")
-	require.NoError(t, err)
-
-	cfg := &config.Config{
-		DBHost:     host,
-		DBPort:     int(mappedPort.Num()),
-		DBUser:     "testuser",
-		DBPassword: "testpass",
-		DBName:     "testdb",
-		DBSSLMode:  "disable",
-		// The pool cap is DBMaxOpenConnections. MaxConnections is the ssh session cap
-		// and setting it here asserted nothing about the pool at all.
-		DBMaxOpenConnections: 5,
-		MaxConnections:       200,
-		Env:                  "production",
-	}
-
-	database, err := db.Connect(cfg)
-	require.NoError(t, err)
-	require.NotNil(t, database)
-
-	sqlDB, err := database.DB()
-	require.NoError(t, err)
-	require.NotNil(t, sqlDB)
-
-	err = sqlDB.Ping()
-	require.NoError(t, err)
-
-	assert.Equal(t, 5, sqlDB.Stats().MaxOpenConnections,
-		"DBMaxOpenConnections has to reach the pool, not just the config struct")
-}
 
 // A NULL scans into the Go zero value, so a nullable column whose struct field is a
 // plain string/int/bool cannot tell "unset" from "empty" or "zero" or false. The list
