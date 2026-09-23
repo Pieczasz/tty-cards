@@ -200,13 +200,11 @@ func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth := gameview.HandWidth(m.Global.Width)
 	handRows := gameview.HandRows(m.Global.Height)
-	var handView string
+	var staged map[int]struct{}
 	if m.phase == logic.PhasePassing {
-		handView = gameview.RenderHandMulti(m.Global.Theme, m.Base.Hand, m.passIndices(),
-			m.Selected, handWidth, handRows)
-	} else {
-		handView = gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, false, handWidth, handRows)
+		staged = m.passIndices()
 	}
+	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, staged, handWidth, handRows)
 
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
 }

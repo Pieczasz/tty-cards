@@ -171,3 +171,18 @@ func TestRenderSuitPicker_OffersEverySuit(t *testing.T) {
 	}
 	assert.Contains(t, out, "Pick a suit")
 }
+
+// Selection is suppressed, not just unhighlighted: while the picker is open the hand
+// cursor is frozen, and a highlight on a card the player cannot move reads as live.
+func TestRenderPlayerSection_ThePickerDropsTheHandHighlight(t *testing.T) {
+	t.Parallel()
+
+	m := viewAt(120, 50, "bob")
+	m.Selected = 3
+	m.suit.Open = true
+	picking := m.renderPlayerSection()
+
+	m.suit.Open = false
+	m.Selected = -1
+	assert.Equal(t, m.renderPlayerSection(), picking)
+}

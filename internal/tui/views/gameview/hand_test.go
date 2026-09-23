@@ -44,8 +44,8 @@ func TestRenderHand_StaysInsideItsBudget(t *testing.T) {
 					t.Parallel()
 					hand := testHand(size)
 
-					out := RenderHand(theme, hand, 2, false, width, rows)
-					multi := RenderHandMulti(theme, hand, map[int]struct{}{0: {}}, 1, width, rows)
+					out := RenderHand(theme, hand, 2, nil, width, rows)
+					multi := RenderHand(theme, hand, 1, map[int]struct{}{0: {}}, width, rows)
 
 					assert.LessOrEqual(t, lg.Width(out), width)
 					assert.LessOrEqual(t, lg.Width(multi), width)
@@ -66,8 +66,8 @@ func TestRenderHand_AnEmptyHandDrawsNothing(t *testing.T) {
 	t.Parallel()
 
 	theme := styles.NewTheme(true)
-	assert.Empty(t, RenderHand(theme, nil, 0, false, 80, 0))
-	assert.Empty(t, RenderHandMulti(theme, nil, nil, 0, 80, 0))
+	assert.Empty(t, RenderHand(theme, nil, 0, nil, 80, 0))
+	assert.Empty(t, RenderHand(theme, nil, 0, map[int]struct{}{}, 80, 0))
 }
 
 // FansHand is what a decorator (Uno's colour row) asks instead of guessing, so it has
@@ -87,7 +87,7 @@ func TestFansHand_AgreesWithWhatRenderHandDraws(t *testing.T) {
 					hand := testHand(size)
 					// Whether the renderer fanned is not a guess: it either drew the
 					// fan or fell back to the very strip components exposes.
-					drewTheStrip := RenderHand(theme, hand, 0, false, width, rows) ==
+					drewTheStrip := RenderHand(theme, hand, 0, nil, width, rows) ==
 						components.RenderStrip(theme, hand, nil, 0, width)
 					fanned := size > 0 && !drewTheStrip
 
@@ -97,19 +97,6 @@ func TestFansHand_AgreesWithWhatRenderHandDraws(t *testing.T) {
 			}
 		}
 	}
-}
-
-// Selection is suppressed, not just unhighlighted: while a picker is open the cursor
-// is frozen, and a highlight on a card the player cannot move reads as a live cursor.
-func TestRenderHand_DisablingSelectionDropsTheHighlight(t *testing.T) {
-	t.Parallel()
-
-	theme := styles.NewTheme(true)
-	hand := testHand(6)
-
-	disabled := RenderHand(theme, hand, 3, true, HandWidth(120), 0)
-	none := RenderHand(theme, hand, -1, false, HandWidth(120), 0)
-	assert.Equal(t, none, disabled)
 }
 
 // The three breakpoints are read by every game view to decide whether to draw card art
@@ -286,7 +273,7 @@ func TestRenderBands_KeepsTheKeyLineAtEverySize(t *testing.T) {
 func BenchmarkRenderBands(b *testing.B) {
 	g := testContext(120, 50)
 	theme := g.Theme
-	hand := RenderHand(theme, testHand(13), 4, false, HandWidth(120), 0)
+	hand := RenderHand(theme, testHand(13), 4, nil, HandWidth(120), 0)
 	top := strings.Repeat("seat  ", 4)
 	mid := strings.Repeat("table\n", 10)
 

@@ -38,30 +38,22 @@ func FansHand(handSize, maxWidth, maxRows int) bool {
 // forty-card Uno hand on a short terminal costs the table a row or two, which the frame
 // absorbs by clamping, and that is the better trade - cards cut out of a player's own
 // hand are cards they cannot play.
+//
+// staged nil is a single selection: the card under cursor is lifted, and a negative
+// cursor lifts nothing. A non-nil staged is a multi-card move (hearts' pass): the staged
+// cards are lifted and starred, even when none are yet, and cursor only focuses.
 func RenderHand(
 	t styles.Theme,
 	hand []deck.Card,
-	selectedIdx int,
-	disableSelection bool,
+	cursor int,
+	staged map[int]struct{},
 	maxWidth, maxRows int,
 ) string {
-	selected := selectedIdx
-	if disableSelection {
-		selected = -1
+	picked := staged
+	if staged == nil {
+		picked = components.Selection(cursor)
 	}
-	// The strip marks a single selection with the cursor, not as staged.
-	return renderHand(t, hand, components.Selection(selected), nil, selected, maxWidth, maxRows)
-}
-
-// RenderHandMulti is RenderHand for multi-select (Hearts pass phase). selected marks
-// which cards are currently staged for the pass; cursor highlights the focused index.
-func RenderHandMulti(
-	t styles.Theme,
-	hand []deck.Card,
-	selected map[int]struct{},
-	cursor, maxWidth, maxRows int,
-) string {
-	return renderHand(t, hand, selected, selected, cursor, maxWidth, maxRows)
+	return renderHand(t, hand, picked, staged, cursor, maxWidth, maxRows)
 }
 
 // renderHand draws the fan with picked cards lifted and an index row under it, or the

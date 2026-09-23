@@ -58,7 +58,11 @@ func (m *model) renderCurrentSuitIndicator() string {
 
 func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
-	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.suit.Open,
+	cursor := m.Selected
+	if m.suit.Open {
+		cursor = -1 // the picker has the keys, so no card is lifted
+	}
+	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, cursor, nil,
 		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
 
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
