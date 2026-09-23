@@ -56,9 +56,23 @@ func WithTurnTimeout(d time.Duration) EngineOption {
 	}
 }
 
+// NewEngine seats copies of players, not the values themselves: a lobby hands the same
+// *Player to every engine it starts, and shared seats would let the next engine deal
+// into hands a finished one's viewers still read under a different lock. Nothing
+// compares seats by pointer (the lobby uses Player.Equal), and Ratings stays shared
+// because nothing writes it once the seat is taken. NewState keeps aliasing the
+// values, which is what rules tests building a State by hand rely on.
 func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...EngineOption) *Engine {
+	seats := make([]*Player, len(players))
+	for i, p := range players {
+		if p != nil {
+			seat := *p
+			seat.Cards = nil
+			seats[i] = &seat
+		}
+	}
 	e := &Engine{
-		state: NewState(rules, players, cards),
+		state: NewState(rules, seats, cards),
 		// The argument is the subscriber cap, not a buffer size (that is fixed):
 		// headroom above the seat count for non-player subscribers (the
 		// ranked-finalize watcher) and for a reconnect overlapping the seat it

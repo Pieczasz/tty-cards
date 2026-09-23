@@ -1,8 +1,11 @@
 package game
 
 import (
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/Pieczasz/terminal-card/internal/deck"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -129,4 +132,33 @@ func TestEngine_TurnClock_OneMissPerSeatTurn(t *testing.T) {
 	fireTurnTimeout(t, engine)
 	assert.True(t, engine.IsFinished(), "the third absent turn takes the seat")
 	assert.Zero(t, engine.MissedTurns(first), "reaped with the seat")
+}
+
+// A lobby hands the same *Player values to every engine it starts. Shared, the next
+// engine deals into the seats a finished engine's viewers are still reading, under a
+// different lock: a data race the -race run catches.
+func TestNewEngine_EnginesNeverShareSeats(t *testing.T) {
+	t.Parallel()
+	players := []*Player{{ID: "a"}, {ID: "b"}}
+
+	finished := NewEngine(bindRules{}, players, deck.StandardDeck())
+	t.Cleanup(finished.Close)
+	require.NoError(t, finished.Start())
+	finished.RemovePlayer("b")
+	require.True(t, finished.IsFinished())
+
+	next := NewEngine(bindRules{}, players, deck.StandardDeck())
+	t.Cleanup(next.Close)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 100 {
+			_, _, _ = finished.Frame("a", nil)
+		}
+	})
+	require.NoError(t, next.Start())
+	wg.Wait()
+
+	assert.Nil(t, players[0].Cards, "the caller's seat is not the engine's")
+	next.WithState(func(s *State) { assert.NotSame(t, players[0], s.Players[0]) })
 }
