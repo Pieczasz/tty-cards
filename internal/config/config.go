@@ -24,7 +24,10 @@ import (
 // healthcheck runs without a loaded Config and has to agree with it.
 const DefaultAPIPort = 6970
 
-const envProduction = "production"
+const (
+	envProduction  = "production"
+	envDevelopment = "development"
+)
 
 // Config is the whole of the server's configuration, as Load reads it.
 type Config struct {
@@ -68,6 +71,10 @@ type Config struct {
 
 // IsProduction reports whether the production-only checks and defaults apply.
 func (c *Config) IsProduction() bool { return c.Env == envProduction }
+
+// IsDevelopment reports a local development run, the only one that logs every SQL
+// statement: staging is meant to look like production.
+func (c *Config) IsDevelopment() bool { return c.Env == envDevelopment }
 
 // envReader parses env values and keeps every failure, so one boot reports every
 // bad variable instead of the first. An unset or empty variable means the fallback.
@@ -154,10 +161,10 @@ func (r *envReader) level(key string) slog.Level {
 // an error: falling back to development turned a typo like ENV=prod into a production
 // server with every production check off.
 func resolveEnv() (string, error) {
-	env := getEnv("ENV", "development")
+	env := getEnv("ENV", envDevelopment)
 	switch env {
 	case envProduction:
-	case "development", "staging":
+	case envDevelopment, "staging":
 		_ = godotenv.Load()
 	default:
 		return "", fmt.Errorf("invalid ENV %q: want production, staging or development", env)

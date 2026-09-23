@@ -551,3 +551,17 @@ func TestLoad_LogLevel(t *testing.T) {
 		})
 	}
 }
+
+// Only a local run logs every SQL statement; staging is meant to look like production.
+func TestConfig_EnvPredicates(t *testing.T) {
+	t.Parallel()
+	for env, want := range map[string][2]bool{
+		"development": {true, false},
+		"staging":     {false, false},
+		"production":  {false, true},
+	} {
+		c := &config.Config{Env: env}
+		assert.Equal(t, want[0], c.IsDevelopment(), env)
+		assert.Equal(t, want[1], c.IsProduction(), env)
+	}
+}
