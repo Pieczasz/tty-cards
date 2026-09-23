@@ -15,6 +15,8 @@ import (
 
 	"uuid"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,47 +24,60 @@ import (
 
 func TestUpdate_Navigation(t *testing.T) {
 	t.Parallel()
-	m := model{
-		Base: gameview.BaseState{
-			Hand: []deck.Card{
-				{Rank: deck.Two, Suit: logic.ColorRed},
-				{Rank: deck.Three, Suit: logic.ColorBlue},
-				{Rank: deck.Four, Suit: logic.ColorGreen},
-			},
-		}}
-
-	msg := tuitest.Key("l")
-	newM, _ := m.Update(msg)
-	assert.Equal(t, 1, newM.(*model).Selected)
-
-	msg = tuitest.Key("h")
-	newM, _ = newM.Update(msg)
-	assert.Equal(t, 0, newM.(*model).Selected)
+	tests := []struct {
+		name       string
+		keys       []string
+		wantCursor int
+	}{
+		{name: "right", keys: []string{"l"}, wantCursor: 1},
+		{name: "right then left", keys: []string{"l", "h"}, wantCursor: 0},
+		{name: "left stops at the first card", keys: []string{"h"}, wantCursor: 0},
+		{name: "right stops at the last card", keys: []string{"l", "l", "l"}, wantCursor: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var m tea.Model = &model{Base: gameview.BaseState{Hand: []deck.Card{{Rank: deck.Two, Suit: logic.ColorRed}, {Rank: deck.Three, Suit: logic.ColorBlue}, {Rank: deck.Four, Suit: logic.ColorGreen}}}}
+			for _, k := range tt.keys {
+				m, _ = m.Update(tuitest.Key(k))
+			}
+			assert.Equal(t, tt.wantCursor, m.(*model).Selected)
+		})
+	}
 }
 
+// The picker is a two-by-two grid: left and right step by one, up and down by two.
 func TestUpdate_ColorPicking(t *testing.T) {
 	t.Parallel()
-	m := model{color: colorPicker}
-	m.color.Show()
-
-	msg := tuitest.Key("l")
-	newM, _ := m.Update(msg)
-	assert.Equal(t, 1, newM.(*model).color.Cursor)
-
-	msg = tuitest.Key("j")
-	newM, _ = newM.Update(msg)
-	assert.Equal(t, 3, newM.(*model).color.Cursor)
+	tests := []struct {
+		name       string
+		keys       []string
+		wantCursor int
+	}{
+		{name: "right", keys: []string{"l"}, wantCursor: 1},
+		{name: "down", keys: []string{"j"}, wantCursor: 2},
+		{name: "right then down", keys: []string{"l", "j"}, wantCursor: 3},
+		{name: "down then up", keys: []string{"j", "k"}, wantCursor: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := &model{color: colorPicker}
+			m.color.Show()
+			var tm tea.Model = m
+			for _, k := range tt.keys {
+				tm, _ = tm.Update(tuitest.Key(k))
+			}
+			assert.Equal(t, tt.wantCursor, tm.(*model).color.Cursor)
+		})
+	}
 }
 
 // tableOnTurn seats the view as whichever player the engine put on turn, so the
 // test does not depend on where the deal landed.
 func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-		{ID: testutil.SeatID(3), UserID: testutil.UID(3), Name: "carol"},
-	}
+	players := testutil.NamedPlayers("alice", "bob", "carol")
 	engine := game.NewEngine(&logic.Rules{}, players, (&logic.Rules{}).InitialDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
