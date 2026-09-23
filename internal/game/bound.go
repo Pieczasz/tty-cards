@@ -14,6 +14,8 @@ type BoundEngine struct {
 	playerID string
 }
 
+// Bind is playerID's handle on engine, or nil for a nil engine. Every BoundEngine
+// method is safe on nil and reports that there is no game.
 func Bind(engine *Engine, playerID string) *BoundEngine {
 	if engine == nil {
 		return nil
@@ -21,6 +23,7 @@ func Bind(engine *Engine, playerID string) *BoundEngine {
 	return &BoundEngine{engine: engine, playerID: playerID}
 }
 
+// PlayerID is the seat this handle acts as.
 func (b *BoundEngine) PlayerID() string {
 	if b == nil {
 		return ""
@@ -37,6 +40,7 @@ func (b *BoundEngine) Subscribe() (<-chan Event, error) {
 	return b.engine.Subscribe()
 }
 
+// Unsubscribe leaves the feed Subscribe joined.
 func (b *BoundEngine) Unsubscribe(events <-chan Event) {
 	if b == nil || events == nil {
 		return
@@ -44,6 +48,7 @@ func (b *BoundEngine) Unsubscribe(events <-chan Event) {
 	b.engine.Unsubscribe(events)
 }
 
+// Submit plays action as this handle's player.
 func (b *BoundEngine) Submit(action Action) error {
 	if b == nil {
 		return errNoGame

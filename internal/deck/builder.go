@@ -1,5 +1,6 @@
 package deck
 
+// StandardDeck is the 52 cards of a standard deck, no jokers, in suit then rank order.
 func StandardDeck() []Card {
 	cards := make([]Card, 0, 52)
 	for s := Spades; s <= Clubs; s++ {

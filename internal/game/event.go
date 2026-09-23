@@ -1,11 +1,7 @@
 package game
 
-import "github.com/Pieczasz/terminal-card/internal/deck"
-
-type Action interface {
-	Name() string
-}
-
+// Event is one message on a table's feed. PlayerID names the seat it is about, when
+// there is one: the actor, the winner, or the seat that timed out, idled or left.
 type Event struct {
 	Type     EventType
 	PlayerID string
@@ -13,6 +9,7 @@ type Event struct {
 	Reason EndReason
 }
 
+// EventType says what happened at the table.
 type EventType uint8
 
 const (
@@ -84,22 +81,4 @@ func (t EventType) String() string {
 	case EventUnknown:
 	}
 	return "unknown"
-}
-
-type PlayerSnapshot struct {
-	ID       string
-	Username string
-	HandSize int
-}
-
-type StateSnapshot struct {
-	Phase Phase
-	// CurrentPlayer is a display name; CurrentPlayerID is what identifies the seat.
-	// Two players can share a name, so never decide whose turn it is from the former.
-	CurrentPlayer   string
-	CurrentPlayerID string
-	TopDiscard      deck.Card
-	DeckSize        int
-	Players         []PlayerSnapshot
-	Winner          string
 }

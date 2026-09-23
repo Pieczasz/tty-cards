@@ -1,4 +1,6 @@
-// Package game holds the rules engine: state, seats, turns and the turn clock.
+// Package game is the rules engine: the Engine that owns a table's State under one
+// lock, the Rules contract a card game implements, the turn clock, and the event feed
+// views read. It knows nothing about the database, the TUI or routes.
 package game
 
 import (
@@ -19,18 +21,18 @@ import (
 // not a player mistake.
 var ErrInvalidState = errors.New("invalid state type")
 
-// errStaleTurn is an auto-play that lost its turn between resolveTurnTimeout dropping
-// the lock and the submit re-acquiring it. Internal: a non-event, not a failure.
-var errStaleTurn = errors.New("turn already settled")
-
 var (
+	// errClosed is any call on an engine Close already ended.
 	errClosed = errors.New("game is closed")
+	// errNoGame is a call on a nil BoundEngine.
 	errNoGame = errors.New("no active game")
+	// errStaleTurn is an auto-play that lost its turn between resolveTurnTimeout
+	// dropping the lock and the submit re-acquiring it: a non-event, not a failure.
+	errStaleTurn = errors.New("turn already settled")
+	// errActionRefused is an auto-play ValidateAction refused: a rules bug, logged and
+	// re-armed, where an apply failure has already ended the game.
+	errActionRefused = errors.New("auto-play refused")
 )
-
-// errActionRefused is an auto-play ValidateAction refused: a rules bug, logged and
-// re-armed, where an apply failure has already ended the game.
-var errActionRefused = errors.New("auto-play refused")
 
 // Engine owns one mutex covering its clock fields and the State: they are always read
 // together, and a second lock would only add orderings to get wrong.
@@ -58,8 +60,10 @@ type turnClock struct {
 	missCharged bool
 }
 
+// EngineOption configures NewEngine.
 type EngineOption func(*Engine)
 
+// WithTurnTimeout sets the default turn length; zero or less disables the clock.
 func WithTurnTimeout(d time.Duration) EngineOption {
 	return func(e *Engine) {
 		e.clock.timeout = d
@@ -100,6 +104,8 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 	return e
 }
 
+// Broadcaster is the table's raw feed. Views use Subscribe, which cannot Broadcast or
+// Close it.
 func (e *Engine) Broadcaster() *broadcaster.Broadcaster[Event] {
 	return e.broadcaster
 }
@@ -133,6 +139,7 @@ func (e *Engine) WithState(fn func(state *State)) {
 	fn(e.state)
 }
 
+// Snapshot is the table's public state at this moment.
 func (e *Engine) Snapshot() StateSnapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -204,6 +211,7 @@ func (e *Engine) CurrentPlayerID() string {
 	return current.ID
 }
 
+// IsFinished reports whether the table has ended, for any reason.
 func (e *Engine) IsFinished() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -472,6 +480,8 @@ func (e *Engine) endGameLocked(winner *Player, reason EndReason) {
 	})
 }
 
+// RemovePlayer takes playerID's seat, running the rules' PlayerLeaveHandler, and ends
+// the table when the leave decides it. An unknown seat or a finished table is a no-op.
 func (e *Engine) RemovePlayer(playerID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -6,10 +6,13 @@ import (
 	"slices"
 )
 
+// Pile is an ordered stack of cards - a stock or a discard - drawn from the top, the
+// end of the slice.
 type Pile struct {
 	cards []Card
 }
 
+// New is a pile of a copy of cards, the last one on top.
 func New(cards []Card) *Pile {
 	return &Pile{
 		cards: slices.Clone(cards),
@@ -29,6 +32,7 @@ func (p *Pile) Shuffle() {
 	})
 }
 
+// Peek is the top card without drawing it; false on an empty pile.
 func (p *Pile) Peek() (Card, bool) {
 	if len(p.cards) < 1 {
 		return Card{}, false
@@ -36,6 +40,7 @@ func (p *Pile) Peek() (Card, bool) {
 	return p.cards[len(p.cards)-1], true
 }
 
+// Draw takes the top card; false on an empty pile.
 func (p *Pile) Draw() (Card, bool) {
 	if len(p.cards) < 1 {
 		return Card{}, false
@@ -46,6 +51,8 @@ func (p *Pile) Draw() (Card, bool) {
 	return topCard, true
 }
 
+// DrawNCards takes the top cardsToDraw cards, topmost first. Asking for more than the
+// pile holds draws nothing and answers false.
 func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
 	if cardsToDraw < 0 || cardsToDraw > len(p.cards) {
 		return nil, false
@@ -60,18 +67,22 @@ func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
 	return nCards, true
 }
 
+// AddCard puts cards on top, the last one uppermost.
 func (p *Pile) AddCard(cards ...Card) {
 	p.cards = append(p.cards, cards...)
 }
 
+// Size is how many cards the pile holds.
 func (p *Pile) Size() int {
 	return len(p.cards)
 }
 
+// IsEmpty reports whether the pile holds no cards.
 func (p *Pile) IsEmpty() bool {
 	return len(p.cards) < 1
 }
 
+// Cards is a copy of the pile, bottom first.
 func (p *Pile) Cards() []Card {
 	return slices.Clone(p.cards)
 }

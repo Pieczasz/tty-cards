@@ -8,8 +8,11 @@ import (
 )
 
 const (
+	// DefaultTurnTimeout is a turn's length unless WithTurnTimeout or a
+	// TurnDurationHandler says otherwise.
 	DefaultTurnTimeout = 30 * time.Second
-	MaxMissedTurns     = 3
+	// MaxMissedTurns is how many turns in a row a seat may miss before it is taken.
+	MaxMissedTurns = 3
 	// minTurnRemaining is the least a seat keeping the turn is left with, so a turn
 	// that carries on (gin's draw then discard, an auto-play, a leave elsewhere) never
 	// lands on a clock already at zero.

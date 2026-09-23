@@ -8,6 +8,15 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 )
 
+// Action is a move a player submits. Each rules set defines its own; Name is what logs
+// and metrics carry.
+type Action interface {
+	Name() string
+}
+
+// Rules is one card game, driven by the Engine. Every method runs with the engine lock
+// held and receives only *State, so it may mutate the state freely and can never call
+// back into the Engine.
 type Rules interface {
 	MinPlayers() int
 	MaxPlayers() int
@@ -27,13 +36,22 @@ type Rules interface {
 	Standings(state *State) []*Player
 }
 
+// TurnTimeoutHandler opts a rules set into the turn clock. TimeoutAction is the move
+// played for a seat whose turn ran out; it must be one ValidateAction accepts, and nil
+// means there is none, which takes the seat. Rules without it get no clock at all.
 type TurnTimeoutHandler interface {
 	TimeoutAction(state *State) Action
 }
+
+// TurnDurationHandler stretches a particular turn. Zero keeps the engine's default,
+// and no value can resurrect a clock WithTurnTimeout disabled.
 type TurnDurationHandler interface {
 	TurnTimeout(state *State) time.Duration
 }
 
+// PlayerLeaveHandler lets a rules set settle a seat that leaves mid-game.
+// OnPlayerLeave runs while the seat is still in State.Players; AfterPlayerRemoved runs
+// once it is gone and the later seats have shifted down, with the index it had.
 type PlayerLeaveHandler interface {
 	OnPlayerLeave(state *State, playerID string)
 	AfterPlayerRemoved(state *State, removedIndex int)
@@ -50,6 +68,7 @@ type StandingScorer interface {
 	StandingScore(state *State, p *Player) int
 }
 
+// AnyScoreAtLeast is the match-target check for games played to a score.
 func AnyScoreAtLeast(scores map[string]int, target int) bool {
 	for _, score := range scores {
 		if score >= target {
