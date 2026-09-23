@@ -88,6 +88,17 @@ func settleAndAdvance(state *game.State, extra *State) error {
 	return nil
 }
 
+// settleOrUnwind is settleAndAdvance for callers that cannot finish the hand on a
+// failure: a street that cannot be dealt leaves chips no showdown will ever award, so
+// the pool goes back to whoever put it in before the error is passed on.
+func settleOrUnwind(state *game.State, extra *State) error {
+	if err := settleAndAdvance(state, extra); err != nil {
+		refundContributions(extra)
+		return err
+	}
+	return nil
+}
+
 // advanceStreet burns, deals what the next street needs and moves Phase onto it. It
 // reports false once there is no street left to deal, which is the showdown.
 func advanceStreet(state *game.State, extra *State) (bool, error) {
@@ -159,7 +170,7 @@ func runShowdown(state *game.State, extra *State) error {
 func contenders(state *game.State, extra *State) []*game.Player {
 	out := activePlayers(state, extra)
 	for _, p := range state.LeftPlayers {
-		if !isFolded(extra, p.ID) && extra.PlayersAllIn[p.ID] {
+		if !extra.Folded[p.ID] && extra.PlayersAllIn[p.ID] {
 			out = append(out, p)
 		}
 	}
@@ -404,7 +415,7 @@ func resultLevel(state *game.State, extra *State) func(a, b *game.Player) int {
 		if c := cmp.Compare(extra.BustedAtHand[b.ID], extra.BustedAtHand[a.ID]); c != 0 {
 			return c
 		}
-		fa, fb := isFolded(extra, a.ID), isFolded(extra, b.ID)
+		fa, fb := extra.Folded[a.ID], extra.Folded[b.ID]
 		if fa != fb {
 			if fa {
 				return 1

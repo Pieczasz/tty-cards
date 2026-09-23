@@ -532,6 +532,11 @@ func TestChipsAreConservedAcrossRandomHands(t *testing.T) {
 			order := rapid.IntRange(0, 4).Draw(rt, fmt.Sprintf("pick%d", step))
 
 			actions := candidateActions(raiseTo)
+			// The top of the legal band is where a short opponent gets put all-in for
+			// less than a full raise - a raise amount the biased draw above never hits.
+			var top uint
+			engine.WithState(func(s *game.State) { _, top, _ = RaiseBounds(s, id) })
+			actions = append(actions, ActionRaiseTo{Amount: top})
 			acted := false
 			for i := range actions {
 				act := actions[(order+i)%len(actions)]
@@ -1017,6 +1022,7 @@ func TestSettleFailure_HandsThePotBack(t *testing.T) {
 
 		require.Error(t, (&Rules{}).afterBettingAction(state, extra))
 
+		assert.True(t, extra.HandComplete, "the same unwind as a leave: the hand is closed")
 		assert.Equal(t, uint(1000), extra.PlayerChips["a"])
 		assert.Equal(t, uint(1000), extra.PlayerChips["b"])
 		assert.Zero(t, extra.MainPool)

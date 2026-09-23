@@ -29,7 +29,9 @@ var (
 	_ game.PlayerLeaveHandler  = (*Rules)(nil)
 	_ game.TurnTimeoutHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
-	_ game.StandingScorer      = (*Rules)(nil)
+	// Without it, deleting StandingScore still compiles and the engine silently
+	// splits every draw by seat order.
+	_ game.StandingScorer = (*Rules)(nil)
 )
 
 // TimeoutAction never risks chips on an absent player's behalf: it checks when that
@@ -181,8 +183,9 @@ func (r *Rules) beginHand(state *game.State, extra *State, dealer int) error {
 	first := firstToActPreflop(state, extra, headsUp)
 	if first < 0 {
 		// Every funded player was put all-in by their own blind: nobody can act,
-		// so the board just runs out.
-		return settleAndAdvance(state, extra)
+		// so the board just runs out. The blinds are already in the pool, so a
+		// run-out that fails hands them back rather than stranding them.
+		return settleOrUnwind(state, extra)
 	}
 	state.CurrentTurn = first
 	state.OverrideNextTurn = &first
@@ -431,47 +434,17 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	}
 
 	// A hand is only ever handed to a seat while two players still contest it, and
-	// one leave drops that by at most one, so the pot always has a claimant here.
-	live := contenders(state, extra)
-	if len(live) == 1 {
-		awardUncontested(extra, live[0])
-		extra.Winners = live
-		finishHand(state, extra)
-		return
+	// one leave drops that by at most one, so the pot always has a claimant here. The
+	// seats have shifted, so the search for the next actor starts on the cursor itself.
+	if err := resolveAfterChange(state, extra, (state.CurrentTurn-1+n)%n); err != nil {
+		// The hook cannot report it; the hand is already unwound and closed.
+		slog.Error("poker cannot finish the hand after a leave",
+			"hand", extra.HandNumber, "phase", extra.Phase.String(), "error", err)
 	}
-
-	if bettingRoundComplete(state, extra) {
-		if err := settleAndAdvance(state, extra); err != nil {
-			// Nothing can be dealt or shown down, so the hand is unwound rather than
-			// closed over a pot no showdown will ever award.
-			slog.Error("poker cannot finish the hand after a leave",
-				"hand", extra.HandNumber, "phase", extra.Phase.String(), "error", err)
-			refundContributions(extra)
-			finishHand(state, extra)
-			return
-		}
-		if extra.HandComplete {
-			finishHand(state, extra)
-			return
-		}
-		first := firstToActPostflop(state, extra)
-		state.CurrentTurn = first
-		state.OverrideNextTurn = &first
-		return
-	}
-
-	// The round is unfinished, so somebody still owes an action - the same predicate
-	// nextToAct searches on, which is why it cannot come back empty.
-	idx := state.CurrentTurn
-	if cannotAct(extra, state.Players[idx].ID) {
-		idx = nextToAct(state, extra, idx)
-	}
-	state.CurrentTurn = idx
-	state.OverrideNextTurn = &idx
 }
 
 func cannotAct(extra *State, id string) bool {
-	return isFolded(extra, id) || extra.PlayersAllIn[id] || extra.PlayerChips[id] == 0
+	return extra.Folded[id] || extra.PlayersAllIn[id] || extra.PlayerChips[id] == 0
 }
 
 // adjustSeatIndex maps a seat marker to its new index after the player
@@ -531,7 +504,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	}
 
 	p := state.Players[state.CurrentTurn]
-	if isFolded(extra, p.ID) || extra.PlayersAllIn[p.ID] {
+	if extra.Folded[p.ID] || extra.PlayersAllIn[p.ID] {
 		return errors.New("player cannot act")
 	}
 
@@ -735,7 +708,7 @@ func applyBetIncrease(extra *State, state *game.State, raiser *game.Player, newB
 
 func resetActedExcept(extra *State, state *game.State, exceptID string) {
 	for _, p := range state.Players {
-		if p.ID == exceptID || isFolded(extra, p.ID) || extra.PlayersAllIn[p.ID] {
+		if p.ID == exceptID || extra.Folded[p.ID] || extra.PlayersAllIn[p.ID] {
 			continue
 		}
 		extra.ActedThisRound[p.ID] = false
@@ -757,38 +730,47 @@ func (r *Rules) afterBettingAction(state *game.State, extra *State) error {
 	if extra.HandComplete {
 		return nil
 	}
-
 	// Only a live player is ever given the turn, and a fold takes one live player out
 	// of a field of at least two, so the pot always still has a claimant.
+	return resolveAfterChange(state, extra, state.CurrentTurn)
+}
+
+// resolveAfterChange moves the hand on after anything that can take a player out of
+// it, a betting action or a leave: a lone contender takes the pot, an unfinished
+// round goes to the next seat after from that owes an action, and a finished one is
+// settled onto the next street or the showdown.
+//
+// A street that cannot be dealt is unwound by settleOrUnwind and the hand closed, so
+// the error only reports what already happened; the betting path hands it to the
+// engine, which ends the match on it.
+func resolveAfterChange(state *game.State, extra *State, from int) error {
 	live := contenders(state, extra)
 	if len(live) == 1 {
 		awardUncontested(extra, live[0])
-		extra.Winners = []*game.Player{live[0]}
+		extra.Winners = live
 		finishHand(state, extra)
 		return nil
 	}
 
 	if !bettingRoundComplete(state, extra) {
-		next := nextToAct(state, extra, state.CurrentTurn)
-		if next >= 0 {
-			state.OverrideNextTurn = &next
+		if next := nextToAct(state, extra, from); next >= 0 {
+			setTurn(state, next)
 			return nil
 		}
 	}
 
-	if err := settleAndAdvance(state, extra); err != nil {
-		// The engine ends the match on this error, so the pot has to go back to the
-		// stacks the standings are read from instead of dying with the hand.
-		refundContributions(extra)
+	err := settleOrUnwind(state, extra)
+	if err != nil || extra.HandComplete {
+		finishHand(state, extra)
 		return err
 	}
-	if extra.HandComplete {
-		finishHand(state, extra)
-		return nil
-	}
-	first := firstToActPostflop(state, extra)
-	state.OverrideNextTurn = &first
+	setTurn(state, firstToActPostflop(state, extra))
 	return nil
+}
+
+func setTurn(state *game.State, idx int) {
+	state.CurrentTurn = idx
+	state.OverrideNextTurn = &idx
 }
 
 // ToCall returns chips the player must add to match CurrentBet.
@@ -799,20 +781,12 @@ func ToCall(extra *State, playerID string) uint {
 	return extra.CurrentBet - extra.PlayerBets[playerID]
 }
 
-func isFolded(extra *State, playerID string) bool {
-	return extra.Folded[playerID]
-}
-
 func activePlayers(state *game.State, extra *State) []*game.Player {
 	out := make([]*game.Player, 0, len(state.Players))
 	for _, p := range state.Players {
-		if !isFolded(extra, p.ID) {
+		if !extra.Folded[p.ID] {
 			out = append(out, p)
 		}
 	}
 	return out
 }
-
-// Compile-time proof of the optional hook: without it, deleting StandingScore still
-// compiles and the engine silently splits every draw by seat order.
-var _ game.StandingScorer = (*Rules)(nil)
