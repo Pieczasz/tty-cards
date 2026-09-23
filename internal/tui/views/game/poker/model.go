@@ -138,9 +138,10 @@ func (m *Model) syncState() {
 // for the hero, or for anyone still live once the hand is shown down - everyone
 // else gets a hand size and nothing more. A pot that nobody contested is won
 // face-down: with hands left to play, showing those cards would hand the table a
-// free read. Caller must hold the state lock.
+// free read. The match ending is no exception: a last pot won face-down keeps its
+// cards hidden too. Caller must hold the state lock.
 func buildSeats(state *game.State, extra *logic.State, heroID string) []Seat {
-	reveal := extra.ReachedShowdown || state.Phase == game.Finished
+	reveal := extra.ReachedShowdown
 
 	seats := make([]Seat, 0, len(state.Players))
 	for i, p := range state.Players {

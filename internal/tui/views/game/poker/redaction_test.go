@@ -76,9 +76,16 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 			wantVillain: true,
 		},
 		{
-			name:        "the match ending reveals whoever was still live",
+			name:        "a final hand that was shown down reveals whoever was still live",
 			phase:       game.Finished,
+			showdown:    true,
 			wantVillain: true,
+		},
+		{
+			// The match being over is not a showdown: a last pot won face-down keeps
+			// the winner's cards hidden like any other.
+			name:  "a final hand won face-down shows no winner cards",
+			phase: game.Finished,
 		},
 	}
 
