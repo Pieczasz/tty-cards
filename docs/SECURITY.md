@@ -121,7 +121,10 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
 - **Set a strong, unique `DB_PASSWORD`.** Compose refuses to start without one,
   and with `ENV=production` the server refuses to boot without one. `ENV` itself
   must be `production`, `staging` or `development`; a typo fails the boot rather
-  than running with every production check off. In production `DB_SSLMODE` must
+  than running with every production check off. Boolean settings are parsed as
+  strictly (`true`/`false`, `1`/`0`, `t`/`f`), so a mistyped `PROXY_PROTOCOL` or
+  `API_TRUST_PROXY` - `off`, `yes` - fails the boot instead of quietly meaning one
+  or the other. In production `DB_SSLMODE` must
   be `require`, `verify-ca` or `verify-full` for any host outside the compose
   network.
 - **Do not mount the Docker socket into anything.** Alloy reads container logs

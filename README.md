@@ -65,7 +65,7 @@ for everyone: only the leaver's rating moves, and only down.
 - **esc asks before you forfeit.** Mid-game, esc shows "Leave and forfeit this
   game?" and only `y` leaves; any other key keeps you playing.
 - **A dropped connection holds your seat for 90 seconds**
-  (`lobby.DisconnectGrace`). Reconnect inside that and you land back at the
+  (`disconnectGrace` in `internal/lobby`). Reconnect inside that and you land back at the
   table mid-hand. A waiting-lobby seat leaves at once.
 - **One live session per account.** A second connection displaces the first and
   closes it, so a half-open TCP session cannot lock you out of your own seat.
@@ -193,12 +193,12 @@ Full list with comments in [`.env.example`](.env.example).
 | Variable | Default | Notes |
 |---|---|---|
 | `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD` |
-| `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969` |
+| `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969`; an IPv6 literal host (`::`) binds |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
 | `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
 | `MAX_CONNECTIONS` | `1000` | concurrent TCP connections |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
-| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network |
+| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`); the old `RATE_LIMIT_WINDOW_MS` fails the boot |
 | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network; raise for `make loadtest` |
 | `DB_*` | see `.env.example` | Postgres; in production `DB_SSLMODE` defaults to `require` and must be `require`, `verify-ca` or `verify-full` unless the host is internal or `ALLOW_INSECURE_DB=true` |
 | `DB_MAX_OPEN_CONNS` | `25` | pool size, independent of the SSH cap |
@@ -207,6 +207,12 @@ Full list with comments in [`.env.example`](.env.example).
 | `API_TRUST_PROXY` | `false` | compose opts in; only safe behind a proxy that sets `X-Forwarded-For` itself |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | logs, metrics, traces |
 | `LOG_LEVEL` | `INFO` | stderr and OTLP both |
+
+Boolean variables (`PROXY_PROTOCOL`, `API_TRUST_PROXY`, `ALLOW_INSECURE_DB`,
+`OTEL_EXPORTER_OTLP_INSECURE`) take what Go's `strconv.ParseBool` does: `1`, `t`,
+`true`, `0`, `f`, `false` (also `True`/`TRUE`). Anything else - `yes`, `off` - fails
+the boot rather than meaning one or the other, and the error lists every invalid
+variable at once.
 
 New accounts are separately capped at `REGISTRATION_LIMIT` per
 `REGISTRATION_WINDOW` per client network; returning players never spend that
