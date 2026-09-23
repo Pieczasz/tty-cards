@@ -318,7 +318,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	}
 
 	assert.Equal(t, wantCards, countCards(), "the finished hand still holds every card")
-	standings, _ := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	assert.NotEmpty(t, standings, "a finished hand ranks its players")
 }
 

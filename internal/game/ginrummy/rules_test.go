@@ -7,6 +7,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -586,9 +587,9 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 		extra.CumulativeScores["p2"] = 40
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, 2)
-	assert.Equal(t, []int{1, 1}, places, "equal totals are one place, not two")
+	assert.Equal(t, []int{1, 1}, gametest.Places(standings), "equal totals are one place, not two")
 }
 
 // A defender may arrange their hand for the lowest total *after* layoffs, not the

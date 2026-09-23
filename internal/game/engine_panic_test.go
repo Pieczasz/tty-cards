@@ -60,10 +60,8 @@ func TestEngine_TurnTimeout_PanickingStandingsDoesNotEscape(t *testing.T) {
 	assert.True(t, engine.IsFinished())
 	assert.Equal(t, EndReasonRulesError, endedEvent(t, drainEvents(events)).Reason)
 
-	var standings []*Player
-	var places []int
-	require.NotPanics(t, func() { standings, places = engine.StandingsWithPlaces() },
+	var standings []Standing
+	require.NotPanics(t, func() { standings = engine.Standings() },
 		"finalize reads standings on the lobby's goroutine; a panic there kills it")
 	assert.Empty(t, standings, "empty standings are what finalize drops as unrecordable")
-	assert.Empty(t, places)
 }

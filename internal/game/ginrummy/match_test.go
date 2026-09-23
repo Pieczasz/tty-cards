@@ -139,9 +139,9 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 
 	engine.RemovePlayer("p2")
 	assert.Equal(t, game.Finished, engine.Snapshot().Phase)
-	standings, _ := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.NotEmpty(t, standings)
-	assert.Equal(t, "p1", standings[0].ID)
+	assert.Equal(t, "p1", standings[0].Player.ID)
 
 	engine.WithState(func(s *game.State) {
 		extra := extra(t, s)

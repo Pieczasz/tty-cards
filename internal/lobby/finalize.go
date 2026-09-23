@@ -92,7 +92,7 @@ type matchResult struct {
 func (m *Manager) persistFinishedMatch(
 	ctx context.Context, engine *game.Engine, reason game.EndReason, req finalizeRequest,
 ) {
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	if reason == game.EndReasonAbandoned && len(standings) == 0 {
 		// Nobody was left to record, so there is no history to write - but it is still
 		// a finished match that produced no row, which is what the counter tracks.
@@ -102,9 +102,11 @@ func (m *Manager) persistFinishedMatch(
 		return
 	}
 
-	res := matchResult{ref: req.game, places: places, interrupted: reason == game.EndReasonInterrupted}
+	res := matchResult{ref: req.game, interrupted: reason == game.EndReasonInterrupted}
 	res.userIDs = make([]uuid.UUID, 0, len(standings))
-	for i, p := range standings {
+	res.places = make([]int, 0, len(standings))
+	for i, s := range standings {
+		p := s.Player
 		if p == nil || p.UserID == uuid.Nil() {
 			slog.ErrorContext(ctx, "standing player has no database user; match not recorded",
 				"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked, "player_index", i)
@@ -112,6 +114,7 @@ func (m *Manager) persistFinishedMatch(
 			return
 		}
 		res.userIDs = append(res.userIDs, p.UserID)
+		res.places = append(res.places, s.Place)
 	}
 	if res.interrupted {
 		res.leavers = leaverIDs(engine)

@@ -58,7 +58,7 @@ type PlayerLeaveHandler interface {
 }
 
 // StandingScorer reports the value Standings ordered a player by, so
-// Engine.StandingsWithPlaces can turn a tie into equal finishing places. Without it a
+// Engine.Standings can turn a tie into equal finishing places. Without it a
 // draw is split by slice position and the seat that sorted first takes rating off the
 // other.
 //

@@ -150,10 +150,10 @@ func browseCodes(manager *lobby.Manager, p *game.Player) []string {
 }
 
 func standingIDs(engine *game.Engine) []string {
-	standings, _ := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	ids := make([]string, len(standings))
-	for i, p := range standings {
-		ids[i] = p.ID
+	for i, s := range standings {
+		ids[i] = s.Player.ID
 	}
 	return ids
 }

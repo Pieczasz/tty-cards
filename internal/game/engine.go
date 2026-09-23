@@ -218,27 +218,39 @@ func (e *Engine) IsFinished() bool {
 	return e.state.Phase == Finished
 }
 
-// StandingsWithPlaces returns standings and 1-based finishing places in one lock hold.
-// Players the rules scored equally share a place; everything else counts up strictly.
+// Standing is one player's finishing position.
+type Standing struct {
+	Player *Player
+	// Place is 1-based. Players the rules scored equally share one.
+	Place int
+}
+
+// Standings returns the finishing order, best first, in one lock hold. Players the
+// rules scored equally share a place; everything else counts up strictly.
 //
 // The *Player values alias live engine state, so only the fields nothing writes after
 // the seat was taken - ID, UserID, Name - are safe to read once the lock is gone.
 // Cards and anything the rules keep may change under a caller that holds them.
 //
-// A rules panic returns nil, nil, which finalize drops as unrecordable: the lobby's
+// A rules panic returns nil, which finalize drops as unrecordable: the lobby's
 // finalize goroutine has nothing above it to recover.
-func (e *Engine) StandingsWithPlaces() (standings []*Player, places []int) {
+func (e *Engine) Standings() (standings []Standing) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("rules panicked computing standings", "panic", r, "stack", string(debug.Stack()))
-			standings, places = nil, nil
+			standings = nil
 		}
 	}()
 
-	standings = e.standingsLocked()
-	return standings, e.placesLocked(standings)
+	players := e.standingsLocked()
+	places := e.placesLocked(players)
+	standings = make([]Standing, len(players))
+	for i, p := range players {
+		standings[i] = Standing{Player: p, Place: places[i]}
+	}
+	return standings
 }
 
 func (e *Engine) placesLocked(standings []*Player) []int {

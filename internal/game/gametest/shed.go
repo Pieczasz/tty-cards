@@ -80,6 +80,15 @@ func CardsInPlay(state *game.State) int {
 	return total
 }
 
+// Places is each standing's finishing place, in standings order.
+func Places(standings []game.Standing) []int {
+	out := make([]int, len(standings))
+	for i, s := range standings {
+		out[i] = s.Place
+	}
+	return out
+}
+
 // RunShed runs every case the shedding games share, each as its own parallel subtest.
 func RunShed(t *testing.T, s Shed) {
 	t.Helper()
@@ -143,10 +152,10 @@ func tiedSeatsShareAPlace(t *testing.T, s Shed) {
 		state.Players[2].Cards = state.Players[2].Cards[:1]
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, 3)
-	assert.Equal(t, "p3", standings[0].ID, "one card is the best position")
-	assert.Equal(t, []int{1, 2, 2}, places, "equal card counts are one place, not two")
+	assert.Equal(t, "p3", standings[0].Player.ID, "one card is the best position")
+	assert.Equal(t, []int{1, 2, 2}, Places(standings), "equal card counts are one place, not two")
 }
 
 // Deliberately uneven hands: with equal ones, returning the wrong player's cards still

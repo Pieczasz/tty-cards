@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -716,10 +717,10 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 		extra.CumulativeScores = map[string]int{"p1": 10, "p2": 10, "p3": 5, "p4": 20}
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, playerCount)
-	assert.Equal(t, "p3", standings[0].ID, "the fewest points wins hearts")
-	assert.Equal(t, []int{1, 2, 2, 4}, places, "equal totals are one place, not two")
+	assert.Equal(t, "p3", standings[0].Player.ID, "the fewest points wins hearts")
+	assert.Equal(t, []int{1, 2, 2, 4}, gametest.Places(standings), "equal totals are one place, not two")
 }
 
 // A table that ends mid-hand on a disconnect has a live hand nobody has scored yet.
@@ -811,15 +812,15 @@ func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 
 	engine.RemovePlayer("p2")
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, 4)
 	ids := make([]string, len(standings))
-	for i, p := range standings {
-		ids[i] = p.ID
+	for i, s := range standings {
+		ids[i] = s.Player.ID
 	}
 	assert.Equal(t, []string{"p1", "p4", "p3", "p2"}, ids,
 		"lowest live total first, and the leaver last whatever they scored")
-	assert.Equal(t, []int{1, 2, 3, 4}, places,
+	assert.Equal(t, []int{1, 2, 3, 4}, gametest.Places(standings),
 		"p2 left on 5 points and must not tie anyone still at the table")
 }
 

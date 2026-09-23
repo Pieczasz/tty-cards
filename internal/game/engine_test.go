@@ -664,7 +664,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 			for range 200 {
 				_ = engine.CurrentPlayerID()
 				_ = engine.Snapshot()
-				_, _ = engine.StandingsWithPlaces()
+				_ = engine.Standings()
 			}
 		})
 	}
@@ -735,12 +735,11 @@ func TestEngine_Places_LeaverNeverTiesASeatedPlayer(t *testing.T) {
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *State) { state.LeftPlayers = []*Player{quitter} })
 
-			standings, places := engine.StandingsWithPlaces()
+			standings := engine.Standings()
 
 			require.Len(t, standings, 3)
-			assert.Equal(t, []string{"p1", "p2", "p3"},
-				[]string{standings[0].ID, standings[1].ID, standings[2].ID})
-			assert.Equal(t, tt.want, places, "the quitter always places last on their own")
+			assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine))
+			assert.Equal(t, tt.want, places(standings), "the quitter always places last on their own")
 		})
 	}
 }
@@ -763,24 +762,30 @@ func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
 		state.LeftPlayers = []*Player{quitFirst, quitSecond}
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 
 	require.Len(t, standings, 4)
-	assert.Equal(t, []string{"p1", "p2", "p4", "p3"},
-		[]string{standings[0].ID, standings[1].ID, standings[2].ID, standings[3].ID})
-	assert.Equal(t, []int{1, 1, 3, 3}, places)
+	assert.Equal(t, []string{"p1", "p2", "p4", "p3"}, standingIDs(engine))
+	assert.Equal(t, []int{1, 1, 3, 3}, places(standings))
 }
 
 // drainEvents takes everything already published. Broadcast is synchronous under the
 // engine mutex, so once the call that caused it has returned the events are either in
 // the buffer or were never sent; waiting would only hide a missing one.
 func standingIDs(e *Engine) []string {
-	standings, _ := e.StandingsWithPlaces()
-	ids := make([]string, 0, len(standings))
-	for _, p := range standings {
-		ids = append(ids, p.ID)
+	ids := make([]string, 0)
+	for _, s := range e.Standings() {
+		ids = append(ids, s.Player.ID)
 	}
 	return ids
+}
+
+func places(standings []Standing) []int {
+	out := make([]int, len(standings))
+	for i, s := range standings {
+		out[i] = s.Place
+	}
+	return out
 }
 
 func drainEvents(ch <-chan Event) []Event {
