@@ -219,7 +219,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				_, maxP := m.gamePlayerBounds()
+				_, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
 				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
@@ -358,9 +358,9 @@ func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
 	m := newCreateModel(t)
 	m.global.GameRegistry = game.NewRegistry()
 
-	minP, maxP := m.gamePlayerBounds()
-	assert.Equal(t, 2, minP)
-	assert.Equal(t, 8, maxP)
+	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+	assert.Equal(t, fallbackMinPlayers, minP)
+	assert.Equal(t, fallbackMaxPlayers, maxP)
 }
 
 // Anything that is not a keystroke reaches this form too - a resize has to land on the

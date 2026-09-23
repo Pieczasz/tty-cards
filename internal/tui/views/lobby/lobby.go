@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/Pieczasz/terminal-card/internal/elo"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
@@ -64,7 +63,7 @@ func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
 	}
 	isPrivate := true
 	isRanked := false
-	maxPlayers := 4
+	maxPlayers := defaultMaxPlayers
 	if activeLobby != nil {
 		isPrivate = activeLobby.IsPrivate()
 		isRanked = activeLobby.IsRanked()
@@ -112,17 +111,11 @@ func (m *model) seatedIn(engine *game.Engine) bool {
 	})
 }
 
-// Elo comes from the ratings the player was seated with, which are the snapshot taken
-// when they logged in - not a live read. A rating that changes mid-session shows up
-// the next time they connect.
-func (m *model) getElo(p *game.Player) uint32 {
-	if p == nil {
-		return elo.ToUint32(elo.DefaultRating)
-	}
-	if rating, ok := p.Ratings[m.currentLobby.GameName()]; ok {
-		return rating
-	}
-	return elo.ToUint32(elo.DefaultRating)
+// rating comes from the ratings the player was seated with, which are the snapshot
+// taken when they logged in - not a live read. A rating that changes mid-session shows
+// up the next time they connect.
+func (m *model) rating(p *game.Player) uint32 {
+	return lobby.Rating(p, m.currentLobby.GameName())
 }
 
 func (m *model) unsubscribe() {
@@ -130,18 +123,6 @@ func (m *model) unsubscribe() {
 		m.currentLobby.Unsubscribe(views.SessionPlayerID(m.global), m.lobbyChan)
 		m.lobbyChan = nil
 	}
-}
-
-func (m *model) gamePlayerBounds() (minPlayers, maxPlayers int) {
-	minPlayers, maxPlayers = 2, 6
-	if m.global.GameRegistry == nil || m.currentLobby == nil {
-		return minPlayers, maxPlayers
-	}
-	rules, err := m.global.GameRegistry.Create(m.currentLobby.GameName())
-	if err != nil {
-		return minPlayers, maxPlayers
-	}
-	return rules.MinPlayers(), rules.MaxPlayers()
 }
 
 func (m *model) selfPlayer() *game.Player {
@@ -269,7 +250,7 @@ func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 func (m *model) adjustSetting(self *game.Player, delta int) {
 	switch m.cursor {
 	case cursorMaxPlayers:
-		rulesMin, rulesMax := m.gamePlayerBounds()
+		rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.GameName())
 		next := m.maxPlayers + delta
 		if delta < 0 && (next < rulesMin || next < m.currentLobby.CurrentPlayers()) {
 			return
@@ -426,32 +407,15 @@ func capRoster(rows []string, maxRows int) []string {
 }
 
 func (m *model) renderSettings(isLeader bool) string {
-	renderOption := func(idx int, label, value string) string {
-		cursor := "  "
-		if isLeader && m.cursor == idx {
-			cursor = "> "
-			label = m.global.Theme.PlayerItemSelected.Render(label)
-			value = m.global.Theme.PlayerItemSelected.Render(value)
-		}
-		return fmt.Sprintf("%s%s: < %s >", cursor, label, value)
-	}
-
-	vis := "Public"
-	if m.isPrivate {
-		vis = "Private"
-	}
-	mode := "Casual"
-	if m.isRanked {
-		mode = "Ranked"
-	}
-
+	t := m.global.Theme
+	on := func(row int) bool { return isLeader && m.cursor == row }
 	return lg.JoinVertical(lg.Left,
-		"  "+m.global.Theme.SectionHeading.Render("Settings"),
-		"  Lobby Code: "+m.global.Theme.LobbyCode.Render(m.currentLobby.Code()),
-		renderOption(cursorGame, "Game", m.currentLobby.GameName()),
-		renderOption(cursorMaxPlayers, "Max Players", strconv.Itoa(m.maxPlayers)),
-		renderOption(cursorVisibility, "Visibility", fmt.Sprintf("%-7s", vis)),
-		renderOption(cursorMode, "Mode", fmt.Sprintf("%-7s", mode)),
+		"  "+t.SectionHeading.Render("Settings"),
+		"  Lobby Code: "+t.LobbyCode.Render(m.currentLobby.Code()),
+		renderOption(t, on(cursorGame), "Game", m.currentLobby.GameName()),
+		renderOption(t, on(cursorMaxPlayers), "Max Players", strconv.Itoa(m.maxPlayers)),
+		renderOption(t, on(cursorVisibility), "Visibility", visibilityLabel(m.isPrivate)),
+		renderOption(t, on(cursorMode), "Mode", modeLabel(m.isRanked)),
 	)
 }
 
@@ -464,7 +428,7 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 
 	leader := m.currentLobby.Leader()
 	rows = append(rows, fmt.Sprintf("  %s %s (Elo: %d)%s",
-		m.global.Theme.HostTag.Render("[Leader]"), leader.DisplayName(), m.getElo(leader), m.readyMark(leader)))
+		m.global.Theme.HostTag.Render("[Leader]"), leader.DisplayName(), m.rating(leader), m.readyMark(leader)))
 
 	for i, g := range guests {
 		cursor := "  "
@@ -473,7 +437,7 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 			cursor = "> "
 		}
 		row := fmt.Sprintf("%s%s %s (Elo: %d)%s",
-			cursor, m.global.Theme.GuestTag.Render("[Guest] "), g.DisplayName(), m.getElo(g), m.readyMark(g))
+			cursor, m.global.Theme.GuestTag.Render("[Guest] "), g.DisplayName(), m.rating(g), m.readyMark(g))
 		if isSelected {
 			row = m.global.Theme.PlayerItemSelected.Render(row)
 		}

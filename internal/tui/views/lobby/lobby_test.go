@@ -157,7 +157,7 @@ func TestAdjustSetting_MaxPlayersRespectsRulesBounds(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 
-	rulesMin, rulesMax := m.gamePlayerBounds()
+	rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.GameName())
 	require.Equal(t, 2, rulesMin)
 	require.Equal(t, 6, rulesMax)
 
@@ -380,7 +380,7 @@ func TestSeatedIn(t *testing.T) {
 	assert.False(t, m.seatedIn(finished), "a finished table has no seat to return to")
 }
 
-func TestGetElo(t *testing.T) {
+func TestRating(t *testing.T) {
 	t.Parallel()
 	m, _ := leaderView(t)
 	t.Cleanup(m.Close)
@@ -396,12 +396,14 @@ func TestGetElo(t *testing.T) {
 		{name: "rated for this game", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameName: 1750}}, want: 1750},
 		{name: "rated only for another game", player: &game.Player{ID: "9", Ratings: map[string]uint32{"Poker": 1750}}, want: def},
 		{name: "never played anything", player: &game.Player{ID: "9"}, want: def},
+		// The lobby matches a stored zero as unrated, so the roster has to show it as one.
+		{name: "a stored zero", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameName: 0}}, want: def},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, m.getElo(tt.player))
+			assert.Equal(t, tt.want, m.rating(tt.player))
 		})
 	}
 }
@@ -413,26 +415,22 @@ func TestGamePlayerBounds(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		mutate           func(m *model)
+		registry         *game.Registry
 		wantMin, wantMax int
 	}{
-		{name: "the lobby's real game", mutate: func(*model) {}, wantMin: 2, wantMax: 6},
-		{name: "no registry at all", mutate: func(m *model) { m.global.GameRegistry = nil }, wantMin: 2, wantMax: 6},
+		{name: "a registered game", registry: testRegistry(), wantMin: 2, wantMax: 6},
+		{name: "no registry at all", registry: nil, wantMin: fallbackMinPlayers, wantMax: fallbackMaxPlayers},
 		{
-			name:    "a game the registry cannot build",
-			mutate:  func(m *model) { m.global.GameRegistry = game.NewRegistry() },
-			wantMin: 2, wantMax: 6,
+			name:     "a game the registry cannot build",
+			registry: game.NewRegistry(),
+			wantMin:  fallbackMinPlayers, wantMax: fallbackMaxPlayers,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			m, _ := leaderView(t)
-			t.Cleanup(m.Close)
-			tt.mutate(m)
-
-			minP, maxP := m.gamePlayerBounds()
+			minP, maxP := gamePlayerBounds(tt.registry, testGameName)
 
 			assert.Equal(t, tt.wantMin, minP)
 			assert.Equal(t, tt.wantMax, maxP)
