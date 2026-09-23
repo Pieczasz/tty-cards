@@ -11,11 +11,11 @@ import (
 	heartsrules "github.com/Pieczasz/terminal-card/internal/game/hearts"
 	pokerrules "github.com/Pieczasz/terminal-card/internal/game/poker"
 	unorules "github.com/Pieczasz/terminal-card/internal/game/uno"
-	crazyeightview "github.com/Pieczasz/terminal-card/internal/tui/views/game/crazyeight"
-	ginrummyview "github.com/Pieczasz/terminal-card/internal/tui/views/game/ginrummy"
-	heartsview "github.com/Pieczasz/terminal-card/internal/tui/views/game/hearts"
-	pokerview "github.com/Pieczasz/terminal-card/internal/tui/views/game/poker"
-	unoview "github.com/Pieczasz/terminal-card/internal/tui/views/game/uno"
+	crazyeightview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/crazyeight"
+	ginrummyview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/ginrummy"
+	heartsview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/hearts"
+	pokerview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/poker"
+	unoview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/uno"
 
 	tea "charm.land/bubbletea/v2"
 )

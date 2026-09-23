@@ -148,7 +148,7 @@ go test -run='^$' -fuzz=FuzzBestMeldSplit -fuzztime=60s ./internal/game/ginrummy
 Benchmarks (rendering, evaluator, broadcaster, Elo, rate limiter):
 
 ```bash
-go test -run='^$' -bench=. -benchmem ./internal/tui/views/game/poker/
+go test -run='^$' -bench=. -benchmem ./internal/tui/views/gameview/poker/
 ```
 
 `make loadtest` drives N concurrent SSH sessions at a **running** server and

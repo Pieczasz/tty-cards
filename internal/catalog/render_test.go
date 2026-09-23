@@ -163,7 +163,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 // belong to different games. Copy the Hearts entry, change only Rules, and every
 // other test still passes: the view renders a table it has no state for, so it prints
 // almost nothing and asserts nothing. The packages are named for the game on both
-// sides of the tree (internal/game/<g> and internal/tui/views/game/<g>), so comparing
+// sides of the tree (internal/game/<g> and internal/tui/views/gameview/<g>), so comparing
 // the leaf is enough - and it is the convention a new game has to follow anyway.
 func requireSameGame(t *testing.T, rules game.Rules, model tea.Model) {
 	t.Helper()
