@@ -87,7 +87,7 @@ func TestAddChip_StacksOntoTheOpenRaise(t *testing.T) {
 	// The button is dealt at random, so the prompt is opened directly rather than
 	// through beginRaise, which needs the hero to be on turn.
 	m.raising = true
-	m.raiseAmount = m.clampRaise(m.currentBet + m.minRaise)
+	m.raiseAmount = m.raiseMin
 	opening := m.raiseAmount
 
 	m.addChip("3") // 25
@@ -99,7 +99,7 @@ func TestAddChip_StacksOntoTheOpenRaise(t *testing.T) {
 	for range 50 {
 		m.addChip("1")
 	}
-	assert.Equal(t, m.streetBetMax(), m.raiseAmount, "chips stop at the player's stack")
+	assert.Equal(t, m.raiseMax, m.raiseAmount, "chips stop at the top of the band")
 }
 
 func TestAddChip_IsANoOpWhenNotRaising(t *testing.T) {
@@ -375,7 +375,7 @@ func TestStepRaise_MovesByExactlyOneChip(t *testing.T) {
 	m.raising = true
 	step := smallestChip()
 	// Well clear of both ends of the band so the clamp cannot hide the movement.
-	m.raiseAmount = m.clampRaise(m.currentBet+m.minRaise) + 10*step
+	m.raiseAmount = m.raiseMin + 10*step
 
 	opening := m.raiseAmount
 	m.stepRaise(-1)

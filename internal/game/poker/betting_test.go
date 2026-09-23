@@ -557,6 +557,15 @@ func TestValidateRaiseTo(t *testing.T) {
 			currentBet: 100, minRaise: 50, chips: 1000, oppChips: 200, oppBet: 100, amount: 300,
 		},
 		{
+			name:       "an opponent too short for a full raise can still be put all-in",
+			currentBet: 0, minRaise: 50, chips: 1000, oppChips: 30, amount: 30,
+		},
+		{
+			name:       "but not for less than their stack",
+			currentBet: 0, minRaise: 50, chips: 1000, oppChips: 30, amount: 29,
+			wantErr: "minimum raise is 30",
+		},
+		{
 			name:       "nothing can be raised past an opponent who is already all-in for less",
 			currentBet: 100, minRaise: 50, chips: 1000, oppChips: 0, oppBet: 100, amount: 150,
 			wantErr: "no opponent can call more than 100",
@@ -925,6 +934,61 @@ func TestValidateAction_ShortAllInsThatAddUpToAFullRaiseReopen(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, "betting is not reopened")
+		})
+	}
+}
+
+// RaiseBounds is what the view builds its prompt from, so every amount in the band
+// has to pass ValidateAction and nothing just outside it may.
+func TestRaiseBounds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		currentBet     uint
+		hero, opp      seat
+		wantLo, wantHi uint
+		wantOK         bool
+	}{
+		{
+			name: "a full raise up to the stack", currentBet: 50,
+			hero: seat{id: "a", chips: 1000}, opp: seat{id: "b", chips: 1000},
+			wantLo: 100, wantHi: 1000, wantOK: true,
+		},
+		{
+			name: "capped by what the opponent can call", currentBet: 0,
+			hero: seat{id: "a", chips: 1000}, opp: seat{id: "b", chips: 30},
+			wantLo: 30, wantHi: 30, wantOK: true,
+		},
+		{
+			name: "an opponent all-in for the bet leaves nothing to raise", currentBet: 50,
+			hero: seat{id: "a", chips: 1000}, opp: seat{id: "b", bet: 50, allIn: true},
+		},
+		{
+			name: "betting not reopened", currentBet: 70,
+			hero: seat{id: "a", chips: 1000, bet: 50, acted: true, level: 50}, opp: seat{id: "b", chips: 1000},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state, _ := seatedRound(tt.currentBet, tt.hero, tt.opp)
+			state.CurrentTurn = 0
+
+			lo, hi, ok := RaiseBounds(state, "a")
+
+			require.Equal(t, tt.wantOK, ok)
+			if !ok {
+				return
+			}
+			assert.Equal(t, tt.wantLo, lo)
+			assert.Equal(t, tt.wantHi, hi)
+			rules := &Rules{}
+			require.NoError(t, rules.ValidateAction(state, ActionRaiseTo{Amount: lo}))
+			require.NoError(t, rules.ValidateAction(state, ActionRaiseTo{Amount: hi}))
+			require.Error(t, rules.ValidateAction(state, ActionRaiseTo{Amount: lo - 1}))
+			require.Error(t, rules.ValidateAction(state, ActionRaiseTo{Amount: hi + 1}))
 		})
 	}
 }

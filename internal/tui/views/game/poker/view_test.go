@@ -191,7 +191,8 @@ func tableOf(width, height, n int) *Model {
 			{Rank: deck.Queen, Suit: deck.Clubs},
 		},
 		pot: 480, sidePots: 2, street: "RIVER",
-		currentBet: 50, toCall: 50, minRaise: 50, myChips: 500,
+		currentBet: 50, toCall: 50, myChips: 500,
+		raiseMin: 100, raiseMax: 500, raiseOK: true,
 		handNumber: 3, handsTotal: 10, winnerName: "player_1",
 	}
 	m.Global = router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height}
@@ -307,6 +308,7 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		t.Parallel()
 		m := tableOf(120, 50, 3)
 		m.seats[0].Chips, m.seats[0].Bet = 0, 0
+		m.raiseOK = false // what logic.RaiseBounds reports for an empty stack
 		bar := m.renderActionBar()
 		assert.NotContains(t, bar, "r raise")
 		assert.NotContains(t, bar, "a all-in")
@@ -347,7 +349,7 @@ func TestRaisePrompt_OpensAndCancelsWithoutSubmitting(t *testing.T) {
 	m := tableOf(120, 50, 3)
 	_, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	require.True(t, m.raising)
-	assert.Equal(t, m.currentBet+m.minRaise, m.raiseAmount, "the prompt opens on a legal amount")
+	assert.Equal(t, m.raiseMin, m.raiseAmount, "the prompt opens on a legal amount")
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Nil(t, cmd, "esc cancels the prompt rather than leaving the table")
@@ -359,6 +361,7 @@ func TestBeginRaise_IsANoOpWhenARaiseIsIllegal(t *testing.T) {
 
 	m := tableOf(120, 50, 3)
 	m.seats[0].Chips = 0 // busted: nothing left to raise with
+	m.raiseOK = false
 
 	_, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	assert.False(t, m.raising)
@@ -460,16 +463,6 @@ func TestHandleKey_AnUnboundKeyChangesNothing(t *testing.T) {
 	assert.Nil(t, cmd)
 	assert.Equal(t, before.raiseAmount, m.raiseAmount)
 	assert.Equal(t, before.raising, m.raising)
-}
-
-// A hero with no seat - a spectator, or a frame before the first sync - has no stack
-// to bound a raise against, so the ceiling is zero rather than a panic.
-func TestStreetBetMax_WithoutAHeroSeat(t *testing.T) {
-	t.Parallel()
-
-	m := tableOf(120, 50, 3)
-	m.seats = nil
-	assert.Zero(t, m.streetBetMax())
 }
 
 func TestHandOverHint_SaysNothingIsLeftForABustedHero(t *testing.T) {

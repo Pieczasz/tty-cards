@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -604,11 +605,44 @@ func validateRaiseTo(state *game.State, extra *State, p *game.Player, amount uin
 	if additional > extra.PlayerChips[p.ID] {
 		return errors.New("not enough chips")
 	}
-	raiseBy := amount - extra.CurrentBet
-	if additional < extra.PlayerChips[p.ID] && raiseBy < extra.MinRaise {
-		return fmt.Errorf("minimum raise is %d", extra.MinRaise)
+	if lo, _ := raiseRange(state, extra, p); amount < lo {
+		return fmt.Errorf("minimum raise is %d", lo-extra.CurrentBet)
 	}
 	return nil
+}
+
+// raiseRange is the band of legal raise-to amounts before the reopen and
+// above-the-bet checks: a full raise at the bottom, the smaller of the player's own
+// stack and what any opponent can call at the top. When the top is below a full
+// raise the only raise left is the top itself - the player's own all-in, or putting
+// a short opponent all-in, which is chips that opponent can actually call.
+func raiseRange(state *game.State, extra *State, p *game.Player) (lo, hi uint) {
+	hi = min(extra.PlayerBets[p.ID]+extra.PlayerChips[p.ID], largestCallableBet(state, extra, p))
+	return min(extra.CurrentBet+extra.MinRaise, hi), hi
+}
+
+// RaiseBounds is the range of ActionRaiseTo amounts ValidateAction accepts from
+// playerID right now, whose turn it is aside. ok is false when that player has no
+// raise to make at all. Views read it rather than re-deriving the band, so the
+// prompt can only ever offer an amount the rules take.
+func RaiseBounds(state *game.State, playerID string) (lo, hi uint, ok bool) {
+	extra, isPoker := state.Extra.(*State)
+	if !isPoker || extra.HandComplete {
+		return 0, 0, false
+	}
+	i := slices.IndexFunc(state.Players, func(p *game.Player) bool { return p.ID == playerID })
+	if i < 0 {
+		return 0, 0, false
+	}
+	p := state.Players[i]
+	if cannotAct(extra, p.ID) || checkBettingReopened(extra, p) != nil {
+		return 0, 0, false
+	}
+	lo, hi = raiseRange(state, extra, p)
+	if hi <= extra.CurrentBet {
+		return 0, 0, false
+	}
+	return lo, hi, true
 }
 
 // largestCallableBet is the highest street total any opponent still in the hand could

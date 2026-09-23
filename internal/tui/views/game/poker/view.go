@@ -362,7 +362,7 @@ func (m *Model) renderActionBar() string {
 // can be pushed onto it, and how far it can still go.
 func (m *Model) renderRaisePrompt() string {
 	total := m.Global.Theme.Accented.Render(fmt.Sprintf("RAISE TO %d", m.raiseAmount))
-	bounds := m.Global.Theme.Muted.Render(fmt.Sprintf("(min %d, all-in %d)", m.currentBet+m.minRaise, m.streetBetMax()))
+	bounds := m.Global.Theme.Muted.Render(fmt.Sprintf("(min %d, max %d)", m.raiseMin, m.raiseMax))
 	keys := m.Global.Theme.Dim.Render("[/] fine  |  enter confirm  |  esc cancel")
 	return lg.JoinVertical(lg.Center,
 		lg.JoinHorizontal(lg.Center, total, "  ", bounds),

@@ -119,7 +119,7 @@ func (m *Model) beginRaise() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.raising = true
-	m.raiseAmount = m.clampRaise(m.currentBet + m.minRaise)
+	m.raiseAmount = m.raiseMin
 	return m, nil
 }
 

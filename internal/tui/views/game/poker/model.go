@@ -39,7 +39,6 @@ type Model struct {
 	street        string
 	currentBet    uint
 	toCall        uint
-	minRaise      uint
 	myChips       uint
 	handComplete  bool
 	matchComplete bool
@@ -47,6 +46,11 @@ type Model struct {
 	handsTotal    int
 	winnerName    string
 	lastActionErr error
+
+	// raiseMin..raiseMax is what logic.RaiseBounds allows the hero; raiseOK is false
+	// when there is no raise to make at all.
+	raiseMin, raiseMax uint
+	raiseOK            bool
 
 	raising     bool
 	raiseAmount uint
@@ -72,7 +76,7 @@ func (m *Model) syncState() {
 	m.street = ""
 	m.currentBet = 0
 	m.toCall = 0
-	m.minRaise = 0
+	m.raiseMin, m.raiseMax, m.raiseOK = 0, 0, false
 	m.myChips = 0
 	m.handComplete = false
 	m.matchComplete = false
@@ -103,7 +107,7 @@ func (m *Model) syncState() {
 		m.sidePots = len(e.Pots)
 		m.street = e.Phase.String()
 		m.currentBet = e.CurrentBet
-		m.minRaise = e.MinRaise
+		m.raiseMin, m.raiseMax, m.raiseOK = logic.RaiseBounds(state, heroID)
 		m.toCall = logic.ToCall(e, heroID)
 		m.myChips = e.PlayerChips[heroID]
 		m.handComplete = e.HandComplete || state.Phase == game.Finished
@@ -165,19 +169,9 @@ func buildSeats(state *game.State, extra *logic.State, heroID string) []Seat {
 	return seats
 }
 
-// clampRaise holds a raise-to amount within [minimum legal raise, hero's stack].
-// The stack bound is applied last so a hero who cannot cover the minimum raise
-// is offered their whole stack rather than an amount they don't have.
+// clampRaise holds a raise-to amount within the band the rules accept.
 func (m *Model) clampRaise(amount uint) uint {
-	return min(max(amount, m.currentBet+m.minRaise), m.streetBetMax())
-}
-
-func (m *Model) streetBetMax() uint {
-	hero := m.heroSeat()
-	if hero == nil {
-		return 0
-	}
-	return hero.Bet + hero.Chips
+	return min(max(amount, m.raiseMin), m.raiseMax)
 }
 
 func (m *Model) heroSeat() *Seat {
@@ -198,15 +192,7 @@ func (m *Model) canCall() bool {
 }
 
 func (m *Model) canRaise() bool {
-	if !m.Base.MyTurn || m.handComplete {
-		return false
-	}
-	hero := m.heroSeat()
-	if hero == nil || hero.Chips == 0 {
-		return false
-	}
-	minTo := m.currentBet + m.minRaise
-	return hero.Bet+hero.Chips > m.currentBet && hero.Bet+hero.Chips >= minTo
+	return m.Base.MyTurn && !m.handComplete && m.raiseOK
 }
 
 func (m *Model) canAllIn() bool {

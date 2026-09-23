@@ -45,7 +45,7 @@ func TestSyncState_BuildsSeatsFromEngine(t *testing.T) {
 	assert.Equal(t, logic.DefaultSmallBlind+logic.DefaultBigBlind, m.pot)
 	assert.Equal(t, "PREFLOP", m.street)
 	assert.False(t, m.handComplete)
-	assert.Equal(t, logic.DefaultBigBlind, m.minRaise)
+	assert.Equal(t, 2*logic.DefaultBigBlind, m.raiseMin, "a full raise over the big blind")
 
 	hero := m.heroSeat()
 	require.NotNil(t, hero)
@@ -219,4 +219,37 @@ func BenchmarkSyncState(b *testing.B) {
 			}
 		})
 	}
+}
+
+// On the flop against a 30-chip stack a full raise is out of reach, but putting that
+// stack all-in is not: the prompt has to offer exactly 30 and the engine accept it.
+func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
+	t.Parallel()
+	engine, m := startedTable(t)
+	t.Cleanup(engine.Close)
+	heroID := m.Bound.PlayerID()
+	engine.WithState(func(state *game.State) {
+		e := state.Extra.(*logic.State)
+		for i, p := range state.Players {
+			e.PlayerBets[p.ID] = 0
+			e.PlayerChips[p.ID] = 30
+			if p.ID == heroID {
+				e.PlayerChips[p.ID] = 1000
+				state.CurrentTurn = i
+			}
+		}
+		clear(e.ActedThisRound)
+		e.CurrentBet = 0
+		e.Phase = logic.Flop
+	})
+	m.syncState()
+	require.True(t, m.canRaise())
+
+	_, _ = m.beginRaise()
+	assert.Equal(t, uint(30), m.raiseAmount)
+	m.stepRaise(+1)
+	assert.Equal(t, uint(30), m.raiseAmount, "nothing past what the opponent can call")
+
+	_, _ = m.confirm()
+	require.NoError(t, m.lastActionErr, "the engine accepts the amount the view offered")
 }
