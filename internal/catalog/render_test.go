@@ -13,10 +13,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	crazyeightview "github.com/Pieczasz/terminal-card/internal/tui/views/game/crazyeight"
-	ginrummyview "github.com/Pieczasz/terminal-card/internal/tui/views/game/ginrummy"
-	heartsview "github.com/Pieczasz/terminal-card/internal/tui/views/game/hearts"
-	unoview "github.com/Pieczasz/terminal-card/internal/tui/views/game/uno"
+	pokerview "github.com/Pieczasz/terminal-card/internal/tui/views/game/poker"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -180,18 +177,13 @@ func requireSameGame(t *testing.T, rules game.Rules, model tea.Model) {
 
 // setHand overwrites the hand the view has cached, which is the only way to render a
 // size the rules never deal. Poker holds its hole cards in its seat rows rather than
-// the shared base state, so it keeps the hand it was dealt.
+// the shared base state, so it keeps the hand it was dealt. The views' model types are
+// unexported, so the embedded Session's Base is reached by name.
 func setHand(m tea.Model, hand []deck.Card) {
-	switch v := m.(type) {
-	case *crazyeightview.Model:
-		v.Base.Hand = hand
-	case *unoview.Model:
-		v.Base.Hand = hand
-	case *heartsview.Model:
-		v.Base.Hand = hand
-	case *ginrummyview.Model:
-		v.Base.Hand = hand
+	if _, poker := m.(*pokerview.Model); poker {
+		return
 	}
+	reflect.ValueOf(m).Elem().FieldByName("Base").FieldByName("Hand").Set(reflect.ValueOf(hand))
 }
 
 // longHand is n distinct cards, cycling suits so the hand is as wide as a real one.
