@@ -5,7 +5,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
-// State holds Crazy Eights - specific game state stored in game.State.Extra.
+// State is the Crazy Eights state stored in game.State.Extra.
 type State struct {
 	// ShedState carries Passes: the deadlock counter every shedding game keeps.
 	game.ShedState

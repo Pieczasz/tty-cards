@@ -1,7 +1,10 @@
 package uno
 
 import (
+	"slices"
+
 	"github.com/Pieczasz/terminal-card/internal/deck"
+
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
@@ -26,10 +29,5 @@ func isWild(r deck.Rank) bool {
 // hasColor reports whether the hand holds a playable card of the colour. Wilds sit
 // on NoSuit, so they never count: holding one is not holding the colour.
 func hasColor(hand []deck.Card, color deck.Suit) bool {
-	for _, c := range hand {
-		if !isWild(c.Rank) && c.Suit == color {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !isWild(c.Rank) && c.Suit == color })
 }

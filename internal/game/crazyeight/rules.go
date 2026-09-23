@@ -1,3 +1,6 @@
+// Package crazyeight is Crazy Eights for two to six players: match the suit or the
+// rank of the card in play, and an Eight names the suit, over the shared
+// shedding-game helpers.
 package crazyeight
 
 import (
@@ -8,6 +11,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
+// Rules implements Crazy Eights; one hand is the whole game.
 type Rules struct{}
 
 var (
@@ -28,13 +32,8 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 func (r *Rules) MinPlayers() int { return 2 }
 func (r *Rules) MaxPlayers() int { return 6 }
 
-func (r *Rules) InitialDeck() []deck.Card {
-	return deck.StandardDeck()
-}
-
-func (r *Rules) InitialDealCount() int {
-	return 7
-}
+func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDealCount() int    { return 7 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
 	extra := &State{CurrentSuit: deck.NoSuit}
@@ -52,9 +51,10 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	return nil
 }
 
-// ActionPlayCard carries exactly one card by construction: a single field cannot
-// express the zero- or multi-card requests a slice could, so ApplyAction has no
-// invalid length to guard against.
+// ActionPlayCard plays Card onto the discard pile; Suit is the one an Eight names.
+// It carries exactly one card by construction: a single field cannot express the zero-
+// or multi-card requests a slice could, so ApplyAction has no invalid length to guard
+// against.
 type ActionPlayCard struct {
 	Card deck.Card
 	Suit deck.Suit
@@ -62,6 +62,7 @@ type ActionPlayCard struct {
 
 func (a ActionPlayCard) Name() string { return "crazyeight.PlayCard" }
 
+// ActionDrawCard draws one card and ends the turn; on a spent board it is a pass.
 type ActionDrawCard struct{}
 
 func (a ActionDrawCard) Name() string { return "crazyeight.DrawCard" }
@@ -95,8 +96,10 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return nil
 	}
 
-	return errors.New("unknown action")
+	return errUnknownAction
 }
+
+var errUnknownAction = errors.New("unknown action")
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)
@@ -122,15 +125,11 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		extra.Passes = 0
 
 	case ActionDrawCard:
-		drawn, ok := game.DrawWithReshuffle(state)
-		if !ok {
-			extra.Passes++ // stock and discard exhausted: this turn is a forced pass
-			return nil
-		}
-		p.Cards = append(p.Cards, drawn)
-		extra.Passes = 0
+		// Nothing drawn means stock and discard are both spent: a forced pass.
+		extra.RecordDraw(game.DrawInto(state, p, 1))
 	}
 	return nil
+
 }
 
 func (r *Rules) AfterAction(_ *game.State, _ game.Action) error {
