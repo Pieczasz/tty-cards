@@ -1,3 +1,7 @@
+// Command server runs terminal-card: the ssh game server on SERVER_PORT and the
+// read-only stats API on API_PORT, sharing one database, lobby manager and session
+// tracker. With -healthcheck it instead probes a running server's /healthz and exits
+// with its verdict, for the container healthcheck.
 package main
 
 import (
@@ -172,6 +176,8 @@ func installLogging() *slog.LevelVar {
 	return level
 }
 
+// levelGate holds the OTLP handler to the same live level as the stderr one, which
+// the bridge does not do for itself.
 type levelGate struct {
 	slog.Handler
 	level slog.Leveler
