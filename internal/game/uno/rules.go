@@ -105,10 +105,8 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	case ActionDrawCard:
 		return nil
 	}
-	return errUnknownAction
+	return game.ErrUnknownAction
 }
-
-var errUnknownAction = errors.New("unknown action")
 
 func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck.Card) error {
 	if isWild(a.Card.Rank) {

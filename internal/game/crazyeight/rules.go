@@ -97,10 +97,8 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return nil
 	}
 
-	return errUnknownAction
+	return game.ErrUnknownAction
 }
-
-var errUnknownAction = errors.New("unknown action")
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)

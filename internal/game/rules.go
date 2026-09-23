@@ -2,10 +2,20 @@ package game
 
 import (
 	"cmp"
+	"errors"
 	"slices"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
+)
+
+var (
+	// ErrUnknownAction refuses a move the rules have no case for: another game's
+	// action, or client garbage.
+	ErrUnknownAction = errors.New("unknown action")
+	// ErrHandOver refuses a move between hands, after one is scored and before the
+	// next is dealt.
+	ErrHandOver = errors.New("the hand is over")
 )
 
 // Action is a move a player submits. Each rules set defines its own; Name is what logs

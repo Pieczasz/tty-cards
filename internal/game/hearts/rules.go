@@ -94,10 +94,7 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	return nil
 }
 
-var (
-	errNotEnoughCards = errors.New("not enough cards to deal")
-	errHandOver       = errors.New("the hand is over")
-)
+var errNotEnoughCards = errors.New("not enough cards to deal")
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)
@@ -117,7 +114,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return validatePlay(state, extra, action)
 	case PhaseHandOver:
 	}
-	return errHandOver
+	return game.ErrHandOver
 }
 
 func validatePass(state *game.State, extra *State, action game.Action) error {

@@ -108,10 +108,8 @@ func beginHand(state *game.State, extra *State) error {
 }
 
 var (
-	errHandOver      = errors.New("the hand is over")
-	errUnknownAction = errors.New("unknown action")
-	errDrawFirst     = errors.New("must draw first")
-	errDiscardFirst  = errors.New("must discard first")
+	errDrawFirst    = errors.New("must draw first")
+	errDiscardFirst = errors.New("must discard first")
 )
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
@@ -125,7 +123,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)
 	}
 	if extra.HandComplete() {
-		return errHandOver
+		return game.ErrHandOver
 	}
 
 	p := state.Players[state.CurrentTurn]
@@ -160,7 +158,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		}
 		return nil
 	default:
-		return errUnknownAction
+		return game.ErrUnknownAction
 	}
 }
 
