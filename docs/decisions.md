@@ -17,7 +17,7 @@ is only the *why*.
 | [1](#1-one-mutex-per-engine) | One mutex per engine |
 | [2](#2-rules-never-call-back-into-the-engine) | Rules never call back into the engine |
 | [3](#3-latest-wins-broadcaster-and-subscribe-returns-an-error) | Latest-wins broadcaster, and `Subscribe` returns an error |
-| [4](#4-turnseq-a-generation-counter-fences-the-turn-clock) | `turnSeq`: a generation counter fences the turn clock |
+| [4](#4-clockseq-a-generation-counter-fences-the-turn-clock) | `clock.seq`: a generation counter fences the turn clock |
 | [5](#5-boundengine-is-a-façade-not-a-capability) | `BoundEngine` is a façade, not a capability |
 | [6](#6-catalogall-is-the-single-registration-point-and-the-lockstep-hazard-is-accepted) | `catalog.All` is the single registration point |
 | [7](#7-a-games-identity-in-the-database-is-its-slug) | A game's identity in the database is its slug |
@@ -62,6 +62,12 @@ is only the *why*.
 | [46](#46-an-unknown-env-fails-the-boot-and-production-refuses-a-plaintext-capable-sslmode) | An unknown `ENV` fails the boot; production refuses a plaintext-capable `sslmode` |
 | [47](#47-proxy-and-x-forwarded-for-are-believed-only-from-the-proxys-networks) | PROXY and `X-Forwarded-For` only from the proxy's networks |
 | [48](#48-migration-000005s-down-is-lossy) | Migration 000005's down is lossy |
+| [49](#49-the-game_type-metric-label-is-the-catalog-slug) | The `game_type` metric label is the catalog slug |
+| [50](#50-consumers-ask-for-the-smallest-repository-interface) | Consumers ask for the smallest repository interface |
+| [51](#51-the-engine-hands-out-subscriptions-not-its-broadcaster) | The engine hands out subscriptions, not its broadcaster |
+| [52](#52-rate_limit_window-is-a-duration-and-the-old-name-fails-the-boot) | `RATE_LIMIT_WINDOW` is a duration; the old name fails the boot |
+| [53](#53-boolean-environment-values-are-parsed-strictly) | Boolean environment values are parsed strictly |
+| [54](#54-the-game-packages-import-from-an-allow-list) | The game packages import from an allow-list |
 
 The 2026-09-23 review labelled its policy choices D-1 to D-8, and code comments
 still cite them: D-1 is [#39](#39-an-interrupted-match-charges-only-its-leavers),
@@ -95,8 +101,9 @@ to remember (tracker -> manager -> lobby -> engine, see
 [#45](#45-the-session-tracker-lock-comes-before-the-managers)) and nothing below
 the engine.
 
-**Where.** `internal/game/engine.go` - the comment on the `Engine` struct says it.
-`internal/game/state.go` says the same from the other side.
+**Where.** `internal/game/engine.go` - the comment on the `Engine` struct says it,
+and the clock fields are grouped in its `turnClock`. `internal/game/state.go` says
+the same from the other side.
 
 ---
 
@@ -148,11 +155,14 @@ stuck subscriber would otherwise turn every broadcast into a log write under the
 lock.
 
 **Where.** `internal/broadcaster/broadcaster.go`. Capacity sizing is at
-`game.NewEngine` (`len(players) + 8`) and `lobby.Manager.New`.
+`game.NewEngine` (`len(players) + 8`) and `lobby.Manager.CreateLobby`
+(`maxLobbySubscribers`). The engine's feed is reached only through `Engine.Subscribe`
+/ `Unsubscribe` / `Dropped` / `SubscriberCount`
+([#51](#51-the-engine-hands-out-subscriptions-not-its-broadcaster)).
 
 ---
 
-## 4. `turnSeq`: a generation counter fences the turn clock
+## 4. `clock.seq`: a generation counter fences the turn clock
 
 *Clock 2026-08-08, `41ed85d`. Fencing 2026-08-28, `d4b9497`.*
 
@@ -161,21 +171,22 @@ computes a safe move, **drops the lock**, and re-takes it to submit. In that gap
 the player can act for themselves. Without a fence they are charged a miss for a
 turn they took, and the auto-play lands as a second move.
 
-**Decision.** `stopTurnTimerLocked` increments `turnSeq`, and
-`armTurnTimerLocked` calls it first - so every cursor change invalidates timers
+**Decision.** `stopTurnTimerLocked` increments `clock.seq` (it was the engine
+field `turnSeq` until the clock fields were grouped into `turnClock`, 2026-09-23,
+`46318fe`), and `armTurnTimerLocked` calls it first - so every cursor change invalidates timers
 already in flight. A timer captures the generation when armed;
 `submitTimedOutAction` refuses a mismatch with `errStaleTurn`, and
 `removeIfStillIdle` re-checks the same generation before taking a seat.
 
-**Consequences.** `turnSeq` is the whole re-check, and that is deliberate: every
+**Consequences.** `clock.seq` is the whole re-check, and that is deliberate: every
 path that clears a miss count also settles the cursor, and settling the cursor
 bumps the sequence. So a matching sequence proves the count was not cleared. A
 *rejected* action clears nothing and bumps nothing, which is exactly why spamming
 garbage cannot dodge removal.
 
 **Where.** `internal/game/turnclock.go` - the comment on `removeIfStillIdle`
-states the argument in full. Tests:
-`internal/game/engine_timeout_test.go`.
+states the argument in full; the `turnClock` struct is in
+`internal/game/engine.go`. Tests: `internal/game/engine_timeout_test.go`.
 
 ---
 
@@ -189,7 +200,9 @@ states the argument in full. Tests:
 
 **Decision.** `game.Bind(engine, playerID)` returns a session-scoped handle that
 submits only as that player, and whose `Frame` returns only that player's hand.
-`Subscribe`/`Unsubscribe` join the event feed without exposing the broadcaster. The
+`Subscribe`/`Unsubscribe` join the event feed without exposing the broadcaster -
+and since 2026-09-23 (`ce04748`) the engine does not expose it either
+([#51](#51-the-engine-hands-out-subscriptions-not-its-broadcaster)). The
 old `Engine()` accessor is gone (there never was a separate `Hand()`; the hand
 comes from `Frame`): `Frame`'s callback is the one way to the rest of the table,
 and it hands the view the live, unredacted `*State`.
@@ -202,8 +215,8 @@ the view's named, testable job. In poker that function is `buildSeats`, and it h
 its own test file.
 
 **Where.** `internal/game/bound.go` (the comment on `Frame`),
-`internal/tui/views/game/poker/model.go` `buildSeats`,
-`internal/tui/views/game/poker/redaction_test.go`.
+`internal/tui/views/gameview/poker/model.go` `buildSeats`,
+`internal/tui/views/gameview/poker/redaction_test.go`.
 
 ---
 
@@ -215,19 +228,23 @@ its own test file.
 `cmd/server/main.go`) and a TUI view constructor (for the route table, built in
 `internal/tui/app.go`). Two lists means a game can be half-registered.
 
-**Decision.** One slice, `catalog.All`, whose `Entry` carries both. Both consumers
-read the same slice.
+**Decision.** One slice, `catalog.All`, whose `Entry` embeds the `game.Module`
+(name, slug, rules `Factory`) and adds the `View` constructor. Both consumers read
+the same slice: `catalog.NewRegistry()` builds the immutable `game.Registry` from it,
+and `game.NewRegistry` panics on a half-declared module or a name declared twice
+(2026-09-23, `4ce83fb`), so a wiring slip fails the boot rather than the first table.
 
 **Consequences.** A game cannot be registered without a view: `catalog_test.go`
 fails on a missing field or a duplicate slug. But **copying an entry and changing
-only the `Rules` field still compiles and still passes** - the types match. That
+only the `Factory` field still compiles and still passes** - the types match. That
 hazard is accepted rather than engineered away, because the alternative (a
 registry keyed by a type parameter, or codegen) costs more than the one line of
 attention it saves. The pair is kept in lockstep by hand, and the tests
 `TestAll_NamesArePersistedAndFrozen` and `TestAll_SlugsMatchTheMigrationBackfill`
 catch the cases that actually corrupt data.
 
-**Where.** `internal/catalog/catalog.go`, `internal/catalog/catalog_test.go`.
+**Where.** `internal/catalog/catalog.go`, `internal/catalog/catalog_test.go`,
+`internal/game/registry.go` `NewRegistry`.
 
 ---
 
@@ -355,8 +372,8 @@ linear in the number of graduated alts someone is willing to run (the comment in
 `fetchBestPlayers` says the same, 2026-09-23, `f8b190d`).
 
 **Where.** `internal/repository/match.go` - `maxSamePairingPerDay`,
-`repeatedPairCountLast24h`, `worstPairCount`, and the damping branch inside
-`updateRankingsTx`.
+`repeatedPairCountLast24h`, `worstPairCount`, `isDamped`, and the `damped` branch
+of `applyRatings`.
 
 ---
 
@@ -367,9 +384,10 @@ linear in the number of graduated alts someone is willing to run (the comment in
 **Context.** `EventGameEnded` carries an `EndReason`, and not every ending is a
 result.
 
-**Decision.** `rated := req.isRanked && !m.isShuttingDown() && reason !=
-EndReasonRulesError && reason != EndReasonAbandoned`. The match is still written -
-as casual history - in all three cases.
+**Decision.** A ranked match is rated unless `unratedReason(reason,
+m.isShuttingDown())` names a reason: shutdown, `EndReasonRulesError` or
+`EndReasonAbandoned`. The match is still written - as casual history - in all three
+cases.
 
 - **Shutdown.** SSH teardown order, not play, decided who was left holding cards.
 - **`EndReasonRulesError`.** The state may be half-applied; it must not move the
@@ -382,7 +400,7 @@ is an honest result.
 
 **Consequences.** A player cannot tell a damped match from an unrated one from the
 outside; both read as "no Elo change". `unratedReason` logs which of the three it
-was, and the metric label distinguishes them. An abandoned match with no standings
+was, and the metric label - `EndReason.String()` - distinguishes them. An abandoned match with no standings
 at all writes nothing and counts as `dropped`.
 
 `EndReasonInterrupted` (2026-09-23, `141f979`) is a fourth, partial case: it stays
@@ -390,8 +408,10 @@ rated, but only against its leavers
 ([#39](#39-an-interrupted-match-charges-only-its-leavers)); its metric label is
 `interrupted`.
 
-**Where.** `internal/lobby/finalize.go` - the gate, `unratedReason`,
-`endReasonLabel`. `internal/game/action.go` for the enum.
+**Where.** `internal/lobby/finalize.go` - the gate and `unratedReason`.
+`internal/game/event.go` for the enum and its `String()`, the label metrics and
+logs carry (2026-09-23, `b9703cb`; it replaced the label table the lobby used to
+keep).
 
 ---
 
@@ -447,7 +467,7 @@ live lobby settings.
 indefinitely instead would let one person freeze a table.
 
 **Decision.** A dropped session calls `Manager.DisconnectPlayer`, not
-`LeaveLobby`. Mid-game it arms `DisconnectGrace` (90 seconds). The engine keeps
+`LeaveLobby`. Mid-game it arms `disconnectGrace` (90 seconds). The engine keeps
 auto-playing the absent seat through `TimeoutAction`, and `MaxMissedTurns` (3) is
 the backstop that takes the seat even inside the grace window.
 `Manager.ResumePlayer` - reached through `tui.ResumeSeat`, which the ssh layer
@@ -465,7 +485,7 @@ all-ready.
 
 **Where.** `internal/lobby/disconnect.go` (`DisconnectPlayer`, `ResumePlayer`,
 `releaseHeldSeats`, the `pending` -> `expiring` state machine),
-`internal/lobby/manager.go` (`DisconnectGrace`), `internal/lobby/finalize.go`
+`internal/lobby/manager.go` (`disconnectGrace`), `internal/lobby/finalize.go`
 (`BeginShutdown`).
 
 ---
@@ -484,7 +504,8 @@ whole 90-second grace window.
 generation and **closes the displaced connection** - the `gossh.Conn`, not the
 session channel, because closing a channel leaves the socket and any other
 channel on it up until the peer notices. Only the owning generation may free the
-tracker slot or give up the lobby seat (`ReleaseWith`, `Owns`).
+tracker slot or give up the lobby seat (`ReleaseWith`; the test-only `Release` and
+`Owns` were dropped 2026-09-23, `36332dd`).
 
 **Consequences.** Reconnecting always works, which is the behaviour a player
 expects. The close happens **outside** the tracker lock: a wedged peer must not
@@ -506,9 +527,9 @@ from the environment.
 `releaseSession`, `limitSessionChannels`, `envCappedChannel`.
 `internal/ssh/lifecycle_test.go`
 `TestSessionTracker_ConnectClosesTheDisplacedSession`,
-`internal/ssh/channel_test.go` `TestSetupServer_CapsSessionChannelsBeforeAccept`,
-`TestSetupServer_CapsEnvRequests` and
-`TestSetupServer_DisplacementClosesTheOldConnection`.
+`internal/ssh/channel_test.go` `TestNewServer_CapsSessionChannelsBeforeAccept`,
+`TestNewServer_CapsEnvRequests` and
+`TestNewServer_DisplacementClosesTheOldConnection`.
 
 ---
 
@@ -738,7 +759,7 @@ racing the erasure could put the account back:
 - The leaderboard cache carries a generation that the erasure bumps; a read that
   fetched before the erasure committed cannot store its rows.
 
-**Where.** `internal/repository/user.go` `DeleteAccount` / `eraseUserLocked`,
+**Where.** `internal/repository/user.go` `DeleteAccount` / `eraseUser`,
 `internal/db/users.go` `AnonymisedUsername` / `ValidateUsername`,
 `internal/db/migrations/000001_init.up.sql` (`username_valid`),
 `internal/tui/views/profile/profile.go` (the `x` -> type `DELETE` flow).
@@ -846,14 +867,14 @@ written down in prose where they could rot.
 | Rule | Denies |
 |---|---|
 | `repository-only-from-root` | anything but `cmd/server` and `internal/repository` importing `internal/repository` |
-| `game-is-pure` | `internal/game/**` importing `internal/db`, `internal/tui` or `internal/lobby` |
+| `game-is-pure` | `internal/game/**` importing anything outside an allow-list: the standard library, `deck`, `broadcaster`, `game/**` and `uuid` (a deny-list of `db`, `tui` and `lobby` until 2026-09-23, [#54](#54-the-game-packages-import-from-an-allow-list)) |
 
 **Consequences.** `internal/ssh` needs the auth error sentinels, so they were moved
 *out* of `internal/repository` and into `internal/db/errors.go`, next to the
-`UserRepository` interface they belong to. That is the shape a layer rule forces
+account interfaces they belong to. That is the shape a layer rule forces
 and it is the right one: the transport depends on the contract package, never on
-the implementation. `list-mode: lax` and the `!$test` exclusion keep the rules off
-test files and the composition root.
+the implementation. The `!$test` exclusion keeps the rules off test files, and
+`repository-only-from-root` (`list-mode: lax`) exempts the composition root.
 
 **Where.** `.golangci.yml` `settings.depguard`, `internal/db/errors.go`.
 
@@ -1000,18 +1021,22 @@ overlapping the session it replaces.
 ## 33. The stats API's dependency struct is deliberately asymmetric
 
 **Context.** `httpapi.Deps` takes two locally-declared one-method interfaces
-(`SessionCounter`, `LobbyCounter`) and one concrete package interface
-(`db.UserRepository`).
+(`SessionCounter`, `LobbyCounter`) and one package interface (`db.Leaderboard`,
+which was the whole `db.UserRepository` until 2026-09-23 -
+[#50](#50-consumers-ask-for-the-smallest-repository-interface)).
 
 **Decision.** Keep the asymmetry and say so in the code.
 
 **Consequences.** The two counters exist for exactly one reason - to stop
-`internal/httpapi` importing `internal/ssh` and `internal/lobby`. `db.UserRepository`
+`internal/httpapi` importing `internal/ssh` and `internal/lobby`. `db.Leaderboard`
 needs no such treatment: it is already the contract every consumer depends on, and
 re-declaring a narrower copy of it here would be ceremony. Consistency for its own
-sake would have made the file longer and no safer.
+sake would have made the file longer and no safer. All three are required:
+`httpapi.NewServer` returns `ErrMissingDeps` for a nil one rather than serving zeros
+forever (2026-09-23, `d1be128`).
 
-**Where.** `internal/httpapi/httpapi.go` (the comment inside `Deps`).
+**Where.** `internal/httpapi/httpapi.go` (the comment inside `Deps`, `NewServer`).
+`internal/httpapi/httpapi_test.go` `TestNewServer_RequiresEveryDependency`.
 
 ---
 
@@ -1097,15 +1122,15 @@ defect.
 **Decision.** `Engine.recoverRulesPanic` is a direct `defer` on that goroutine and
 re-takes `e.mu`; `SubmitAction` has its own direct deferred `recover`, which runs
 before the unlock. Both call `endOnRulesPanicLocked`, which logs the panic with
-`debug.Stack()` and, on a live engine, calls `finishAfterPanicLocked`:
-`Phase = Finished`, the clock stopped, `EventGameEnded{Reason:
-EndReasonRulesError}`. It does **not** call `Rules.Standings` - the state a hook
+`debug.Stack()` and, on a live engine, calls `endGameLocked(nil,
+EndReasonRulesError)` - the one primitive that ends a table: `Phase = Finished`, the
+clock stopped, `EventGameEnded{Reason: EndReasonRulesError}`. It does **not** call `Rules.Standings` - the state a hook
 panicked on cannot be trusted to rank a winner, and a second panic from
 `Standings` inside the timer's recover would take the process down after all - and
 it does not check for `Playing`, because a panic inside `finishGameLocked`'s own
 `Standings` call has already set `Finished` without announcing it.
-`StandingsWithPlaces` recovers as well and returns `nil, nil`, so finalize has
-nothing to write. On the player path the panic comes back to the view as an error
+`Engine.Standings` recovers as well and returns `nil`, so finalize has nothing to
+write. On the player path the panic comes back to the view as an error
 rather than unwinding into the session, whose recover would have left the table
 running on half-applied state.
 
@@ -1115,15 +1140,16 @@ table ends, the match is recorded **unrated**
 keeps playing. Re-taking the lock in the recover is safe because the locked
 helpers release `e.mu` in their own defers as the panic unwinds. This is a
 backstop, not a licence: rules are still expected not to panic, and the
-`TestSoak_TimeoutActionIsAlwaysLegal` soaks and `FuzzBestMeldSplit` exist to keep
+`TestSoak_TimeoutActionIsAlwaysLegal` soaks (for crazy eights and uno, through the
+shared `gametest.SoakTimeoutIsAlwaysLegal`) and `FuzzBestMeldSplit` exist to keep
 them from doing so. `bestSplitBy`'s over-long-hand guard in
 `internal/game/ginrummy/melds.go` still returns the whole hand as deadwood rather
 than panicking; its comment predates this recover and now understates the
 blast-radius reduction, but the guard itself is still the right behaviour.
 
 **Where.** `internal/game/turnclock.go` `onTurnTimeout` / `recoverRulesPanic` /
-`endOnRulesPanicLocked` / `finishAfterPanicLocked`, `internal/game/engine.go`
-`SubmitAction` / `StandingsWithPlaces`. Tests:
+`endOnRulesPanicLocked`, `internal/game/engine.go` `SubmitAction` /
+`endGameLocked` / `Standings`. Tests:
 `internal/game/engine_timeout_test.go`
 `TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable`,
 `internal/game/engine_panic_test.go`.
@@ -1134,8 +1160,8 @@ blast-radius reduction, but the guard itself is still the right behaviour.
 
 *2026-09-23, `ef09991` "keep a seat's deadline while its turn carries on (D-6)".*
 
-**Context.** `applyNextTurnLocked` re-armed a full 30 seconds on every cursor
-settle, even when the same seat kept the turn. Gin rummy's draw and discard are two
+**Context.** The engine re-armed a full 30 seconds on every cursor settle (today
+`settleTurnLocked`, which `advanceTurnLocked` ends in), even when the same seat kept the turn. Gin rummy's draw and discard are two
 actions of one turn, so an absent player got two expiries - and two misses - per
 turn and lost the seat after one and a half turns instead of three. The reverse
 also held: a leave elsewhere at the table, an Uno heads-up skip or reverse, or a
@@ -1146,7 +1172,7 @@ for. The same seat with the same length is the same turn carrying on and keeps i
 running deadline, floored at `minTurnRemaining` (10 seconds, or the whole timeout if
 that is shorter), so it never lands on a clock already at zero. A different seat or
 a different length (a `TurnDurationHandler` stretch) is a fresh turn at full
-length. A miss is charged once per seat-turn: `turnMissCharged` is set by
+length. A miss is charged once per seat-turn: `clock.missCharged` is set by
 `resolveTurnTimeout` and cleared only on a fresh turn. An auto-play the rules refuse
 re-arms on the same lock hold as a chargeable turn with the floor
 (`submitTimedOutAction`), so a rules set that always refuses still loses the seat.
@@ -1238,17 +1264,20 @@ betting for players who already acted. The code treated each short all-in on its
 own, so A bets 100, B shoves 150, C shoves 220: A faced 120 more, a full raise, and
 could still only call or fold.
 
-**Decision.** The TDA rule. `State.LastBetLevel[p]` is the `CurrentBet` when `p`
-last acted. `checkBettingReopened` lets a player who already acted raise again once
-`CurrentBet - LastBetLevel[p] >= MinRaise`. A single full raise still clears
-`ActedThisRound` outright (`applyBetIncrease`).
+**Decision.** The TDA rule. `Seat.LastBetLevel` is the `CurrentBet` when that
+player last acted. `checkBettingReopened` lets a player who already acted raise again
+once `CurrentBet - LastBetLevel >= MinRaise`. A single full raise still clears every
+other live seat's `Seat.Acted` outright (`applyBetIncrease`). Both fields were
+per-player maps on `poker.State` until the seven maps became one `*Seat` per player
+(2026-09-23, `cda44c8`).
 
 **Consequences.** The table follows the rule players expect from a casino. The
 raise prompt reads the band from `RaiseBounds`, which runs the same check, so it
 can only offer amounts the rules take.
 
 **Where.** `internal/game/poker/betting.go` `checkBettingReopened`,
-`applyBetIncrease`, `RaiseBounds`; `internal/game/poker/state.go` `LastBetLevel`.
+`applyBetIncrease`, `RaiseBounds`; `internal/game/poker/state.go` `Seat`
+(`LastBetLevel`, `Acted`).
 Test: `internal/game/poker/betting_test.go`
 `TestValidateAction_ShortAllInsThatAddUpToAFullRaiseReopen`.
 
@@ -1329,8 +1358,8 @@ screen rather than a row of the table, because every table already spends its fu
 height and the between-hands screens have no hero band, so no layout budget
 changed.
 
-**Where.** `internal/tui/views/game/session.go` `HandleLeaveKey`,
-`LeaveConfirmScreen`. Test: `internal/tui/views/game/session_test.go`
+**Where.** `internal/tui/views/gameview/session.go` `HandleLeaveKey`,
+`LeaveConfirmScreen`. Test: `internal/tui/views/gameview/session_test.go`
 `TestSession_HandleLeaveKey`.
 
 ---
@@ -1342,13 +1371,14 @@ changed.
 **Context.** Teardown used to give up the lobby seat and then free the tracker slot
 as two steps. In between, a reconnect could take the slot and resume the seat, and
 the old session's `DisconnectPlayer` then armed a grace timer on the seat the
-replacement was playing. On the other side, resuming inside `tui.Model` meant a
+replacement was playing. On the other side, resuming inside the TUI's constructor
+(now `tui.New`) meant a
 session refused with `ErrServerFull` still cancelled the grace timer holding the
 player's seat.
 
 **Decision.** `SessionTracker.ReleaseWith(userID, gen, fn)` runs `fn` - the
 `DisconnectPlayer` call - under the tracker lock, for the owning generation only.
-The seat resume moved out of `tui.Model` into `tui.ResumeSeat`, which the ssh layer
+The seat resume moved out of the constructor into `tui.ResumeSeat`, which the ssh layer
 calls only after `Connect` has handed it the slot. The lock order is therefore
 `SessionTracker.mu` -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu`.
 
@@ -1415,7 +1445,7 @@ port". The subnets are pinned in `compose.yaml`, so the list and the network hav
 change together; a config test parses exactly the list compose sets. Local development with
 `PROXY_PROTOCOL=false` is unaffected.
 
-**Where.** `internal/config/config.go` `parsePrefixes`, `cmd/server/main.go`
+**Where.** `internal/config/config.go` `envReader.prefixes`, `cmd/server/main.go`
 `proxyListener`, `internal/httpapi/httpapi.go` `clientIPFunc` / `fromProxy`,
 `compose.yaml`. Tests: `cmd/server/proxy_test.go`,
 `internal/httpapi/httpapi_test.go`
@@ -1447,3 +1477,184 @@ Every future down migration is tested against rows, not an empty schema.
 
 **Where.** `internal/db/migrations/000005_game_slug.down.sql`,
 `internal/testutil/db.go` `seedRoundTripData`.
+
+---
+
+## 49. The `game_type` metric label is the catalog slug
+
+*2026-09-23, `6ece959` "game_type is the catalog slug on lobby and view metrics alike".*
+
+**Context.** The lobby labels a table's metrics (`GameStarted`, `LobbyStarted`,
+`GameFinished`, `TurnTimedOut`, `PlayerIdleRemoved`) and the game view labels its own
+(`ActionRejected`). The lobby used `Module.Name` (`"Crazy Eights"`), and each view
+hard-coded a lower-case literal (`"crazy eights"`, `"gin rummy"`), so a dashboard
+grouping by `game_type` split every game into two series.
+
+**Decision.** `game_type` is the catalog slug everywhere (`crazy_eights`,
+`gin_rummy`). The lobby reads `Module.Slug`; `catalog.Entry.View` is handed the
+entry's `Slug` and passes it to `gameview.NewSession`, so no view spells its game
+itself. The slug and not the display name, because the slug is already the frozen
+identity ([#7](#7-a-games-identity-in-the-database-is-its-slug)): renaming a game
+must not break a dashboard any more than it may move a rating.
+
+**Consequences.** One series per game, and the label cannot drift, because a view
+has no literal left to get wrong. The change is operator-facing: a saved query or
+alert that filtered on the old spellings matches nothing afterwards and has to be
+rewritten to the slugs (the bundled Grafana dashboards do not filter on it). The
+changelog says so.
+
+**Where.** `internal/catalog/catalog.go` (`Entry.View`), `internal/lobby/lobby.go`
+`startGameLocked`, `internal/lobby/watch.go`, `internal/lobby/finalize.go`,
+`internal/tui/views/gameview/session.go` (`NewSession`, `Submit`). Test:
+`internal/catalog/metrics_test.go` `TestAll_LobbyAndViewShareOneGameTypeLabel`.
+
+---
+
+## 50. Consumers ask for the smallest repository interface
+
+*2026-09-23, `0476704` "compose UserRepository from small interfaces; concrete
+repository types" and `3a5ada3` "consumers take db.Authenticator, Profiles or
+Leaderboard; tui.Deps".*
+
+**Context.** `db.UserRepository` was one interface with every account operation, and
+every consumer took all of it: the SSH layer, the TUI's profile and leaderboard
+screens, the stats API. So the stats API could, as far as its types said, register
+accounts or erase one, and a test fake for any of them had to stub the lot.
+
+**Decision.** `db.UserRepository` is now the union of three consumer-sized
+interfaces, and each consumer names the one it calls:
+
+| Interface | Methods | Asked for by |
+|---|---|---|
+| `db.Authenticator` | `LoadUserByFingerprint`, `RegisterUserWithKey`, `UpdateUserActivity` | `ssh.Deps.Auth`, `ssh.LoadOrRegisterUser` |
+| `db.Profiles` | `UserProfile`, `UserMatchHistory`, `DeleteAccount` | `ssh.Deps`, `tui.Deps`, `router.GlobalContext`, the profile view |
+| `db.Leaderboard` | `BestPlayers` | `ssh.Deps`, `tui.Deps`, `router.GlobalContext`, the leaderboard view, `httpapi.Deps.Users` |
+
+The GORM types in `internal/repository` are concrete (`*UserRepository`,
+`*MatchRepository`), with a compile-time assertion against the `db` interface each
+implements. Only `cmd/server`, the composition root, holds the whole
+`db.UserRepository`, and hands the same value to each field.
+
+**Consequences.** A package's imports now say what it can do to accounts: only the
+SSH layer can register one, and the website's feed can only read the leaderboard.
+Fakes shrink to the methods a test exercises. The cost is three fields where there
+was one in `ssh.Deps` and `tui.Deps`, all set from the same repository. The stats
+API's asymmetry ([#33](#33-the-stats-apis-dependency-struct-is-deliberately-asymmetric))
+survives, with `db.Leaderboard` in place of the whole repository.
+
+**Where.** `internal/db/repository.go`, `internal/repository/user.go`,
+`cmd/server/main.go` `newSSHServer` / `startStatsAPI`, `internal/ssh/server.go`
+`Deps`, `internal/tui/app.go` `Deps`, `internal/tui/router/router.go`
+`GlobalContext`.
+
+---
+
+## 51. The engine hands out subscriptions, not its broadcaster
+
+*`Engine.Subscribe` 2026-09-23, `b9703cb`; `Engine.Broadcaster()` removed
+2026-09-23, `ce04748`.*
+
+**Context.** `Engine.Broadcaster()` returned the table's
+`*broadcaster.Broadcaster[Event]`. It was there for tests and for joining the feed,
+but it also let any holder `Broadcast` a forged event to every seat, or `Close` the
+feed for the whole table. The comment in `bound.go` claiming views could not reach it
+was false: a view holding the `*Engine` could.
+
+**Decision.** The accessor is gone and the broadcaster is a private field. What
+callers need from it is four methods on `Engine`: `Subscribe` and `Unsubscribe` (also
+on `BoundEngine`), `Dropped` for the latest-wins loss count, and `SubscriberCount`.
+Tests that used to inject an event through the broadcaster now end a real hand:
+the lobby tests play `stubWin` or `stubBoom` through `endHand`, and a view's
+released slot is proved with `SubscriberCount`.
+
+**Consequences.** Only the engine publishes on its feed, so every event a view or
+the lobby sees is one the engine emitted under its lock. The tests got slower to
+write and more honest: they drive the path production takes rather than a
+side door that skipped the engine. The same reasoning is why a lobby exposes only
+`Subscribe`/`Unsubscribe` too.
+
+**Where.** `internal/game/engine.go` (`Subscribe`, `Unsubscribe`, `Dropped`,
+`SubscriberCount`), `internal/game/bound.go`. Tests: `internal/lobby/lobby_test.go`
+`endHand`, `internal/catalog/close_test.go`
+`TestAll_CloseReleasesTheEngineSubscription`.
+
+---
+
+## 52. `RATE_LIMIT_WINDOW` is a duration, and the old name fails the boot
+
+*2026-09-23, `f48f677` "RATE_LIMIT_WINDOW is a Go duration; RATE_LIMIT_WINDOW_MS fails
+the boot".*
+
+**Context.** The auth limiter's window was `RATE_LIMIT_WINDOW_MS`, an integer of
+milliseconds, while `REGISTRATION_WINDOW` beside it was a Go duration (`1h`). Two
+units for the same kind of setting is a unit error waiting for an operator.
+
+**Decision.** The variable is `RATE_LIMIT_WINDOW`, parsed with `time.ParseDuration`
+(default `1s`, at least `1ms`); a bare number is refused, since it has no unit. The
+old name is not read as a fallback: setting it fails `config.Load` with "renamed
+RATE_LIMIT_WINDOW, a duration such as 1s" (`envReader.renamed`).
+
+**Consequences.** Failing on the old name is the deliberate part. Ignored, it would
+drop a window the operator tuned back to the default without a word, which is the
+worst outcome for a rate limit; honoured, it would keep two spellings alive
+forever. A deployment that sets it has to change one line before the next boot, and
+the changelog says so.
+
+**Where.** `internal/config/config.go` `Load`, `envReader.duration`,
+`envReader.renamed`; `compose.yaml`. Test: `internal/config/config_test.go`
+`TestLoad_RateLimitWindow`.
+
+---
+
+## 53. Boolean environment values are parsed strictly
+
+*2026-09-23, `3648c0b` "a mistyped bool env fails the boot; one env reader reports
+every bad value".*
+
+**Context.** The four switches spelled "true" four ways: `API_TRUST_PROXY` was
+`== "true"`, `PROXY_PROTOCOL` was `!= "false"`, `OTEL_EXPORTER_OTLP_INSECURE` took a
+three-word allow-list, and `ALLOW_INSECURE_DB` a plain compare. So
+`PROXY_PROTOCOL=off` kept the PROXY header on, and `API_TRUST_PROXY=yes` left
+the header trust off - each typo silently picking a posture the operator did not ask for,
+two of them security switches.
+
+**Decision.** Every boolean goes through `envReader.bool`, which is
+`strconv.ParseBool` (`1`, `t`, `true`, `0`, `f`, `false`, in any case). An unset or
+empty variable is the default; anything else fails the boot. The same `envReader`
+collects every invalid variable with `errors.Join`, so a broken `.env` is reported
+in one pass rather than one error per restart.
+
+**Consequences.** `PROXY_PROTOCOL=off` or `yes` now stops the server instead of
+guessing; the fix is `false` or `true`. This is the same stance as
+[#46](#46-an-unknown-env-fails-the-boot-and-production-refuses-a-plaintext-capable-sslmode):
+a misconfigured deploy fails loudly at boot rather than running with the wrong
+posture.
+
+**Where.** `internal/config/config.go` `envReader` (`bool`, `fail`), `Load`. Tests:
+`internal/config/config_test.go` `TestLoad_BoolEnvTypoFailsTheBoot`,
+`TestLoad_BoolEnvs`, `TestLoad_ReportsEveryInvalidVariable`.
+
+---
+
+## 54. The game packages import from an allow-list
+
+*2026-09-23, `712de95` "game-is-pure depguard rule is an allow-list".*
+
+**Context.** `game-is-pure` ([#26](#26-the-layer-rules-are-enforced-by-depguard))
+was a deny-list: `internal/game/**` could not import `internal/db`, `internal/tui`
+or `internal/lobby`. Anything else was allowed by default - `internal/ssh`,
+`internal/observability`, a new third-party module - so the rule said what the
+engine must not know rather than what it may.
+
+**Decision.** `list-mode: strict` with an allow-list: the standard library
+(`$gostd`), `internal/deck`, `internal/broadcaster`, `internal/game` and its
+subpackages, and `uuid` (the stdlib package `game.Player.UserID` is typed with,
+listed by name). `internal/game/gametest` is exempt, because it is test support and
+uses the test libraries; `!$test` keeps test files out as before.
+
+**Consequences.** A new dependency of the engine or a rules package is a line in
+`.golangci.yml` and therefore a decision someone reviews, not a default. The rules
+packages and `game/shed` stay importable into anything, including a future
+different front end, because they drag nothing in.
+
+**Where.** `.golangci.yml` `settings.depguard.rules.game-is-pure`.
