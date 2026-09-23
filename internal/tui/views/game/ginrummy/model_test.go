@@ -55,9 +55,9 @@ func TestSyncState_LoadsGinExtra(t *testing.T) {
 func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.Broadcaster().Len())
+	require.Equal(t, 1, engine.SubscriberCount())
 	m.Close()
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 }
 
 // Mirrors the other game views' teardown test: without Close the listener goroutine
@@ -65,10 +65,10 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 func TestClose_IsIdempotentAndSurvivesAClosedEngine(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.Broadcaster().Len())
+	require.Equal(t, 1, engine.SubscriberCount())
 
 	m.Close()
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 
 	assert.NotPanics(t, m.Close, "session teardown may follow a view that already exited")
 

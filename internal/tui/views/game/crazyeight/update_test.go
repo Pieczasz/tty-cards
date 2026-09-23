@@ -132,7 +132,7 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
 	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
-	require.Equal(t, 1, engine.Broadcaster().Len(), "the view subscribed on construction")
+	require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
 
 	// Park a listener exactly as the Bubble Tea runtime would. Init returns a batch
 	// that also drives the animation tick, so take the event listener directly.
@@ -142,7 +142,7 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	go func() { done <- listen() }()
 
 	m.Close()
-	assert.Zero(t, engine.Broadcaster().Len(), "Close returns the subscriber slot")
+	assert.Zero(t, engine.SubscriberCount(), "Close returns the subscriber slot")
 
 	select {
 	case msg := <-done:
@@ -152,7 +152,7 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	}
 
 	m.Close() // idempotent: session teardown may follow a view that already exited
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 }
 
 func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {

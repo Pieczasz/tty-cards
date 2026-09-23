@@ -124,14 +124,14 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
 	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
-	require.Equal(t, 1, engine.Broadcaster().Len())
+	require.Equal(t, 1, engine.SubscriberCount())
 
 	listen := m.Listen()
 	done := make(chan tea.Msg, 1)
 	go func() { done <- listen() }()
 
 	m.Close()
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 
 	select {
 	case msg := <-done:

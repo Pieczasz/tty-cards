@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -61,9 +62,7 @@ func TestConcurrent_FinalizeRacesRemoveLobby(t *testing.T) {
 	// The hand really is over, so both racers have a result to persist: the watcher
 	// through the event, or - if RemoveLobby closes the feed first and the event is
 	// never delivered - through the finished engine it finds when the feed ends.
-	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
-
-	go engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
 	go m.RemoveLobby(l.Code())
 
 	select {
@@ -76,8 +75,8 @@ func TestConcurrent_FinalizeRacesRemoveLobby(t *testing.T) {
 	assert.Empty(t, recorded, "the match was recorded more than once")
 }
 
-// A single hand produces a single row no matter how many times the terminal event is
-// published: the engine ends once, the watcher stops reading after the first.
+// A single hand produces a single row no matter how many times something tries to end
+// it: the engine ends once, the watcher stops reading after the first.
 func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 	t.Parallel()
 
@@ -89,8 +88,8 @@ func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 
 	m, _, engine := newFinishedGameLobby(t, repo)
 
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
+	endHand(engine, stubWin)
 
 	select {
 	case <-calls:
@@ -126,7 +125,7 @@ func TestShutdown_MatchEndingDuringDrainIsNotSilentlyDropped(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+			endHand(engine, stubWin)
 		}()
 		drained := m.WaitForFinalizers(2 * time.Second)
 		<-done
@@ -264,7 +263,7 @@ func TestFinalize_RankedMatchEndingDuringShutdownIsRecordedWithoutElo(t *testing
 	m, _, engine := newFinishedGameLobby(t, repo)
 	m.BeginShutdown()
 
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonForfeit})
+	engine.RemovePlayer("guest") // the last seat standing is a forfeit
 
 	select {
 	case <-recorded:
@@ -287,7 +286,7 @@ func TestFinalize_RulesErrorIsRecordedWithoutElo(t *testing.T) {
 		Return(nil)
 
 	_, _, engine := newFinishedGameLobby(t, repo)
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonRulesError})
+	endHand(engine, stubBoom)
 
 	select {
 	case <-recorded:
@@ -420,16 +419,39 @@ func pendingGrace(m *Manager, id string) bool {
 // skipped entirely when no match repository was configured. The engine then dropped
 // the seat while the lobby roster kept it, and the table could never reach all-ready
 // again.
+//
+// The turn clock is real, so this runs in a synctest bubble: the idle removal takes
+// MaxMissedTurns of one seat's turns, minutes of fake time that pass at once.
 func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 	t.Parallel()
-	m, l, _, guest := startedGame(t)
+	synctest.Test(t, func(t *testing.T) {
+		m := newTestManager(t, nil)
+		leader, guest := mockPlayer("p1", testutil.UID(1)), mockPlayer("p2", testutil.UID(2))
+		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
+		require.NoError(t, err)
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+		registry := gameRegistry("Mock", idleRules{stubRules{minPlayers: 2, maxPlayers: 2}})
+		require.NoError(t, l.ToggleReady(leader, registry))
+		require.NoError(t, l.ToggleReady(guest, registry))
+		idler, other := leader, guest
+		if l.ActiveGame().CurrentPlayerID() != leader.ID {
+			idler, other = guest, leader
+		}
 
-	l.ActiveGame().Broadcaster().Broadcast(game.Event{Type: game.EventPlayerIdle, PlayerID: guest.ID})
+		// Each seat's turn times out in turn; the first seat's third miss takes it.
+		time.Sleep(2 * game.MaxMissedTurns * game.DefaultTurnTimeout)
+		synctest.Wait()
 
-	require.Eventually(t, func() bool { return !l.HasPlayer(guest) }, 2*time.Second, 10*time.Millisecond,
-		"the engine took the seat but the lobby roster kept it")
-	assert.Nil(t, m.FindLobbyByPlayer(guest))
+		assert.False(t, l.HasPlayer(idler), "the engine took the seat but the lobby roster kept it")
+		assert.Nil(t, m.FindLobbyByPlayer(idler))
+		assert.True(t, l.HasPlayer(other), "only the idle seat leaves")
+	})
 }
+
+// idleRules puts stubRules on the turn clock: an expired turn passes.
+type idleRules struct{ stubRules }
+
+func (idleRules) TimeoutAction(*game.State) game.Action { return stubAction("pass") }
 
 // A seat is held for a reconnect because the hand is still running. Once the game is
 // over the lobby is Waiting, where DisconnectPlayer gives a seat up immediately - so a
@@ -615,10 +637,8 @@ func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
 		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
 
 	m, l, engine := newFinishedGameLobby(t, repo)
-	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
-
 	m.mu.Lock()
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
 	// The table is Waiting again, so the watcher is parked in releaseHeldSeats on m.mu.
 	require.Eventually(t, func() bool {
 		l.mu.RLock()

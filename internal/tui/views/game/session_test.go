@@ -212,7 +212,7 @@ func TestNewSession_BindsAndSubscribes(t *testing.T) {
 	require.NotNil(t, s.Bound)
 	assert.Equal(t, testutil.SeatID(1), s.Bound.PlayerID())
 	assert.NotNil(t, s.Events)
-	assert.Equal(t, 1, engine.Broadcaster().Len())
+	assert.Equal(t, 1, engine.SubscriberCount())
 }
 
 func TestNewSession_WithoutAUserStillBuildsAView(t *testing.T) {
@@ -259,11 +259,11 @@ func TestSession_SeatNamesFallBackToThePlayerID(t *testing.T) {
 func TestSession_UnsubscribeReleasesTheEngineSlot(t *testing.T) {
 	t.Parallel()
 	engine, s := startedSession(t)
-	require.Equal(t, 1, engine.Broadcaster().Len())
+	require.Equal(t, 1, engine.SubscriberCount())
 
 	s.unsubscribe()
 
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 	assert.Nil(t, s.Events)
 }
 
@@ -282,7 +282,7 @@ func TestSession_Leave(t *testing.T) {
 
 		require.IsType(t, router.ChangeViewMsg{}, msg)
 		assert.Equal(t, router.RouteHome, msg.(router.ChangeViewMsg).ViewName)
-		assert.Zero(t, engine.Broadcaster().Len(), "leaving always releases the feed")
+		assert.Zero(t, engine.SubscriberCount(), "leaving always releases the feed")
 	})
 
 	t.Run("a finished game with no session still goes home", func(t *testing.T) {

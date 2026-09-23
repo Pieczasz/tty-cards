@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -216,6 +217,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true) // Immediate win to end game
+	acceptAnyAction(mockRules)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
 
 	registry := gameRegistry("MockGame", mockRules)
@@ -243,9 +245,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	l.mu.RUnlock()
 	require.NotNil(t, engine)
 
-	engine.Broadcaster().Broadcast(game.Event{
-		Type: game.EventGameEnded,
-	})
+	endHand(engine, stubAction("move"))
 
 	select {
 	case <-done:
@@ -279,6 +279,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
+	acceptAnyAction(mockRules)
 	registry := gameRegistry("MockGame", mockRules)
 
 	done := make(chan struct{})
@@ -291,7 +292,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 
 	engine := l.activeEngine
 	require.NotNil(t, engine)
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded})
+	endHand(engine, stubAction("move"))
 
 	select {
 	case <-done:
@@ -754,10 +755,45 @@ func (stubRules) InitialDeck() []deck.Card                      { return deck.St
 func (stubRules) InitialDealCount() int                         { return 1 }
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }
-func (stubRules) ApplyAction(*game.State, game.Action) error    { return nil }
 func (stubRules) AfterAction(*game.State, game.Action) error    { return nil }
-func (stubRules) CheckWinCondition(*game.State) bool            { return false }
+func (stubRules) CheckWinCondition(s *game.State) bool          { return s.Extra == stubWin }
 func (stubRules) Standings(s *game.State) []*game.Player        { return s.Players }
+
+func (stubRules) ApplyAction(s *game.State, a game.Action) error {
+	switch a {
+	case stubBoom:
+		return errors.New("boom")
+	case stubWin:
+		s.Extra = stubWin
+	}
+	return nil
+}
+
+// stubAction is a move for stubRules: stubWin ends the hand as a win, stubBoom fails
+// it as a rules error, anything else passes the turn.
+type stubAction string
+
+func (a stubAction) Name() string { return string(a) }
+
+const (
+	stubWin  stubAction = "win"
+	stubBoom stubAction = "boom"
+)
+
+// endHand plays a on the seat to act, which is how these tests finish a real hand.
+// The error is dropped: stubBoom returns one by design, and a finished or closed
+// engine refusing the move is what the racing tests are about.
+func endHand(engine *game.Engine, a game.Action) {
+	_ = engine.SubmitAction(engine.CurrentPlayerID(), a)
+}
+
+// acceptAnyAction lets a MockRules table take any move, so a test can end the hand
+// through CheckWinCondition.
+func acceptAnyAction(m *MockRules) {
+	m.On("ValidateAction", mock.Anything, mock.Anything).Return(nil)
+	m.On("ApplyAction", mock.Anything, mock.Anything)
+	m.On("AfterAction", mock.Anything, mock.Anything).Return(nil)
+}
 
 // A match that ends has to reopen the table by itself.
 func TestLobby_FinishedGameReopensTheTableForSettings(t *testing.T) {
@@ -872,8 +908,7 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	l.options.cardGame = "Something Else"
 	l.mu.Unlock()
 
-	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
 
 	select {
 	case <-done:

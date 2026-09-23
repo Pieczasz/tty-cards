@@ -104,10 +104,10 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 	return e
 }
 
-// Broadcaster is the table's raw feed. Views use Subscribe, which cannot Broadcast or
-// Close it.
-func (e *Engine) Broadcaster() *broadcaster.Broadcaster[Event] {
-	return e.broadcaster
+// SubscriberCount is how many feeds Subscribe has open, which is how a test proves a
+// view gave its slot back. The broadcaster itself stays private.
+func (e *Engine) SubscriberCount() int {
+	return e.broadcaster.Len()
 }
 
 // Subscribe joins the table's event feed without handing out the broadcaster, which

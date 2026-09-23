@@ -430,7 +430,7 @@ func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
 	engine := game.NewEngine(&Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 
 	engine.RemovePlayer("p2")

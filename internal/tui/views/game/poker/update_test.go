@@ -20,9 +20,7 @@ import (
 func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	broadcaster := engine.Broadcaster()
-
-	require.Equal(t, 1, broadcaster.Len(), "the view subscribed on construction")
+	require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
 
 	// Park a listener on the channel exactly as the Bubble Tea runtime would. The
 	// command is built here, on this goroutine, because Close writes m.Events. It is
@@ -34,11 +32,11 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 
 	m.Close()
 
-	assert.Zero(t, broadcaster.Len(), "Close returns the subscriber slot")
+	assert.Zero(t, engine.SubscriberCount(), "Close returns the subscriber slot")
 	assert.Nil(t, <-done, "unsubscribing closes the channel so the listener returns")
 
 	m.Close() // idempotent: the session teardown may run after a view already exited
-	assert.Zero(t, broadcaster.Len())
+	assert.Zero(t, engine.SubscriberCount())
 
 	engine.Close()
 }
@@ -50,7 +48,7 @@ func TestClose_AfterEngineClosed(t *testing.T) {
 	engine.Close()
 
 	m.Close()
-	assert.Zero(t, engine.Broadcaster().Len())
+	assert.Zero(t, engine.SubscriberCount())
 }
 
 // stepRaise works in uint, so decreasing below the step would wrap to a huge number.
