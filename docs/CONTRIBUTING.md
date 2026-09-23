@@ -75,12 +75,19 @@ assertion:
 Two rules that have each cost a bug:
 
 - **`TimeoutAction` must return something your own `ValidateAction` accepts.**
-  Otherwise the turn re-arms and the seat is taken on the *next* expiry instead.
-  Gin rummy's `autoDiscard` skips the card the upcard rule forbids for exactly
-  this reason.
+  Otherwise the turn re-arms with only the 10-second floor left and every refused
+  expiry still costs a miss, so the absent seat is taken early. Gin rummy's
+  `autoDiscard` skips the card the upcard rule forbids for exactly this reason.
 - **Anything checkable up front belongs in `ValidateAction`.** An error from
   `ApplyAction` or `AfterAction` ends the game as `EndReasonRulesError`, with
   state possibly half-applied and the match recorded unrated.
+
+If one seat leaving means the match cannot go on (hearts is four-handed or
+nothing), set `State.Interrupted` in `OnPlayerLeave`: the removal that ends the
+game then reports `EndReasonInterrupted`, and finalize charges only the leavers
+([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
+A shedding game should reuse `internal/game/shed.go` (`ValidateShedPlay`,
+`DrawWithReshuffle`, `ShedStandings`) rather than copy it.
 
 Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 `PipValue` answer three different questions and must not be swapped, and
@@ -90,8 +97,19 @@ Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 
 Expose `New(router.GlobalContext, *game.Engine) tea.Model`, embed
 `gameview.Session`, and implement your rules rendering and nothing else. Session
-already owns binding, subscribing, the `Update` loop (`HandleFrame`), the hand
-cursor, leaving, idle removal and `Close`.
+already owns binding, subscribing, the `Update` loop (`HandleFrame`), the turn
+clock tick, the last rejected move (`ActionErr`), the hand cursor, the forfeit
+prompt, leaving, idle removal and the idle-quit exemption, and `Close`. Wire it the
+way `crazyeight` does:
+
+- `Init` returns `tea.Batch(m.Listen(), m.ClockTick())`.
+- Your key handler closes any prompt of your own on esc first, then calls
+  `m.HandleLeaveKey(key)` before its own bindings and returns if it consumed the
+  key - mid-game esc must ask before it forfeits
+  ([`decisions.md` #44](decisions.md#44-leaving-a-live-game-asks-first)).
+- `View` returns `m.LeaveConfirmScreen()` before anything else when it is armed.
+- Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
+  render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
 
 Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`). The
 `*State` you get is live and unredacted - filtering what the player may see is
@@ -131,8 +149,8 @@ data migration, not a rename. The display `Name` is free to change.
   packages have one; a view that subscribes and forgets to `Close` is exactly
   what it catches.
 
-You do **not** need to seed a `games` row: `getOrCreateGame` upserts on the slug
-at finalize time.
+You do **not** need to seed a `games` row: `getOrCreateGame` reads by slug at
+finalize time and upserts on the slug the first time it is missing.
 
 ## Test conventions
 
@@ -191,12 +209,20 @@ maintenance signal.)
 ## Database migrations
 
 Schema changes are SQL files in `internal/db/migrations/`, applied with
-[golang-migrate](https://github.com/golang-migrate/migrate). Five pairs exist.
+[golang-migrate](https://github.com/golang-migrate/migrate). Seven pairs exist.
 
 - **Up *and* down, always.** `make migrate-create` writes both.
-- **No GORM AutoMigrate.** `testutil.SetupTestDB` replays these same files, so
-  the tested schema cannot drift from the deployed one - and a broken migration
-  fails the suite rather than production.
+- **No GORM AutoMigrate.** `testutil.SetupTestDB` replays these same files, up,
+  down and up again, with rows seeded before the down pass
+  (`seedRoundTripData`), so the tested schema cannot drift from the deployed one -
+  and a broken migration, or a down that breaks on real data, fails the suite
+  rather than production. Add a seed row when your down file rewrites data.
+- **Say so when a down loses data.** `000005_game_slug.down.sql` opens with
+  `-- LOSSY.` and what is lost
+  ([`decisions.md` #48](decisions.md#48-migration-000005s-down-is-lossy)).
+- **Refuse rather than guess** when existing rows break the new constraint and
+  fixing them is an operator's decision: `000006_username_ci.up.sql` names every
+  case collision and stops.
 - Compose runs them automatically before the backend starts.
 - Put the *reason* in the file as a SQL comment. `000004_not_null_scalars.up.sql`
   and `000005_game_slug.up.sql` both do, and both are worth reading before you
