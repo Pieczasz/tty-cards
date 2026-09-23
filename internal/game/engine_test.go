@@ -128,7 +128,7 @@ func TestEngine_Start_Failures(t *testing.T) {
 		t.Cleanup(engine.Close)
 
 		require.ErrorContains(t, engine.Start(), "set up game")
-		assert.True(t, engine.TurnDeadline().IsZero(), "a table that never opened arms no clock")
+		assert.True(t, engine.turnDeadline().IsZero(), "a table that never opened arms no clock")
 	})
 }
 

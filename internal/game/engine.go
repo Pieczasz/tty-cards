@@ -39,24 +39,30 @@ type Engine struct {
 	state       *State
 	broadcaster *broadcaster.Broadcaster[Event]
 	closed      bool
+	clock       turnClock
+}
 
-	turnTimeout  time.Duration
-	turnSeq      uint64
-	turnTimer    *time.Timer
-	turnDeadline time.Time
-	missedTurns  map[string]int
+// turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
+type turnClock struct {
+	timeout time.Duration
+	// seq fences stale timers: every stop bumps it, and a timer only acts for the
+	// generation it was armed in.
+	seq      uint64
+	timer    *time.Timer
+	deadline time.Time
+	missed   map[string]int
 	// The seat and length the running deadline was armed for, and whether that
 	// seat-turn has been charged its miss: armTurnTimerLocked's continuation check.
-	turnPlayerID    string
-	turnLength      time.Duration
-	turnMissCharged bool
+	playerID    string
+	length      time.Duration
+	missCharged bool
 }
 
 type EngineOption func(*Engine)
 
 func WithTurnTimeout(d time.Duration) EngineOption {
 	return func(e *Engine) {
-		e.turnTimeout = d
+		e.clock.timeout = d
 	}
 }
 
@@ -83,8 +89,10 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 		// replaces. Too small and a real player's Subscribe fails with
 		// ErrAtCapacity, leaving their view with no feed at all.
 		broadcaster: broadcaster.New[Event](len(players) + 8),
-		turnTimeout: DefaultTurnTimeout,
-		missedTurns: make(map[string]int, len(players)),
+		clock: turnClock{
+			timeout: DefaultTurnTimeout,
+			missed:  make(map[string]int, len(players)),
+		},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -176,8 +184,8 @@ func (e *Engine) Frame(playerID string, fn func(*State)) (StateSnapshot, []deck.
 		}
 	}
 	var remaining time.Duration
-	if !e.turnDeadline.IsZero() {
-		remaining = max(time.Until(e.turnDeadline), 0)
+	if !e.clock.deadline.IsZero() {
+		remaining = max(time.Until(e.clock.deadline), 0)
 	}
 	if fn != nil {
 		fn(e.state)
@@ -341,7 +349,7 @@ func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	}
 	// Cleared only on a move the rules accept: clearing on any keypress would let a
 	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
-	delete(e.missedTurns, playerID)
+	delete(e.clock.missed, playerID)
 	return e.applyActionLocked(current, action)
 }
 
@@ -351,7 +359,7 @@ func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if seq != e.turnSeq {
+	if seq != e.clock.seq {
 		return errStaleTurn
 	}
 	// The miss count is left alone: this timeout is already counted, and clearing it
@@ -368,7 +376,7 @@ func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64
 	// player's own move may already have armed the next seat's clock, and re-arming
 	// then would reset it. The re-armed turn is chargeable again, or a rules set that
 	// always refuses would never lose the seat.
-	e.turnMissCharged = false
+	e.clock.missCharged = false
 	e.armTurnTimerLocked()
 	return fmt.Errorf("%w: %w", errActionRefused, err)
 }
@@ -492,7 +500,7 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	e.state.LeftPlayers = append(e.state.LeftPlayers, removedPlayer)
 
 	e.state.Players = slices.Delete(e.state.Players, playerIndex, playerIndex+1)
-	delete(e.missedTurns, playerID)
+	delete(e.clock.missed, playerID)
 
 	if e.state.CurrentTurn > playerIndex {
 		e.state.CurrentTurn--

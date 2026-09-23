@@ -22,17 +22,17 @@ const (
 // minTurnRemaining. Anything else is a fresh turn with the full length, and only a
 // fresh turn can be charged a new miss.
 func (e *Engine) armTurnTimerLocked() {
-	prevDeadline, prevPlayer, prevLength := e.turnDeadline, e.turnPlayerID, e.turnLength
+	prevDeadline, prevPlayer, prevLength := e.clock.deadline, e.clock.playerID, e.clock.length
 	e.stopTurnTimerLocked()
 
-	if e.closed || e.turnTimeout <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
+	if e.closed || e.clock.timeout <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
 		return
 	}
 	if _, ok := e.state.Rules.(TurnTimeoutHandler); !ok {
 		return
 	}
 
-	timeout := e.turnTimeout
+	timeout := e.clock.timeout
 	if h, ok := e.state.Rules.(TurnDurationHandler); ok {
 		if override := h.TurnTimeout(e.state); override > 0 {
 			timeout = override
@@ -47,36 +47,36 @@ func (e *Engine) armTurnTimerLocked() {
 	if !prevDeadline.IsZero() && playerID == prevPlayer && timeout == prevLength {
 		wait = max(time.Until(prevDeadline), min(minTurnRemaining, timeout))
 	} else {
-		e.turnMissCharged = false
+		e.clock.missCharged = false
 	}
-	e.turnPlayerID, e.turnLength = playerID, timeout
+	e.clock.playerID, e.clock.length = playerID, timeout
 
-	seq := e.turnSeq
-	e.turnDeadline = time.Now().Add(wait)
-	e.turnTimer = time.AfterFunc(wait, func() { e.onTurnTimeout(seq) })
+	seq := e.clock.seq
+	e.clock.deadline = time.Now().Add(wait)
+	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(seq) })
 }
 
 func (e *Engine) stopTurnTimerLocked() {
-	e.turnSeq++
-	if e.turnTimer != nil {
-		e.turnTimer.Stop()
-		e.turnTimer = nil
+	e.clock.seq++
+	if e.clock.timer != nil {
+		e.clock.timer.Stop()
+		e.clock.timer = nil
 	}
-	e.turnDeadline = time.Time{}
+	e.clock.deadline = time.Time{}
 }
 
-// TurnDeadline is a test seam; views read the remaining time from Frame.
-func (e *Engine) TurnDeadline() time.Time {
+// turnDeadline is a test seam; views read the remaining time from Frame.
+func (e *Engine) turnDeadline() time.Time {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.turnDeadline
+	return e.clock.deadline
 }
 
-// MissedTurns is a test seam: the idle count is the engine's own business.
-func (e *Engine) MissedTurns(playerID string) int {
+// missedTurns is a test seam: the idle count is the engine's own business.
+func (e *Engine) missedTurns(playerID string) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.missedTurns[playerID]
+	return e.clock.missed[playerID]
 }
 
 func (e *Engine) onTurnTimeout(seq uint64) {
@@ -143,7 +143,7 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if seq != e.turnSeq || e.state.Phase != Playing || len(e.state.Players) == 0 {
+	if seq != e.clock.seq || e.state.Phase != Playing || len(e.state.Players) == 0 {
 		return "", nil, false
 	}
 
@@ -154,11 +154,11 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 
 	// One miss per seat-turn, not per expiry: a turn that carries on after an
 	// auto-play (gin's draw, then its discard) is still the one turn missed.
-	if !e.turnMissCharged {
-		e.missedTurns[current.ID]++
-		e.turnMissCharged = true
+	if !e.clock.missCharged {
+		e.clock.missed[current.ID]++
+		e.clock.missCharged = true
 	}
-	if e.missedTurns[current.ID] >= MaxMissedTurns {
+	if e.clock.missed[current.ID] >= MaxMissedTurns {
 		return current.ID, nil, true
 	}
 
@@ -175,7 +175,7 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 		// real play is a rules bug, hence the log.
 		slog.Warn("rules returned no safe timeout move; taking the seat",
 			"player_id", current.ID, "phase", e.state.Phase)
-		e.missedTurns[current.ID] = MaxMissedTurns
+		e.clock.missed[current.ID] = MaxMissedTurns
 		return current.ID, nil, true
 	}
 	// Broadcast under the same lock hold that charged the miss. Outside it, a player
@@ -189,8 +189,8 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action,
 // resolveTurnTimeout had to drop the lock before calling here; without this, a player
 // who SubmitAction'd in that window would still be kicked.
 //
-// turnSeq is the whole re-check: every path that clears a miss count settles the
-// cursor too, and settling the cursor bumps turnSeq. So a sequence that still matches
+// clock.seq is the whole re-check: every path that clears a miss count settles the
+// cursor too, and settling the cursor bumps the sequence. So a sequence that still matches
 // is proof the count was not cleared behind our back, and no separate count check is
 // needed - a rejected action clears nothing and leaves the sequence alone, which is
 // how spamming garbage fails to dodge removal.
@@ -198,7 +198,7 @@ func (e *Engine) removeIfStillIdle(seq uint64, playerID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if seq != e.turnSeq {
+	if seq != e.clock.seq {
 		// They acted (or the table moved on) inside the window we had to drop the
 		// lock for: a newer timer already owns the turn.
 		return
@@ -206,7 +206,7 @@ func (e *Engine) removeIfStillIdle(seq uint64, playerID string) {
 	// EventPlayerIdle ends the player's ssh session through the view, so this is the
 	// only server-side record that a seat was taken for idling.
 	slog.Info("removing idle player",
-		"player_id", playerID, "missed_turns", e.missedTurns[playerID])
+		"player_id", playerID, "missed_turns", e.clock.missed[playerID])
 	e.broadcaster.Broadcast(Event{Type: EventPlayerIdle, PlayerID: playerID})
 	e.removePlayerLocked(playerID)
 }

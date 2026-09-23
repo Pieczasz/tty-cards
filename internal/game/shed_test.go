@@ -39,7 +39,7 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 		before := shedCardsInPlay(state)
 		top, _ := state.Discard.Peek()
 
-		ReshuffleDiscardIntoStock(state)
+		reshuffleDiscardIntoStock(state)
 
 		assert.Equal(t, before, shedCardsInPlay(state))
 		assert.Equal(t, 1, state.Discard.Size(), "the card in play stays in play")
@@ -55,7 +55,7 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 		stock := []deck.Card{{Rank: deck.Five, Suit: deck.Spades}}
 		state := shedState(stock, discard)
 
-		ReshuffleDiscardIntoStock(state)
+		reshuffleDiscardIntoStock(state)
 
 		assert.Equal(t, stock, state.Deck.Cards())
 		assert.Equal(t, discard, state.Discard.Cards())
@@ -64,7 +64,7 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 	t.Run("an empty discard is a no-op", func(t *testing.T) {
 		t.Parallel()
 		state := shedState(nil, nil)
-		ReshuffleDiscardIntoStock(state)
+		reshuffleDiscardIntoStock(state)
 		assert.Equal(t, 1, shedCardsInPlay(state))
 	})
 }
@@ -147,7 +147,7 @@ func TestReturnHandToStock(t *testing.T) {
 		}})
 		before := shedCardsInPlay(state)
 
-		ReturnHandToStock(state, "p2")
+		returnHandToStock(state, "p2")
 
 		assert.Equal(t, before, shedCardsInPlay(state))
 		assert.Equal(t, 3, state.Deck.Size())
@@ -159,7 +159,7 @@ func TestReturnHandToStock(t *testing.T) {
 		t.Parallel()
 		state := shedState(nil, nil)
 		before := shedCardsInPlay(state)
-		ReturnHandToStock(state, "nobody")
+		returnHandToStock(state, "nobody")
 		assert.Equal(t, before, shedCardsInPlay(state))
 	})
 }

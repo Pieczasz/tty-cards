@@ -53,7 +53,7 @@ func newTwoStep() *twoStepRules {
 func setDeadline(e *Engine, d time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.turnDeadline = d
+	e.clock.deadline = d
 }
 
 func TestEngine_TurnClock_SameSeatKeepsItsDeadline(t *testing.T) {
@@ -77,7 +77,7 @@ func TestEngine_TurnClock_SameSeatKeepsItsDeadline(t *testing.T) {
 
 			require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), namedAction{name: tt.action}))
 
-			assert.InDelta(t, tt.wantRemaining.Seconds(), time.Until(engine.TurnDeadline()).Seconds(), 1)
+			assert.InDelta(t, tt.wantRemaining.Seconds(), time.Until(engine.turnDeadline()).Seconds(), 1)
 		})
 	}
 }
@@ -89,7 +89,7 @@ func TestEngine_TurnClock_ALongerTurnIsAFreshTurn(t *testing.T) {
 
 	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), namedAction{name: "draw"}))
 
-	assert.InDelta(t, (2 * time.Hour).Seconds(), time.Until(engine.TurnDeadline()).Seconds(), 1,
+	assert.InDelta(t, (2 * time.Hour).Seconds(), time.Until(engine.turnDeadline()).Seconds(), 1,
 		"the rules asked for a different length, so this is a new turn and gets it whole")
 }
 
@@ -107,7 +107,7 @@ func TestEngine_TurnClock_SomeoneElseLeavingKeepsTheClock(t *testing.T) {
 	engine.RemovePlayer(leaver)
 
 	require.Equal(t, onTurn, engine.CurrentPlayerID())
-	assert.WithinDuration(t, deadline, engine.TurnDeadline(), time.Millisecond,
+	assert.WithinDuration(t, deadline, engine.turnDeadline(), time.Millisecond,
 		"a leave elsewhere at the table must not hand the seat on turn a fresh clock")
 }
 
@@ -125,13 +125,13 @@ func TestEngine_TurnClock_OneMissPerSeatTurn(t *testing.T) {
 	require.False(t, engine.IsFinished(), "two absent turns each is not yet the limit")
 	engine.WithState(func(state *State) {
 		for _, p := range state.Players {
-			assert.Equal(t, 2, engine.missedTurns[p.ID], "one miss per turn for %s", p.ID)
+			assert.Equal(t, 2, engine.clock.missed[p.ID], "one miss per turn for %s", p.ID)
 		}
 	})
 
 	fireTurnTimeout(t, engine)
 	assert.True(t, engine.IsFinished(), "the third absent turn takes the seat")
-	assert.Zero(t, engine.MissedTurns(first), "reaped with the seat")
+	assert.Zero(t, engine.missedTurns(first), "reaped with the seat")
 }
 
 // A lobby hands the same *Player values to every engine it starts. Shared, the next

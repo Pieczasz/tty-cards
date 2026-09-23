@@ -7,10 +7,10 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 )
 
-// ReshuffleDiscardIntoStock moves the discard pile, except the card in play, back into
+// reshuffleDiscardIntoStock moves the discard pile, except the card in play, back into
 // an empty stock and shuffles, conserving every card. A non-empty stock is left alone:
 // merging two piles would lose the order of the one still in play.
-func ReshuffleDiscardIntoStock(state *State) {
+func reshuffleDiscardIntoStock(state *State) {
 	if !state.Deck.IsEmpty() {
 		return
 	}
@@ -43,13 +43,13 @@ func ValidateShedPlay(state *State, card deck.Card, match func(top deck.Card) er
 // card in play when it runs out. false means both piles are spent, which the caller
 // counts as a forced pass.
 func DrawWithReshuffle(state *State) (deck.Card, bool) {
-	ReshuffleDiscardIntoStock(state)
+	reshuffleDiscardIntoStock(state)
 	return state.Deck.Draw()
 }
 
-// ReturnHandToStock keeps the deck whole when a player leaves, reshuffling so the cards
+// returnHandToStock keeps the deck whole when a player leaves, reshuffling so the cards
 // they were seen holding are not the next ones dealt.
-func ReturnHandToStock(state *State, playerID string) {
+func returnHandToStock(state *State, playerID string) {
 	for _, p := range state.Players {
 		if p == nil || p.ID != playerID {
 			continue
@@ -98,7 +98,7 @@ func ShedStandings(state *State) []*Player {
 // deadlock that never happened.
 func LeaveShedGame(state *State, shed *ShedState, playerID string) {
 	shed.Passes = 0
-	ReturnHandToStock(state, playerID)
+	returnHandToStock(state, playerID)
 }
 
 // OpenDiscard starts the discard pile on the first card the game may legally open on,
