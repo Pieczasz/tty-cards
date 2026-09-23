@@ -3,7 +3,6 @@ package uno
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -228,13 +227,7 @@ func drawCardsInto(state *game.State, playerIdx, n int) bool {
 	p := state.Players[playerIdx]
 	drew := 0
 	for range n {
-		if state.Deck.IsEmpty() {
-			if err := game.ReshuffleDiscardIntoStock(state); err != nil {
-				slog.Error("uno reshuffle failed", "error", err)
-				break
-			}
-		}
-		card, ok := state.Deck.Draw()
+		card, ok := game.DrawWithReshuffle(state)
 		if !ok {
 			break
 		}

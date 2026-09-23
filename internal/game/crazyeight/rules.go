@@ -135,15 +135,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		extra.Passes = 0
 
 	case ActionDrawCard:
-		if state.Deck.IsEmpty() {
-			if err := game.ReshuffleDiscardIntoStock(state); err != nil {
-				// A shuffle failure is a crypto/rand failure: unrecoverable, and
-				// the engine finishes the game rather than playing an untrusted
-				// order.
-				return fmt.Errorf("reshuffle discard into stock: %w", err)
-			}
-		}
-		drawn, ok := state.Deck.Draw()
+		drawn, ok := game.DrawWithReshuffle(state)
 		if !ok {
 			extra.Passes++ // stock and discard exhausted: this turn is a forced pass
 			return nil

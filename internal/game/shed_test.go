@@ -39,7 +39,7 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 		before := shedCardsInPlay(state)
 		top, _ := state.Discard.Peek()
 
-		require.NoError(t, ReshuffleDiscardIntoStock(state))
+		ReshuffleDiscardIntoStock(state)
 
 		assert.Equal(t, before, shedCardsInPlay(state))
 		assert.Equal(t, 1, state.Discard.Size(), "the card in play stays in play")
@@ -48,25 +48,62 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 		assert.Equal(t, len(discard)-1, state.Deck.Size())
 	})
 
-	// The failure path throws the stock away, which only conserves cards while the
-	// stock was empty. A caller that reshuffles too early would destroy it silently.
-	t.Run("refuses a stock that is not empty", func(t *testing.T) {
+	// Merging into a stock still in play would lose its order, so a caller that
+	// reshuffles too early gets nothing done rather than a shuffled stock.
+	t.Run("leaves a stock that is not empty alone", func(t *testing.T) {
 		t.Parallel()
-		state := shedState([]deck.Card{{Rank: deck.Five, Suit: deck.Spades}}, discard)
-		before := shedCardsInPlay(state)
+		stock := []deck.Card{{Rank: deck.Five, Suit: deck.Spades}}
+		state := shedState(stock, discard)
 
-		require.ErrorIs(t, ReshuffleDiscardIntoStock(state), errStockNotEmpty)
-		assert.Equal(t, before, shedCardsInPlay(state), "a refused reshuffle changes nothing")
-		assert.Equal(t, 1, state.Deck.Size())
+		ReshuffleDiscardIntoStock(state)
+
+		assert.Equal(t, stock, state.Deck.Cards())
+		assert.Equal(t, discard, state.Discard.Cards())
 	})
 
 	t.Run("an empty discard is a no-op", func(t *testing.T) {
 		t.Parallel()
 		state := shedState(nil, nil)
-		require.NoError(t, ReshuffleDiscardIntoStock(state))
+		ReshuffleDiscardIntoStock(state)
 		assert.Equal(t, 1, shedCardsInPlay(state))
 	})
+}
 
+func TestDrawWithReshuffle(t *testing.T) {
+	t.Parallel()
+	two := deck.Card{Rank: deck.Two, Suit: deck.Hearts}
+	three := deck.Card{Rank: deck.Three, Suit: deck.Clubs}
+
+	tests := []struct {
+		name        string
+		stock       []deck.Card
+		discard     []deck.Card
+		want        deck.Card
+		wantOK      bool
+		wantDiscard []deck.Card
+	}{
+		{name: "draws off the stock", stock: []deck.Card{two}, discard: []deck.Card{three}, want: two, wantOK: true, wantDiscard: []deck.Card{three}},
+		{name: "refills an empty stock from under the top card", discard: []deck.Card{two, three}, want: two, wantOK: true, wantDiscard: []deck.Card{three}},
+		{name: "a one-card discard leaves nothing to draw", discard: []deck.Card{three}, wantDiscard: []deck.Card{three}},
+		{name: "both piles empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state := shedState(tt.stock, tt.discard)
+			before := shedCardsInPlay(state)
+
+			got, ok := DrawWithReshuffle(state)
+
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantDiscard, state.Discard.Cards(), "the card in play never moves")
+			if ok {
+				before--
+			}
+			assert.Equal(t, before, shedCardsInPlay(state), "every card is conserved")
+		})
+	}
 }
 
 func TestReturnHandToStock(t *testing.T) {
