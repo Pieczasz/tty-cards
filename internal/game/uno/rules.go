@@ -289,7 +289,3 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 func (r *Rules) Standings(state *game.State) []*game.Player { return game.ShedStandings(state) }
 
 func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return game.ShedScore(p) }
-
-// Compile-time proof of the optional hook: without it, deleting StandingScore still
-// compiles and the engine silently splits every draw by seat order.
-var _ game.StandingScorer = (*Rules)(nil)

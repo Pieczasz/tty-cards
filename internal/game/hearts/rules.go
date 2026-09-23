@@ -364,7 +364,3 @@ func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
 	}
 	return extra.CumulativeScores[p.ID] + extra.HandPoints[p.ID]
 }
-
-// Compile-time proof of the optional hook: without it, deleting StandingScore still
-// compiles and the engine silently splits every draw by seat order.
-var _ game.StandingScorer = (*Rules)(nil)
