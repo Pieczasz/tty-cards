@@ -59,6 +59,10 @@ type Deps struct {
 	AllowOrigin       string
 	RequestsPerMinute int
 	TrustedProxy      bool
+	// TrustedProxyNetworks, when set, are the only peers whose X-Forwarded-For is
+	// believed: the port is reachable from every container on the network, not just
+	// the proxy. Empty trusts the header from any peer, as TrustedProxy alone always did.
+	TrustedProxyNetworks []netip.Prefix
 
 	// Health reports whether the process's dependencies are usable (the database
 	// ping, in practice). nil means /healthz only asserts the process serves HTTP.
@@ -88,7 +92,7 @@ type leaderboardEntry struct {
 
 func Handler(deps Deps) http.Handler {
 	limiter := ratelimit.NewSlidingWindowLimiter(deps.RequestsPerMinute, time.Minute)
-	clientAddr := clientIPFunc(deps.TrustedProxy)
+	clientAddr := clientIPFunc(deps.TrustedProxy, deps.TrustedProxyNetworks)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/stats", statsHandler(deps))
@@ -177,7 +181,7 @@ func leaderboardHandler(deps Deps) http.Handler {
 	})
 }
 
-func clientIPFunc(trustProxy bool) func(*http.Request) string {
+func clientIPFunc(trustProxy bool, proxies []netip.Prefix) func(*http.Request) string {
 	socketHost := func(r *http.Request) string {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -189,6 +193,9 @@ func clientIPFunc(trustProxy bool) func(*http.Request) string {
 		return socketHost
 	}
 	return func(r *http.Request) string {
+		if !fromProxy(socketHost(r), proxies) {
+			return socketHost(r)
+		}
 		first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
 		first = strings.TrimSpace(first)
 		// Only an address the header actually parses as counts. A blank or malformed
@@ -200,6 +207,25 @@ func clientIPFunc(trustProxy bool) func(*http.Request) string {
 		}
 		return first
 	}
+}
+
+// fromProxy reports whether a peer may speak for its client. No networks means any
+// peer may, which is what TrustedProxy meant before the networks were configurable.
+func fromProxy(host string, proxies []netip.Prefix) bool {
+	if len(proxies) == 0 {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, p := range proxies {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func Serve(addr string, h http.Handler) *http.Server {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -336,6 +337,33 @@ func TestTrustedProxy_UsesLeftmostForwardedAddress(t *testing.T) {
 	require.Equal(t, http.StatusOK, send("198.51.100.5, 10.0.0.1"))
 	assert.Equal(t, http.StatusTooManyRequests, send("198.51.100.5, 172.16.0.9"),
 		"same client through a different hop is still the same client")
+}
+
+// A header is only as honest as whoever set it. The stats port is reachable from
+// every container on the compose network, not only nginx, so with the proxy's
+// networks named, a forged X-Forwarded-For from anywhere else must key on the socket.
+func TestTrustedProxy_HeaderFromOutsideTheProxyNetworksIsIgnored(t *testing.T) {
+	t.Parallel()
+	h := Handler(Deps{
+		Sessions: fakeSessions(1), RequestsPerMinute: 2, TrustedProxy: true, AllowOrigin: "*",
+		TrustedProxyNetworks: []netip.Prefix{netip.MustParsePrefix("172.29.69.0/24")},
+	})
+
+	send := func(peer, xff string) int {
+		req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Forwarded-For", xff)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	var last int
+	for i := range 4 {
+		last = send("10.0.0.7:1234", fmt.Sprintf("203.0.113.%d", i+1))
+	}
+	assert.Equal(t, http.StatusTooManyRequests, last, "a peer outside the proxy networks cannot mint budgets")
+	assert.Equal(t, http.StatusOK, send("172.29.69.2:4000", "198.51.100.1"), "nginx's header is still believed")
 }
 
 // A HEAD is how a monitor checks the feed is alive; it must get the headers and

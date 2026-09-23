@@ -262,7 +262,9 @@ func startStatsAPI(
 		AllowOrigin:       cfg.APIAllowOrigin,
 		RequestsPerMinute: cfg.APIRequestsPerMinute,
 		TrustedProxy:      cfg.APITrustProxy,
-		Health:            health,
+		// Same networks the PROXY header is trusted from: in compose, exactly nginx's.
+		TrustedProxyNetworks: cfg.ProxyTrustedCIDRs,
+		Health:               health,
 	}))
 
 	serveErr := make(chan error, 1)
