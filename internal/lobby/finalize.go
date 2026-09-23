@@ -124,13 +124,15 @@ func (m *Manager) persistFinishedMatch(
 	// play, decided who was left holding cards. Rules errors are the same class -
 	// half-applied state must not move the ladder. So is a table every seat left:
 	// standings are then reverse leave order, so rating it pays the last to quit.
+	// An interrupted match stays rated, but only against its leavers: see
+	// recordFinishedMatch.
 	rated := req.isRanked && !m.isShuttingDown() &&
 		reason != game.EndReasonRulesError && reason != game.EndReasonAbandoned
 	if req.isRanked && !rated {
 		slog.WarnContext(ctx, unratedReason(reason), "lobby", req.lobbyCode, "game", req.game.Slug)
 	}
 
-	if err := m.recordFinishedMatch(ctx, req.game, userIDs, places, rated); err != nil {
+	if err := m.recordFinishedMatch(ctx, engine, reason, req.game, userIDs, places, rated); err != nil {
 		slog.ErrorContext(ctx, "failed to record finished match",
 			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated)
 		observability.MatchFinalize(ctx, "error", req.isRanked)
@@ -139,17 +141,38 @@ func (m *Manager) persistFinishedMatch(
 	observability.MatchFinalize(ctx, "ok", req.isRanked)
 }
 
+// recordFinishedMatch picks the write. An interrupted match (decision D-1) is rated
+// only against its leavers: the seats still playing did not finish, so nothing moves
+// for them, but quitting a losing match must not be free.
 func (m *Manager) recordFinishedMatch(
-	ctx context.Context, ref db.GameRef, userIDs []uuid.UUID, places []int, isRanked bool,
+	ctx context.Context, engine *game.Engine, reason game.EndReason,
+	ref db.GameRef, userIDs []uuid.UUID, places []int, isRanked bool,
 ) error {
-	if isRanked {
+	switch {
+	case !isRanked:
+		if err := m.matchRepo.RecordCasualMatch(ctx, ref, userIDs); err != nil {
+			return fmt.Errorf("record casual match: %w", err)
+		}
+	case reason == game.EndReasonInterrupted:
+		if err := m.matchRepo.FinalizeInterruptedMatch(ctx, ref, userIDs, places, leaverIDs(engine)); err != nil {
+			return fmt.Errorf("finalize interrupted match: %w", err)
+		}
+	default:
 		if err := m.matchRepo.FinalizeRankedMatch(ctx, ref, userIDs, places); err != nil {
 			return fmt.Errorf("finalize ranked match: %w", err)
 		}
-		return nil
-	}
-	if err := m.matchRepo.RecordCasualMatch(ctx, ref, userIDs); err != nil {
-		return fmt.Errorf("record casual match: %w", err)
 	}
 	return nil
+}
+
+// leaverIDs is who left the finished engine's table. LeftPlayers is engine state, so it
+// is read under the engine's lock; the lobby holds no lock of its own here.
+func leaverIDs(engine *game.Engine) []uuid.UUID {
+	var ids []uuid.UUID
+	engine.WithState(func(state *game.State) {
+		for _, p := range state.LeftPlayers {
+			ids = append(ids, p.UserID)
+		}
+	})
+	return ids
 }

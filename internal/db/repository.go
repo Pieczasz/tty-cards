@@ -35,4 +35,13 @@ type MatchRepository interface {
 	// without moving rating between the tied players. A nil places means a strict
 	// finish order.
 	FinalizeRankedMatch(ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int) error
+	// FinalizeInterruptedMatch settles a ranked match that a leave ended early for
+	// everyone (game.EndReasonInterrupted). Elo is computed as for FinalizeRankedMatch,
+	// with the leavers already ranked last, but only a leaver's loss is written: every
+	// other seat keeps its rating and its matches_played, so a friend quitting cannot
+	// bank a lead, and a losing player cannot quit for free. leavers are user ids from
+	// orderedUserIDs; anything else is ignored.
+	FinalizeInterruptedMatch(
+		ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
+	) error
 }

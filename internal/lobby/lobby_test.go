@@ -73,6 +73,12 @@ func (m *MockMatchRepo) FinalizeRankedMatch(
 	return m.Called(ctx, ref, orderedUserIDs, places).Error(0)
 }
 
+func (m *MockMatchRepo) FinalizeInterruptedMatch(
+	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
+) error {
+	return m.Called(ctx, ref, orderedUserIDs, places, leavers).Error(0)
+}
+
 // gameRef mirrors what registerGame put in the registry: the persisted key is the
 // slug, so an expectation written against the display name would pass while the row
 // was being written under a different identity.
@@ -630,9 +636,20 @@ func TestLobby_RecordFinishedMatch(t *testing.T) {
 	tests := []struct {
 		name    string
 		ranked  bool
+		reason  game.EndReason
 		setup   func(*MockMatchRepo)
 		wantErr string
 	}{
+		{
+			name:   "interrupted failure is reported",
+			ranked: true,
+			reason: game.EndReasonInterrupted,
+			setup: func(r *MockMatchRepo) {
+				r.On("FinalizeInterruptedMatch", mock.Anything, gameRef("Mock"), []uuid.UUID{testutil.UID(1)},
+					mock.Anything, mock.Anything).Return(assert.AnError)
+			},
+			wantErr: "finalize interrupted match",
+		},
 		{
 			name:   "ranked success",
 			ranked: true,
@@ -670,7 +687,11 @@ func TestLobby_RecordFinishedMatch(t *testing.T) {
 			tt.setup(repo)
 			m := newTestManager(t, repo)
 
-			err := m.recordFinishedMatch(context.Background(), gameRef("Mock"), []uuid.UUID{testutil.UID(1)}, nil, tt.ranked)
+			engine := game.NewEngine(&stubRules{}, nil, deck.StandardDeck())
+			t.Cleanup(engine.Close)
+
+			err := m.recordFinishedMatch(context.Background(), engine, tt.reason,
+				gameRef("Mock"), []uuid.UUID{testutil.UID(1)}, nil, tt.ranked)
 
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)

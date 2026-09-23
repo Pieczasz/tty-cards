@@ -642,3 +642,67 @@ func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
 		t.Fatal("the match that ended during the drain was dropped")
 	}
 }
+
+// A match one leaver ended early for everyone (decision D-1): the seats still
+// playing are not rated on a result nobody finished, but the leaver still loses, or
+// quitting a losing match would be free. The repository applies that; the lobby's
+// job is to route the match there with the leavers named.
+func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
+	t.Parallel()
+
+	seated := []*game.Player{mockPlayer("a", testutil.UID(1)), mockPlayer("b", testutil.UID(2))}
+	leaver := mockPlayer("c", testutil.UID(3))
+	standings := []uuid.UUID{testutil.UID(1), testutil.UID(2), testutil.UID(3)}
+
+	tests := []struct {
+		name     string
+		ranked   bool
+		shutdown bool
+		expect   func(r *MockMatchRepo)
+	}{
+		{
+			name:   "ranked: only the leaver is rated",
+			ranked: true,
+			expect: func(r *MockMatchRepo) {
+				r.On("FinalizeInterruptedMatch", mock.Anything, gameRef("Mock"), standings, mock.Anything,
+					[]uuid.UUID{testutil.UID(3)}).Return(nil).Once()
+			},
+		},
+		{
+			name: "casual: history only",
+			expect: func(r *MockMatchRepo) {
+				r.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), standings).Return(nil).Once()
+			},
+		},
+		{
+			name:     "shutdown: not even the leaver is rated",
+			ranked:   true,
+			shutdown: true,
+			expect: func(r *MockMatchRepo) {
+				r.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), standings).Return(nil).Once()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := new(MockMatchRepo)
+			tt.expect(repo)
+			m := newTestManager(t, repo)
+			if tt.shutdown {
+				m.shuttingDown.Store(true)
+			}
+
+			engine := game.NewEngine(&stubRules{}, seated, deck.StandardDeck())
+			t.Cleanup(engine.Close)
+			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
+
+			m.finalizeFinishedGame(finalizeRequest{
+				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
+			}, engine, game.EndReasonInterrupted, m.registerFinalizer())
+
+			repo.AssertExpectations(t)
+			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
