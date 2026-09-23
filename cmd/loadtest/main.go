@@ -16,9 +16,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -51,7 +52,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	r := &run{addr: *addr, journey: *journey, prefix: *prefix}
+	r := &results{addr: *addr, journey: *journey, prefix: *prefix}
 	release := make(chan struct{})
 
 	var wg sync.WaitGroup
@@ -87,7 +88,8 @@ func main() {
 	r.report(*sessions, time.Since(started))
 }
 
-type run struct {
+// results is one run's configuration and everything its clients report back.
+type results struct {
 	addr    string
 	journey string
 	prefix  string
@@ -103,7 +105,7 @@ type run struct {
 	peak atomic.Int64
 }
 
-func (r *run) record(connect, frame time.Duration, n int64) {
+func (r *results) record(connect, frame time.Duration, n int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.connectMs = append(r.connectMs, float64(connect)/float64(time.Millisecond))
@@ -114,29 +116,38 @@ func (r *run) record(connect, frame time.Duration, n int64) {
 	r.ok++
 }
 
-func (r *run) fail(stage string, err error) {
+// fail counts err, which names the stage it happened at, among the run's errors.
+func (r *results) fail(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.errs == nil {
 		r.errs = map[string]int{}
 	}
-	r.errs[stage+": "+err.Error()]++
+	r.errs[err.Error()]++
 }
 
-// client runs one session end to end. It returns only after release closes, so the
-// caller's WaitGroup measures the true concurrency window.
-// openSession dials, authenticates and requests a PTY, reporting any failure. The
-// returned cleanup closes the connection; it is non-nil exactly when ok.
-func (r *run) openSession(i int) (sess *ssh.Session, connectLatency time.Duration, cleanup func(), ok bool) {
+// session is one client's open connection and its PTY session.
+type session struct {
+	*ssh.Session
+	conn    *ssh.Client
+	connect time.Duration
+}
+
+func (s *session) close() {
+	_ = s.Close()
+	_ = s.conn.Close()
+}
+
+// openSession dials, authenticates and requests a PTY. The error names the stage
+// that failed; on success the caller owns the session and closes it.
+func (r *results) openSession(i int) (*session, error) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		r.fail("keygen", err)
-		return nil, 0, nil, false
+		return nil, fmt.Errorf("keygen: %w", err)
 	}
 	signer, err := ssh.NewSignerFromKey(priv)
 	if err != nil {
-		r.fail("signer", err)
-		return nil, 0, nil, false
+		return nil, fmt.Errorf("signer: %w", err)
 	}
 
 	cfg := &ssh.ClientConfig{
@@ -149,50 +160,50 @@ func (r *run) openSession(i int) (sess *ssh.Session, connectLatency time.Duratio
 	dialStart := time.Now()
 	conn, err := ssh.Dial("tcp", r.addr, cfg)
 	if err != nil {
-		r.fail("dial/auth", err)
-		return nil, 0, nil, false
+		return nil, fmt.Errorf("dial/auth: %w", err)
 	}
-	connectLatency = time.Since(dialStart)
+	connect := time.Since(dialStart)
 
-	sess, err = conn.NewSession()
+	sess, err := conn.NewSession()
 	if err != nil {
-		r.fail("new session", err)
 		_ = conn.Close()
-		return nil, 0, nil, false
+		return nil, fmt.Errorf("new session: %w", err)
 	}
+	s := &session{Session: sess, conn: conn, connect: connect}
 
 	if err := sess.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{
 		ssh.ECHO: 0, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400,
 	}); err != nil {
-		r.fail("request pty", err)
-		_ = sess.Close()
-		_ = conn.Close()
-		return nil, 0, nil, false
+		s.close()
+		return nil, fmt.Errorf("request pty: %w", err)
 	}
-	return sess, connectLatency, func() { _ = sess.Close(); _ = conn.Close() }, true
+	return s, nil
 }
 
-func (r *run) client(i int, release <-chan struct{}) {
-	sess, connectLatency, cleanup, ok := r.openSession(i)
-	if !ok {
+// client runs one session end to end. It returns only after release closes, so the
+// caller's WaitGroup measures the true concurrency window.
+func (r *results) client(i int, release <-chan struct{}) {
+	sess, err := r.openSession(i)
+	if err != nil {
+		r.fail(err)
 		return
 	}
-	defer cleanup()
+	defer sess.close()
 	sessionStart := time.Now()
 
 	stdout, err := sess.StdoutPipe()
 	if err != nil {
-		r.fail("stdout pipe", err)
+		r.fail(fmt.Errorf("stdout pipe: %w", err))
 		return
 	}
 	stdin, err := sess.StdinPipe()
 	if err != nil {
-		r.fail("stdin pipe", err)
+		r.fail(fmt.Errorf("stdin pipe: %w", err))
 		return
 	}
 
 	if err := sess.Shell(); err != nil {
-		r.fail("shell", err)
+		r.fail(fmt.Errorf("shell: %w", err))
 		return
 	}
 
@@ -222,10 +233,10 @@ func (r *run) client(i int, release <-chan struct{}) {
 	// percentiles - reading best exactly when the server is dropping connections,
 	// which is the run this tool exists to measure.
 	if res.err != nil && !errors.Is(res.err, io.EOF) {
-		r.fail("read", res.err)
+		r.fail(fmt.Errorf("read: %w", res.err))
 		return
 	}
-	r.record(connectLatency, res.firstFrame, res.bytes)
+	r.record(sess.connect, res.firstFrame, res.bytes)
 }
 
 type drainResult struct {
@@ -257,7 +268,7 @@ func drain(out io.Reader, since time.Time, done chan<- drainResult) {
 // keystrokes walks home -> join-lobby browser and parks there, which is the hot
 // spot: the browser re-renders on a 2s tick plus a cursor blink for as long as a
 // player is looking at it. "f" is the home view's key for the join browser.
-func (r *run) keystrokes(in io.WriteCloser, release <-chan struct{}) {
+func (r *results) keystrokes(in io.WriteCloser, release <-chan struct{}) {
 	defer func() { _ = in.Close() }()
 	steps := []struct {
 		wait time.Duration
@@ -287,11 +298,11 @@ func pct(sorted []float64, p float64) float64 {
 	return sorted[i]
 }
 
-func (r *run) report(requested int, elapsed time.Duration) {
+func (r *results) report(requested int, elapsed time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	sort.Float64s(r.connectMs)
-	sort.Float64s(r.frameMs)
+	slices.Sort(r.connectMs)
+	slices.Sort(r.frameMs)
 
 	failed := 0
 	for _, n := range r.errs {
@@ -321,8 +332,8 @@ func (r *run) report(requested int, elapsed time.Duration) {
 	}
 	if len(r.errs) > 0 {
 		fmt.Printf("\nerrors:\n")
-		for msg, n := range r.errs {
-			fmt.Printf("  %6d  %s\n", n, msg)
+		for _, msg := range slices.Sorted(maps.Keys(r.errs)) {
+			fmt.Printf("  %6d  %s\n", r.errs[msg], msg)
 		}
 	}
 	fmt.Println()
