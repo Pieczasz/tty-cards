@@ -632,6 +632,26 @@ func TestUserRepository_DeleteAccount(t *testing.T) {
 	assert.NotEqual(t, f.leaver.ID, returning.ID, "a returning key must not reopen the erased account")
 }
 
+// An operator soft-delete hides the row from the default scope, and the anonymising
+// UPDATE is default-scoped: it matched nothing, so erasure reported ErrUserNotFound for
+// an account that still holds its name.
+func TestUserRepository_DeleteAccountErasesASoftDeletedUser(t *testing.T) {
+	t.Parallel()
+	database := testutil.SetupTestDB(t)
+	repo := repository.NewUserRepository(database)
+	ctx := context.Background()
+
+	user, _, err := repo.RegisterUserWithKey(ctx, "hidden", "fp_hidden")
+	require.NoError(t, err)
+	require.NoError(t, database.Delete(&db.User{}, "id = ?", user.ID.String()).Error)
+
+	require.NoError(t, repo.DeleteAccount(ctx, user.ID))
+
+	var username string
+	require.NoError(t, database.Raw(`SELECT username FROM users WHERE id = ?`, user.ID.String()).Scan(&username).Error)
+	assert.Equal(t, db.AnonymisedUsername(user.ID), username, "the soft-deleted account kept its name")
+}
+
 // An id that was never a user is not a silent success: the caller asked to erase
 // something specific and nothing was erased.
 func TestUserRepository_DeleteAccountUnknownUser(t *testing.T) {

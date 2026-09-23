@@ -360,7 +360,10 @@ func eraseUserLocked(tx *gorm.DB, userID uuid.UUID) error {
 
 	// A column update keyed on the id, not Save on a loaded User: the save hooks would
 	// walk the associations this transaction has just deleted and write them back.
-	anonymised := tx.Model(&db.User{}).Where("id = ?", userID.String()).Updates(map[string]any{
+	//
+	// Unscoped: an operator soft-delete hides the row from the default scope, and a
+	// scoped update then matched nothing and reported a still-named account as unknown.
+	anonymised := tx.Unscoped().Model(&db.User{}).Where("id = ?", userID.String()).Updates(map[string]any{
 		"username": db.AnonymisedUsername(userID),
 		// NULL rather than a zero timestamp: "never seen" is what an erased row means,
 		// and the column is nullable precisely so it can say that.

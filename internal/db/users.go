@@ -20,7 +20,7 @@ import (
 // uses to build queries. TestSchemaNullabilityMatchesStructs derives what the SQL must
 // guarantee from these structs, so the drift is caught by CI rather than by a tag.
 type User struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid;default:uuidv7()"`
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	DeletedAt  gorm.DeletedAt
