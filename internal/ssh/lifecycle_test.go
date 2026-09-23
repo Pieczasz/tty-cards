@@ -10,6 +10,8 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
+	"uuid"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
@@ -27,6 +29,11 @@ type fakeSession struct {
 }
 
 func (f *fakeSession) Context() ssh.Context { return f.ctx }
+
+// release is ReleaseWith with nothing to do under the lock.
+func release(tracker *SessionTracker, userID uuid.UUID, gen uint64) bool {
+	return tracker.ReleaseWith(userID, gen, func() {})
+}
 
 type recordingCloser struct{ closed *bool }
 
@@ -140,11 +147,11 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	gen2, err := tracker.Connect(testutil.UID(1), nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, gen1, gen2)
-	assert.False(t, tracker.Release(testutil.UID(1), gen1), "stale generation must not free the slot")
+	assert.False(t, release(tracker, testutil.UID(1), gen1), "stale generation must not free the slot")
 	assert.Equal(t, 2, tracker.Count())
-	assert.True(t, tracker.Release(testutil.UID(1), gen2))
+	assert.True(t, release(tracker, testutil.UID(1), gen2))
 
-	assert.True(t, tracker.Release(testutil.UID(2), gen))
+	assert.True(t, release(tracker, testutil.UID(2), gen))
 	_, err = tracker.Connect(testutil.UID(3), nil)
 	require.NoError(t, err, "capacity frees with the seat")
 }
@@ -293,7 +300,6 @@ func TestSessionTracker_ConnectClosesTheDisplacedSession(t *testing.T) {
 
 	// A Close error is the peer already being gone, which is the common case here and
 	// must not stop the new session from being tracked.
-	assert.True(t, tracker.Owns(testutil.UID(7), gen2))
-	assert.False(t, tracker.Release(testutil.UID(7), gen1), "the displaced generation frees nothing")
-	assert.True(t, tracker.Release(testutil.UID(7), gen2))
+	assert.False(t, release(tracker, testutil.UID(7), gen1), "the displaced generation frees nothing")
+	assert.True(t, release(tracker, testutil.UID(7), gen2))
 }

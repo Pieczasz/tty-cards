@@ -131,6 +131,9 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	if err := observability.RegisterSessionGauge(tracker.Count); err != nil {
+		slog.ErrorContext(ctx, "failed to register the session gauge", "error", err)
+	}
 
 	stopAPI, apiErr := startStatsAPI(cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
 	defer stopAPI()
@@ -170,7 +173,7 @@ func (g levelGate) WithGroup(name string) slog.Handler {
 }
 
 func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
-	shutdown, err := observability.SetupOTel(ctx, cfg)
+	shutdown, err := observability.Setup(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("setup otel: %w", err)
 	}

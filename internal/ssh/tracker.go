@@ -5,8 +5,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/Pieczasz/terminal-card/internal/observability"
-
 	"uuid"
 )
 
@@ -20,6 +18,9 @@ type trackedSession struct {
 	conn io.Closer
 }
 
+// SessionTracker holds one live session per account and the server-wide session
+// cap. Its generations are what let a displaced session's teardown tell that it no
+// longer owns the account's slot.
 type SessionTracker struct {
 	mu     sync.Mutex
 	active map[uuid.UUID]trackedSession
@@ -30,6 +31,8 @@ type SessionTracker struct {
 	maxSessions int
 }
 
+// NewSessionTracker returns a tracker refusing sessions past maxSessions (zero is
+// unlimited).
 func NewSessionTracker(maxSessions int) *SessionTracker {
 	return &SessionTracker{
 		active:      make(map[uuid.UUID]trackedSession),
@@ -39,7 +42,7 @@ func NewSessionTracker(maxSessions int) *SessionTracker {
 
 // Connect registers userID and returns a generation. A second Connect for the same
 // account displaces the first: half-open TCP otherwise blocks reconnect for the whole
-// mid-game grace window. Release with a stale generation is a no-op.
+// mid-game grace window. ReleaseWith with a stale generation is a no-op.
 //
 // conn is the connection the displaced session is hung up on. Without closing it,
 // the account keeps every connection it ever opened until each one's TCP dies, so the
@@ -55,37 +58,22 @@ func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, erro
 		return 0, ErrServerFull
 	}
 	t.active[userID] = trackedSession{gen: gen, conn: conn}
-	if !exists {
-		observability.SSHSessionsActive.Add(1)
-	}
 	t.mu.Unlock()
 
 	// Outside the lock: Close writes to the network, and a wedged peer must not hold
 	// every other account's Connect behind it. The displaced session's own teardown
-	// is already harmless - Release only frees a slot for the live generation.
+	// is already harmless - ReleaseWith only frees a slot for the live generation.
 	if exists && prev.conn != nil {
 		_ = prev.conn.Close()
 	}
 	return gen, nil
 }
 
+// Count is the number of accounts with a live session.
 func (t *SessionTracker) Count() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.active)
-}
-
-// Release frees the slot only when gen is still the live generation. A displaced
-// session's teardown must not drop the replacement or start a disconnect grace.
-func (t *SessionTracker) Release(userID uuid.UUID, gen uint64) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.active[userID].gen != gen {
-		return false
-	}
-	delete(t.active, userID)
-	observability.SSHSessionsActive.Add(-1)
-	return true
 }
 
 // ReleaseWith runs fn and then frees the slot, both under the tracker lock, only if
@@ -101,13 +89,5 @@ func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bo
 	}
 	fn()
 	delete(t.active, userID)
-	observability.SSHSessionsActive.Add(-1)
 	return true
-}
-
-// Owns reports whether gen is still the live generation for userID.
-func (t *SessionTracker) Owns(userID uuid.UUID, gen uint64) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.active[userID].gen == gen
 }

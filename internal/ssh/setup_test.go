@@ -391,7 +391,7 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 	assert.Equal(t, user, st.user)
 	assert.NotZero(t, st.gen)
 	assert.NotNil(t, st.model, "closeSessionModel would leave the view's subscriptions running")
-	assert.True(t, tracker.Owns(user.ID, st.gen))
+	assert.True(t, release(tracker, user.ID, st.gen), "the session does not own the slot it claimed")
 	assert.Zero(t, s.exited, "an accepted session must not be hung up on")
 }
 
