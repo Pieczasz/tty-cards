@@ -24,11 +24,8 @@ func testUser(name string) *db.User {
 // startedTable returns a two-handed table mid-hand plus the view bound to seat 1.
 func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.StandardDeck())
+
 	require.NoError(t, engine.Start())
 
 	global := router.GlobalContext{User: testUser("alice")}

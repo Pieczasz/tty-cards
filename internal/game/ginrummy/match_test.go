@@ -29,7 +29,7 @@ func TestMatch_ScoresCarryIntoNextHand(t *testing.T) {
 	}
 	state.Players[0].Cards = knocker
 	state.Players[1].Cards = opponent
-	extra.HandPhase = AwaitingDiscard
+	extra.Phase = PhaseAwaitingDiscard
 	state.CurrentTurn = 0
 
 	rules.ApplyAction(state, ActionKnock{Discard: c(deck.King, deck.Clubs)})
@@ -42,7 +42,7 @@ func TestMatch_ScoresCarryIntoNextHand(t *testing.T) {
 	assert.Equal(t, score, extra.CumulativeScores["p1"], "scores carry across hands")
 	assert.Equal(t, 2, extra.HandNumber)
 	assert.False(t, extra.HandComplete())
-	assert.Equal(t, AwaitingDraw, extra.HandPhase)
+	assert.Equal(t, PhaseAwaitingDraw, extra.Phase)
 }
 
 // Two players who only ever take the upcard never touch the stock, so the ordinary
@@ -57,7 +57,7 @@ func TestMatch_UpcardTradingCannotStallTheHand(t *testing.T) {
 	for turn := range maxHandTurns * 2 {
 		if extra.HandComplete() {
 			require.NotNil(t, extra.LastHandResult)
-			assert.True(t, extra.LastHandResult.Wall, "a stalled hand settles as a wall")
+			assert.Equal(t, OutcomeWall, extra.LastHandResult.Outcome, "a stalled hand settles as a wall")
 			assert.Equal(t, openingStock, state.Deck.Size(), "no stock was ever drawn")
 			assert.Equal(t, maxHandTurns, extra.TurnsThisHand)
 			return
@@ -109,7 +109,7 @@ func TestMatch_EndsOnceCumulativeScoreCrossesTarget(t *testing.T) {
 	}
 	state.Players[0].Cards = knocker
 	state.Players[1].Cards = opponent
-	extra.HandPhase = AwaitingDiscard
+	extra.Phase = PhaseAwaitingDiscard
 	state.CurrentTurn = 0
 
 	rules.ApplyAction(state, ActionKnock{Discard: c(deck.King, deck.Clubs)})
@@ -131,7 +131,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 
 	var scoreBefore map[string]int
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
+		extra := extra(t, s)
 		extra.CumulativeScores["p1"] = 30
 		extra.CumulativeScores["p2"] = 12
 		scoreBefore = map[string]int{"p1": 30, "p2": 12}
@@ -144,7 +144,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 	assert.Equal(t, "p1", standings[0].ID)
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
+		extra := extra(t, s)
 		assert.Equal(t, scoreBefore["p1"], extra.CumulativeScores["p1"])
 		assert.Equal(t, scoreBefore["p2"], extra.CumulativeScores["p2"])
 	})
@@ -156,7 +156,7 @@ func TestMatch_FirstActorAlternates(t *testing.T) {
 	state, extra := startedState(t)
 	assert.Equal(t, 0, extra.FirstActor)
 
-	extra.HandPhase = HandOver
+	extra.Phase = PhaseHandOver
 	extra.FirstActor = 0
 	next := 1
 	extra.FirstActor = next

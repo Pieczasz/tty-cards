@@ -20,7 +20,7 @@ func (m *model) View() tea.View {
 		return tea.NewView(screen)
 	}
 	if m.handComplete || m.matchComplete {
-		return tea.NewView(styles.Clamp(m.Global.Width, m.Global.Height, m.renderHandOver()))
+		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
 		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.winnerName))
@@ -59,17 +59,17 @@ func (m *model) compact() bool {
 const seatNameWidth = 12
 
 func (m *model) renderHandOver() string {
-	compact := m.compact()
-	board := m.renderBoard(compact)
-
-	title := m.Global.Theme.Accented.Render(fmt.Sprintf("HAND %d/%d COMPLETE", m.handNumber, m.handsTotal))
-	winner := m.Global.Theme.Accented.Render(m.winnerName + " wins the hand")
+	h := gameview.HandOver{
+		Title:    fmt.Sprintf("HAND %d/%d COMPLETE", m.handNumber, m.handsTotal),
+		Subtitle: m.winnerName + " wins the hand",
+		Body:     m.renderBoard(m.compact()),
+		Rows:     make([]string, 0, len(m.seats)),
+		Hint:     m.handOverHint(),
+	}
 	if m.matchComplete {
-		title = m.Global.Theme.Accented.Render("MATCH COMPLETE")
-		winner = m.Global.Theme.Accented.Render(m.winnerName + " wins")
+		h.Title, h.Subtitle = gameview.MatchOverTitle(""), m.winnerName+" wins"
 	}
 
-	seatLines := make([]string, 0, len(m.seats))
 	for _, s := range m.seats {
 		// Chip glyphs carry their own colour, so they are joined in rather than
 		// rendered through m.Global.Theme.Muted.
@@ -81,15 +81,9 @@ func (m *model) renderHandOver() string {
 		if len(s.Hole) == logic.HoleCards {
 			line += "  " + components.RenderMiniCard(m.Global.Theme, s.Hole[0]) + components.RenderMiniCard(m.Global.Theme, s.Hole[1])
 		}
-		seatLines = append(seatLines, line)
+		h.Rows = append(h.Rows, line)
 	}
-
-	content := lg.JoinVertical(lg.Center,
-		title, winner, "", board, "",
-		lg.JoinVertical(lg.Left, seatLines...),
-		"", m.Global.Theme.Dim.Render(m.handOverHint()),
-	)
-	return styles.Place(m.Global.Width, m.Global.Height, lg.Center, lg.Center, content)
+	return gameview.RenderHandOver(m.Global, h)
 }
 
 // handOverHint spells out that esc leaves the whole match. The screen looks like
@@ -97,8 +91,9 @@ func (m *model) renderHandOver() string {
 // player just spent them building.
 func (m *model) handOverHint() string {
 	if m.matchComplete {
-		return "esc / enter -> lobby"
+		return gameview.LobbyHint
 	}
+
 	leave := "esc: leave the match, forfeiting your chips"
 
 	var next string

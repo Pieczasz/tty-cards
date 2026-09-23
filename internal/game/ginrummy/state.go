@@ -7,12 +7,14 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 )
 
+// Phase is where the turn, or the hand, is. The zero value is PhaseAwaitingDraw, the
+// phase every hand deals into.
 type Phase uint8
 
 const (
-	AwaitingDraw Phase = iota
-	AwaitingDiscard
-	HandOver
+	PhaseAwaitingDraw Phase = iota
+	PhaseAwaitingDiscard
+	PhaseHandOver
 )
 
 const (
@@ -26,12 +28,17 @@ const (
 	// maxHands bounds the match. Two players who never knock never score, so the
 	// target alone is not a termination condition: a table that walls every hand
 	// redeals forever. At the cap the standings settle on the totals as they are.
-	maxHands        = 50
-	handOverTimeout = time.Minute
+	maxHands            = 50
+	handOverTurnTimeout = time.Minute
+
+	// A meld is three or four of a rank, or a run of three or more in one suit.
+	minMeldSize = 3
+	maxSetSize  = 4
 )
 
+// State is the Gin Rummy match state stored in game.State.Extra.
 type State struct {
-	HandPhase Phase
+	Phase Phase
 	// TakenUpcard is the card drawn from the discard pile this turn, which may not
 	// be discarded straight back. Without it two players can trade the same upcard
 	// forever: discard draws never touch the stock, so the wall never arrives and
@@ -56,12 +63,46 @@ type State struct {
 	LastHandResult *HandResult
 }
 
-// HandComplete is derived from HandPhase rather than kept beside it, so the two cannot
+// HandComplete is derived from Phase rather than kept beside it, so the two cannot
 // disagree about whether the hand is over.
-func (s *State) HandComplete() bool { return s.HandPhase == HandOver }
+func (s *State) HandComplete() bool { return s.Phase == PhaseHandOver }
+
+// Outcome is how a hand ended. The zero value is a result nobody has settled.
+type Outcome uint8
+
+const (
+	OutcomeUnknown Outcome = iota
+	// OutcomeKnock is a knock the defender could not undercut.
+	OutcomeKnock
+	// OutcomeGin is a knock on no deadwood: the bonus, and no layoffs.
+	OutcomeGin
+	// OutcomeUndercut is a knock the defender matched or beat after laying off.
+	OutcomeUndercut
+	// OutcomeWall is a hand nobody knocked in before the stock ran down.
+	OutcomeWall
+)
+
+// String is the outcome's stable label, the one the logs carry.
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeKnock:
+		return "knock"
+	case OutcomeGin:
+		return "gin"
+	case OutcomeUndercut:
+		return "undercut"
+	case OutcomeWall:
+		return "wall"
+	case OutcomeUnknown:
+	}
+	return "unknown"
+}
 
 // HandResult is the settle-up summary shown between hands.
+
 type HandResult struct {
+	Outcome Outcome
+
 	KnockerMelds          [][]deck.Card
 	KnockerDeadwood       []deck.Card
 	KnockerDeadwoodPoints int
@@ -71,11 +112,8 @@ type HandResult struct {
 	OpponentDeadwoodPoints int
 	LaidOffCards           []deck.Card
 
-	Gin        bool
-	Undercut   bool
-	Wall       bool
 	ScoreDelta int
-	Winner     string // player ID credited; empty on Wall
+	Winner     string // player ID credited; empty on a wall
 }
 
 // Clone deep-copies the result so a view can keep reading it after releasing the

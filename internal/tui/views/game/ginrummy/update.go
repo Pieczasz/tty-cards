@@ -57,7 +57,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	card, ok := m.SelectedCard()
-	if !ok || m.handPhase != logic.AwaitingDiscard {
+	if !ok || m.phase != logic.PhaseAwaitingDiscard {
 		return m, nil
 	}
 	return m.submit(logic.ActionDiscard{Card: card})
@@ -65,7 +65,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKnock() (tea.Model, tea.Cmd) {
 	card, ok := m.SelectedCard()
-	if !m.Base.MyTurn || !ok || m.handPhase != logic.AwaitingDiscard {
+	if !m.Base.MyTurn || !ok || m.phase != logic.PhaseAwaitingDiscard {
 		return m, nil
 	}
 	return m.submit(logic.ActionKnock{Discard: card})

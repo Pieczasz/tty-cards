@@ -28,9 +28,7 @@ func TestHandResult_Clone(t *testing.T) {
 			OpponentDeadwood:       []deck.Card{c(deck.Nine, deck.Hearts)},
 			OpponentDeadwoodPoints: 9,
 			LaidOffCards:           []deck.Card{c(deck.Ten, deck.Spades)},
-			Gin:                    true,
-			Undercut:               true,
-			Wall:                   true,
+			Outcome:                OutcomeUndercut,
 			ScoreDelta:             34,
 			Winner:                 "p2",
 		}
@@ -63,4 +61,16 @@ func TestHandResult_Clone(t *testing.T) {
 		assert.Equal(t, c(deck.Nine, deck.Hearts), original.OpponentDeadwood[0])
 		assert.Equal(t, c(deck.Ten, deck.Spades), original.LaidOffCards[0])
 	})
+}
+
+// The label is what the knock log carries, so every settled outcome needs its own.
+func TestOutcome_StringNamesEverySettledOutcome(t *testing.T) {
+	t.Parallel()
+	seen := map[string]bool{}
+	for _, o := range []Outcome{OutcomeKnock, OutcomeGin, OutcomeUndercut, OutcomeWall} {
+		label := o.String()
+		assert.NotEqual(t, OutcomeUnknown.String(), label, "outcome %d", o)
+		assert.False(t, seen[label], "two outcomes share %q", label)
+		seen[label] = true
+	}
 }

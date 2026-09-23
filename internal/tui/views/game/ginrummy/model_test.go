@@ -1,7 +1,6 @@
 package ginrummy
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -23,11 +22,7 @@ func testUser() *db.User {
 
 func startedTable(t *testing.T) (*game.Engine, *Model) {
 	t.Helper()
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.StandardDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -35,7 +30,7 @@ func startedTable(t *testing.T) (*game.Engine, *Model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         testUser(),
-		LobbyManager: lobby.NewManager(context.Background(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil),
 		Width:        80,
 		Height:       40,
 	}
@@ -49,11 +44,12 @@ func TestSyncState_LoadsGinExtra(t *testing.T) {
 	_, m := startedTable(t)
 
 	assert.Equal(t, 1, m.handNumber)
-	assert.Equal(t, logic.AwaitingDraw, m.handPhase)
+	assert.Equal(t, logic.PhaseAwaitingDraw, m.phase)
 	assert.Len(t, m.Base.Hand, 10)
-	assert.Len(t, m.seatOrder, 2)
-	assert.Equal(t, "alice", m.seatNames[testutil.SeatID(1)])
-	assert.Equal(t, 31, m.stockSize)
+	assert.Len(t, m.Base.SeatOrder(), 2)
+	assert.Equal(t, "alice", m.Base.SeatNames()[testutil.SeatID(1)])
+	assert.Equal(t, 31, m.Base.DeckSize)
+
 }
 
 func TestClose_ReleasesEngineSubscription(t *testing.T) {
@@ -129,15 +125,15 @@ func TestHandleKnock_OnlyFiresWhenAKnockIsLegal(t *testing.T) {
 		phase     logic.Phase
 		wantReach bool
 	}{
-		{name: "off turn", myTurn: false, phase: logic.AwaitingDiscard},
-		{name: "before drawing", myTurn: true, phase: logic.AwaitingDraw},
-		{name: "on turn holding eleven", myTurn: true, phase: logic.AwaitingDiscard, wantReach: true},
+		{name: "off turn", myTurn: false, phase: logic.PhaseAwaitingDiscard},
+		{name: "before drawing", myTurn: true, phase: logic.PhaseAwaitingDraw},
+		{name: "on turn holding eleven", myTurn: true, phase: logic.PhaseAwaitingDiscard, wantReach: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, m := startedTable(t)
 			m.Base.MyTurn = tc.myTurn
-			m.handPhase = tc.phase
+			m.phase = tc.phase
 			m.Selected = 0
 
 			_, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
@@ -166,10 +162,10 @@ func TestDrawKeys_OnlyActOnYourOwnTurn(t *testing.T) {
 			require.NoError(t, m.ActionErr, "an off-turn draw never reaches the engine")
 
 			m.Base.MyTurn = true
-			m.handPhase = logic.AwaitingDraw
+			m.phase = logic.PhaseAwaitingDraw
 			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 			m.syncState()
-			assert.True(t, m.handPhase == logic.AwaitingDiscard || m.ActionErr != nil,
+			assert.True(t, m.phase == logic.PhaseAwaitingDiscard || m.ActionErr != nil,
 				"on turn the draw either lands or is rejected, but it is not swallowed")
 		})
 	}
@@ -204,7 +200,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		t.Parallel()
 		_, m := startedTable(t)
 		m.Base.MyTurn = true
-		m.handPhase = logic.AwaitingDraw
+		m.phase = logic.PhaseAwaitingDraw
 
 		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.NoError(t, m.ActionErr, "the discard never reaches the engine")

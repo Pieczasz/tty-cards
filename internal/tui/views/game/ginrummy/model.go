@@ -1,3 +1,5 @@
+// Package ginrummy is the Gin Rummy table view: the opponent, the stock and upcard,
+// the hero's hand and the between-hands settle-up.
 package ginrummy
 
 import (
@@ -11,18 +13,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// Model is the Gin Rummy view of one seat at the table.
 type Model struct {
 	gameview.Session
 
-	handPhase        logic.Phase
+	phase            logic.Phase
 	handNumber       int
 	cumulativeScores map[string]int
 	handComplete     bool
 	matchComplete    bool
 	lastHandResult   *logic.HandResult
-	stockSize        int
-	seatOrder        []string
-	seatNames        map[string]string
 }
 
 // New creates a Gin Rummy TUI view bound to the session player.
@@ -32,7 +32,6 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	m := &Model{
 		Session:          session,
 		cumulativeScores: map[string]int{},
-		seatNames:        map[string]string{},
 	}
 	m.syncState()
 	return m
@@ -41,7 +40,7 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 func (m *Model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
-			m.handPhase = s.HandPhase
+			m.phase = s.Phase
 			m.handNumber = s.HandNumber
 			m.cumulativeScores = maps.Clone(s.CumulativeScores)
 			m.handComplete = s.HandComplete()
@@ -50,9 +49,6 @@ func (m *Model) syncState() {
 			m.lastHandResult = s.LastHandResult.Clone()
 		}
 	})
-	m.stockSize = m.Base.DeckSize
-	m.seatOrder = m.Base.SeatOrder()
-	m.seatNames = m.Base.SeatNames()
 }
 
 func (m *Model) Init() tea.Cmd {

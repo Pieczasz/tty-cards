@@ -30,18 +30,17 @@ func TestView_ActionBarHints(t *testing.T) {
 		Base: gameview.BaseState{
 			Phase: game.Playing,
 			Hand:  []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}},
+			Seats: aliceAndBob,
 		},
-		handPhase:  logic.AwaitingDraw,
+		phase:      logic.PhaseAwaitingDraw,
 		handNumber: 1,
-		seatOrder:  []string{"1", "2"},
-		seatNames:  map[string]string{"1": "alice", "2": "bob"},
 	}
 
 	out := m.View().Content
 	require.NotEmpty(t, out)
 	assert.Contains(t, out, "draw stock")
 
-	m.handPhase = logic.AwaitingDiscard
+	m.phase = logic.PhaseAwaitingDiscard
 	out = m.View().Content
 	assert.Contains(t, out, "knock")
 }
@@ -54,13 +53,11 @@ func TestView_HandOverWallBanner(t *testing.T) {
 			Width:  80,
 			Height: 24,
 		},
-		Base:             gameview.BaseState{Phase: game.Playing},
-		handPhase:        logic.HandOver,
+		Base:             gameview.BaseState{Phase: game.Playing, Seats: aliceAndBob},
+		phase:            logic.PhaseHandOver,
 		handComplete:     true,
 		handNumber:       2,
-		seatOrder:        []string{"1", "2"},
-		seatNames:        map[string]string{"1": "alice", "2": "bob"},
-		lastHandResult:   &logic.HandResult{Wall: true},
+		lastHandResult:   &logic.HandResult{Outcome: logic.OutcomeWall},
 		cumulativeScores: map[string]int{"1": 10, "2": 5},
 	}
 
@@ -69,6 +66,8 @@ func TestView_HandOverWallBanner(t *testing.T) {
 	assert.Contains(t, out, "HAND 2 COMPLETE")
 	assert.Contains(t, out, "WALL")
 }
+
+var aliceAndBob = []game.PlayerSnapshot{{ID: "1", Username: "alice"}, {ID: "2", Username: "bob"}}
 
 func handOf(n int) []deck.Card {
 	suits := []deck.Suit{deck.Spades, deck.Hearts, deck.Diamonds, deck.Clubs}
@@ -95,11 +94,8 @@ func viewAt(width, height int) *Model {
 			CurrentPlayerID: "1",
 			TurnRemaining:   9 * time.Second,
 		},
-		handPhase:        logic.AwaitingDiscard,
+		phase:            logic.PhaseAwaitingDiscard,
 		handNumber:       3,
-		stockSize:        20,
-		seatOrder:        []string{"1", "2"},
-		seatNames:        map[string]string{"1": "alice", "2": "bob"},
 		cumulativeScores: map[string]int{"1": 40, "2": 22},
 	}
 }
@@ -111,7 +107,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 
 	screens := map[string]func(*Model){
 		"the table":        func(*Model) {},
-		"awaiting a draw":  func(m *Model) { m.handPhase = logic.AwaitingDraw },
+		"awaiting a draw":  func(m *Model) { m.phase = logic.PhaseAwaitingDraw },
 		"the hand summary": func(m *Model) { m.handComplete = true; m.lastHandResult = knockResult() },
 		"a gin":            func(m *Model) { m.handComplete = true; m.lastHandResult = ginResult() },
 		"the match over": func(m *Model) {
@@ -143,6 +139,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 
 func knockResult() *logic.HandResult {
 	return &logic.HandResult{
+		Outcome: logic.OutcomeKnock,
 		KnockerMelds: [][]deck.Card{
 			{{Rank: deck.Four, Suit: deck.Spades}, {Rank: deck.Four, Suit: deck.Hearts}, {Rank: deck.Four, Suit: deck.Clubs}},
 			{{Rank: deck.Five, Suit: deck.Hearts}, {Rank: deck.Six, Suit: deck.Hearts}, {Rank: deck.Seven, Suit: deck.Hearts}},
@@ -156,7 +153,7 @@ func knockResult() *logic.HandResult {
 
 func ginResult() *logic.HandResult {
 	r := knockResult()
-	r.Gin = true
+	r.Outcome = logic.OutcomeGin
 	r.LaidOffCards = nil
 	return r
 }
@@ -175,10 +172,10 @@ func TestRenderHandResult_NamesEveryOutcome(t *testing.T) {
 		{name: "a gin", result: ginResult(), want: "GIN!"},
 		{name: "an undercut", result: func() *logic.HandResult {
 			r := knockResult()
-			r.Undercut = true
+			r.Outcome = logic.OutcomeUndercut
 			return r
 		}(), want: "UNDERCUT"},
-		{name: "a wall", result: &logic.HandResult{Wall: true}, want: "WALL"},
+		{name: "a wall", result: &logic.HandResult{Outcome: logic.OutcomeWall}, want: "WALL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -227,14 +224,14 @@ func TestKeyHints_FollowTheHandPhase(t *testing.T) {
 		phase logic.Phase
 		want  string
 	}{
-		{name: "awaiting a draw", phase: logic.AwaitingDraw, want: "draw stock"},
-		{name: "awaiting a discard", phase: logic.AwaitingDiscard, want: "knock"},
-		{name: "the hand is over", phase: logic.HandOver, want: "esc: leave"},
+		{name: "awaiting a draw", phase: logic.PhaseAwaitingDraw, want: "draw stock"},
+		{name: "awaiting a discard", phase: logic.PhaseAwaitingDiscard, want: "knock"},
+		{name: "the hand is over", phase: logic.PhaseHandOver, want: "esc: leave"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := viewAt(100, 40)
-			m.handPhase = tc.phase
+			m.phase = tc.phase
 			assert.Contains(t, m.keyHints(), tc.want)
 		})
 	}

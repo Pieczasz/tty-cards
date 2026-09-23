@@ -24,7 +24,7 @@ func TestUpdate_Navigation(t *testing.T) {
 			MyTurn: true,
 			Phase:  game.Playing,
 		},
-		handPhase: logic.AwaitingDiscard,
+		phase: logic.PhaseAwaitingDiscard,
 	}
 
 	msg := tea.KeyPressMsg{Code: rune("l"[0]), Text: "l"}

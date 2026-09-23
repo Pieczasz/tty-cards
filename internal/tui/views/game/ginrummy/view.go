@@ -2,7 +2,6 @@ package ginrummy
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -20,8 +19,8 @@ func (m *Model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
-	if m.handComplete || m.matchComplete || m.handPhase == logic.HandOver {
-		return tea.NewView(styles.Clamp(m.Global.Width, m.Global.Height, m.renderHandOver()))
+	if m.handComplete || m.matchComplete || m.phase == logic.PhaseHandOver {
+		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
 		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.Winner))
@@ -40,10 +39,10 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) keyHints() string {
-	switch m.handPhase {
-	case logic.AwaitingDraw:
+	switch m.phase {
+	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
-	case logic.AwaitingDiscard:
+	case logic.PhaseAwaitingDiscard:
 		return "<-/h left | ->/l right | enter: discard | k: knock | esc: leave"
 	default:
 		return "esc: leave"
@@ -52,7 +51,7 @@ func (m *Model) keyHints() string {
 
 func (m *Model) renderMiddleLayer(height int) string {
 	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
-	stockLabel := m.Global.Theme.Muted.Render(fmt.Sprintf("stock %d", m.stockSize))
+	stockLabel := m.Global.Theme.Muted.Render(fmt.Sprintf("stock %d", m.Base.DeckSize))
 	scores := m.renderScoreLine()
 	center := lg.JoinVertical(lg.Center, discardView, stockLabel, scores)
 
@@ -60,9 +59,9 @@ func (m *Model) renderMiddleLayer(height int) string {
 }
 
 func (m *Model) renderScoreLine() string {
-	parts := make([]string, 0, len(m.seatOrder))
-	for _, id := range m.seatOrder {
-		parts = append(parts, fmt.Sprintf("%s %d", m.seatNames[id], m.cumulativeScores[id]))
+	parts := make([]string, 0, len(m.Base.Seats))
+	for _, seat := range m.Base.Seats {
+		parts = append(parts, fmt.Sprintf("%s %d", seat.Username, m.cumulativeScores[seat.ID]))
 	}
 	return m.Global.Theme.Dim.Render(fmt.Sprintf("hand %d · %s", m.handNumber, strings.Join(parts, "  ")))
 }
@@ -76,32 +75,20 @@ func (m *Model) renderPlayerSection() string {
 }
 
 func (m *Model) renderHandOver() string {
-	title := m.Global.Theme.Accented.Render(fmt.Sprintf("HAND %d COMPLETE", m.handNumber))
-	hint := "enter: deal next hand | esc: leave"
+	h := gameview.HandOver{
+		Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
+		Body:  m.renderHandResult(),
+		Hint:  "enter: deal next hand | esc: leave",
+	}
 	if m.matchComplete || m.Base.Phase == game.Finished {
-		title = m.Global.Theme.Accented.Render("MATCH COMPLETE")
-		hint = "esc / enter -> lobby"
-		if m.Base.Winner != "" {
-			title = m.Global.Theme.Accented.Render("MATCH COMPLETE - " + m.Base.Winner + " wins")
-		}
+		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.Winner), gameview.LobbyHint
 	}
 
-	body := m.renderHandResult()
-	scores := make([]string, 0, len(m.seatOrder))
-	for _, id := range m.seatOrder {
-		scores = append(scores, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  total %3s",
-			styles.PadTruncate(m.seatNames[id], 12),
-			strconv.Itoa(m.cumulativeScores[id]),
-		)))
+	for _, seat := range m.Base.Seats {
+		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  total %3d",
+			styles.PadTruncate(seat.Username, 12), m.cumulativeScores[seat.ID])))
 	}
-
-	content := lg.JoinVertical(lg.Center,
-		title, "",
-		body, "",
-		lg.JoinVertical(lg.Left, scores...),
-		"", m.Global.Theme.Dim.Render(hint),
-	)
-	return styles.Place(m.Global.Width, m.Global.Height, lg.Center, lg.Center, content)
+	return gameview.RenderHandOver(m.Global, h)
 }
 
 func (m *Model) renderHandResult() string {
@@ -109,21 +96,20 @@ func (m *Model) renderHandResult() string {
 	if r == nil {
 		return ""
 	}
-	if r.Wall {
-		return lg.NewStyle().Foreground(m.Global.Theme.Warning).Render("WALL - stock exhausted, no score")
-	}
 
 	var banner string
-	switch {
-	case r.Gin:
+	switch r.Outcome {
+	case logic.OutcomeWall:
+		return lg.NewStyle().Foreground(m.Global.Theme.Warning).Render("WALL - stock exhausted, no score")
+	case logic.OutcomeGin:
 		banner = m.Global.Theme.SuccessText.Render("GIN!")
-	case r.Undercut:
+	case logic.OutcomeUndercut:
 		banner = lg.NewStyle().Foreground(m.Global.Theme.Warning).Render("UNDERCUT")
-	default:
+	case logic.OutcomeKnock, logic.OutcomeUnknown:
 		banner = m.Global.Theme.Accented.Render("KNOCK")
 	}
 
-	winnerName := m.seatNames[r.Winner]
+	winnerName := m.Base.SeatNames()[r.Winner]
 	delta := m.Global.Theme.SuccessText.Render(fmt.Sprintf("+%d -> %s", r.ScoreDelta, winnerName))
 
 	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds, false)

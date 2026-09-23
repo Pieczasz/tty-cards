@@ -1,8 +1,8 @@
 package hearts
 
 import (
-	"context"
 	"slices"
+
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -25,12 +25,7 @@ func testUser() *db.User {
 
 func startedTable(t *testing.T) (*game.Engine, *Model) {
 	t.Helper()
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-		{ID: testutil.SeatID(3), UserID: testutil.UID(3), Name: "carol"},
-		{ID: testutil.SeatID(4), UserID: testutil.UID(4), Name: "dave"},
-	}
+	players := testutil.NamedPlayers("alice", "bob", "carol", "dave")
 	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
@@ -39,7 +34,7 @@ func startedTable(t *testing.T) (*game.Engine, *Model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         testUser(),
-		LobbyManager: lobby.NewManager(context.Background(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil),
 		Width:        80,
 		Height:       40,
 	}
