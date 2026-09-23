@@ -5,6 +5,7 @@ package repository_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/repository"
@@ -74,6 +75,29 @@ func TestEraseAndFinalizeSerialize(t *testing.T) {
 	require.NoError(t, gormDB.Unscoped().Model(&db.Ranking{}).
 		Where("user_id = ?", ids[0].String()).Count(&rows).Error)
 	assert.Zero(t, rows, "a finalize racing the erasure left the erased account rated")
+}
+
+// Every finalize used to upsert the game row, and DO UPDATE holds that row's lock
+// until commit, so all finalizes for one game - casual ones included - queued behind
+// each other. A transaction sitting on the row stands in for the slow finalize ahead.
+func TestRecordCasualMatchDoesNotWaitOnTheGameRow(t *testing.T) {
+	t.Parallel()
+	gormDB := testutil.SetupTestDB(t)
+	ctx := context.Background()
+	u := &db.User{Username: "solo"}
+	require.NoError(t, gormDB.Create(u).Error)
+	repo := repository.NewMatchRepository(gormDB)
+	require.NoError(t, repo.RecordCasualMatch(ctx, gameRef("Poker"), []uuid.UUID{u.ID}))
+
+	holder := gormDB.Begin()
+	require.NoError(t, holder.Error)
+	t.Cleanup(func() { holder.Rollback() })
+	require.NoError(t, holder.Exec(`UPDATE games SET updated_at = now() WHERE slug = 'poker'`).Error)
+
+	quick, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	assert.NoError(t, repo.RecordCasualMatch(quick, gameRef("Poker"), []uuid.UUID{u.ID}),
+		"a finalize queued behind another transaction's hold on the game row")
 }
 
 // D-1: a match one leaver ended early for everyone. The seated players' ratings and

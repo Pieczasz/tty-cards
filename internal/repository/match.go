@@ -63,7 +63,21 @@ func NewMatchRepository(db *gorm.DB) db.MatchRepository {
 // and the default-scoped reload could not see the row - every finalize for that game
 // would fail forever. Writing the name on the way through is also how a renamed game
 // reaches the leaderboard without its ratings moving.
+//
+// The plain read comes first because the upsert is a row write: DO UPDATE locks the
+// game row until commit, so every finalize for one game - casual ones included -
+// queued behind the one before it. Only a miss, a rename or a soft-deleted row needs
+// the write.
 func getOrCreateGame(tx *gorm.DB, ref db.GameRef) (*db.Game, error) {
+	var existing db.Game
+	err := tx.Unscoped().Where("slug = ?", ref.Slug).Limit(1).Find(&existing).Error
+	if err != nil {
+		return nil, fmt.Errorf("find game: %w", err)
+	}
+	if existing.ID != 0 && existing.Name == ref.Name && !existing.DeletedAt.Valid {
+		return &existing, nil
+	}
+
 	game := db.Game{Slug: ref.Slug, Name: ref.Name}
 	if err := tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "slug"}},
