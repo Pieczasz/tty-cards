@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -522,95 +521,6 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	return nil
 }
 
-// watchGameLocked starts the goroutine that persists the result and counts engine
-// events. It is the only thing that persists a match, so a failed subscribe costs the
-// players their history and Elo - the engine's len(players)+8 broadcaster exists so
-// that cannot happen, and it is logged loudly if it ever does. Caller holds l.mu.
-//
-// It subscribes whether or not a match repository is configured: this goroutine is
-// also the only consumer of EventPlayerIdle, so skipping it leaves an idle-removed
-// seat on the roster with the engine no longer holding it, and the table can never
-// reach all-ready again. finalizeFinishedGame already no-ops without a repository.
-//
-// The finalize snapshot is taken here, not when the game ends: by then the lobby may
-// have reopened and been reconfigured, and the result would be written under the new
-// ranked flag, the new game, and the next hand's start time.
-func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
-	if l.manager == nil {
-		return
-	}
-	ch, err := engine.Broadcaster().Subscribe()
-	if err != nil {
-		observability.SubscribeFailure(l.manager.shutdownCtx(), "game")
-		slog.ErrorContext(l.manager.shutdownCtx(),
-			"cannot watch game for completion; result will not be persisted",
-			"error", err, "lobby", l.code, "game", ref.Slug)
-		return
-	}
-	req := finalizeRequest{
-		lobbyCode: l.code,
-		game:      ref,
-		isRanked:  l.options.isRanked,
-		startedAt: l.startedAt,
-	}
-	go func() {
-		defer engine.Broadcaster().Unsubscribe(ch)
-		l.handleBroadcasterEvents(ch, engine, req)
-	}()
-}
-
-func (l *Lobby) handleBroadcasterEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
-	ctx := l.manager.shutdownCtx()
-	gameName := req.game.Name
-	defer func() {
-		if n := engine.Broadcaster().Dropped(); n > 0 {
-			observability.BroadcastDropped(ctx, "game", n)
-		}
-	}()
-
-	for event := range ch {
-		switch event.Type {
-		case game.EventTurnTimedOut:
-			observability.TurnTimedOut(ctx, gameName)
-		case game.EventPlayerIdle:
-			observability.PlayerIdleRemoved(ctx, gameName)
-			// The engine took the seat, so the roster follows, or a player kicked for
-			// idling reconnects into a lobby whose game no longer has them. Equal falls
-			// back to ID, so a zero-UserID stub still matches.
-			l.manager.LeaveLobby(&game.Player{ID: event.PlayerID})
-		case game.EventGameEnded:
-			l.requestFinalize(engine, event.Reason, req)
-			return
-		default:
-			// Turn and action events are the views' business; the lobby counts nothing.
-		}
-	}
-
-	// The feed ending is not proof the match did not finish: the broadcaster is
-	// latest-wins and can drop EventGameEnded, and RemoveLobby closes the feed from
-	// under this goroutine.
-	if engine.IsFinished() {
-		l.requestFinalize(engine, game.EndReasonUnknown, req)
-	}
-}
-
-// requestFinalize reopens the finished table and hands it to Manager for persistence.
-// req was snapshotted by watchGameLocked when this game started, so a lobby that has
-// since reopened cannot rewrite what the finished match is recorded as.
-//
-// Register, reopen, persist - in that order. Reopening comes before the write, so a
-// 15s write does not pin InGame while the TUI is already back in the lobby; but it
-// waits on m.mu in releaseHeldSeats, and a shutdown that began inside that wait would
-// have refused the registration and dropped the match.
-func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
-	if l.manager == nil {
-		return
-	}
-	registered := l.manager.registerFinalizer()
-	l.releaseFinishedGame()
-	l.manager.finalizeFinishedGame(req, engine, reason, registered)
-}
-
 // releaseFinishedGameLocked returns a finished lobby to Waiting and hands back the
 // engine to close. Caller holds l.mu; closing and releaseHeldSeats are the unlocked
 // caller's job (lock order is manager then lobby).
@@ -641,4 +551,25 @@ func (l *Lobby) releaseFinishedGame() {
 	if bc != nil {
 		bc.Broadcast(Event{Type: EventPlayersUpdated})
 	}
+}
+
+// kickableGuestLocked returns the guest index host may remove. Caller holds l.mu.
+func (l *Lobby) kickableGuestLocked(host, target *game.Player) (int, error) {
+	switch {
+	case l.state == Closed:
+		return -1, errors.New("lobby is closed")
+	// A leader who can kick mid-hand can farm Elo: drop whoever is winning, let the
+	// engine finish the match without them, and take the rating.
+	case l.state == InGame:
+		return -1, errors.New("cannot kick during a game")
+	case !l.leader.Equal(host):
+		return -1, errors.New("only the leader can kick players")
+	case l.leader.Equal(target):
+		return -1, errors.New("cannot kick the lobby leader")
+	}
+	idx := slices.IndexFunc(l.guests, func(g *game.Player) bool { return g.Equal(target) })
+	if idx == -1 {
+		return -1, errors.New("player not in lobby")
+	}
+	return idx, nil
 }

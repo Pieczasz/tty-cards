@@ -176,3 +176,80 @@ func leaverIDs(engine *game.Engine) []uuid.UUID {
 	})
 	return ids
 }
+
+// registerFinalizer accepts a finished-match write unless shutdown has started.
+func (m *Manager) registerFinalizer() bool {
+	m.finalizerMu.Lock()
+	defer m.finalizerMu.Unlock()
+	if m.finalizersStopped {
+		return false
+	}
+	m.finalizing.Add(1)
+	return true
+}
+
+// BeginShutdown marks the process as going away without stopping finished-match
+// writes: a hand that ends while sessions are torn down still belongs in the
+// players' history, it just must not move anyone's rating.
+//
+// Seats still held for a reconnect are given up here. Their timers would fire long
+// after the drain, so the lobby would never be removed and its engine never closed -
+// the player is not coming back to a process that is exiting.
+func (m *Manager) BeginShutdown() {
+	if m == nil {
+		return
+	}
+	m.shuttingDown.Store(true)
+	m.mu.Lock()
+	held := make([]*game.Player, 0, len(m.grace.pending))
+	for id := range m.grace.pending {
+		held = append(held, &game.Player{ID: id})
+	}
+	m.mu.Unlock()
+	// LeaveLobby stops the timer under m.mu before touching the roster.
+	for _, p := range held {
+		m.LeaveLobby(p)
+	}
+}
+
+func (m *Manager) isShuttingDown() bool {
+	return m != nil && m.shuttingDown.Load()
+}
+
+// WaitForFinalizers stops accepting finished-match writes, then blocks until all
+// previously registered writes finish or timeout elapses. A non-positive timeout
+// waits indefinitely.
+//
+// The waiter goroutine is started once and reused, so a caller that times out and
+// calls again does not strand one waiter per attempt. Because finalizersStopped is
+// already set, the group only ever counts down, so that goroutine always exits.
+func (m *Manager) WaitForFinalizers(timeout time.Duration) bool {
+	if m == nil {
+		return true
+	}
+	m.shuttingDown.Store(true)
+
+	m.finalizerMu.Lock()
+	m.finalizersStopped = true
+	if m.drained == nil {
+		ch := make(chan struct{})
+		m.drained = ch
+		go func() {
+			m.finalizing.Wait()
+			close(ch)
+		}()
+	}
+	drained := m.drained
+	m.finalizerMu.Unlock()
+
+	if timeout <= 0 {
+		<-drained
+		return true
+	}
+	select {
+	case <-drained:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}

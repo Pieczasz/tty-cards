@@ -1,6 +1,11 @@
 package lobby
 
-import "time"
+import (
+	"log/slog"
+	"time"
+
+	"github.com/Pieczasz/terminal-card/internal/game"
+)
 
 // disconnectGrace holds mid-game seats after a dropped session. Caller must hold
 // Manager.mu around every method: the maps are not independently locked.
@@ -57,4 +62,109 @@ func (d *disconnectGrace) tryCancel(id string) (cancelled, blocked bool) {
 	}
 	delete(d.pending, id)
 	return true, false
+}
+
+// DisconnectPlayer is what a dropped session calls instead of LeaveLobby: a seat
+// in a running game is kept for DisconnectGrace so the player can reconnect, while
+// a seat in a waiting lobby is given up immediately (nothing is lost by leaving).
+// During shutdown the grace is skipped so the drain still forfeits cleanly.
+func (m *Manager) DisconnectPlayer(p *game.Player) {
+	if p == nil {
+		return
+	}
+
+	m.mu.Lock()
+	// Read under m.mu, not before it: BeginShutdown sets the flag and then takes this
+	// lock to drain the pending graces, so a disconnect that saw "not shutting down"
+	// outside the lock could arm its timer after the drain had already walked the map
+	// - a seat held for a reconnect to a process that is exiting.
+	if m.shuttingDown.Load() {
+		m.mu.Unlock()
+		m.LeaveLobby(p)
+		return
+	}
+	l, ok := m.playerLobby[p.ID]
+	if !ok || l == nil {
+		m.mu.Unlock()
+		return
+	}
+	l.mu.Lock()
+	inGame := l.state == InGame
+	if inGame {
+		// The session is gone, so its event channels must close now - but the seat
+		// stays, and the engine's turn clock plays for it until they return.
+		l.unsubscribePlayerLocked(p.ID)
+	}
+	l.mu.Unlock()
+	if !inGame {
+		m.mu.Unlock()
+		m.LeaveLobby(p)
+		return
+	}
+	m.grace.arm(p.ID, DisconnectGrace, func() { m.expireLeave(p) })
+	m.mu.Unlock()
+	slog.Info("session dropped mid-game, holding the seat",
+		"player_id", p.ID, "grace", DisconnectGrace.String())
+}
+
+// expireLeave is the grace timer's body, separate so tests can drive the expiry
+// without waiting out the window.
+func (m *Manager) expireLeave(p *game.Player) {
+	m.mu.Lock()
+	if !m.grace.beginExpire(p.ID) {
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+	slog.Info("disconnect grace expired, giving up the seat", "player_id", p.ID)
+	m.LeaveLobby(p)
+}
+
+// ResumePlayer cancels a pending disconnect leave and returns the lobby the player
+// still occupies, or nil. A reconnecting session calls it before routing, so the
+// player lands back at their table instead of a fresh home screen.
+//
+// A takeover (second SSH session while the first is half-open) finds the seat still
+// mapped with no pending leave: return that lobby so unclean disconnects can resume.
+func (m *Manager) ResumePlayer(p *game.Player) *Lobby {
+	if p == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cancelled, blocked := m.grace.tryCancel(p.ID); blocked {
+		return nil
+	} else if cancelled {
+		slog.Info("player reconnected inside the grace window", "player_id", p.ID)
+	}
+	// Same re-validation FindLobbyByPlayer and New do: a stale index entry would
+	// route the reconnect into a lobby whose roster no longer holds them.
+	if !m.playerInLobbyLocked(p) {
+		return nil
+	}
+	return m.playerLobby[p.ID]
+}
+
+// releaseHeldSeats gives up every seat this table is holding for a dropped session.
+// The hold only makes sense mid-hand: once the game is over the lobby is Waiting, and
+// DisconnectPlayer gives a Waiting seat up at once. Leaving it armed keeps the player
+// out of every other table - and this one unable to reach all-ready - until the timer
+// fires, up to DisconnectGrace later.
+func (m *Manager) releaseHeldSeats(l *Lobby) {
+	if m == nil || l == nil {
+		return
+	}
+	m.mu.Lock()
+	held := make([]*game.Player, 0, len(m.grace.pending))
+	for id := range m.grace.pending {
+		if m.playerLobby[id] == l {
+			held = append(held, &game.Player{ID: id})
+		}
+	}
+	m.mu.Unlock()
+	// expireLeave, not LeaveLobby: it claims the grace the way the timer would, so a
+	// ResumePlayer racing it is refused rather than resuming a seat already gone.
+	for _, p := range held {
+		m.expireLeave(p)
+	}
 }
