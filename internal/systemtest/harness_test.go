@@ -127,9 +127,9 @@ func chipsInPlay(t *testing.T, engine *game.Engine) uint {
 	engine.WithState(func(state *game.State) {
 		extra, ok := state.Extra.(*poker.State)
 		require.True(t, ok)
-		total = extra.MainPool
-		for _, chips := range extra.PlayerChips {
-			total += chips
+		total = extra.Pool
+		for _, seat := range extra.Seats {
+			total += seat.Chips
 		}
 	})
 	return total

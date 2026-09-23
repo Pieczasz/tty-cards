@@ -116,7 +116,6 @@ func TestAddChip_IsANoOpWhenNotRaising(t *testing.T) {
 func TestConfirm_DealsTheNextHandInsteadOfLeaving(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 
 	// Fold the hand out heads-up; the match still has hands left to play.
 	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), logic.ActionFold{}))
@@ -142,7 +141,6 @@ func TestConfirm_DealsTheNextHandInsteadOfLeaving(t *testing.T) {
 func TestSyncState_UncontestedPotKeepsOpponentCardsHidden(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 
 	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), logic.ActionFold{}))
 	m.syncState()
@@ -229,8 +227,7 @@ func TestIdleRemoved_MatchesOnlyOurOwnSeat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			engine, m := startedTable(t)
-			t.Cleanup(engine.Close)
+			_, m := startedTable(t)
 
 			assert.Equal(t, tt.want, m.IdleRemoved(tt.event))
 		})
@@ -240,8 +237,7 @@ func TestIdleRemoved_MatchesOnlyOurOwnSeat(t *testing.T) {
 // Only the quit path asserts on the returned command.
 func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 	t.Parallel()
-	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
+	_, m := startedTable(t)
 
 	_, cmd := m.Update(gameview.EventMsg{
 		Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1),
@@ -258,7 +254,6 @@ func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 
 	_, cmd := m.Update(gameview.ClockTickMsg{Source: m.Events})
 	require.NotNil(t, cmd, "a live hand keeps counting down")
@@ -278,8 +273,7 @@ func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 // the engine into the view's own state.
 func TestSyncState_CarriesTheTurnCountdown(t *testing.T) {
 	t.Parallel()
-	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
+	_, m := startedTable(t)
 
 	assert.Positive(t, m.Base.TurnRemaining, "a started hand has a clock running")
 	assert.LessOrEqual(t, m.Base.TurnRemaining, game.DefaultTurnTimeout)
@@ -287,7 +281,7 @@ func TestSyncState_CarriesTheTurnCountdown(t *testing.T) {
 
 // heroOnTurn advances the hand until the hero is the one to act. The button is dealt
 // at random, so a test that needs the hero on turn cannot assume it.
-func heroOnTurn(t *testing.T, engine *game.Engine, m *Model) {
+func heroOnTurn(t *testing.T, engine *game.Engine, m *model) {
 	t.Helper()
 	if m.Base.MyTurn {
 		return
@@ -303,8 +297,7 @@ func heroOnTurn(t *testing.T, engine *game.Engine, m *Model) {
 // on a healthy connection or every session opens on a false alarm.
 func TestNew_HealthyTableReportsNoError(t *testing.T) {
 	t.Parallel()
-	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
+	_, m := startedTable(t)
 
 	require.NoError(t, m.ActionErr, "a successful subscription is not an error")
 	assert.NotNil(t, m.Events, "and the feed is live")
@@ -315,7 +308,6 @@ func TestNew_HealthyTableReportsNoError(t *testing.T) {
 func TestSyncState_MatchDoneTracksTheEnginePhase(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 
 	require.False(t, m.matchComplete, "the match has only just started")
 
@@ -354,8 +346,7 @@ func TestCanAllInAndHeroBusted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			engine, m := startedTable(t)
-			t.Cleanup(engine.Close)
+			_, m := startedTable(t)
 
 			hero := m.heroSeat()
 			require.NotNil(t, hero)
@@ -397,7 +388,6 @@ func TestSubmit(t *testing.T) {
 	t.Run("an accepted action is applied and clears the error line", func(t *testing.T) {
 		t.Parallel()
 		engine, m := startedTable(t)
-		t.Cleanup(engine.Close)
 		heroOnTurn(t, engine, m)
 
 		m.ActionErr = assert.AnError
@@ -420,7 +410,6 @@ func TestSubmit(t *testing.T) {
 	t.Run("a rejected action is reported and changes nothing", func(t *testing.T) {
 		t.Parallel()
 		engine, m := startedTable(t)
-		t.Cleanup(engine.Close)
 		heroOnTurn(t, engine, m)
 
 		street := m.street
@@ -433,8 +422,7 @@ func TestSubmit(t *testing.T) {
 
 	t.Run("acting out of turn never reaches the engine", func(t *testing.T) {
 		t.Parallel()
-		engine, m := startedTable(t)
-		t.Cleanup(engine.Close)
+		_, m := startedTable(t)
 		m.Base.MyTurn = false
 		m.ActionErr = nil
 
@@ -450,7 +438,6 @@ func TestSubmit(t *testing.T) {
 func TestBuildSeats_TurnMarkerNamesOneLiveSeat(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 
 	onTurn := make([]string, 0, 1)
 	for _, s := range m.seats {
@@ -474,8 +461,7 @@ func TestBuildSeats_TurnMarkerNamesOneLiveSeat(t *testing.T) {
 // tells the table the wrong player is being waited on.
 func TestView_CountdownIsDrawnOnTheSeatOnTurn(t *testing.T) {
 	t.Parallel()
-	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
+	_, m := startedTable(t)
 
 	rendered := stripANSI(m.View().Content)
 
@@ -489,7 +475,6 @@ func TestView_CountdownIsDrawnOnTheSeatOnTurn(t *testing.T) {
 func TestView_NoCountdownBetweenHands(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), logic.ActionFold{}))
 	m.syncState()
 	require.True(t, m.handComplete)
@@ -501,8 +486,7 @@ func TestView_NoCountdownBetweenHands(t *testing.T) {
 
 func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 	t.Parallel()
-	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
+	_, m := startedTable(t)
 
 	// Batched, so the one command carries the event listener and the countdown: a
 	// view that armed only one of them either stops updating or freezes its clock.

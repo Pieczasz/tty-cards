@@ -30,13 +30,13 @@ func TestSeatZones_PlacesEveryOpponentExactlyOnce(t *testing.T) {
 		t.Run(fmt.Sprintf("seats=%d", total), func(t *testing.T) {
 			t.Parallel()
 
-			m := &Model{seats: make([]Seat, 0, total)}
+			m := &model{seats: make([]seat, 0, total)}
 			for i := range total {
-				m.seats = append(m.seats, Seat{PlayerID: fmt.Sprintf("p%d", i), IsHero: i == 0})
+				m.seats = append(m.seats, seat{PlayerID: fmt.Sprintf("p%d", i), IsHero: i == 0})
 			}
 
 			z := m.seatZones()
-			placed := make([]Seat, 0, total)
+			placed := make([]seat, 0, total)
 			placed = append(placed, z.Left...)
 			placed = append(placed, z.Top...)
 			placed = append(placed, z.Right...)
@@ -59,7 +59,7 @@ func TestSeatZones_PlacesEveryOpponentExactlyOnce(t *testing.T) {
 func TestSeatZones_WithoutAHeroPlacesEverybody(t *testing.T) {
 	t.Parallel()
 
-	m := &Model{seats: []Seat{{PlayerID: "a"}, {PlayerID: "b"}, {PlayerID: "c"}}}
+	m := &model{seats: []seat{{PlayerID: "a"}, {PlayerID: "b"}, {PlayerID: "c"}}}
 	z := m.seatZones()
 
 	// ElementsMatch, not Len: a duplicated seat standing in for a dropped one keeps
@@ -97,7 +97,7 @@ func TestRenderMiniCard_PrintsTheRankOnTheCard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
-			got := stripANSI(renderMiniCard(theme, deck.Card{Rank: tt.rank, Suit: deck.Hearts}))
+			got := stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: tt.rank, Suit: deck.Hearts}))
 			assert.Equal(t, fmt.Sprintf("[%2s♥]", tt.want), got)
 		})
 	}
@@ -109,9 +109,9 @@ func TestRenderMiniCard_IsAFixedWidth(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	want := lg.Width(stripANSI(renderMiniCard(theme, deck.Card{Rank: deck.Ace, Suit: deck.Spades})))
+	want := lg.Width(stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: deck.Ace, Suit: deck.Spades})))
 	for _, rank := range []deck.Rank{deck.Ten, deck.King, deck.Two} {
-		got := lg.Width(stripANSI(renderMiniCard(theme, deck.Card{Rank: rank, Suit: deck.Spades})))
+		got := lg.Width(stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: rank, Suit: deck.Spades})))
 		assert.Equal(t, want, got, "rank %d changes the card width", rank)
 	}
 }
@@ -121,8 +121,8 @@ func TestRenderMiniCard_IsAFixedWidth(t *testing.T) {
 func TestRenderSeatCards_ShowsNoBacksForASeatWithNoCards(t *testing.T) {
 	t.Parallel()
 
-	m := &Model{Global: router.GlobalContext{Theme: styles.NewTheme(true)}}
-	busted := Seat{Name: "broke", HandSize: 0}
+	m := &model{Global: router.GlobalContext{Theme: styles.NewTheme(true)}}
+	busted := seat{Name: "broke", HandSize: 0}
 
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestRenderSeatCards_ShowsNoBacksForASeatWithNoCards(t *testing.T) {
 		})
 	}
 
-	dealt := Seat{Name: "live", HandSize: 2}
+	dealt := seat{Name: "live", HandSize: 2}
 	assert.NotEmpty(t, stripANSI(m.renderSeatCards(dealt, true)),
 		"a seat holding cards still shows them face down")
 }
@@ -152,7 +152,7 @@ func TestBoardAndHolePlaceholdersMatchCardFootprint(t *testing.T) {
 func TestSeatZones_EmptyTable(t *testing.T) {
 	t.Parallel()
 
-	z := (&Model{}).seatZones()
+	z := (&model{}).seatZones()
 	assert.Empty(t, z.Left)
 	assert.Empty(t, z.Top)
 	assert.Empty(t, z.Right)
@@ -161,10 +161,10 @@ func TestSeatZones_EmptyTable(t *testing.T) {
 // tableOf builds a rendered table of n seats with the hero first, mid-hand on the
 // flop. Hole cards are dealt to the hero only, which is what the table looks like for
 // all but the last frame of a hand.
-func tableOf(width, height, n int) *Model {
-	seats := make([]Seat, 0, n)
+func tableOf(width, height, n int) *model {
+	seats := make([]seat, 0, n)
 	for i := range n {
-		s := Seat{
+		s := seat{
 			PlayerID: fmt.Sprintf("p%d", i),
 			Name:     fmt.Sprintf("player_%d", i),
 			Chips:    uint(500 - 40*i),
@@ -181,7 +181,7 @@ func tableOf(width, height, n int) *Model {
 		}
 		seats = append(seats, s)
 	}
-	m := &Model{
+	m := &model{
 		seats: seats,
 		board: []deck.Card{
 			{Rank: deck.Two, Suit: deck.Clubs},
@@ -191,7 +191,7 @@ func tableOf(width, height, n int) *Model {
 			{Rank: deck.Queen, Suit: deck.Clubs},
 		},
 		pot: 480, sidePots: 2, street: "RIVER",
-		currentBet: 50, toCall: 50, myChips: 500,
+		currentBet: 50, toCall: 50,
 		raiseMin: 100, raiseMax: 500, raiseOK: true,
 		handNumber: 3, handsTotal: 10, winnerName: "player_1",
 	}
@@ -209,15 +209,15 @@ func tableOf(width, height, n int) *Model {
 func TestView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	screens := map[string]func(*Model){
-		"mid hand":       func(*Model) {},
-		"an empty board": func(m *Model) { m.board = nil },
-		"the raise prompt": func(m *Model) {
+	screens := map[string]func(*model){
+		"mid hand":       func(*model) {},
+		"an empty board": func(m *model) { m.board = nil },
+		"the raise prompt": func(m *model) {
 			m.raising = true
 			m.raiseAmount = 200
 		},
-		"the hand over":  func(m *Model) { m.handComplete = true },
-		"the match over": func(m *Model) { m.handComplete, m.matchComplete = true, true },
+		"the hand over":  func(m *model) { m.handComplete = true },
+		"the match over": func(m *model) { m.handComplete, m.matchComplete = true, true },
 	}
 
 	for _, size := range []struct{ w, h int }{

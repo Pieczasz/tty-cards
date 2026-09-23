@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	logic "github.com/Pieczasz/terminal-card/internal/game/poker"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
@@ -15,7 +15,7 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
-func (m *Model) View() tea.View {
+func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
@@ -49,7 +49,7 @@ func (m *Model) View() tea.View {
 // elsewhere, and the five community cards sit above it.
 const artTableHeight = 48
 
-func (m *Model) compact() bool {
+func (m *model) compact() bool {
 	return m.Global.Height < artTableHeight || gameview.IsCompact(m.Global.Width, m.Global.Height)
 }
 
@@ -58,7 +58,7 @@ func (m *Model) compact() bool {
 // columns out of line.
 const seatNameWidth = 12
 
-func (m *Model) renderHandOver() string {
+func (m *model) renderHandOver() string {
 	compact := m.compact()
 	board := m.renderBoard(compact)
 
@@ -78,8 +78,8 @@ func (m *Model) renderHandOver() string {
 		if s.Folded {
 			line += m.Global.Theme.Muted.Render("  folded")
 		}
-		if len(s.Hole) == 2 {
-			line += "  " + renderMiniCard(m.Global.Theme, s.Hole[0]) + renderMiniCard(m.Global.Theme, s.Hole[1])
+		if len(s.Hole) == logic.HoleCards {
+			line += "  " + components.RenderMiniCard(m.Global.Theme, s.Hole[0]) + components.RenderMiniCard(m.Global.Theme, s.Hole[1])
 		}
 		seatLines = append(seatLines, line)
 	}
@@ -95,7 +95,7 @@ func (m *Model) renderHandOver() string {
 // handOverHint spells out that esc leaves the whole match. The screen looks like
 // the end of a game, but with hands still to play esc forfeits the stack the
 // player just spent them building.
-func (m *Model) handOverHint() string {
+func (m *model) handOverHint() string {
 	if m.matchComplete {
 		return "esc / enter -> lobby"
 	}
@@ -117,7 +117,7 @@ func (m *Model) handOverHint() string {
 
 // seatZones places the opponents around the table, starting from the seat on the
 // hero's left so the order on screen is the order the action moves in.
-func (m *Model) seatZones() gameview.TableZones[Seat] {
+func (m *model) seatZones() gameview.TableZones[seat] {
 	heroIdx := -1
 	for i, s := range m.seats {
 		if s.IsHero {
@@ -126,7 +126,7 @@ func (m *Model) seatZones() gameview.TableZones[Seat] {
 		}
 	}
 
-	opps := make([]Seat, 0, len(m.seats))
+	opps := make([]seat, 0, len(m.seats))
 	if heroIdx < 0 {
 		opps = append(opps, m.seats...)
 	} else {
@@ -138,7 +138,7 @@ func (m *Model) seatZones() gameview.TableZones[Seat] {
 	return gameview.SplitZones(opps)
 }
 
-func (m *Model) renderTopRow(seats []Seat, compact bool) string {
+func (m *model) renderTopRow(seats []seat, compact bool) string {
 	if len(seats) == 0 {
 		return ""
 	}
@@ -153,14 +153,14 @@ func (m *Model) renderTopRow(seats []Seat, compact bool) string {
 	return row
 }
 
-func (m *Model) renderMiddle(height int, left, right []Seat, compact bool) string {
+func (m *model) renderMiddle(height int, left, right []seat, compact bool) string {
 	leftView := m.renderSideStack(left, compact, gameview.OrientationLeft)
 	rightView := m.renderSideStack(right, compact, gameview.OrientationRight)
 
 	return gameview.RenderTableRow(m.Global.Width, height, leftView, m.renderCenter(compact), rightView)
 }
 
-func (m *Model) renderSideStack(seats []Seat, compact bool, orientation gameview.Orientation) string {
+func (m *model) renderSideStack(seats []seat, compact bool, orientation gameview.Orientation) string {
 	if len(seats) == 0 {
 		return ""
 	}
@@ -171,7 +171,7 @@ func (m *Model) renderSideStack(seats []Seat, compact bool, orientation gameview
 	return lg.JoinVertical(lg.Center, parts...)
 }
 
-func (m *Model) renderCenter(compact bool) string {
+func (m *model) renderCenter(compact bool) string {
 	board := m.renderBoard(compact)
 	potLine := m.Global.Theme.Accented.Render(fmt.Sprintf("POT %d", m.pot))
 	if m.sidePots > 1 {
@@ -183,12 +183,12 @@ func (m *Model) renderCenter(compact bool) string {
 	return lg.JoinVertical(lg.Center, board, "", potLine, renderChipStack(m.Global.Theme, m.pot), street, betLine)
 }
 
-func (m *Model) renderBoard(compact bool) string {
-	slots := make([]string, 5)
-	for i := range 5 {
+func (m *model) renderBoard(compact bool) string {
+	slots := make([]string, logic.BoardSize)
+	for i := range slots {
 		switch {
 		case i < len(m.board) && compact:
-			slots[i] = renderMiniCard(m.Global.Theme, m.board[i])
+			slots[i] = components.RenderMiniCard(m.Global.Theme, m.board[i])
 		case i < len(m.board):
 			slots[i] = components.RenderCard(m.Global.Theme, m.board[i], false)
 		case compact:
@@ -220,18 +220,7 @@ func renderFacedownCard(t styles.Theme) string {
 	return t.CardFrame.MarginTop(1).Render(strings.Join(lines, "\n"))
 }
 
-// The mini card lives in components: Hearts falls back to the same four columns when
-// its trick will not fit, and two tables disagreeing about how a card reads at mini
-// size is how a player learns the wrong shorthand.
-func renderMiniCard(t styles.Theme, c deck.Card) string {
-	return components.RenderMiniCard(t, c)
-}
-
-func renderHoleBack(t styles.Theme) string {
-	return components.MiniCardBack(t)
-}
-
-func (m *Model) renderSeat(s Seat, compact bool, orientation gameview.Orientation) string {
+func (m *model) renderSeat(s seat, compact bool, orientation gameview.Orientation) string {
 	t := m.Global.Theme
 	ns := lg.NewStyle().Bold(true).Foreground(t.Accent)
 	if s.IsTurn {
@@ -275,7 +264,7 @@ func (m *Model) renderSeat(s Seat, compact bool, orientation gameview.Orientatio
 	return gameview.AttachTurnClock(block, clock, orientation)
 }
 
-func seatBadges(s Seat) string {
+func seatBadges(s seat) string {
 	var b []string
 	if s.IsDealer {
 		b = append(b, "D")
@@ -289,10 +278,13 @@ func seatBadges(s Seat) string {
 	return strings.Join(b, "/")
 }
 
-func (m *Model) renderSeatCards(s Seat, compact bool) string {
-	if len(s.Hole) == 2 {
+func (m *model) renderSeatCards(s seat, compact bool) string {
+	if len(s.Hole) == logic.HoleCards {
 		if compact {
-			return lg.JoinHorizontal(lg.Center, renderMiniCard(m.Global.Theme, s.Hole[0]), renderMiniCard(m.Global.Theme, s.Hole[1]))
+			return lg.JoinHorizontal(lg.Center,
+				components.RenderMiniCard(m.Global.Theme, s.Hole[0]),
+				components.RenderMiniCard(m.Global.Theme, s.Hole[1]))
+
 		}
 		return lg.JoinHorizontal(lg.Bottom,
 			components.RenderCard(m.Global.Theme, s.Hole[0], false),
@@ -310,12 +302,12 @@ func (m *Model) renderSeatCards(s Seat, compact bool) string {
 	}
 	backs := make([]string, 0, s.HandSize)
 	for range s.HandSize {
-		backs = append(backs, renderHoleBack(m.Global.Theme))
+		backs = append(backs, components.MiniCardBack(m.Global.Theme))
 	}
 	return strings.Join(backs, "")
 }
 
-func (m *Model) renderHero(compact bool) string {
+func (m *model) renderHero(compact bool) string {
 	hero := m.heroSeat()
 	var seatBlock string
 	if hero != nil {
@@ -332,7 +324,7 @@ func (m *Model) renderHero(compact bool) string {
 	return block
 }
 
-func (m *Model) renderActionBar() string {
+func (m *model) renderActionBar() string {
 	if m.raising {
 		return m.renderRaisePrompt()
 	}
@@ -363,7 +355,7 @@ func (m *Model) renderActionBar() string {
 
 // renderRaisePrompt shows the raise being built: the running total, the chips that
 // can be pushed onto it, and how far it can still go.
-func (m *Model) renderRaisePrompt() string {
+func (m *model) renderRaisePrompt() string {
 	total := m.Global.Theme.Accented.Render(fmt.Sprintf("RAISE TO %d", m.raiseAmount))
 	bounds := m.Global.Theme.Muted.Render(fmt.Sprintf("(min %d, max %d)", m.raiseMin, m.raiseMax))
 	keys := m.Global.Theme.Dim.Render("[/] fine  |  enter confirm  |  esc cancel")

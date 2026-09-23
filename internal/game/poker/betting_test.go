@@ -26,27 +26,23 @@ type seat struct {
 func seatedRound(currentBet uint, seats ...seat) (*game.State, *State) {
 	players := make([]*game.Player, 0, len(seats))
 	extra := &State{
-		CurrentBet:       currentBet,
-		BigBlind:         DefaultBigBlind,
-		MinRaise:         DefaultBigBlind,
-		Phase:            PreFlop,
-		Folded:           map[string]bool{},
-		PlayersAllIn:     map[string]bool{},
-		Table:            make([]deck.Card, 0, 5),
-		PlayerChips:      map[string]uint{},
-		PlayerBets:       map[string]uint{},
-		TotalContributed: map[string]uint{},
-		ActedThisRound:   map[string]bool{},
-		LastBetLevel:     map[string]uint{},
+		CurrentBet: currentBet,
+		BigBlind:   DefaultBigBlind,
+		MinRaise:   DefaultBigBlind,
+		Phase:      PhasePreFlop,
+		Table:      make([]deck.Card, 0, BoardSize),
+		Seats:      map[string]*Seat{},
 	}
 	for _, s := range seats {
 		players = append(players, &game.Player{ID: s.id})
-		extra.PlayerChips[s.id] = s.chips
-		extra.PlayerBets[s.id] = s.bet
-		extra.ActedThisRound[s.id] = s.acted
-		extra.LastBetLevel[s.id] = s.level
-		extra.Folded[s.id] = s.folded
-		extra.PlayersAllIn[s.id] = s.allIn
+		extra.Seats[s.id] = &Seat{
+			Chips:        s.chips,
+			Bet:          s.bet,
+			Acted:        s.acted,
+			LastBetLevel: s.level,
+			Folded:       s.folded,
+			AllIn:        s.allIn,
+		}
 	}
 	state := game.NewState(&Rules{}, players, deck.StandardDeck())
 	state.Extra = extra
@@ -218,7 +214,7 @@ func TestSettleAndAdvance_RunsOutTheBoardWhenBettingCannotContinue(t *testing.T)
 
 		require.NoError(t, settleAndAdvance(state, extra))
 
-		assert.Equal(t, Flop, extra.Phase, "there is still betting to do")
+		assert.Equal(t, PhaseFlop, extra.Phase, "there is still betting to do")
 		assert.Len(t, extra.Table, 3)
 	})
 
@@ -231,7 +227,7 @@ func TestSettleAndAdvance_RunsOutTheBoardWhenBettingCannotContinue(t *testing.T)
 
 		require.NoError(t, settleAndAdvance(state, extra))
 
-		assert.Equal(t, Showdown, extra.Phase, "a lone live player just sees the board")
+		assert.Equal(t, PhaseShowdown, extra.Phase, "a lone live player just sees the board")
 		assert.Len(t, extra.Table, 5)
 	})
 
@@ -241,11 +237,11 @@ func TestSettleAndAdvance_RunsOutTheBoardWhenBettingCannotContinue(t *testing.T)
 			seat{id: "a", chips: 900, acted: true},
 			seat{id: "b", chips: 900, acted: true},
 		)
-		extra.Phase = River
+		extra.Phase = PhaseRiver
 
 		require.NoError(t, settleAndAdvance(state, extra))
 
-		assert.Equal(t, Showdown, extra.Phase)
+		assert.Equal(t, PhaseShowdown, extra.Phase)
 		assert.True(t, extra.ReachedShowdown)
 	})
 }
@@ -322,8 +318,8 @@ func TestAwardPots_NamesEveryPlayerItPaid(t *testing.T) {
 		require.Len(t, winners, 2)
 		assert.Equal(t, "short", winners[0].ID, "main pot first")
 		assert.Equal(t, "mid", winners[1].ID, "the side pot went somewhere else")
-		assert.Equal(t, uint(300), extra.PlayerChips["short"])
-		assert.Equal(t, uint(400), extra.PlayerChips["mid"])
+		assert.Equal(t, uint(300), extra.Seats["short"].Chips)
+		assert.Equal(t, uint(400), extra.Seats["mid"].Chips)
 	})
 }
 
@@ -399,17 +395,18 @@ func TestRefundUncalled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, extra := sidePotState(t, tt.contributed)
-			poolBefore := extra.MainPool
+			poolBefore := extra.Pool
 
 			refundUncalled(extra)
 
 			var refunded uint
 			for id := range tt.contributed {
-				assert.Equal(t, tt.wantRefund[id], extra.PlayerChips[id], "refund to %s", id)
+				assert.Equal(t, tt.wantRefund[id], extra.Seats[id].Chips, "refund to %s", id)
 				refunded += tt.wantRefund[id]
 			}
-			assert.Equal(t, tt.wantAfter, extra.TotalContributed, "contributions after the refund")
-			assert.Equal(t, poolBefore-refunded, extra.MainPool, "the refund leaves the pool")
+			assert.Equal(t, tt.wantAfter, contributions(extra), "contributions after the refund")
+
+			assert.Equal(t, poolBefore-refunded, extra.Pool, "the refund leaves the pool")
 		})
 	}
 }
@@ -425,9 +422,9 @@ func TestAwardPots(t *testing.T) {
 
 		awardPots(extra, contenders(state, extra), map[string]int{"a": 500, "b": 500, "c": 10})
 
-		assert.Equal(t, uint(150), extra.PlayerChips["a"])
-		assert.Equal(t, uint(150), extra.PlayerChips["b"])
-		assert.Zero(t, extra.PlayerChips["c"], "a losing hand is paid nothing")
+		assert.Equal(t, uint(150), extra.Seats["a"].Chips)
+		assert.Equal(t, uint(150), extra.Seats["b"].Chips)
+		assert.Zero(t, extra.Seats["c"].Chips, "a losing hand is paid nothing")
 	})
 
 	t.Run("the best hand takes it outright", func(t *testing.T) {
@@ -437,8 +434,8 @@ func TestAwardPots(t *testing.T) {
 
 		awardPots(extra, contenders(state, extra), map[string]int{"a": 10, "b": 500})
 
-		assert.Zero(t, extra.PlayerChips["a"])
-		assert.Equal(t, uint(200), extra.PlayerChips["b"])
+		assert.Zero(t, extra.Seats["a"].Chips)
+		assert.Equal(t, uint(200), extra.Seats["b"].Chips)
 	})
 
 	t.Run("hands nobody can classify are still paid", func(t *testing.T) {
@@ -448,7 +445,7 @@ func TestAwardPots(t *testing.T) {
 
 		awardPots(extra, contenders(state, extra), map[string]int{"a": 0, "b": 0})
 
-		assert.Equal(t, uint(200), extra.PlayerChips["a"]+extra.PlayerChips["b"],
+		assert.Equal(t, uint(200), extra.Seats["a"].Chips+extra.Seats["b"].Chips,
 			"a pot must never be left unawarded")
 	})
 }
@@ -618,9 +615,9 @@ func TestApplyAction_AllInCommitsTheWholeStack(t *testing.T) {
 
 			(&Rules{}).ApplyAction(state, ActionAllIn{})
 
-			assert.Zero(t, extra.PlayerChips["a"], "all-in leaves no chips behind")
-			assert.Equal(t, tt.wantBet, extra.PlayerBets["a"])
-			assert.True(t, extra.PlayersAllIn["a"])
+			assert.Zero(t, extra.Seats["a"].Chips, "all-in leaves no chips behind")
+			assert.Equal(t, tt.wantBet, extra.Seats["a"].Bet)
+			assert.True(t, extra.Seats["a"].AllIn)
 		})
 	}
 }
@@ -635,23 +632,23 @@ func TestCommitTo_MovesExactlyWhatIsOwed(t *testing.T) {
 		t.Parallel()
 		_, extra := seatedRound(200, seat{id: "a", chips: 500, bet: 50})
 
-		commitTo(extra, &game.Player{ID: "a"}, 200)
+		extra.commitTo(extra.Seats["a"], 200)
 
-		assert.Equal(t, uint(200), extra.PlayerBets["a"], "the bet lands on the amount owed")
-		assert.Equal(t, uint(350), extra.PlayerChips["a"], "only the difference leaves the stack")
-		assert.Equal(t, uint(150), extra.TotalContributed["a"])
-		assert.False(t, extra.PlayersAllIn["a"])
+		assert.Equal(t, uint(200), extra.Seats["a"].Bet, "the bet lands on the amount owed")
+		assert.Equal(t, uint(350), extra.Seats["a"].Chips, "only the difference leaves the stack")
+		assert.Equal(t, uint(150), extra.Seats["a"].Contributed)
+		assert.False(t, extra.Seats["a"].AllIn)
 	})
 
 	t.Run("a short stack calls for what it has", func(t *testing.T) {
 		t.Parallel()
 		_, extra := seatedRound(500, seat{id: "a", chips: 100, bet: 50})
 
-		commitTo(extra, &game.Player{ID: "a"}, 500)
+		extra.commitTo(extra.Seats["a"], 500)
 
-		assert.Equal(t, uint(150), extra.PlayerBets["a"])
-		assert.Zero(t, extra.PlayerChips["a"])
-		assert.True(t, extra.PlayersAllIn["a"])
+		assert.Equal(t, uint(150), extra.Seats["a"].Bet)
+		assert.Zero(t, extra.Seats["a"].Chips)
+		assert.True(t, extra.Seats["a"].AllIn)
 	})
 }
 
@@ -667,11 +664,11 @@ func TestApplyBetIncrease_Boundaries(t *testing.T) {
 		)
 		extra.MinRaise = 100
 
-		applyBetIncrease(extra, state, state.Players[0], 200)
+		applyBetIncrease(state, extra, state.Players[0], 200)
 
 		assert.Equal(t, uint(200), extra.CurrentBet)
 		assert.Equal(t, uint(100), extra.MinRaise, "a raise of exactly the minimum is a full raise")
-		assert.False(t, extra.ActedThisRound["b"], "so it reopens the round")
+		assert.False(t, extra.Seats["b"].Acted, "so it reopens the round")
 	})
 
 	t.Run("an increase to what is already owed changes nothing", func(t *testing.T) {
@@ -684,10 +681,10 @@ func TestApplyBetIncrease_Boundaries(t *testing.T) {
 		// a raise of nothing would count as full and hand everybody fresh action.
 		extra.MinRaise = 0
 
-		applyBetIncrease(extra, state, state.Players[0], 100)
+		applyBetIncrease(state, extra, state.Players[0], 100)
 
 		assert.Equal(t, uint(100), extra.CurrentBet)
-		assert.True(t, extra.ActedThisRound["b"], "nobody gets to act again over a non-raise")
+		assert.True(t, extra.Seats["b"].Acted, "nobody gets to act again over a non-raise")
 	})
 }
 
@@ -742,7 +739,7 @@ func TestValidateAction_NoRaiseWhenBettingIsNotReopened(t *testing.T) {
 		state, extra := notReopened()
 		// Short enough that going all-in cannot get past the current bet, so it is
 		// a call with everything rather than a raise.
-		extra.PlayerChips["a"] = 30
+		extra.Seats["a"].Chips = 30
 
 		require.NoError(t, rules.ValidateAction(state, ActionAllIn{}))
 	})
@@ -751,7 +748,7 @@ func TestValidateAction_NoRaiseWhenBettingIsNotReopened(t *testing.T) {
 		t.Parallel()
 		state, extra := notReopened()
 		// What a full-size raise does: applyBetIncrease clears ActedThisRound.
-		extra.ActedThisRound["a"] = false
+		extra.Seats["a"].Acted = false
 
 		require.NoError(t, rules.ValidateAction(state, ActionRaiseTo{Amount: 400}))
 		require.NoError(t, rules.ValidateAction(state, ActionAllIn{}))
@@ -801,14 +798,14 @@ func TestAfterBettingAction_SeatZeroCanBeNext(t *testing.T) {
 		seat{id: "a", chips: 900, bet: 50, acted: true},
 		seat{id: "b", chips: 900, bet: 100, acted: true},
 	)
-	extra.Phase = Flop
+	extra.Phase = PhaseFlop
 	state.CurrentTurn = 1
 
-	require.NoError(t, (&Rules{}).afterBettingAction(state, extra))
+	require.NoError(t, afterBettingAction(state, extra))
 
 	require.NotNil(t, state.OverrideNextTurn)
 	assert.Equal(t, 0, *state.OverrideNextTurn, "seat 0 still owes chips, so it is on turn")
-	assert.Equal(t, Flop, extra.Phase, "the round is not over, so the street does not advance")
+	assert.Equal(t, PhaseFlop, extra.Phase, "the round is not over, so the street does not advance")
 }
 
 // The blinds walk forward from the button over seats that still have chips.
@@ -844,9 +841,9 @@ func TestBeginHand_SeatZeroCanBeUnderTheGun(t *testing.T) {
 	// seat 0 itself.
 	state, extra := tableWithChips(1000, 1000)
 
-	require.NoError(t, (&Rules{}).beginHand(state, extra, 0))
+	require.NoError(t, beginHand(state, extra, 0))
 
-	assert.Equal(t, PreFlop, extra.Phase, "the hand starts with betting, not a board")
+	assert.Equal(t, PhasePreFlop, extra.Phase, "the hand starts with betting, not a board")
 	assert.Empty(t, extra.Table)
 	assert.Equal(t, 0, state.CurrentTurn, "the button is under the gun heads-up")
 }
@@ -864,12 +861,12 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 		{name: "a betting turn keeps the engine's clock", mutate: func(*State) {}},
 		{
 			name:   "between hands the dealer gets a minute",
-			mutate: func(e *State) { e.HandComplete = true },
+			mutate: func(e *State) { e.Phase = PhaseShowdown },
 			want:   dealTurnTimeout,
 		},
 		{
 			name:   "a finished match needs no deal clock",
-			mutate: func(e *State) { e.HandComplete, e.MatchComplete = true, true },
+			mutate: func(e *State) { e.Phase, e.MatchComplete = PhaseShowdown, true },
 		},
 	}
 

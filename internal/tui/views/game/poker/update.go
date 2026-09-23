@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The table has moved on, so a complaint about a move the player tried against
 	// the old one has nothing left to refer to. Only on an event: clearing it on the
 	// clock tick too would wipe the message inside a second of it being shown.
@@ -22,7 +22,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// esc takes the raise prompt down before it can mean leaving the table.
 	if msg.String() == "esc" && m.raising {
 		m.raising = false
@@ -71,7 +71,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // addChip pushes one chip of the keyed denomination into the pending raise, which
 // is how a raise is built up: start at the minimum, then stack chips on top.
-func (m *Model) addChip(key string) {
+func (m *model) addChip(key string) {
 	if !m.raising {
 		return
 	}
@@ -84,7 +84,7 @@ func (m *Model) addChip(key string) {
 
 // stepRaise nudges the pending raise by the smallest chip, staying inside the
 // legal range. It is a no-op unless the raise prompt is open.
-func (m *Model) stepRaise(direction int) {
+func (m *model) stepRaise(direction int) {
 	if !m.raising {
 		return
 	}
@@ -101,7 +101,7 @@ func (m *Model) stepRaise(direction int) {
 }
 
 // confirm deals the next hand, leaves a finished match, or commits the pending raise.
-func (m *Model) confirm() (tea.Model, tea.Cmd) {
+func (m *model) confirm() (tea.Model, tea.Cmd) {
 	if m.matchComplete {
 		// Separate statement on purpose: m is returned by value and Leave mutates it
 		// through the pointer receiver; the order of those two in one return is unspecified.
@@ -121,7 +121,7 @@ func (m *Model) confirm() (tea.Model, tea.Cmd) {
 
 // beginRaise opens the raise prompt at the smallest legal raise, so every chip
 // the player then adds is on top of an amount that is already valid.
-func (m *Model) beginRaise() (tea.Model, tea.Cmd) {
+func (m *model) beginRaise() (tea.Model, tea.Cmd) {
 	if !m.canRaise() {
 		return m, nil
 	}
@@ -130,7 +130,7 @@ func (m *Model) beginRaise() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
+func (m *model) submit(action game.Action) (tea.Model, tea.Cmd) {
 	if m.Bound == nil || !m.Base.MyTurn {
 		return m, nil
 	}
@@ -146,4 +146,4 @@ func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
 
 // Close comes from the embedded Session. Without it a mid-game disconnect never runs
 // the esc/enter paths, so the listener goroutine stays parked on the event channel.
-var _ router.Closer = (*Model)(nil)
+var _ router.Closer = (*model)(nil)

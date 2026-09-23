@@ -22,7 +22,7 @@ func testUser(name string) *db.User {
 }
 
 // startedTable returns a two-handed table mid-hand plus the view bound to seat 1.
-func startedTable(t *testing.T) (*game.Engine, *Model) {
+func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	players := []*game.Player{
 		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
@@ -32,9 +32,20 @@ func startedTable(t *testing.T) (*game.Engine, *Model) {
 	require.NoError(t, engine.Start())
 
 	global := router.GlobalContext{User: testUser("alice")}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
+	// The view first: closing it unsubscribes, which a closed engine no longer needs.
+	t.Cleanup(engine.Close)
+	t.Cleanup(m.Close)
 	return engine, m
+}
+
+// extra is the poker state behind a table, failing the test on anything else.
+func extra(t *testing.T, s *game.State) *logic.State {
+	t.Helper()
+	e, ok := s.Extra.(*logic.State)
+	require.True(t, ok, "state.Extra is %T, not *poker.State", s.Extra)
+	return e
 }
 
 func TestSyncState_BuildsSeatsFromEngine(t *testing.T) {
@@ -128,7 +139,7 @@ func TestClampRaise_BoundsToLegalRange(t *testing.T) {
 
 // tableOnTurn seats the view as whichever player the engine put on turn, so the
 // test does not depend on where the button landed.
-func tableOnTurn(t *testing.T, seats int) (*game.Engine, *Model) {
+func tableOnTurn(t *testing.T, seats int) (*game.Engine, *model) {
 	t.Helper()
 	players := make([]*game.Player, 0, seats)
 	for i := range seats {
@@ -144,7 +155,7 @@ func tableOnTurn(t *testing.T, seats int) (*game.Engine, *Model) {
 	id, err := uuid.Parse(engine.CurrentPlayerID())
 	require.NoError(t, err)
 
-	m, ok := New(router.GlobalContext{User: &db.User{ID: id, Username: "hero"}}, engine).(*Model)
+	m, ok := New(router.GlobalContext{User: &db.User{ID: id, Username: "hero"}}, engine).(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m
@@ -180,7 +191,7 @@ func TestSyncState_KeepsTheRaisePromptWhileTheTurnIsStillYours(t *testing.T) {
 
 func TestSyncState_NilBoundIsInert(t *testing.T) {
 	t.Parallel()
-	m, ok := New(router.GlobalContext{}, nil).(*Model)
+	m, ok := New(router.GlobalContext{}, nil).(*model)
 	require.True(t, ok)
 
 	assert.Empty(t, m.seats)
@@ -190,57 +201,24 @@ func TestSyncState_NilBoundIsInert(t *testing.T) {
 	assert.False(t, m.canAllIn())
 }
 
-// syncState rebuilds every seat from the engine on each broadcast event, so it runs
-// once per player per action. It shares the frame budget (~16ms) with the lipgloss
-// render, so it needs to stay in the microseconds.
-func BenchmarkSyncState(b *testing.B) {
-	for _, seats := range []int{2, 6, 9} {
-		b.Run(fmt.Sprintf("seats=%d", seats), func(b *testing.B) {
-			players := make([]*game.Player, 0, seats)
-			for i := range seats {
-				players = append(players, &game.Player{
-					ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1), Name: fmt.Sprintf("p%d", i+1),
-				})
-			}
-			engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
-			if err := engine.Start(); err != nil {
-				b.Fatal(err)
-			}
-			b.Cleanup(engine.Close)
-
-			m, ok := New(router.GlobalContext{User: testUser("p1")}, engine).(*Model)
-			if !ok {
-				b.Fatal("New did not return *Model")
-			}
-
-			b.ReportAllocs()
-			for b.Loop() {
-				m.syncState()
-			}
-		})
-	}
-}
-
 // On the flop against a 30-chip stack a full raise is out of reach, but putting that
 // stack all-in is not: the prompt has to offer exactly 30 and the engine accept it.
 func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	t.Cleanup(engine.Close)
 	heroID := m.Bound.PlayerID()
 	engine.WithState(func(state *game.State) {
-		e := state.Extra.(*logic.State)
+		e := extra(t, state)
 		for i, p := range state.Players {
-			e.PlayerBets[p.ID] = 0
-			e.PlayerChips[p.ID] = 30
+			*e.Seats[p.ID] = logic.Seat{Chips: 30}
 			if p.ID == heroID {
-				e.PlayerChips[p.ID] = 1000
+				e.Seats[p.ID].Chips = 1000
 				state.CurrentTurn = i
 			}
 		}
-		clear(e.ActedThisRound)
 		e.CurrentBet = 0
-		e.Phase = logic.Flop
+
+		e.Phase = logic.PhaseFlop
 	})
 	m.syncState()
 	require.True(t, m.canRaise())

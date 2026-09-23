@@ -8,23 +8,29 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
-// holeCards is what each funded seat is dealt at the start of a hand.
-const holeCards = 2
+const (
+	// HoleCards is what each funded seat is dealt at the start of a hand.
+	HoleCards = 2
+	// BoardSize is the community cards a hand runs out to: the flop, the turn and
+	// the river.
+	BoardSize = flopCards + 1 + 1
 
-// minDeckAfterDeal is burn+flop+turn+river plus a two-card margin, checked once
-// the hole cards for the hand are out.
-const minDeckAfterDeal = 1 + 3 + 1 + 1 + 2
+	flopCards = 3
+	// minDeckAfterDeal is a burn, the board and a two-card margin, checked once the
+	// hole cards for the hand are out.
+	minDeckAfterDeal = 1 + BoardSize + 2
+)
 
 // beginHandOrFinish deals a hand and closes it out when the deal already finished
 // it: blinds big enough to put every funded seat all-in run the board out inside
 // beginHand, before anybody acts. Both the opening deal and every ActionNextHand go
 // through here, because a hand left complete but unfinished parks nobody on turn
 // and the match stops on a result screen nobody can dismiss.
-func (r *Rules) beginHandOrFinish(state *game.State, extra *State, dealer int) error {
-	if err := r.beginHand(state, extra, dealer); err != nil {
+func beginHandOrFinish(state *game.State, extra *State, dealer int) error {
+	if err := beginHand(state, extra, dealer); err != nil {
 		return err
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		finishHand(state, extra)
 	}
 	return nil
@@ -33,14 +39,14 @@ func (r *Rules) beginHandOrFinish(state *game.State, extra *State, dealer int) e
 // beginHand deals the next hand of the match: fresh shuffled deck, hole cards for
 // everyone still holding chips, button and blinds moved on. A busted player is
 // marked folded for the rest of the match so the turn cursor skips their seat.
-func (r *Rules) beginHand(state *game.State, extra *State, dealer int) error {
+func beginHand(state *game.State, extra *State, dealer int) error {
 	resetForHand(state, extra)
 	extra.HandNumber++
 	extra.handStartChips = chipsInPlay(extra)
 
-	state.Deck = deck.New(r.InitialDeck())
+	state.Deck = deck.New(deck.StandardDeck())
 	state.Deck.Shuffle()
-	if err := dealHoleCards(state, extra, holeCards); err != nil {
+	if err := dealHoleCards(state, extra); err != nil {
 		return err
 	}
 	if state.Deck.Size() < minDeckAfterDeal {
@@ -53,8 +59,8 @@ func (r *Rules) beginHand(state *game.State, extra *State, dealer int) error {
 	// short stack would otherwise make a full table look heads-up.
 	headsUp := fundedSeats(state, extra) == 2
 	setBlinds(state, extra, dealer, headsUp)
-	postBlind(extra, state.Players[extra.SBIndex], extra.SmallBlind)
-	postBlind(extra, state.Players[extra.BBIndex], extra.BigBlind)
+	extra.postBlind(extra.Seats[state.Players[extra.SBIndex].ID], extra.SmallBlind)
+	extra.postBlind(extra.Seats[state.Players[extra.BBIndex].ID], extra.BigBlind)
 	// A blind too short to post in full is all-in for less; the bring-in stays at the
 	// full big blind and the shortfall is dead money, so the opening bet is the blind
 	// rather than what was actually posted. Following the posted amount would drop the
@@ -69,44 +75,40 @@ func (r *Rules) beginHand(state *game.State, extra *State, dealer int) error {
 		// run-out that fails hands them back rather than stranding them.
 		return settleOrUnwind(state, extra)
 	}
-	state.CurrentTurn = first
-	state.OverrideNextTurn = &first
+	state.SetTurn(first)
 	return nil
 }
 
 func resetForHand(state *game.State, extra *State) {
-	clear(extra.Folded)
-	clear(extra.PlayersAllIn)
-	clear(extra.PlayerBets)
-	clear(extra.TotalContributed)
-	clear(extra.ActedThisRound)
-	clear(extra.LastBetLevel)
+	for _, seat := range extra.Seats {
+		seat.resetForHand()
+	}
 	extra.Table = extra.Table[:0]
 	extra.Pots = nil
 	extra.Winners = nil
-	extra.MainPool = 0
+	extra.Pool = 0
 	extra.CurrentBet = 0
 	extra.MinRaise = extra.BigBlind
-	extra.Phase = PreFlop
-	extra.HandComplete = false
+	extra.Phase = PhasePreFlop
 	extra.ReachedShowdown = false
 	state.Winner = nil
 }
 
-func dealHoleCards(state *game.State, extra *State, count int) error {
+func dealHoleCards(state *game.State, extra *State) error {
 	funded := 0
 	for _, p := range state.Players {
-		if extra.PlayerChips[p.ID] == 0 {
+		seat := extra.Seats[p.ID]
+		if seat.Chips == 0 {
 			p.Cards = nil
-			extra.Folded[p.ID] = true
-			extra.ActedThisRound[p.ID] = true
+			seat.Folded = true
+			seat.Acted = true
 			continue
 		}
-		cards, ok := state.Deck.DrawNCards(count)
+		cards, ok := state.Deck.DrawNCards(HoleCards)
 		if !ok {
 			slog.Error("poker deck empty dealing hole cards",
 				"hand", extra.HandNumber, "player", p.ID, "dealt", funded)
-			return errors.New("insufficient number of cards to deal for all players")
+			return errors.New("not enough cards to deal")
 		}
 		p.Cards = cards
 		funded++
@@ -136,7 +138,7 @@ func setBlinds(state *game.State, extra *State, dealer int, headsUp bool) {
 func firstToActPreflop(state *game.State, extra *State, headsUp bool) int {
 	// Heads-up the button acts first, so its own seat has to be considered; every
 	// other table starts with the seat after the big blind.
-	if headsUp && !cannotAct(extra, state.Players[extra.DealerIndex].ID) {
+	if headsUp && extra.Seats[state.Players[extra.DealerIndex].ID].canAct() {
 		return extra.DealerIndex
 	}
 	return nextToAct(state, extra, extra.BBIndex)
@@ -146,14 +148,8 @@ func firstToActPreflop(state *game.State, extra *State, headsUp bool) int {
 // standings can order them by how long they lasted.
 func recordBustouts(state *game.State, extra *State) {
 	for _, p := range state.Players {
-		if extra.PlayerChips[p.ID] > 0 {
-			continue
-		}
-		if extra.BustedAtHand == nil {
-			extra.BustedAtHand = make(map[string]int, len(state.Players))
-		}
-		if _, done := extra.BustedAtHand[p.ID]; !done {
-			extra.BustedAtHand[p.ID] = extra.HandNumber
+		if seat := extra.Seats[p.ID]; seat.Chips == 0 && seat.BustedAtHand == 0 {
+			seat.BustedAtHand = extra.HandNumber
 		}
 	}
 }
@@ -161,7 +157,7 @@ func recordBustouts(state *game.State, extra *State) {
 func fundedSeats(state *game.State, extra *State) int {
 	n := 0
 	for _, p := range state.Players {
-		if extra.PlayerChips[p.ID] > 0 {
+		if extra.Seats[p.ID].Chips > 0 {
 			n++
 		}
 	}
@@ -169,21 +165,20 @@ func fundedSeats(state *game.State, extra *State) int {
 }
 
 func nextFundedSeat(state *game.State, extra *State, from int) int {
-	idx := nextSeat(from, len(state.Players), func(idx int) bool {
-		return extra.PlayerChips[state.Players[idx].ID] > 0
+	seat := game.NextSeat(from, len(state.Players), func(seat int) bool {
+		return extra.Seats[state.Players[seat].ID].Chips > 0
 	})
-	if idx < 0 {
+	if seat < 0 {
 		return from
 	}
-	return idx
+	return seat
 }
 
 // finishHand closes out a hand. It ends the match once the hands run out or only
 // one player still has chips; otherwise it parks the turn on the next dealer, who
 // deals the following hand with ActionNextHand.
 func finishHand(state *game.State, extra *State) {
-	extra.HandComplete = true
-	extra.Phase = Showdown
+	extra.Phase = PhaseShowdown
 	checkChipConservation(extra)
 	recordBustouts(state, extra)
 	if extra.HandNumber >= extra.HandsTotal || fundedSeats(state, extra) <= 1 {
@@ -191,9 +186,7 @@ func finishHand(state *game.State, extra *State) {
 		state.OverrideNextTurn = nil
 		return
 	}
-	next := nextFundedSeat(state, extra, extra.DealerIndex)
-	state.CurrentTurn = next
-	state.OverrideNextTurn = &next
+	state.SetTurn(nextFundedSeat(state, extra, extra.DealerIndex))
 }
 
 // checkChipConservation is a money-bug tripwire. Chips only ever move between a stack
@@ -203,14 +196,14 @@ func finishHand(state *game.State, extra *State) {
 // worth a log line even though it is too late to fix.
 //
 // The pool is checked separately because the total cannot see it: chipsInPlay counts
-// MainPool, so a hand that ends without paying a pot out balances, and the next
+// Pool, so a hand that ends without paying a pot out balances, and the next
 // resetForHand quietly zeroes the stranded chips.
 func checkChipConservation(extra *State) {
-	if extra.MainPool != 0 {
+	if extra.Pool != 0 {
 		slog.Error("poker hand finished with chips still in the pot",
 			"hand", extra.HandNumber,
 			"phase", extra.Phase.String(),
-			"pool", extra.MainPool,
+			"pool", extra.Pool,
 		)
 	}
 	if extra.handStartChips == 0 {
@@ -227,13 +220,13 @@ func checkChipConservation(extra *State) {
 	)
 }
 
-func postBlind(extra *State, p *game.Player, amount uint) {
-	pay := min(amount, extra.PlayerChips[p.ID])
-	extra.PlayerChips[p.ID] -= pay
-	extra.PlayerBets[p.ID] += pay
-	extra.TotalContributed[p.ID] += pay
-	extra.MainPool += pay
-	if extra.PlayerChips[p.ID] == 0 {
-		extra.PlayersAllIn[p.ID] = true
+func (s *State) postBlind(seat *Seat, amount uint) {
+	pay := min(amount, seat.Chips)
+	seat.Chips -= pay
+	seat.Bet += pay
+	seat.Contributed += pay
+	s.Pool += pay
+	if seat.Chips == 0 {
+		seat.AllIn = true
 	}
 }

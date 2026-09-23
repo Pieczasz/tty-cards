@@ -3,6 +3,7 @@ package poker
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -17,7 +18,7 @@ import (
 // benchTable seats n players and returns the view belonging to the first. Rendering
 // is the per-frame cost every client pays, so it is measured at the table sizes the
 // games actually support.
-func benchTable(b *testing.B, n int) *Model {
+func benchTable(b *testing.B, n int) *model {
 	b.Helper()
 	players := make([]*game.Player, 0, n)
 	for i := range n {
@@ -30,7 +31,7 @@ func benchTable(b *testing.B, n int) *Model {
 	b.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("player1"), Width: 120, Height: 40}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m
@@ -90,7 +91,7 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("player1"), Width: 120, Height: 40}
-	first, ok := New(global, engine).(*Model)
+	first, ok := New(global, engine).(*model)
 	require.True(t, ok)
 	t.Cleanup(first.Close)
 
@@ -106,9 +107,9 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	runtime.ReadMemStats(&before)
 
 	const sessions = 8
-	views := make([]*Model, 0, sessions)
+	views := make([]*model, 0, sessions)
 	for range sessions {
-		m, okView := New(global, engine).(*Model)
+		m, okView := New(global, engine).(*model)
 		require.True(t, okView)
 		views = append(views, m)
 	}
@@ -127,9 +128,26 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 
 // BenchmarkPokerView_RenderParallel measures whether rendering scales across cores.
 func BenchmarkPokerView_RenderParallel(b *testing.B) {
+	// Each worker opens its own table; they are closed here, on the benchmark's own
+	// goroutine, once every worker is done.
+	var mu sync.Mutex
+	var engines []*game.Engine
+	var models []*model
+	b.Cleanup(func() {
+		for _, m := range models {
+			m.Close()
+		}
+		for _, e := range engines {
+			e.Close()
+		}
+	})
+
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
-		m := benchParallelTable(b, 6)
+		engine, m := benchParallelTable(b, 6)
+		mu.Lock()
+		engines, models = append(engines, engine), append(models, m)
+		mu.Unlock()
 		for pb.Next() {
 			_ = m.View()
 		}
@@ -137,10 +155,10 @@ func BenchmarkPokerView_RenderParallel(b *testing.B) {
 }
 
 // benchParallelTable is benchTable without b.Cleanup, which is not safe to call from
-// a parallel worker goroutine.
+// a parallel worker goroutine; the caller closes what it returns.
 //
 //nolint:thelper // runs on a parallel worker, so it must not register as a helper
-func benchParallelTable(b *testing.B, n int) *Model {
+func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
 	players := make([]*game.Player, 0, n)
 	for i := range n {
 		players = append(players, &game.Player{
@@ -152,11 +170,11 @@ func benchParallelTable(b *testing.B, n int) *Model {
 		b.Error(err)
 	}
 	global := router.GlobalContext{User: testUser("player1"), Width: 120, Height: 40}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	if !ok {
 		b.Error("unexpected model type")
 	}
-	return m
+	return engine, m
 }
 
 // TestCapacity_TableRenderRate reports the frames a whole table generates per second

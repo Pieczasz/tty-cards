@@ -14,11 +14,15 @@ import (
 // committed to (see contenders) and are shown down like anybody else.
 func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 	extra, ok := state.Extra.(*State)
-	if !ok || extra.HandComplete || extra.PlayersAllIn[playerID] {
+	if !ok || extra.HandComplete() {
 		return
 	}
-	extra.Folded[playerID] = true
-	extra.ActedThisRound[playerID] = true
+	seat := extra.Seats[playerID]
+	if seat == nil || seat.AllIn {
+		return
+	}
+	seat.Folded = true
+	seat.Acted = true
 }
 
 // AfterPlayerRemoved reindexes the button/blinds and picks the next actor from
@@ -37,7 +41,7 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	extra.SBIndex = adjustSeatIndex(extra.SBIndex, removedIndex, n)
 	extra.BBIndex = adjustSeatIndex(extra.BBIndex, removedIndex, n)
 
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		// The player who was due to deal may be the one who just left, so the turn
 		// is re-parked rather than left pointing at an empty seat.
 		finishHand(state, extra)
@@ -47,7 +51,7 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	// A hand is only ever handed to a seat while two players still contest it, and
 	// one leave drops that by at most one, so the pot always has a claimant here. The
 	// seats have shifted, so the search for the next actor starts on the cursor itself.
-	if err := resolveAfterChange(state, extra, (state.CurrentTurn-1+n)%n); err != nil {
+	if err := resolveAfterChange(state, extra, game.SeatAt(state.CurrentTurn-1, n)); err != nil {
 		// The hook cannot report it; the hand is already unwound and closed.
 		slog.Error("poker cannot finish the hand after a leave",
 			"hand", extra.HandNumber, "phase", extra.Phase.String(), "error", err)
@@ -65,7 +69,8 @@ func adjustSeatIndex(seat, removed, nAfter int) int {
 	case seat > removed:
 		seat--
 	case seat == removed:
-		seat = (removed - 1 + nAfter) % nAfter
+		seat = game.SeatAt(removed-1, nAfter)
+
 	}
 	return min(max(seat, 0), nAfter-1)
 }

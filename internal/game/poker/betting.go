@@ -8,26 +8,29 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
-func cannotAct(extra *State, id string) bool {
-	return extra.Folded[id] || extra.PlayersAllIn[id] || extra.PlayerChips[id] == 0
+// canAct is a seat with a decision still to make this hand: in it, not all-in, and
+// holding chips.
+func (s *Seat) canAct() bool {
+	return !s.Folded && !s.AllIn && s.Chips > 0
 }
 
 // checkBettingReopened refuses a raise from a player who has already acted this
 // round unless the bet has since risen by at least a full MinRaise over the level
-// they acted on. A full raise clears ActedThisRound outright (see applyBetIncrease);
-// the level is what catches several short all-ins that only reach a full raise
-// together, which reopen the betting just the same (the TDA rule). Anyone else still
-// on turn with ActedThisRound set is facing less than a full raise: they owe the
-// difference and may only call or fold.
-func checkBettingReopened(extra *State, p *game.Player) error {
-	if extra.ActedThisRound[p.ID] && extra.CurrentBet-extra.LastBetLevel[p.ID] < extra.MinRaise {
+// they acted on. A full raise clears Acted outright (see applyBetIncrease); the level
+// is what catches several short all-ins that only reach a full raise together, which
+// reopen the betting just the same (the TDA rule). Anyone else still on turn with
+// Acted set is facing less than a full raise: they owe the difference and may only
+// call or fold.
+func checkBettingReopened(extra *State, seat *Seat) error {
+	if seat.Acted && extra.CurrentBet-seat.LastBetLevel < extra.MinRaise {
 		return errors.New("betting is not reopened, you may only call or fold")
 	}
 	return nil
 }
 
 func validateRaiseTo(state *game.State, extra *State, p *game.Player, amount uint) error {
-	if err := checkBettingReopened(extra, p); err != nil {
+	seat := extra.Seats[p.ID]
+	if err := checkBettingReopened(extra, seat); err != nil {
 		return err
 	}
 	if amount <= extra.CurrentBet {
@@ -36,8 +39,8 @@ func validateRaiseTo(state *game.State, extra *State, p *game.Player, amount uin
 	if callable := largestCallableBet(state, extra, p); amount > callable {
 		return fmt.Errorf("no opponent can call more than %d", callable)
 	}
-	additional := amount - extra.PlayerBets[p.ID]
-	if additional > extra.PlayerChips[p.ID] {
+	additional := amount - seat.Bet
+	if additional > seat.Chips {
 		return errors.New("not enough chips")
 	}
 	if lo, _ := raiseRange(state, extra, p); amount < lo {
@@ -52,7 +55,8 @@ func validateRaiseTo(state *game.State, extra *State, p *game.Player, amount uin
 // raise the only raise left is the top itself - the player's own all-in, or putting
 // a short opponent all-in, which is chips that opponent can actually call.
 func raiseRange(state *game.State, extra *State, p *game.Player) (lo, hi uint) {
-	hi = min(extra.PlayerBets[p.ID]+extra.PlayerChips[p.ID], largestCallableBet(state, extra, p))
+	seat := extra.Seats[p.ID]
+	hi = min(seat.Bet+seat.Chips, largestCallableBet(state, extra, p))
 	return min(extra.CurrentBet+extra.MinRaise, hi), hi
 }
 
@@ -62,7 +66,7 @@ func raiseRange(state *game.State, extra *State, p *game.Player) (lo, hi uint) {
 // prompt can only ever offer an amount the rules take.
 func RaiseBounds(state *game.State, playerID string) (lo, hi uint, ok bool) {
 	extra, isPoker := state.Extra.(*State)
-	if !isPoker || extra.HandComplete {
+	if !isPoker || extra.HandComplete() {
 		return 0, 0, false
 	}
 	i := slices.IndexFunc(state.Players, func(p *game.Player) bool { return p.ID == playerID })
@@ -70,7 +74,8 @@ func RaiseBounds(state *game.State, playerID string) (lo, hi uint, ok bool) {
 		return 0, 0, false
 	}
 	p := state.Players[i]
-	if cannotAct(extra, p.ID) || checkBettingReopened(extra, p) != nil {
+	seat := extra.Seats[p.ID]
+	if !seat.canAct() || checkBettingReopened(extra, seat) != nil {
 		return 0, 0, false
 	}
 	lo, hi = raiseRange(state, extra, p)
@@ -91,25 +96,26 @@ func largestCallableBet(state *game.State, extra *State, p *game.Player) uint {
 		if o.ID == p.ID {
 			continue
 		}
-		best = max(best, extra.PlayerBets[o.ID]+extra.PlayerChips[o.ID])
+		seat := extra.Seats[o.ID]
+		best = max(best, seat.Bet+seat.Chips)
 	}
 	return best
 }
 
-// commitTo raises the player's street bet to streetTotal, clamped to the chips they
-// actually have - so it doubles as "call what is owed" for a stack too short to cover
-// it.
-func commitTo(extra *State, p *game.Player, streetTotal uint) {
-	if streetTotal < extra.PlayerBets[p.ID] {
+// commitTo raises the seat's street bet to streetTotal, clamped to the chips it
+// actually has - so it doubles as "call what is owed" for a stack too short to cover
+// it, and as posting a blind.
+func (s *State) commitTo(seat *Seat, streetTotal uint) {
+	if streetTotal < seat.Bet {
 		return
 	}
-	additional := min(streetTotal-extra.PlayerBets[p.ID], extra.PlayerChips[p.ID])
-	extra.PlayerChips[p.ID] -= additional
-	extra.PlayerBets[p.ID] += additional
-	extra.TotalContributed[p.ID] += additional
-	extra.MainPool += additional
-	if extra.PlayerChips[p.ID] == 0 {
-		extra.PlayersAllIn[p.ID] = true
+	additional := min(streetTotal-seat.Bet, seat.Chips)
+	seat.Chips -= additional
+	seat.Bet += additional
+	seat.Contributed += additional
+	s.Pool += additional
+	if seat.Chips == 0 {
+		seat.AllIn = true
 	}
 }
 
@@ -122,7 +128,7 @@ func commitTo(extra *State, p *game.Player, streetTotal uint) {
 // MinRaise is the size of the last full raise, and the next legal raise is measured
 // from the raised CurrentBet: a sub-minimum all-in moves the bet but not the increment,
 // which is the standard rule (decisions.md #41).
-func applyBetIncrease(extra *State, state *game.State, raiser *game.Player, newBet uint) {
+func applyBetIncrease(state *game.State, extra *State, raiser *game.Player, newBet uint) {
 	if newBet <= extra.CurrentBet {
 		return
 	}
@@ -131,21 +137,22 @@ func applyBetIncrease(extra *State, state *game.State, raiser *game.Player, newB
 	extra.CurrentBet = newBet
 	if full {
 		extra.MinRaise = raiseSize
-		resetActedExcept(extra, state, raiser.ID)
+		resetActedExcept(state, extra, raiser.ID)
 	}
 }
 
-func resetActedExcept(extra *State, state *game.State, exceptID string) {
+func resetActedExcept(state *game.State, extra *State, exceptID string) {
 	for _, p := range state.Players {
-		if p.ID == exceptID || extra.Folded[p.ID] || extra.PlayersAllIn[p.ID] {
+		seat := extra.Seats[p.ID]
+		if p.ID == exceptID || seat.Folded || seat.AllIn {
 			continue
 		}
-		extra.ActedThisRound[p.ID] = false
+		seat.Acted = false
 	}
 }
 
-func (r *Rules) afterBettingAction(state *game.State, extra *State) error {
-	if extra.HandComplete {
+func afterBettingAction(state *game.State, extra *State) error {
+	if extra.HandComplete() {
 		return nil
 	}
 	// Only a live player is ever given the turn, and a fold takes one live player out
@@ -172,37 +179,25 @@ func resolveAfterChange(state *game.State, extra *State, from int) error {
 
 	if !bettingRoundComplete(state, extra) {
 		if next := nextToAct(state, extra, from); next >= 0 {
-			setTurn(state, next)
+			state.SetTurn(next)
 			return nil
 		}
 	}
 
 	err := settleOrUnwind(state, extra)
-	if err != nil || extra.HandComplete {
+	if err != nil || extra.HandComplete() {
 		finishHand(state, extra)
 		return err
 	}
-	setTurn(state, firstToActPostflop(state, extra))
+	state.SetTurn(firstToActPostflop(state, extra))
 	return nil
 }
 
-func setTurn(state *game.State, idx int) {
-	state.CurrentTurn = idx
-	state.OverrideNextTurn = &idx
-}
-
-// ToCall returns chips the player must add to match CurrentBet.
-func ToCall(extra *State, playerID string) uint {
-	if extra.CurrentBet <= extra.PlayerBets[playerID] {
-		return 0
-	}
-	return extra.CurrentBet - extra.PlayerBets[playerID]
-}
-
-func activePlayers(state *game.State, extra *State) []*game.Player {
+// unfolded is every seated player still in the hand, all-in or not.
+func unfolded(state *game.State, extra *State) []*game.Player {
 	out := make([]*game.Player, 0, len(state.Players))
 	for _, p := range state.Players {
-		if !extra.Folded[p.ID] {
+		if !extra.Seats[p.ID].Folded {
 			out = append(out, p)
 		}
 	}

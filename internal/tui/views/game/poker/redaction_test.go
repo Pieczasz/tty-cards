@@ -35,12 +35,13 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 	}
 	newExtra := func() *logic.State {
 		return &logic.State{
-			PlayerChips: map[string]uint{"hero": 100, "villain": 100, "folder": 0},
-			PlayerBets:  map[string]uint{},
-			Folded:      map[string]bool{"folder": true},
-			// Both non-hero seats have their stack in the middle: an all-in run-out is
-			// exactly the case where the cards go face up before anyone acts again.
-			PlayersAllIn: map[string]bool{"villain": true},
+			Seats: map[string]*logic.Seat{
+				"hero": {Chips: 100},
+				// Both non-hero seats have their stack in the middle: an all-in run-out
+				// is exactly the case where the cards go face up before anyone acts again.
+				"villain": {Chips: 100, AllIn: true},
+				"folder":  {Folded: true},
+			},
 		}
 	}
 
@@ -99,7 +100,7 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 			seats := buildSeats(state, extra, "hero")
 			require.Len(t, seats, 3)
 
-			byID := map[string]Seat{}
+			byID := map[string]seat{}
 			for _, s := range seats {
 				byID[s.PlayerID] = s
 			}
@@ -117,13 +118,13 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 	}
 }
 
-func assertHole(t *testing.T, seat Seat, want []deck.Card, revealed bool, who string) {
+func assertHole(t *testing.T, s seat, want []deck.Card, revealed bool, who string) {
 	t.Helper()
 	if revealed {
-		assert.Equal(t, want, seat.Hole, "%s is shown down", who)
+		assert.Equal(t, want, s.Hole, "%s is shown down", who)
 		return
 	}
-	assert.Empty(t, seat.Hole, "%s must not leak a hole card", who)
+	assert.Empty(t, s.Hole, "%s must not leak a hole card", who)
 }
 
 // The revealed cards are copied out of the engine's own player, so a later deal into
@@ -137,10 +138,7 @@ func TestBuildSeats_CopiesTheHoleCardsItReveals(t *testing.T) {
 		Phase:   game.Finished,
 		Players: []*game.Player{{ID: "hero", Name: "alice", Cards: cards}},
 	}
-	extra := &logic.State{
-		PlayerChips: map[string]uint{}, PlayerBets: map[string]uint{},
-		Folded: map[string]bool{}, PlayersAllIn: map[string]bool{},
-	}
+	extra := &logic.State{}
 
 	seats := buildSeats(state, extra, "hero")
 	require.Len(t, seats, 1)
@@ -158,10 +156,7 @@ func TestBuildSeats_SkipsAnEmptySeat(t *testing.T) {
 		Phase:   game.Playing,
 		Players: []*game.Player{{ID: "hero", Name: "alice"}, nil},
 	}
-	extra := &logic.State{
-		PlayerChips: map[string]uint{}, PlayerBets: map[string]uint{},
-		Folded: map[string]bool{}, PlayersAllIn: map[string]bool{},
-	}
+	extra := &logic.State{}
 
 	assert.Len(t, buildSeats(state, extra, "hero"), 1)
 }

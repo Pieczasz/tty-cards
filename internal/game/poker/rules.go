@@ -1,3 +1,6 @@
+// Package poker is No-Limit Texas Hold'em played as a match of HandsPerMatch hands:
+// chips carry across hands, side pots are cut for every short all-in, and the biggest
+// stack when the hands run out wins.
 package poker
 
 import (
@@ -8,6 +11,8 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
+// The stack every player sits down with and the blinds, which stay fixed for the
+// whole match.
 const (
 	DefaultStack      uint = 1000
 	DefaultSmallBlind uint = 25
@@ -45,7 +50,7 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	if !ok {
 		return nil
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		if extra.MatchComplete {
 			return nil
 		}
@@ -55,10 +60,10 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 		return nil
 	}
 	p := state.Players[state.CurrentTurn]
-	if ToCall(extra, p.ID) == 0 {
+	if extra.ToCall(p.ID) == 0 {
 		return ActionCheck{}
 	}
-	if largestCallableBet(state, extra, p) <= extra.PlayerBets[p.ID] {
+	if largestCallableBet(state, extra, p) <= extra.Seats[p.ID].Bet {
 		return ActionCall{}
 	}
 	return ActionFold{}
@@ -74,7 +79,7 @@ const dealTurnTimeout = time.Minute
 // turn on the engine's.
 func (r *Rules) TurnTimeout(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
-	if !ok || !extra.HandComplete || extra.MatchComplete {
+	if !ok || !extra.HandComplete() || extra.MatchComplete {
 		return 0
 	}
 	return dealTurnTimeout
@@ -83,9 +88,7 @@ func (r *Rules) TurnTimeout(state *game.State) time.Duration {
 func (r *Rules) MinPlayers() int { return 2 }
 func (r *Rules) MaxPlayers() int { return 9 }
 
-func (r *Rules) InitialDeck() []deck.Card {
-	return deck.StandardDeck()
-}
+func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
 
 // InitialDealCount is zero because a match deals a fresh hand every round, not
 // once at the start: beginHand owns the deal so there is a single code path for
@@ -102,25 +105,19 @@ func (r *Rules) OnGameStart(state *game.State) error {
 
 	extra := &State{
 		// The engine seats the first turn at random; that seat takes the button.
-		DealerIndex:      state.CurrentTurn,
-		SmallBlind:       DefaultSmallBlind,
-		BigBlind:         DefaultBigBlind,
-		HandsTotal:       HandsPerMatch,
-		Folded:           make(map[string]bool, nPlayers),
-		PlayersAllIn:     make(map[string]bool, nPlayers),
-		Table:            make([]deck.Card, 0, 5),
-		PlayerChips:      make(map[string]uint, nPlayers),
-		PlayerBets:       make(map[string]uint, nPlayers),
-		TotalContributed: make(map[string]uint, nPlayers),
-		ActedThisRound:   make(map[string]bool, nPlayers),
-		LastBetLevel:     make(map[string]uint, nPlayers),
+		DealerIndex: state.CurrentTurn,
+		SmallBlind:  DefaultSmallBlind,
+		BigBlind:    DefaultBigBlind,
+		HandsTotal:  HandsPerMatch,
+		Table:       make([]deck.Card, 0, BoardSize),
+		Seats:       make(map[string]*Seat, nPlayers),
 	}
 	for _, p := range state.Players {
-		extra.PlayerChips[p.ID] = DefaultStack
+		extra.Seats[p.ID] = &Seat{Chips: DefaultStack}
 	}
 	state.Extra = extra
 
-	return r.beginHandOrFinish(state, extra, extra.DealerIndex)
+	return beginHandOrFinish(state, extra, extra.DealerIndex)
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
@@ -162,24 +159,30 @@ func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
 	return group
 }
 
+// ActionFold gives up the hand and everything already committed to it.
 type ActionFold struct{}
 
 func (a ActionFold) Name() string { return "poker.Fold" }
 
+// ActionCheck passes the action on when there is nothing to call.
 type ActionCheck struct{}
 
 func (a ActionCheck) Name() string { return "poker.Check" }
 
+// ActionCall matches the current bet, or goes all-in for less on a short stack.
 type ActionCall struct{}
 
 func (a ActionCall) Name() string { return "poker.Call" }
 
+// ActionRaiseTo raises the player's street bet to Amount, a total rather than an
+// increment; RaiseBounds is the band ValidateAction accepts.
 type ActionRaiseTo struct {
 	Amount uint
 }
 
 func (a ActionRaiseTo) Name() string { return "poker.RaiseTo" }
 
+// ActionAllIn commits the player's whole stack.
 type ActionAllIn struct{}
 
 func (a ActionAllIn) Name() string { return "poker.AllIn" }
@@ -196,18 +199,20 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return game.ErrInvalidState
 	}
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
-		return validateNextHand(extra)
+		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
+		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)
 	}
-	if extra.HandComplete || extra.Phase == Showdown {
-		return errors.New("hand is over")
+	if extra.HandComplete() {
+		return errHandOver
 	}
 
 	p := state.Players[state.CurrentTurn]
-	if extra.Folded[p.ID] || extra.PlayersAllIn[p.ID] {
+	seat := extra.Seats[p.ID]
+	if seat.Folded || seat.AllIn {
 		return errors.New("player cannot act")
 	}
 
-	toCall := ToCall(extra, p.ID)
+	toCall := extra.ToCall(p.ID)
 
 	switch action := action.(type) {
 	case ActionFold:
@@ -225,29 +230,24 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	case ActionRaiseTo:
 		return validateRaiseTo(state, extra, p, action.Amount)
 	case ActionAllIn:
-		if extra.PlayerChips[p.ID] == 0 {
+		if seat.Chips == 0 {
 			return errors.New("no chips to go all-in")
 		}
 		// A shove that lands above the current bet is a raise, and a player who is
 		// only owed the difference from a sub-minimum all-in has no raise to make.
-		if extra.PlayerBets[p.ID]+extra.PlayerChips[p.ID] > extra.CurrentBet {
-			return checkBettingReopened(extra, p)
+		if seat.Bet+seat.Chips > extra.CurrentBet {
+			return checkBettingReopened(extra, seat)
 		}
 		return nil
 	default:
-		return errors.New("action not allowed in poker")
+		return errUnknownAction
 	}
 }
 
-func validateNextHand(extra *State) error {
-	if !extra.HandComplete {
-		return errors.New("the hand is still being played")
-	}
-	if extra.MatchComplete {
-		return errors.New("the match is over")
-	}
-	return nil
-}
+var (
+	errHandOver      = errors.New("the hand is over")
+	errUnknownAction = errors.New("unknown action")
+)
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)
@@ -259,25 +259,26 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		return nil
 	}
 	p := state.Players[state.CurrentTurn]
+	seat := extra.Seats[p.ID]
 
 	switch action := action.(type) {
 	case ActionFold:
-		extra.Folded[p.ID] = true
+		seat.Folded = true
 	case ActionCall:
-		commitTo(extra, p, extra.CurrentBet)
+		extra.commitTo(seat, extra.CurrentBet)
 	case ActionRaiseTo:
-		commitTo(extra, p, action.Amount)
-		applyBetIncrease(extra, state, p, extra.PlayerBets[p.ID])
+		extra.commitTo(seat, action.Amount)
+		applyBetIncrease(state, extra, p, seat.Bet)
 	case ActionAllIn:
-		newBet := extra.PlayerBets[p.ID] + extra.PlayerChips[p.ID]
+		newBet := seat.Bet + seat.Chips
 		wasRaise := newBet > extra.CurrentBet
-		commitTo(extra, p, newBet)
+		extra.commitTo(seat, newBet)
 		if wasRaise {
-			applyBetIncrease(extra, state, p, extra.PlayerBets[p.ID])
+			applyBetIncrease(state, extra, p, seat.Bet)
 		}
 	}
-	extra.ActedThisRound[p.ID] = true
-	extra.LastBetLevel[p.ID] = extra.CurrentBet
+	seat.Acted = true
+	seat.LastBetLevel = extra.CurrentBet
 	return nil
 }
 
@@ -287,7 +288,7 @@ func (r *Rules) AfterAction(state *game.State, action game.Action) error {
 		return game.ErrInvalidState
 	}
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
-		return r.beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
+		return beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
 	}
-	return r.afterBettingAction(state, extra)
+	return afterBettingAction(state, extra)
 }
