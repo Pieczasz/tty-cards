@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -135,7 +136,10 @@ func run() (err error) {
 		slog.ErrorContext(ctx, "failed to register the session gauge", "error", err)
 	}
 
-	stopAPI, apiErr := startStatsAPI(cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
+	stopAPI, apiErr, err := startStatsAPI(cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
+	if err != nil {
+		return err
+	}
 	defer stopAPI()
 
 	return serve(ctx, serveDeps{
@@ -239,25 +243,30 @@ func newSSHServer(
 	return server, tracker, nil
 }
 
+// startStatsAPI takes interfaces, not the concrete tracker and manager: a nil
+// *SessionTracker in an interface is not nil, and would pass NewServer's check.
 func startStatsAPI(
 	cfg *config.Config,
-	tracker *ssh.SessionTracker,
-	lobbyManager *lobby.Manager,
-	userRepo db.UserRepository,
+	sessions httpapi.SessionCounter,
+	lobbies httpapi.LobbyCounter,
+	users db.UserRepository,
 	health func(ctx context.Context) error,
-) (func(), <-chan error) {
-	addr := fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.APIPort)
-	srv := httpapi.Serve(addr, httpapi.Handler(httpapi.Deps{
-		Sessions:          tracker,
-		Lobbies:           lobbyManager,
-		Users:             userRepo,
+) (func(), <-chan error, error) {
+	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.APIPort))
+	srv, err := httpapi.NewServer(addr, httpapi.Deps{
+		Sessions:          sessions,
+		Lobbies:           lobbies,
+		Users:             users,
 		AllowOrigin:       cfg.APIAllowOrigin,
 		RequestsPerMinute: cfg.APIRequestsPerMinute,
 		TrustedProxy:      cfg.APITrustProxy,
 		// Same networks the PROXY header is trusted from: in compose, exactly nginx's.
 		TrustedProxyNetworks: cfg.ProxyTrustedCIDRs,
 		Health:               health,
-	}))
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("setup stats api: %w", err)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -273,7 +282,7 @@ func startStatsAPI(
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("stats api shutdown was not clean", "error", err)
 		}
-	}, serveErr
+	}, serveErr, nil
 }
 
 type sshServer interface {

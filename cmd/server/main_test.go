@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/config"
+	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/terminal-card/internal/httpapi"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
 	charmssh "charm.land/ssh"
@@ -237,6 +239,26 @@ func TestInstallLogging_LevelIsLiveAndGatesBothSinks(t *testing.T) {
 	assert.True(t, slog.Default().Enabled(context.Background(), slog.LevelDebug))
 }
 
+type onlineCount int
+
+func (n onlineCount) Count() int { return int(n) }
+
+type lobbyCounts struct{}
+
+func (lobbyCounts) Stats() (int, int) { return 0, 0 }
+
+type emptyUsers struct{ db.UserRepository }
+
+// A miswired stats api used to serve zeros for as long as it ran; now it refuses to
+// start, and run returns before anything binds.
+func TestStartStatsAPI_RefusesAMissingDependency(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{ServerHost: "127.0.0.1", APIRequestsPerMinute: 1}
+
+	_, _, err := startStatsAPI(cfg, nil, lobbyCounts{}, emptyUsers{}, nil)
+	require.ErrorIs(t, err, httpapi.ErrMissingDeps)
+}
+
 // The stats api runs on its own goroutine, and a bind failure there used to be a log
 // line nobody reads. This pins the whole small lifecycle: it binds, it answers, it stops.
 func TestStartStatsAPI_ServesAndStops(t *testing.T) {
@@ -247,7 +269,8 @@ func TestStartStatsAPI_ServesAndStops(t *testing.T) {
 	require.NoError(t, listener.Close())
 
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIPort: port, APIRequestsPerMinute: 100}
-	stop, serveErr := startStatsAPI(cfg, nil, nil, nil, func(context.Context) error { return nil })
+	stop, serveErr, err := startStatsAPI(cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
+	require.NoError(t, err)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
 	require.Eventually(t, func() bool {

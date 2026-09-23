@@ -10,7 +10,7 @@ import (
 	"go.uber.org/goleak"
 )
 
-// Installed before any Handler is built: otelhttp resolves its tracer and meter from
+// Installed before any handler is built: otelhttp resolves its tracer and meter from
 // the globals when the handler is constructed, and the otel globals forward only to
 // the first provider they are given.
 var (

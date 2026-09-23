@@ -168,7 +168,7 @@ func TestLoad_BlankEnvFallsBackToDefault(t *testing.T) {
 	assert.NotEmpty(t, cfg.ServiceVersion, "version always resolves to something")
 }
 
-// httpapi.Handler applies no defaults of its own, so Load is the only place the
+// httpapi.NewServer applies no defaults of its own, so Load is the only place the
 // stats API gets a rate and an origin: a zero rate refuses every visitor and an empty
 // origin breaks the website's fetch.
 func TestLoad_StatsAPIDefaults(t *testing.T) {

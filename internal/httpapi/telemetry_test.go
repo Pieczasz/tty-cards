@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,8 +16,8 @@ import (
 // visitor's address and User-Agent into Tempo. The request metrics stay; spans go.
 //
 //nolint:paralleltest // reads the process-global span recorder
-func TestHandler_ProducesNoSpans(t *testing.T) {
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 10, AllowOrigin: "*"})
+func TestNewServer_ProducesNoSpans(t *testing.T) {
+	h := handler(t, Deps{RequestsPerMinute: 10})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
 	req.RemoteAddr = "203.0.113.50:5555"
@@ -43,8 +42,8 @@ var httpServerAttributeKeys = map[string]bool{
 // server.port - up to 65535 series from one header.
 //
 //nolint:paralleltest // reads the process-global manual reader
-func TestHandler_HTTPMetricsCarryBoundedAttributesOnly(t *testing.T) {
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 10, AllowOrigin: "*"})
+func TestNewServer_HTTPMetricsCarryBoundedAttributesOnly(t *testing.T) {
+	h := handler(t, Deps{RequestsPerMinute: 10})
 
 	for _, target := range []string{"/v1/stats", "/v1/invented/" + strings.Repeat("x", 40)} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -54,7 +53,7 @@ func TestHandler_HTTPMetricsCarryBoundedAttributesOnly(t *testing.T) {
 	}
 
 	var got metricdata.ResourceMetrics
-	require.NoError(t, testMetrics.Collect(context.Background(), &got))
+	require.NoError(t, testMetrics.Collect(t.Context(), &got))
 
 	seen := 0
 	for _, scope := range got.ScopeMetrics {

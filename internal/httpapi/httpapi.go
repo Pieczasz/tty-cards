@@ -6,11 +6,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,14 +39,22 @@ const (
 	idleTimeout  = 60 * time.Second
 )
 
+// SessionCounter is how many players are connected: ssh.SessionTracker in production.
 type SessionCounter interface {
 	Count() int
 }
 
+// LobbyCounter is how many tables are playing and waiting: lobby.Manager in production.
 type LobbyCounter interface {
 	Stats() (inGame, waiting int)
 }
 
+// ErrMissingDeps refuses a server built without its counters or its repository. A
+// nil one used to be skipped, so a miswiring served zeros or an empty leaderboard
+// forever instead of failing the boot.
+var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies and Users")
+
+// Deps is what the stats API reads from. Sessions, Lobbies and Users are required.
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
@@ -90,7 +100,27 @@ type leaderboardEntry struct {
 	Elo      uint32 `json:"elo"`
 }
 
-func Handler(deps Deps) http.Handler {
+// NewServer returns the stats API's http.Server for addr, with its timeouts set. The
+// caller runs and shuts it down.
+func NewServer(addr string, deps Deps) (*http.Server, error) {
+	h, err := newHandler(deps)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
+}
+
+func newHandler(deps Deps) (http.Handler, error) {
+	if deps.Sessions == nil || deps.Lobbies == nil || deps.Users == nil {
+		return nil, ErrMissingDeps
+	}
 	limiter := ratelimit.New(deps.RequestsPerMinute, time.Minute)
 	clientAddr := clientIPFunc(deps.TrustedProxy, deps.TrustedProxyNetworks)
 
@@ -120,21 +150,14 @@ func Handler(deps Deps) http.Handler {
 		// Without both, otelhttp labels every request metric from the client's own
 		// Host header - an unbounded name, and up to 65535 port series.
 		otelhttp.WithServerName("stats-api:80"),
-	)
+	), nil
 }
 
 func statsHandler(deps Deps) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inGame, waiting := 0, 0
-		if deps.Lobbies != nil {
-			inGame, waiting = deps.Lobbies.Stats()
-		}
-		online := 0
-		if deps.Sessions != nil {
-			online = deps.Sessions.Count()
-		}
+		inGame, waiting := deps.Lobbies.Stats()
 		writeJSON(w, r, statsResponse{
-			PlayersOnline: online,
+			PlayersOnline: deps.Sessions.Count(),
 			HandsInPlay:   inGame,
 			TablesOpen:    waiting,
 		})
@@ -151,11 +174,6 @@ func leaderboardHandler(deps Deps) http.Handler {
 				return
 			}
 			limit = min(n, maxLeaderboardLimit)
-		}
-
-		if deps.Users == nil {
-			writeJSON(w, r, []leaderboardEntry{})
-			return
 		}
 
 		// No per-game filter: the only client never asked for one, and a caller-supplied
@@ -220,23 +238,7 @@ func fromProxy(host string, proxies []netip.Prefix) bool {
 		return false
 	}
 	addr = addr.Unmap()
-	for _, p := range proxies {
-		if p.Contains(addr) {
-			return true
-		}
-	}
-	return false
-}
-
-func Serve(addr string, h http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: readTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-	}
+	return slices.ContainsFunc(proxies, func(p netip.Prefix) bool { return p.Contains(addr) })
 }
 
 func writeJSON(w http.ResponseWriter, r *http.Request, v any) {
