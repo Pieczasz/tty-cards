@@ -517,7 +517,7 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 			state.LeftPlayers = []*Player{leftFirst, leftLast}
 		})
 
-		assert.Equal(t, []string{"p1", "p3", "p2"}, engine.StandingsIDs())
+		assert.Equal(t, []string{"p1", "p3", "p2"}, standingIDs(engine))
 	})
 
 	t.Run("players the rules placed themselves are not repeated", func(t *testing.T) {
@@ -533,7 +533,7 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 		t.Cleanup(engine.Close)
 		engine.WithState(func(state *State) { state.LeftPlayers = []*Player{left} })
 
-		assert.Equal(t, []string{"p1", "p2"}, engine.StandingsIDs())
+		assert.Equal(t, []string{"p1", "p2"}, standingIDs(engine))
 	})
 }
 
@@ -667,7 +667,6 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 				_ = engine.CurrentPlayerID()
 				_ = engine.Snapshot()
 				_, _ = engine.StandingsWithPlaces()
-				_ = engine.StandingsIDs()
 			}
 		})
 	}
@@ -781,6 +780,15 @@ func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
 // drainEvents takes everything already published. Broadcast is synchronous under the
 // engine mutex, so once the call that caused it has returned the events are either in
 // the buffer or were never sent; waiting would only hide a missing one.
+func standingIDs(e *Engine) []string {
+	standings, _ := e.StandingsWithPlaces()
+	ids := make([]string, 0, len(standings))
+	for _, p := range standings {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
 func drainEvents(ch <-chan Event) []Event {
 	var out []Event
 	for {

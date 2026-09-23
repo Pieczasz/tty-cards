@@ -132,7 +132,6 @@ func TestBoundEngine_NilIsInert(t *testing.T) {
 	assert.Nil(t, Bind(nil, "1"), "there is no seat without an engine")
 
 	var unbound *BoundEngine
-	assert.Nil(t, unbound.Engine())
 	assert.Empty(t, unbound.PlayerID())
 	require.ErrorContains(t, unbound.Submit(noopAction{}), "no active game")
 
@@ -142,17 +141,14 @@ func TestBoundEngine_NilIsInert(t *testing.T) {
 	assert.Zero(t, remaining)
 }
 
-// The escape hatch has to reach the same engine the view was bound to - poker renders
-// every seat through it - and the bound ID is what scopes everything else.
-func TestBoundEngine_ExposesItsEngineAndSeat(t *testing.T) {
+// The bound ID is what scopes everything else a view does.
+func TestBoundEngine_ExposesItsSeat(t *testing.T) {
 	t.Parallel()
 
 	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.StandardDeck())
 	t.Cleanup(engine.Close)
 
-	bound := Bind(engine, "1")
-	assert.Same(t, engine, bound.Engine())
-	assert.Equal(t, "1", bound.PlayerID())
+	assert.Equal(t, "1", Bind(engine, "1").PlayerID())
 }
 
 // Frame is one lock hold: the callback sees the same state the snapshot and hand were

@@ -65,12 +65,14 @@ func (e *Engine) stopTurnTimerLocked() {
 	e.turnDeadline = time.Time{}
 }
 
+// TurnDeadline is a test seam; views read the remaining time from Frame.
 func (e *Engine) TurnDeadline() time.Time {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.turnDeadline
 }
 
+// MissedTurns is a test seam: the idle count is the engine's own business.
 func (e *Engine) MissedTurns(playerID string) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -442,7 +442,8 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	}
 
 	assert.Equal(t, wantCards, countCards(), "the finished hand still holds every card")
-	assert.NotEmpty(t, engine.StandingsIDs(), "a finished hand ranks its players")
+	standings, _ := engine.StandingsWithPlaces()
+	assert.NotEmpty(t, standings, "a finished hand ranks its players")
 }
 
 // Drawing is the only move ValidateAction accepts unconditionally, and on a dead board it

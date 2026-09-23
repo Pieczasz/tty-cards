@@ -23,16 +23,6 @@ func Bind(engine *Engine, playerID string) *BoundEngine {
 	return &BoundEngine{engine: engine, playerID: playerID}
 }
 
-// Engine is the escape hatch to whole-table state, for views that genuinely need it: a
-// card table renders every seat. Reaching for it means taking on the redaction yourself,
-// as poker's buildSeats does; everything else belongs on BoundEngine.
-func (b *BoundEngine) Engine() *Engine {
-	if b == nil {
-		return nil
-	}
-	return b.engine
-}
-
 func (b *BoundEngine) PlayerID() string {
 	if b == nil {
 		return ""

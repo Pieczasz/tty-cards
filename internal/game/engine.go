@@ -92,7 +92,8 @@ func (e *Engine) Broadcaster() *broadcaster.Broadcaster[Event] {
 }
 
 // WithState runs fn with the engine lock held. fn must not call back into the engine:
-// every Engine method takes the same lock, so it would deadlock.
+// every Engine method takes the same lock, so it would deadlock. A test seam: nothing
+// in production calls it, and views read through Frame.
 func (e *Engine) WithState(fn func(state *State)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -159,6 +160,7 @@ func (e *Engine) Frame(playerID string, fn func(*State)) (StateSnapshot, []deck.
 	return snap, hand, remaining
 }
 
+// CurrentPlayerID is a test seam; views read the seat on turn from their Frame snapshot.
 func (e *Engine) CurrentPlayerID() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -226,6 +228,9 @@ func (e *Engine) placesLocked(standings []*Player) []int {
 	return places
 }
 
+// StandingsIDs is a test seam kept only for the poker match tests and the system test,
+// which live outside this package's owners; migrate them to StandingsWithPlaces and
+// delete it.
 func (e *Engine) StandingsIDs() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
