@@ -6,16 +6,16 @@ owner of facts. Every section links to the document that owns the detail
 ([`docs/README.md`](README.md) "Which document owns which fact"). When this file
 and the code disagree, the code wins and this file is the one to fix.
 
-*Snapshot: commit `ed376bc` (2026-09-23, branch `fix/review-2026-09`). Regenerate
+*Snapshot: commit `3ab702e` (2026-09-23, branch `fix/review-2026-09`). Regenerate
 the numbers with the commands in [Keeping this current](#9-keeping-this-current).*
 
 | | |
 |---|---|
-| Go packages | 37 (102 non-test files, ~18.2k lines) |
-| Test files | 140 (~33.9k lines) - tests outweigh code almost 2:1 |
+| Go packages | 40 (108 non-test files, ~19.1k lines) |
+| Test files | 158 (~33.7k lines) - tests outweigh code almost 2:1 |
 | Games | 5: Crazy Eights, Poker (NL Hold'em), Uno, Hearts, Gin Rummy |
 | Migrations | 7 up/down pairs |
-| Design records | 48 in [`decisions.md`](decisions.md) |
+| Design records | 54 in [`decisions.md`](decisions.md) |
 | Tagged releases | none - `main` is what runs |
 
 ---
@@ -104,8 +104,9 @@ flowchart TD
     subgraph ui [Presentation]
         tui["internal/tui<br/>route wiring"]
         router["tui/router<br/>Router, GlobalContext"]
-        vgame["tui/views/game<br/>Session baseline + layout"]
-        vgames["tui/views/game/*<br/>5 game views"]
+        views["tui/views<br/>shared screen helpers"]
+        vgame["tui/views/gameview<br/>Session baseline + layout"]
+        vgames["tui/views/gameview/*<br/>5 game views"]
         vother["tui/views/{home,lobby,<br/>leaderboard,profile}"]
         comp["tui/components"]
         styles["tui/styles<br/>theme, layout budget"]
@@ -117,6 +118,7 @@ flowchart TD
         lobby["internal/lobby<br/>Manager, Lobby, finalize, grace"]
         game["internal/game<br/>Engine, Rules, turn clock"]
         rules["internal/game/*<br/>5 rules packages"]
+        shed["internal/game/shed<br/>shedding-game helpers"]
         deck["internal/deck"]
         elo["internal/elo"]
         bc["internal/broadcaster"]
@@ -133,35 +135,52 @@ flowchart TD
         cfg["internal/config"]
     end
 
-    main --> ssh & httpapi & catalog & lobby & game & repo & db & obs & cfg
-    ssh --> tui & lobby & game & db & rl & obs & cfg
+    subgraph testsupport [Test support - imported by tests only]
+        gametest["internal/game/gametest<br/>shared rules suites"]
+        tuitest["tui/tuitest<br/>fit sizes, keys"]
+        testutil["internal/testutil<br/>seats, test DB"]
+    end
+
+    main --> ssh & httpapi & catalog & lobby & repo & db & obs & cfg
+    ssh --> tui & router & lobby & game & db & rl & obs & cfg
     httpapi --> db & rl & obs
-    tui --> catalog & router & vother & lobby & game & db
+    tui --> catalog & router & views & vother & lobby & game & db
     catalog --> game & rules & router & vgames
-    vgames --> vgame
-    vgame --> game & deck & comp & router & styles & obs
-    vother --> lobby & game & elo & catalog & db & comp & router & styles
+    vgames --> vgame & rules & game & deck & comp & router & styles
+    vgame --> views & game & deck & comp & router & styles & obs
+    vother --> views & lobby & game & db & comp & router & styles
+    views --> lobby & game & router & styles
     router --> lobby & game & db & styles
     comp --> deck & styles
     lobby --> game & bc & db & elo & rl & obs
     game --> bc & deck
-    rules --> game & deck
+    rules --> game & deck & shed
+    shed --> game & deck
+    gametest --> game & deck & shed
+    tuitest --> styles
+    testutil --> game
     repo --> db & elo
-    db --> cfg
     obs --> cfg
 ```
 
 What the arrows prove:
 
-- **`internal/game` depends only on `broadcaster` and `deck`.** No db, no tui, no
-  lobby. That is lint-enforced (`depguard` rule `game-is-pure` in `.golangci.yml`).
+- **`internal/game` depends only on `broadcaster` and `deck`**, and the rules
+  packages add only `game/shed`. No db, no tui, no lobby. That is lint-enforced:
+  `depguard` rule `game-is-pure` in `.golangci.yml` is an allow-list (the standard
+  library, `deck`, `broadcaster`, `game/**`, `uuid`), so a new import is a decision
+  ([#54](decisions.md#54-the-game-packages-import-from-an-allow-list)). `gametest` is
+  exempt: it is test support.
 - **Only `cmd/server` imports `internal/repository`.** Everything else sees the
   `db` interfaces (`depguard` rule `repository-only-from-root`).
 - **`catalog` sits above both rules and views**, which is why `game` can never
   import it: it would be a cycle.
 - **The TUI never reaches a `MatchRepository`.** Persistence after a game is the
-  lobby's job. `router.GlobalContext` carries `*lobby.Manager` and a
-  `UserRepository`, nothing else that writes.
+  lobby's job. `router.GlobalContext` carries `*lobby.Manager`, `db.Profiles` and
+  `db.Leaderboard`, nothing else that writes
+  ([#50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface)).
+- **`internal/db` imports nothing of ours.** `repository.Connect` takes a DSN and
+  pool settings, so the contract no longer reaches into `config`.
 
 Package responsibilities and the "must not" column: [`architecture.md` §8](architecture.md#8-package-responsibilities).
 
@@ -175,7 +194,7 @@ sequenceDiagram
     actor P as Player (ssh)
     participant N as nginx
     participant S as internal/ssh
-    participant R as UserRepository
+    participant R as db.Authenticator
     participant T as SessionTracker
     participant TUI as tui.Router
     participant M as lobby.Manager
@@ -193,7 +212,7 @@ sequenceDiagram
     S->>TUI: ResumeSeat, only once the slot is owned
     TUI->>M: ResumePlayer (reconnect lands at table)
     P->>TUI: create / browse / join by code
-    TUI->>M: New / JoinLobbyByCode / ToggleReady
+    TUI->>M: CreateLobby / JoinLobbyByCode / ToggleReady
     M->>E: all ready -> NewEngine + Start
     loop each turn
         P->>TUI: key
@@ -226,13 +245,13 @@ sequenceDiagram
     alt rejected
         Ru-->>V: error (miss count NOT cleared)
     else rules panic
-        E->>Bc: finishAfterPanicLocked - EventGameEnded (RulesError), no Standings call
+        E->>Bc: endOnRulesPanicLocked -> endGameLocked - EventGameEnded (RulesError), no Standings call
     else accepted
         E->>Ru: ApplyAction
         E->>Ru: AfterAction
         Note over E,Ru: error here = EndReasonRulesError,<br/>state may be half-applied, match unrated
         E->>Ru: CheckWinCondition
-        E->>E: applyNextTurnLocked<br/>OverrideNextTurn > advance > stay<br/>re-arm timer, turnSeq++ (same seat keeps its deadline)
+        E->>E: advanceTurnLocked -> settleTurnLocked<br/>OverrideNextTurn > advance > stay<br/>re-arm timer, clock.seq++ (same seat keeps its deadline)
         E->>Bc: EventActionApplied / EventTurnAdvanced / EventGameEnded
     end
 ```
@@ -248,21 +267,21 @@ sequenceDiagram
 
     Tm->>E: onTurnTimeout(seq)
     Note over E: defer recoverRulesPanic:<br/>a panic ends this table only
-    E->>E: lock, seq == turnSeq? else stale, drop
-    E->>E: missedTurns[player]++ once per seat-turn (turnMissCharged)
+    E->>E: resolveTurnTimeout: lock, seq == clock.seq? else timeoutIgnored
+    E->>E: clock.missed[player]++ once per seat-turn (clock.missCharged)
     E->>Ru: TimeoutAction(state)
     E->>Bc: EventTurnTimedOut (same lock hold)
     E->>E: submitTimedOutAction(seq) -> ValidateAction...
     Note over E: refused: re-arm on the same hold,<br/>chargeable again, 10 s floor
-    alt missedTurns >= 3
+    alt clock.missed >= 3 (timeoutTakeSeat)
         E->>E: removeIfStillIdle (re-check under lock)
         E->>Bc: EventPlayerIdle
         Note right of Bc: that player's own view quits,<br/>ending the SSH session
     end
 ```
 
-Owner: [`architecture.md` §4.2](architecture.md#42-turn-cursor-and-clock---applynextturnlocked),
-[`decisions.md` #4](decisions.md#4-turnseq-a-generation-counter-fences-the-turn-clock).
+Owner: [`architecture.md` §4.2](architecture.md#42-turn-cursor-and-clock---advanceturnlocked--settleturnlocked),
+[`decisions.md` #4](decisions.md#4-clockseq-a-generation-counter-fences-the-turn-clock).
 
 ### 4.4 Finishing a match
 
@@ -287,7 +306,7 @@ Owner: [`architecture.md` §3.6 and §6](architecture.md#36-finish---managerfina
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Waiting: Manager.New (leader = seat 0)
+    [*] --> Waiting: Manager.CreateLobby (leader = seat 0)
     Waiting --> InGame: ToggleReady, everyone ready -> startGameLocked
     InGame --> Waiting: releaseFinishedGameLocked (engine IsFinished)
     Waiting --> Closed: leader leaves with no guests
@@ -337,7 +356,7 @@ classDiagram
     }
     class TurnDurationHandler {
         <<optional>>
-        TurnTimeout(*State) Duration
+        TurnDuration(*State) Duration
     }
     class PlayerLeaveHandler {
         <<optional>>
@@ -352,13 +371,24 @@ classDiagram
     class Engine {
         -mu sync.Mutex
         -state *State
-        -turnSeq uint64
-        -missedTurns map
+        -broadcaster *Broadcaster[Event]
+        -clock turnClock
         Start() error
         SubmitAction(id, Action) error
         RemovePlayer(id)
         Frame(id, fn) (Snapshot, hand, remaining)
+        Standings() []Standing
+        Subscribe() (chan Event, error)
+        Unsubscribe(chan Event)
+        Dropped() int64
+        SubscriberCount() int
         Close()
+    }
+    class turnClock {
+        seq uint64
+        deadline Time
+        missed map
+        missCharged bool
     }
     class State {
         Players []*Player
@@ -366,6 +396,7 @@ classDiagram
         CurrentTurn int
         OverrideNextTurn *int
         Phase
+        Winner *Player
         Deck *Pile
         Discard *Pile
         Interrupted bool
@@ -380,27 +411,31 @@ classDiagram
     class Session {
         <<embedded in every game view>>
         ActionErr error
+        Init() Cmd
         HandleFrame()
-        ClockTick()
         Sync(fn)
         Submit(Action) error
         MoveCursor(delta)
+        SelectDigit(key)
         SelectedCard()
         HandleLeaveKey(key)
         LeaveConfirmScreen()
         IdleExempt() bool
+        IdleRemoved(Event) bool
         Leave()
         Close()
     }
     class Entry {
         <<catalog.All>>
+        game.Module
         Name string
         Slug string
-        Rules func() Rules
-        View func(GlobalContext, *Engine) Model
+        Factory func() Rules
+        View func(GlobalContext, *Engine, slug) Model
     }
 
     Engine o-- State
+    Engine *-- turnClock
     Engine ..> Rules : calls, never the reverse
     State --> Rules
     Rules <|.. crazyeight_Rules
@@ -483,15 +518,17 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 |---|---|---|
 | Strategy | `game.Rules`, five implementations | a sixth game touches the engine in no way |
 | Optional interface (capability probe) | `TurnTimeoutHandler`, `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface. No timeout handler means no clock |
-| Single registration point | `catalog.All` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs |
+| Single registration point | `catalog.All`, each `Entry` embedding a `game.Module` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs, and `game.NewRegistry` panics on a half-declared or duplicate module |
 | Facade | `game.BoundEngine` | the safe path is the default; `Frame`'s callback is the one way to whole-table state, and there is no `Engine()` escape hatch ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
-| Embedded base type | `gameview.Session` | every view gets binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free |
-| Observer, latest-wins | `broadcaster.Broadcaster[T]` | a slow SSH client can never stall the engine ([#3](decisions.md#3-latest-wins-broadcaster-and-subscribe-returns-an-error)) |
+| Embedded base type | `gameview.Session` | every view gets `Init`, binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free; `gameview.RenderHandOver` and `ChoicePicker` are the shared hand-over screen and suit/colour picker |
+| Observer, latest-wins | `broadcaster.Broadcaster[T]`, reached only through `Engine.Subscribe`/`Unsubscribe`/`Dropped`/`SubscriberCount` | a slow SSH client can never stall the engine ([#3](decisions.md#3-latest-wins-broadcaster-and-subscribe-returns-an-error)), and no view can publish on or close a table's feed ([#51](decisions.md#51-the-engine-hands-out-subscriptions-not-its-broadcaster)) |
 | Event as cue, not payload | `game.Event{Type, PlayerID, Reason}` | a dropped event costs nothing, the next `Frame` re-reads the truth |
 | Snapshot / DTO | `StateSnapshot`, `BrowseEntry` | built under one lock, rendered lock-free. Hand sizes only |
-| Fencing token | `Engine.turnSeq`, `SessionTracker` generations | stale timers and displaced sessions become no-ops |
-| Repository, interface at the consumer | `internal/db` declares, `internal/repository` implements | swap point for Postgres; enforced by `depguard` |
+| Fencing token | the engine's `clock.seq`, `SessionTracker` generations | stale timers and displaced sessions become no-ops |
+| Repository, interface at the consumer | `internal/db` declares, `internal/repository` implements | swap point for Postgres; enforced by `depguard`. Each consumer asks for the smallest of `db.Authenticator`, `db.Profiles`, `db.Leaderboard` ([#50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface)) |
+| Shared test suite | `gametest.RunShed`, `gametest.SoakTimeoutIsAlwaysLegal` | crazy eights and uno run one set of shedding-game tests instead of two copies |
 | Functional options | `lobby.Option`, `game.EngineOption` | |
+| One label per game | the catalog slug as the `game_type` metric label, lobby and views alike | a dashboard never splits one game in two ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
 | Middleware chain | `wish.WithMiddleware` (runs last-first), `withCORS`/`withRateLimit` | |
 | Elm architecture | every `tui/views/**` model | Bubble Tea |
 | TTL cache + singleflight + generation | `repository.BestPlayers` (5 min; concurrent misses share one query; erasure bumps the generation) | a cold board is read by every lobby screen and the site at once, and an erased name must not be re-cached |
@@ -595,6 +632,6 @@ Caveats when reading graph output for Go:
   they are reached through a type assertion. `make deadcode` is authoritative.
 - **Same-named symbols merge.** Its top hub, `Equal`, is `Player.Equal` fused with
   testify's `assert.Equal`. The meaningful bridges it reports are
-  `FinalizeRankedMatch`, `updateRankingsTx` and `Lobby.ToggleReady`.
+  `FinalizeRankedMatch`, `updateRankings` and `Lobby.ToggleReady`.
 - **GitNexus truncates flows.** Its analyze log says so. An absent flow is not
   an absent code path.
