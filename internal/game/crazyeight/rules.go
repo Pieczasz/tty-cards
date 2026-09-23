@@ -9,6 +9,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/shed"
 )
 
 // Rules implements Crazy Eights; one hand is the whole game.
@@ -43,7 +44,7 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	// up itself, which would leave the opening suit set by the card's own printed
 	// suit while every player sees a wild. Redraw until a plain card opens the pile,
 	// the same way uno refuses to open on a Wild.
-	top, err := game.OpenDiscard(state, func(c deck.Card) bool { return c.Rank != deck.Eight })
+	top, err := shed.OpenDiscard(state, func(c deck.Card) bool { return c.Rank != deck.Eight })
 	if err != nil {
 		return fmt.Errorf("open the crazy eights discard pile: %w", err)
 	}
@@ -77,7 +78,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	case ActionPlayCard:
 		card := action.Card
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
-		return game.ValidateShedPlay(state, card, func(topCard deck.Card) error {
+		return shed.ValidatePlay(state, card, func(topCard deck.Card) error {
 			if card.Rank == deck.Eight {
 				if !deck.IsSuit(action.Suit) {
 					return errors.New("must choose a suit when playing an eight")
@@ -126,7 +127,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 
 	case ActionDrawCard:
 		// Nothing drawn means stock and discard are both spent: a forced pass.
-		extra.RecordDraw(game.DrawInto(state, p, 1))
+		extra.RecordDraw(shed.DrawInto(state, p, 1))
 	}
 	return nil
 
@@ -141,7 +142,7 @@ func (r *Rules) CheckWinCondition(state *game.State) bool {
 	if !ok {
 		return false
 	}
-	return game.HandEmptyOrAllPassed(state, extra.Passes)
+	return shed.HandEmptyOrAllPassed(state, extra.Passes)
 }
 
 // OnPlayerLeave returns the departing player's cards to the stock so the deck
@@ -151,7 +152,7 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 	if !ok {
 		return
 	}
-	game.LeaveShedGame(state, &extra.ShedState, playerID)
+	shed.Leave(state, &extra.State, playerID)
 }
 
 // AfterPlayerRemoved is a no-op; the engine's generic cursor handling suffices.
@@ -160,6 +161,6 @@ func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) {}
 // Standings ranks by fewest cards held. Deviation: the paper game scores a hand by
 // the pip value of the cards left in each hand, which needs a running match total
 // this table does not keep - one hand, and the shortest hand takes it.
-func (r *Rules) Standings(state *game.State) []*game.Player { return game.ShedStandings(state) }
+func (r *Rules) Standings(state *game.State) []*game.Player { return shed.Standings(state) }
 
-func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return game.ShedScore(p) }
+func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return shed.Score(p) }

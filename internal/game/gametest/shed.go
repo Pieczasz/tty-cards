@@ -11,6 +11,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/shed"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ type Shed struct {
 	// NewExtra is the rules' Extra for a table whose card in play is top.
 	NewExtra func(top deck.Card) any
 	// ShedState reaches the deadlock counter inside an Extra NewExtra built.
-	ShedState func(extra any) *game.ShedState
+	ShedState func(extra any) *shed.State
 	// Opens reports whether a card may start the discard pile.
 	Opens func(deck.Card) bool
 	// Play is the game's action for playing card with no colour or suit named.
@@ -187,28 +188,28 @@ func unknownLeaverChangesNothing(t *testing.T, s Shed) {
 // having passed. Their returned cards also refill the stock the count was measuring.
 func leaveClearsStalePasses(t *testing.T, s Shed) {
 	state := s.Table(t, 3, 3, 3)
-	shed := s.ShedState(state.Extra)
+	counter := s.ShedState(state.Extra)
 
-	shed.Passes = 2
+	counter.Passes = 2
 	s.Rules.OnPlayerLeave(state, "p3")
 	state.Players = state.Players[:2] // the engine drops the seat after the hook
 
-	assert.Zero(t, shed.Passes, "the count measured a table that no longer exists")
+	assert.Zero(t, counter.Passes, "the count measured a table that no longer exists")
 	assert.False(t, s.Rules.CheckWinCondition(state), "nobody passed, so nothing is deadlocked")
 }
 
 // With three seats the hand only ends once all three have passed in succession.
 func deadlockNeedsEverySeat(t *testing.T, s Shed) {
 	state := s.Table(t, 3, 5, 1)
-	shed := s.ShedState(state.Extra)
+	counter := s.ShedState(state.Extra)
 
 	for passes := range len(state.Players) {
-		shed.Passes = passes
+		counter.Passes = passes
 		assert.False(t, s.Rules.CheckWinCondition(state),
 			"%d of %d seats passed is not a deadlock", passes, len(state.Players))
 	}
 
-	shed.Passes = len(state.Players)
+	counter.Passes = len(state.Players)
 	assert.True(t, s.Rules.CheckWinCondition(state), "every seat passing ends the hand")
 }
 

@@ -5,13 +5,13 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/shed"
 )
 
 // State holds Uno-specific game state stored in game.State.Extra.
 type State struct {
-	// ShedState carries Passes: the deadlock counter every shedding game keeps.
-	game.ShedState
+	// shed.State carries Passes: the deadlock counter every shedding game keeps.
+	shed.State
 
 	CurrentColor deck.Suit // one of ColorRed/Yellow/Green/Blue once started
 	Direction    int8      // +1 clockwise, -1 counterclockwise

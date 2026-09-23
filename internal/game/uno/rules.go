@@ -9,6 +9,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/shed"
 )
 
 // Rules implements Uno; see the Deviation notes for where it departs from the box.
@@ -37,7 +38,7 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	state.Extra = extra
 
 	// Official Uno never starts on a Wild; redraw until a colored card surfaces.
-	top, err := game.OpenDiscard(state, func(c deck.Card) bool { return !isWild(c.Rank) })
+	top, err := shed.OpenDiscard(state, func(c deck.Card) bool { return !isWild(c.Rank) })
 	if err != nil {
 		return fmt.Errorf("open the uno discard pile: %w", err)
 	}
@@ -56,7 +57,7 @@ func applyOpeningCard(state *game.State, extra *State, card deck.Card) {
 	case Skip:
 		first = advance(state, extra, 1)
 	case DrawTwo:
-		extra.RecordDraw(game.DrawInto(state, state.Players[state.CurrentTurn], 2))
+		extra.RecordDraw(shed.DrawInto(state, state.Players[state.CurrentTurn], 2))
 		first = advance(state, extra, 1)
 	case Reverse:
 		if len(state.Players) == 2 {
@@ -97,7 +98,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	switch a := action.(type) {
 	case ActionPlayCard:
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
-		return game.ValidateShedPlay(state, a.Card, func(topCard deck.Card) error {
+		return shed.ValidatePlay(state, a.Card, func(topCard deck.Card) error {
 			return validatePlay(state.Players[state.CurrentTurn].Cards, extra, a, topCard)
 		})
 
@@ -193,7 +194,7 @@ func applyReverse(state *game.State, extra *State) {
 // cover charges the deadlock count like any other.
 func applyForcedDraw(state *game.State, extra *State, n int) {
 	victim := state.Players[advance(state, extra, 1)]
-	extra.RecordDraw(game.DrawInto(state, victim, n))
+	extra.RecordDraw(shed.DrawInto(state, victim, n))
 	state.OverrideTurn(advance(state, extra, 2))
 }
 
@@ -201,7 +202,7 @@ func applyForcedDraw(state *game.State, extra *State, n int) {
 // player play the card they just drew; here the draw ends the turn, which keeps a
 // draw a single action with no follow-up state for a disconnect to strand.
 func applyVoluntaryDraw(state *game.State, extra *State) {
-	extra.RecordDraw(game.DrawInto(state, state.Players[state.CurrentTurn], 1))
+	extra.RecordDraw(shed.DrawInto(state, state.Players[state.CurrentTurn], 1))
 	state.OverrideTurn(advance(state, extra, 1))
 }
 
@@ -214,7 +215,7 @@ func (r *Rules) CheckWinCondition(state *game.State) bool {
 	if !ok {
 		return false
 	}
-	return game.HandEmptyOrAllPassed(state, extra.Passes)
+	return shed.HandEmptyOrAllPassed(state, extra.Passes)
 }
 
 func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
@@ -224,7 +225,7 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 	}
 	extra.leaverWasOnTurn = state.CurrentTurn == slices.IndexFunc(state.Players,
 		func(p *game.Player) bool { return p != nil && p.ID == playerID })
-	game.LeaveShedGame(state, &extra.ShedState, playerID)
+	shed.Leave(state, &extra.State, playerID)
 }
 
 // AfterPlayerRemoved settles the cursor when the seat on turn left a counterclockwise
@@ -252,6 +253,6 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	state.SetTurn(game.SeatAt(removedIndex-1, n))
 }
 
-func (r *Rules) Standings(state *game.State) []*game.Player { return game.ShedStandings(state) }
+func (r *Rules) Standings(state *game.State) []*game.Player { return shed.Standings(state) }
 
-func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return game.ShedScore(p) }
+func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return shed.Score(p) }

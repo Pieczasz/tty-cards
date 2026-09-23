@@ -240,7 +240,7 @@ func TestRules_ApplyAction_NumberCard(t *testing.T) {
 
 func TestRules_ApplyAction_Skip(t *testing.T) {
 	t.Parallel()
-	state := shed.Table(t, 3, 3, 3)
+	state := suite.Table(t, 3, 3, 3)
 	rules := &Rules{}
 	state.CurrentTurn = 0
 	state.Players[0].Cards = []deck.Card{{Rank: Skip, Suit: ColorRed}}
@@ -259,7 +259,7 @@ func TestRules_ApplyAction_Reverse(t *testing.T) {
 
 	t.Run("three players flips direction", func(t *testing.T) {
 		t.Parallel()
-		state := shed.Table(t, 2, 2, 2)
+		state := suite.Table(t, 2, 2, 2)
 		state.CurrentTurn = 0
 		state.Players[0].Cards = []deck.Card{{Rank: Reverse, Suit: ColorRed}}
 		extra(t, state).CurrentColor = ColorRed
@@ -275,7 +275,7 @@ func TestRules_ApplyAction_Reverse(t *testing.T) {
 
 	t.Run("two players acts as skip", func(t *testing.T) {
 		t.Parallel()
-		state := shed.Table(t, 2, 2)
+		state := suite.Table(t, 2, 2)
 		state.CurrentTurn = 0
 		state.Players[0].Cards = []deck.Card{{Rank: Reverse, Suit: ColorRed}}
 		extra(t, state).CurrentColor = ColorRed
@@ -292,7 +292,7 @@ func TestRules_ApplyAction_Reverse(t *testing.T) {
 
 func TestRules_ApplyAction_DrawTwo(t *testing.T) {
 	t.Parallel()
-	state := shed.Table(t, 1, 1, 1)
+	state := suite.Table(t, 1, 1, 1)
 	rules := &Rules{}
 	state.CurrentTurn = 0
 	state.Players[0].Cards = []deck.Card{{Rank: DrawTwo, Suit: ColorRed}}
@@ -309,7 +309,7 @@ func TestRules_ApplyAction_DrawTwo(t *testing.T) {
 
 func TestRules_ApplyAction_WildDrawFour(t *testing.T) {
 	t.Parallel()
-	state := shed.Table(t, 1, 1, 1)
+	state := suite.Table(t, 1, 1, 1)
 	rules := &Rules{}
 	state.CurrentTurn = 0
 	state.Players[0].Cards = []deck.Card{{Rank: WildDrawFour, Suit: ColorWild}}
@@ -395,7 +395,7 @@ func TestRules_OnGameStart_NeverOpensOnAWild(t *testing.T) {
 func TestRules_DrawCard_SuccessfulDrawClearsThePassCount(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	state := shed.Table(t, 3, 3)
+	state := suite.Table(t, 3, 3)
 	extra := extra(t, state)
 	extra.Passes = 1
 	stockBefore := state.Deck.Size()
@@ -488,7 +488,7 @@ func TestRules_OnPlayerLeave_NormalLeaveIsNotAnError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
 	t.Cleanup(func() { slog.SetDefault(original) })
 
-	state := shed.Table(t, 3, 3)
+	state := suite.Table(t, 3, 3)
 	(&Rules{}).OnPlayerLeave(state, "p1")
 	assert.Empty(t, logged.String())
 }
@@ -645,7 +645,7 @@ func TestRules_ApplyAction_ForcedDrawHeadsUp(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			state := shed.Table(t, 1, 1)
+			state := suite.Table(t, 1, 1)
 			state.CurrentTurn = 0
 			state.Players[0].Cards = []deck.Card{tt.card}
 			extra(t, state).CurrentColor = ColorRed
@@ -672,7 +672,7 @@ func TestRules_AfterPlayerRemoved_TwoSeatsCollapseToOne(t *testing.T) {
 	for _, dir := range []int8{1, -1} {
 		t.Run(fmt.Sprintf("direction %d", dir), func(t *testing.T) {
 			t.Parallel()
-			state := shed.Table(t, 3, 3)
+			state := suite.Table(t, 3, 3)
 			extra := extra(t, state)
 			extra.Direction = dir
 			state.CurrentTurn = 0

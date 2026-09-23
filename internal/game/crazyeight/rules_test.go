@@ -347,7 +347,7 @@ func TestRules_OnPlayerLeave_NormalLeaveIsNotAnError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
 	t.Cleanup(func() { slog.SetDefault(original) })
 
-	state := shed.Table(t, 3, 3)
+	state := suite.Table(t, 3, 3)
 
 	(&Rules{}).OnPlayerLeave(state, "p1")
 
@@ -477,7 +477,7 @@ func TestRules_ValidateAction_EightNeedsARealSuit(t *testing.T) {
 // direction to honour, so the hook must not move the turn.
 func TestRules_AfterPlayerRemoved_LeavesTheCursorAlone(t *testing.T) {
 	t.Parallel()
-	state := shed.Table(t, 3, 3, 3)
+	state := suite.Table(t, 3, 3, 3)
 	state.CurrentTurn = 1
 
 	(&Rules{}).AfterPlayerRemoved(state, 0)

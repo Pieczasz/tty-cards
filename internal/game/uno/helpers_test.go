@@ -6,15 +6,16 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/game/gametest"
+	"github.com/Pieczasz/terminal-card/internal/game/shed"
 
 	"github.com/stretchr/testify/require"
 )
 
-// shed is uno described to the shared shedding-game suite.
-var shed = gametest.Shed{
+// suite is uno described to the shared shedding-game suite.
+var suite = gametest.Shed{
 	Rules:     &Rules{},
 	NewExtra:  func(top deck.Card) any { return &State{CurrentColor: top.Suit, Direction: 1} },
-	ShedState: func(e any) *game.ShedState { return &e.(*State).ShedState },
+	ShedState: func(e any) *shed.State { return &e.(*State).State },
 	Opens:     func(c deck.Card) bool { return !isWild(c.Rank) },
 	Play:      func(c deck.Card) game.Action { return ActionPlayCard{Card: c} },
 	Draw:      ActionDrawCard{},
@@ -22,7 +23,7 @@ var shed = gametest.Shed{
 
 func TestShedContract(t *testing.T) {
 	t.Parallel()
-	gametest.RunShed(t, shed)
+	gametest.RunShed(t, suite)
 }
 
 // extra is the uno state of a table, failing the test on anything else.
@@ -35,5 +36,5 @@ func extra(t *testing.T, s *game.State) *State {
 
 func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 	t.Parallel()
-	gametest.SoakTimeoutIsAlwaysLegal(t, shed)
+	gametest.SoakTimeoutIsAlwaysLegal(t, suite)
 }

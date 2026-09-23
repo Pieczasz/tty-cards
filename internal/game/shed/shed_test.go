@@ -1,23 +1,24 @@
-package game
+package shed
 
 import (
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/terminal-card/internal/game"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func shedState(stock, discard []deck.Card) *State {
-	return &State{
-		Players: []*Player{{ID: "p1", Cards: []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}}}},
+func shedState(stock, discard []deck.Card) *game.State {
+	return &game.State{
+		Players: []*game.Player{{ID: "p1", Cards: []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}}}},
 		Deck:    deck.New(stock),
 		Discard: deck.New(discard),
 	}
 }
 
-func shedCardsInPlay(state *State) int {
+func shedCardsInPlay(state *game.State) int {
 	total := state.Deck.Size() + state.Discard.Size()
 	for _, p := range state.Players {
 		total += len(p.Cards)
@@ -69,7 +70,7 @@ func TestReshuffleDiscardIntoStock(t *testing.T) {
 	})
 }
 
-func TestValidateShedPlay(t *testing.T) {
+func TestValidatePlay(t *testing.T) {
 	t.Parallel()
 	held := deck.Card{Rank: deck.Ace, Suit: deck.Spades} // shedState deals p1 this card
 	top := deck.Card{Rank: deck.Two, Suit: deck.Hearts}
@@ -80,25 +81,25 @@ func TestValidateShedPlay(t *testing.T) {
 	t.Run("no card in play refuses before the game's rule runs", func(t *testing.T) {
 		t.Parallel()
 		var saw deck.Card
-		require.ErrorContains(t, ValidateShedPlay(shedState(nil, nil), held, matchSaw(&saw)), "no cards in discard")
+		require.ErrorContains(t, ValidatePlay(shedState(nil, nil), held, matchSaw(&saw)), "no cards in discard")
 		assert.Zero(t, saw)
 	})
 	t.Run("a card not in the hand is refused", func(t *testing.T) {
 		t.Parallel()
 		var saw deck.Card
-		err := ValidateShedPlay(shedState(nil, []deck.Card{top}), top, matchSaw(&saw))
+		err := ValidatePlay(shedState(nil, []deck.Card{top}), top, matchSaw(&saw))
 		require.ErrorContains(t, err, "you don't have that card")
 		assert.Zero(t, saw)
 	})
 	t.Run("the game's rule decides against the top card", func(t *testing.T) {
 		t.Parallel()
 		var saw deck.Card
-		require.NoError(t, ValidateShedPlay(shedState(nil, []deck.Card{top}), held, matchSaw(&saw)))
+		require.NoError(t, ValidatePlay(shedState(nil, []deck.Card{top}), held, matchSaw(&saw)))
 		assert.Equal(t, top, saw)
 	})
 }
 
-func TestDrawWithReshuffle(t *testing.T) {
+func TestDraw(t *testing.T) {
 	t.Parallel()
 	two := deck.Card{Rank: deck.Two, Suit: deck.Hearts}
 	three := deck.Card{Rank: deck.Three, Suit: deck.Clubs}
@@ -122,7 +123,7 @@ func TestDrawWithReshuffle(t *testing.T) {
 			state := shedState(tt.stock, tt.discard)
 			before := shedCardsInPlay(state)
 
-			got, ok := DrawWithReshuffle(state)
+			got, ok := draw(state)
 
 			assert.Equal(t, tt.wantOK, ok)
 			assert.Equal(t, tt.want, got)
@@ -141,7 +142,7 @@ func TestReturnHandToStock(t *testing.T) {
 	t.Run("the leaver's cards go back to the stock", func(t *testing.T) {
 		t.Parallel()
 		state := shedState([]deck.Card{{Rank: deck.Two, Suit: deck.Clubs}}, nil)
-		state.Players = append(state.Players, &Player{ID: "p2", Cards: []deck.Card{
+		state.Players = append(state.Players, &game.Player{ID: "p2", Cards: []deck.Card{
 			{Rank: deck.King, Suit: deck.Hearts},
 			{Rank: deck.Queen, Suit: deck.Hearts},
 		}})
@@ -166,10 +167,10 @@ func TestReturnHandToStock(t *testing.T) {
 
 func TestHandEmptyOrAllPassed(t *testing.T) {
 	t.Parallel()
-	seated := func(counts ...int) *State {
-		state := &State{}
+	seated := func(counts ...int) *game.State {
+		state := &game.State{}
 		for i, n := range counts {
-			state.Players = append(state.Players, &Player{
+			state.Players = append(state.Players, &game.Player{
 				ID:    string(rune('a' + i)),
 				Cards: make([]deck.Card, n),
 			})
@@ -179,7 +180,7 @@ func TestHandEmptyOrAllPassed(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		state  *State
+		state  *game.State
 		passes int
 		want   bool
 	}{
@@ -255,33 +256,33 @@ func TestOpenDiscard(t *testing.T) {
 	})
 }
 
-func TestShedStandings_FewestCardsFirstAndTiesStable(t *testing.T) {
+func TestStandings_FewestCardsFirstAndTiesStable(t *testing.T) {
 	t.Parallel()
-	state := &State{Players: []*Player{
+	state := &game.State{Players: []*game.Player{
 		{ID: "p1", Cards: make([]deck.Card, 4)},
 		{ID: "p2", Cards: make([]deck.Card, 1)},
 		{ID: "p3", Cards: make([]deck.Card, 4)},
 	}}
 
-	standings := ShedStandings(state)
+	standings := Standings(state)
 
 	require.Len(t, standings, 3)
 	assert.Equal(t, []string{"p2", "p1", "p3"}, []string{standings[0].ID, standings[1].ID, standings[2].ID},
 		"ties keep seat order so the ranking is reproducible")
-	assert.Equal(t, ShedScore(standings[1]), ShedScore(standings[2]),
+	assert.Equal(t, Score(standings[1]), Score(standings[2]),
 		"Standings and StandingScore have to agree, or a draw is split by seat")
 }
 
-func TestLeaveShedGame(t *testing.T) {
+func TestLeave(t *testing.T) {
 	t.Parallel()
 	state := shedState(nil, nil)
-	state.Players = append(state.Players, &Player{ID: "p2", Cards: []deck.Card{
+	state.Players = append(state.Players, &game.Player{ID: "p2", Cards: []deck.Card{
 		{Rank: deck.King, Suit: deck.Hearts},
 	}})
-	shed := &ShedState{Passes: 2}
+	shed := &State{Passes: 2}
 	before := shedCardsInPlay(state)
 
-	LeaveShedGame(state, shed, "p2")
+	Leave(state, shed, "p2")
 
 	assert.Zero(t, shed.Passes, "the count measured a table that no longer exists")
 	assert.Equal(t, before, shedCardsInPlay(state))
@@ -290,17 +291,17 @@ func TestLeaveShedGame(t *testing.T) {
 
 func TestDrawInto_DealsWhatTheStockHas(t *testing.T) {
 	t.Parallel()
-	p := &Player{ID: "p1"}
-	state := &State{Players: []*Player{p}, Deck: deck.New([]deck.Card{{Rank: deck.Ace}, {Rank: deck.Two}}), Discard: deck.New(nil)}
+	p := &game.Player{ID: "p1"}
+	state := &game.State{Players: []*game.Player{p}, Deck: deck.New([]deck.Card{{Rank: deck.Ace}, {Rank: deck.Two}}), Discard: deck.New(nil)}
 
 	assert.True(t, DrawInto(state, p, 3), "two of three is still a draw")
 	assert.Len(t, p.Cards, 2)
 	assert.False(t, DrawInto(state, p, 1), "an empty stock and discard yield nothing")
 }
 
-func TestShedState_RecordDraw(t *testing.T) {
+func TestState_RecordDraw(t *testing.T) {
 	t.Parallel()
-	s := &ShedState{}
+	s := &State{}
 	s.RecordDraw(false)
 	s.RecordDraw(false)
 	assert.Equal(t, 2, s.Passes)
