@@ -528,7 +528,11 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	}
 
 	if e.state.Rules.CheckWinCondition(e.state) {
-		e.finishGameLocked(nil, EndReasonWin)
+		reason := EndReasonWin
+		if e.state.Interrupted {
+			reason = EndReasonInterrupted
+		}
+		e.finishGameLocked(nil, reason)
 		return
 	}
 

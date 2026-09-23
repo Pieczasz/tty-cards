@@ -21,6 +21,10 @@ type State struct {
 	OverrideNextTurn *int
 	Phase            Phase
 	Winner           *Player
+	// Interrupted is set by a leave handler whose game cannot continue without the
+	// seat (hearts is four-handed or nothing). The removal that ends the game then
+	// reports EndReasonInterrupted instead of a win nobody finished.
+	Interrupted bool
 
 	Deck    *deck.Pile
 	Discard *deck.Pile

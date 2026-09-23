@@ -339,9 +339,12 @@ func (r *Rules) TurnTimeout(state *game.State) time.Duration {
 	}
 }
 
+// OnPlayerLeave ends the match: hearts does not play three-handed. Interrupted tells
+// the engine, and through it finalize, that the seats still playing did not finish it.
 func (r *Rules) OnPlayerLeave(state *game.State, _ string) {
 	if extra, ok := state.Extra.(*State); ok {
 		extra.MatchComplete = true
+		state.Interrupted = true
 	}
 }
 

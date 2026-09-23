@@ -433,6 +433,30 @@ func TestRules_OnPlayerLeave_EndsMatch(t *testing.T) {
 	rules.OnPlayerLeave(state, "p2")
 	assert.True(t, state.Extra.(*State).MatchComplete)
 	assert.True(t, rules.CheckWinCondition(state))
+	assert.True(t, state.Interrupted, "the match ended on a leave, not on the score")
+}
+
+// Hearts cannot go on three-handed, so one leave ends the match for everyone. That is
+// not a result the seats still playing earned, and the engine has to say so.
+func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
+	t.Parallel()
+	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
+	engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+	events, err := engine.Broadcaster().Subscribe()
+	require.NoError(t, err)
+
+	engine.RemovePlayer("p2")
+
+	require.True(t, engine.IsFinished())
+	reason := game.EndReasonUnknown
+	for len(events) > 0 {
+		if ev := <-events; ev.Type == game.EventGameEnded {
+			reason = ev.Reason
+		}
+	}
+	assert.Equal(t, game.EndReasonInterrupted, reason)
 }
 
 func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
