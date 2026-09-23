@@ -42,3 +42,53 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 		})
 	}
 }
+
+// The start is only ever checked on a ready toggle, so a roster change that left
+// everyone else ready used to strand the table: all-ready, and nothing to start it.
+// The same rule as a setting change applies - the table changed, so nobody is ready.
+func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
+	t.Parallel()
+
+	removals := map[string]func(m *Manager, leader, holdout *game.Player) error{
+		"the holdout leaves":    func(m *Manager, _, holdout *game.Player) error { m.LeaveLobby(holdout); return nil },
+		"the holdout is kicked": func(m *Manager, leader, holdout *game.Player) error { return m.Kick(leader, holdout) },
+	}
+	for name, remove := range removals {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m, l, registry := newTestLobby(t, 4)
+			leader := l.Leader()
+			b := mockPlayer("p2", testutil.UID(2))
+			c := mockPlayer("p3", testutil.UID(3))
+			holdout := mockPlayer("p4", testutil.UID(4))
+			for _, p := range []*game.Player{b, c, holdout} {
+				require.NoError(t, m.JoinLobbyByCode(l.Code(), p))
+			}
+			for _, p := range []*game.Player{leader, b, c} {
+				require.NoError(t, l.ToggleReady(p, registry))
+			}
+
+			require.NoError(t, remove(m, leader, holdout))
+
+			for _, p := range []*game.Player{leader, b, c} {
+				assert.False(t, l.IsReady(p), "%s is still ready after the roster changed", p.ID)
+			}
+			assert.Equal(t, Waiting, l.state)
+		})
+	}
+
+	t.Run("the leader leaves", func(t *testing.T) {
+		t.Parallel()
+		m, l, registry := newTestLobby(t, 4)
+		leader := l.Leader()
+		b := mockPlayer("p2", testutil.UID(2))
+		c := mockPlayer("p3", testutil.UID(3))
+		require.NoError(t, m.JoinLobbyByCode(l.Code(), b))
+		require.NoError(t, m.JoinLobbyByCode(l.Code(), c))
+		require.NoError(t, l.ToggleReady(b, registry))
+
+		m.LeaveLobby(leader)
+
+		assert.False(t, l.IsReady(b), "the promoted table kept a ready from before the change")
+	})
+}

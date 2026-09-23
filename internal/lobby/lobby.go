@@ -195,7 +195,8 @@ func (l *Lobby) detachPlayerLocked(p *game.Player) (
 		if len(l.guests) > 0 {
 			l.leader = l.guests[0]
 			l.guests = l.guests[1:]
-			delete(l.ready, p.ID)
+			// Same rule as removeGuestAtLocked: the table changed, so nobody is ready.
+			clear(l.ready)
 			return engine, bc, EventPlayersUpdated, false, true
 		}
 		l.setStateLocked(Closed)
@@ -209,12 +210,17 @@ func (l *Lobby) detachPlayerLocked(p *game.Player) (
 	return nil, nil, "", false, false
 }
 
-// removeGuestAtLocked removes guests[idx] and clears ready/subs. Caller holds l.mu.
+// removeGuestAtLocked removes guests[idx] and its subs, and un-readies the table.
+// Caller holds l.mu.
+//
+// A start is only checked on a ready toggle, so dropping the one unready seat used to
+// leave a table all-ready with nothing to start it. A ready was also consent to the
+// table as it was - the same rule withLeaderSettings applies.
 func (l *Lobby) removeGuestAtLocked(idx int) {
 	g := l.guests[idx]
 	l.unsubscribePlayerLocked(g.ID)
 	l.guests = slices.Delete(l.guests, idx, idx+1)
-	delete(l.ready, g.ID)
+	clear(l.ready)
 }
 
 func notifyEngineAndBroadcast(engine *game.Engine, bc *broadcaster.Broadcaster[Event], playerID, eventType string) {
