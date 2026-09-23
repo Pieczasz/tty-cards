@@ -27,6 +27,7 @@ const (
 // Rank is a card's rank: Ace..King and Joker, then Uno's own block from 20.
 type Rank uint8
 
+// The standard ranks, 1-based so a zero Card is detectably empty, then the Joker.
 const (
 	Ace Rank = iota + 1
 	Two

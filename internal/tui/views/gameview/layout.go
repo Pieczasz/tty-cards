@@ -97,6 +97,7 @@ func renderHand(
 // Orientation is the table edge an opponent's seat is drawn on.
 type Orientation int
 
+// The table edges.
 const (
 	OrientationTop Orientation = iota
 	OrientationLeft

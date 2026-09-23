@@ -12,6 +12,7 @@ type Event struct {
 // EventType says what happened at the table.
 type EventType uint8
 
+// The events a table publishes.
 const (
 	EventUnknown EventType = iota
 	EventTurnAdvanced
@@ -28,6 +29,7 @@ const (
 // type alone.
 type EndReason uint8
 
+// The reasons a table ends.
 const (
 	EndReasonUnknown EndReason = iota
 	EndReasonWin

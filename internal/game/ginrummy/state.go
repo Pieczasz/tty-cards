@@ -11,6 +11,7 @@ import (
 // phase every hand deals into.
 type Phase uint8
 
+// The phases of a gin rummy hand.
 const (
 	PhaseAwaitingDraw Phase = iota
 	PhaseAwaitingDiscard
@@ -70,6 +71,7 @@ func (s *State) HandComplete() bool { return s.Phase == PhaseHandOver }
 // Outcome is how a hand ended. The zero value is a result nobody has settled.
 type Outcome uint8
 
+// The ways a gin rummy hand ends.
 const (
 	OutcomeUnknown Outcome = iota
 	// OutcomeKnock is a knock the defender could not undercut.

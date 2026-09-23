@@ -76,6 +76,7 @@ type joinModel struct {
 	lastView string
 }
 
+// NewJoin is the join screen: the public lobby browser and the join-by-code prompt.
 func NewJoin(global router.GlobalContext) tea.Model {
 	ti := textinput.New()
 	ti.Placeholder = "8-character code"

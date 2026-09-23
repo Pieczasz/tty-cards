@@ -16,6 +16,7 @@ const (
 	superCompactWidth  = 72
 )
 
+// IsCompact is a terminal too short or too narrow for the full table layout.
 func IsCompact(width, height int) bool {
 	return height < compactHeight || width < compactWidth
 }

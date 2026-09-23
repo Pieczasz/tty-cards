@@ -203,6 +203,7 @@ type footerKey struct {
 // ten-item footer emits ten colour sequences on a frame that never changes.
 var footerCache sync.Map // footerKey -> string
 
+// RenderActionFooter is the key-hint footer for actions, one styled item each.
 func (t Theme) RenderActionFooter(actions []string) string {
 	key := footerKey{actions: strings.Join(actions, "\x00"), dark: t.Dark}
 	if cached, ok := footerCache.Load(key); ok {

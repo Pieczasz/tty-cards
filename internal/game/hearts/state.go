@@ -10,6 +10,7 @@ import (
 // a hold hand deals into.
 type Phase uint8
 
+// The phases of a hearts hand.
 const (
 	PhasePassing Phase = iota
 	PhaseTrickPlay
@@ -20,6 +21,7 @@ const (
 // across and hold, one hand each.
 type PassDirection uint8
 
+// The pass directions, in the order they rotate.
 const (
 	PassLeft PassDirection = iota
 	PassRight

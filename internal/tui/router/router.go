@@ -106,6 +106,7 @@ type Router struct {
 	lastActivity time.Time
 }
 
+// New is a router for one session, starting at RouteHome with no views registered.
 func New(global GlobalContext) *Router {
 	// Dark until the terminal says otherwise: most terminals are, and one that
 	// never answers the background query must still be legible.
@@ -125,6 +126,7 @@ func (r *Router) SetInitialRoute(name Route, ctx any) {
 	r.initialCtx = ctx
 }
 
+// Register makes factory the builder for name, replacing any earlier one.
 func (r *Router) Register(name Route, factory ViewFactory) {
 	r.views[name] = factory
 }
@@ -172,6 +174,8 @@ func (r *Router) Close() {
 	r.activeKey = ""
 }
 
+// Goto closes the active view and builds name's with context. An unregistered route
+// changes nothing and returns nil.
 func (r *Router) Goto(name Route, context any) tea.Cmd {
 	factory, ok := r.views[name]
 	if !ok {
@@ -183,6 +187,7 @@ func (r *Router) Goto(name Route, context any) tea.Cmd {
 	return r.active.Init()
 }
 
+// Init starts the idle clock, asks for the terminal background and builds the first view.
 func (r *Router) Init() tea.Cmd {
 	// Ask the terminal for its background so the theme can match it. Terminals
 	// that don't answer simply leave the dark default in place.
@@ -193,6 +198,7 @@ func (r *Router) Init() tea.Cmd {
 	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(r.initialRoute, r.initialCtx))
 }
 
+// Update handles the session-wide messages and hands the rest to the active view.
 func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var routerCmd tea.Cmd
 
@@ -225,6 +231,7 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return r, tea.Batch(routerCmd, viewCmd)
 }
 
+// View is the active view, or the too-small notice when the terminal cannot hold one.
 func (r *Router) View() tea.View {
 	var v tea.View
 	switch {

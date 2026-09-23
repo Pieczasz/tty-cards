@@ -92,6 +92,7 @@ type cardKey struct {
 // hundred distinct faces.
 var cardCache sync.Map // cardKey -> string
 
+// RenderCard draws card face up, lifted out of the hand and recoloured when selected.
 func RenderCard(t styles.Theme, card deck.Card, selected bool) string {
 	key := cardKey{rank: card.Rank, suit: card.Suit, selected: selected, dark: t.Dark}
 	if cached, ok := cardCache.Load(key); ok {
@@ -266,6 +267,7 @@ func MiniCardBack(t styles.Theme) string {
 	return t.Dim.Render("[" + strings.Repeat("?", miniRankWidth+1) + "]")
 }
 
+// MiniCardSlot is an empty place for a mini card, the same footprint as RenderMiniCard.
 func MiniCardSlot(t styles.Theme) string {
 	return t.Dim.Render("[" + strings.Repeat(" ", miniRankWidth+1) + "]")
 }

@@ -19,6 +19,7 @@ const (
 // BrowseMode filters the browse by whether a table is ranked.
 type BrowseMode uint8
 
+// The browse filters.
 const (
 	BrowseAny BrowseMode = iota
 	BrowseRanked

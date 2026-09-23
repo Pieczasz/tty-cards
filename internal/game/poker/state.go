@@ -102,6 +102,7 @@ func (s *State) ToCall(playerID string) uint {
 // Phase is the street a hand is on. The zero value is a State nobody has dealt.
 type Phase uint8
 
+// The streets of a hold'em hand.
 const (
 	PhaseUnknown Phase = iota
 	PhasePreFlop

@@ -35,6 +35,7 @@ type State struct {
 // Phase is where a table is in its life: dealt yet, in play, or over.
 type Phase uint8
 
+// The phases of a table's life.
 const (
 	Waiting Phase = iota
 	Playing

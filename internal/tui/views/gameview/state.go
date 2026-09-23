@@ -79,6 +79,7 @@ func (b BaseState) SeatNames() map[string]string {
 	return names
 }
 
+// SeatOrder is every player ID in engine seat order, hero included.
 func (b BaseState) SeatOrder() []string {
 	order := make([]string, len(b.Seats))
 	for i, seat := range b.Seats {

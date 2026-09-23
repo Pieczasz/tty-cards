@@ -52,6 +52,7 @@ type Event struct {
 // announces nothing carries it.
 type EventType uint8
 
+// The lobby events.
 const (
 	EventPlayersUpdated EventType = iota + 1
 	EventSettingsUpdated

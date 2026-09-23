@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// User is a player account.
+//
 // Nothing calls AutoMigrate - internal/db/migrations owns the schema - so
 // uniqueIndex/not null/default/check/type tags would be decoration that reads like
 // enforcement, and one of them had already drifted from the SQL. They are gone; the
