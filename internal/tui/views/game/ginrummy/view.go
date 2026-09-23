@@ -15,7 +15,7 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
-func (m *Model) View() tea.View {
+func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
@@ -38,7 +38,7 @@ func (m *Model) View() tea.View {
 		top, m.renderPlayerSection(), m.keyHints(), m.renderMiddleLayer))
 }
 
-func (m *Model) keyHints() string {
+func (m *model) keyHints() string {
 	switch m.phase {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
@@ -49,7 +49,7 @@ func (m *Model) keyHints() string {
 	}
 }
 
-func (m *Model) renderMiddleLayer(height int) string {
+func (m *model) renderMiddleLayer(height int) string {
 	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
 	stockLabel := m.Global.Theme.Muted.Render(fmt.Sprintf("stock %d", m.Base.DeckSize))
 	scores := m.renderScoreLine()
@@ -58,7 +58,7 @@ func (m *Model) renderMiddleLayer(height int) string {
 	return styles.Place(m.Global.Width, height, lg.Center, lg.Center, center)
 }
 
-func (m *Model) renderScoreLine() string {
+func (m *model) renderScoreLine() string {
 	parts := make([]string, 0, len(m.Base.Seats))
 	for _, seat := range m.Base.Seats {
 		parts = append(parts, fmt.Sprintf("%s %d", seat.Username, m.cumulativeScores[seat.ID]))
@@ -66,7 +66,7 @@ func (m *Model) renderScoreLine() string {
 	return m.Global.Theme.Dim.Render(fmt.Sprintf("hand %d · %s", m.handNumber, strings.Join(parts, "  ")))
 }
 
-func (m *Model) renderPlayerSection() string {
+func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
 	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, false,
 		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
@@ -74,7 +74,7 @@ func (m *Model) renderPlayerSection() string {
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
 }
 
-func (m *Model) renderHandOver() string {
+func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
 		Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Body:  m.renderHandResult(),
@@ -91,7 +91,7 @@ func (m *Model) renderHandOver() string {
 	return gameview.RenderHandOver(m.Global, h)
 }
 
-func (m *Model) renderHandResult() string {
+func (m *model) renderHandResult() string {
 	r := m.lastHandResult
 	if r == nil {
 		return ""
@@ -122,7 +122,7 @@ func (m *Model) renderHandResult() string {
 	return lg.JoinVertical(lg.Center, banner, delta, "", knockerMelds, oppDead, laidOff)
 }
 
-func (m *Model) renderMeldGroups(label string, melds [][]deck.Card, laidOff bool) string {
+func (m *model) renderMeldGroups(label string, melds [][]deck.Card, laidOff bool) string {
 	if len(melds) == 0 {
 		return m.Global.Theme.Dim.Render(label + ": -")
 	}
@@ -146,7 +146,7 @@ func (m *Model) renderMeldGroups(label string, melds [][]deck.Card, laidOff bool
 	)
 }
 
-func (m *Model) renderCardRow(label string, cards []deck.Card, highlight bool) string {
+func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool) string {
 	if len(cards) == 0 {
 		return m.Global.Theme.Dim.Render(label + ": -")
 	}

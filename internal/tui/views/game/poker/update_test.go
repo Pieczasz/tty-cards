@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	logic "github.com/Pieczasz/terminal-card/internal/game/poker"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	tea "charm.land/bubbletea/v2"
@@ -463,7 +464,7 @@ func TestView_CountdownIsDrawnOnTheSeatOnTurn(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 
-	rendered := stripANSI(m.View().Content)
+	rendered := tuitest.StripANSI(m.View().Content)
 
 	clock := gameview.FormatTurnClock(m.Base.TurnRemaining, m.Base.MyTurn)
 	require.NotEmpty(t, clock, "a started hand has a clock running")

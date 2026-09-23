@@ -13,7 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, handled := m.HandleFrame(msg, m.syncState, nil); handled {
 		return m, cmd
 	}
@@ -23,7 +23,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
 		return m, cmd
 	}
@@ -49,7 +49,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleSpace() (tea.Model, tea.Cmd) {
+func (m *model) handleSpace() (tea.Model, tea.Cmd) {
 	if m.phase != logic.PhasePassing || !m.Base.MyTurn {
 		return m, nil
 	}
@@ -68,7 +68,7 @@ func (m *Model) handleSpace() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
+func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.phase == logic.PhaseHandOver && !m.matchComplete {
 		if m.Base.MyTurn {
 			return m.submit(logic.ActionNextHand{})
@@ -91,7 +91,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 	return m.submit(logic.ActionPlayCard{Card: card})
 }
 
-func (m *Model) submitPass() (tea.Model, tea.Cmd) {
+func (m *model) submitPass() (tea.Model, tea.Cmd) {
 	if len(m.passSelected) != 3 {
 		m.ActionErr = errNeedThreeCards
 		return m, nil
@@ -101,11 +101,11 @@ func (m *Model) submitPass() (tea.Model, tea.Cmd) {
 
 var errNeedThreeCards = errors.New("select exactly 3 cards (space to toggle)")
 
-func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
+func (m *model) submit(action game.Action) (tea.Model, tea.Cmd) {
 	if m.Submit(action) == nil {
 		m.passSelected = map[deck.Card]struct{}{}
 	}
 	return m, nil
 }
 
-var _ router.Closer = (*Model)(nil)
+var _ router.Closer = (*model)(nil)

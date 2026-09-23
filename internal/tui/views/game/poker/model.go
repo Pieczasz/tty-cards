@@ -71,10 +71,6 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	return m
 }
 
-func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), m.ClockTick())
-}
-
 func (m *model) syncState() {
 	heroID := ""
 	if m.Bound != nil {

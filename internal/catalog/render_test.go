@@ -13,7 +13,6 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	pokerview "github.com/Pieczasz/terminal-card/internal/tui/views/game/poker"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -180,7 +179,7 @@ func requireSameGame(t *testing.T, rules game.Rules, model tea.Model) {
 // the shared base state, so it keeps the hand it was dealt. The views' model types are
 // unexported, so the embedded Session's Base is reached by name.
 func setHand(m tea.Model, hand []deck.Card) {
-	if _, poker := m.(*pokerview.Model); poker {
+	if path.Base(reflect.TypeOf(m).Elem().PkgPath()) == "poker" {
 		return
 	}
 	reflect.ValueOf(m).Elem().FieldByName("Base").FieldByName("Hand").Set(reflect.ValueOf(hand))

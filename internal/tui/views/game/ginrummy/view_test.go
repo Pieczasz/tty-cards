@@ -12,6 +12,7 @@ import (
 	logic "github.com/Pieczasz/terminal-card/internal/game/ginrummy"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	lg "charm.land/lipgloss/v2"
@@ -21,7 +22,7 @@ import (
 
 func TestView_ActionBarHints(t *testing.T) {
 	t.Parallel()
-	m := &Model{
+	m := &model{
 		Global: router.GlobalContext{
 			Theme:  styles.NewTheme(true),
 			Width:  80,
@@ -47,7 +48,7 @@ func TestView_ActionBarHints(t *testing.T) {
 
 func TestView_HandOverWallBanner(t *testing.T) {
 	t.Parallel()
-	m := &Model{
+	m := &model{
 		Global: router.GlobalContext{
 			Theme:  styles.NewTheme(true),
 			Width:  80,
@@ -78,9 +79,9 @@ func handOf(n int) []deck.Card {
 	return hand
 }
 
-func viewAt(width, height int) *Model {
+func viewAt(width, height int) *model {
 	opponent := game.PlayerSnapshot{ID: "2", Username: "bob", HandSize: 10}
-	return &Model{
+	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Base: gameview.BaseState{
 			Phase:           game.Playing,
@@ -105,12 +106,12 @@ func viewAt(width, height int) *Model {
 func TestView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	screens := map[string]func(*Model){
-		"the table":        func(*Model) {},
-		"awaiting a draw":  func(m *Model) { m.phase = logic.PhaseAwaitingDraw },
-		"the hand summary": func(m *Model) { m.handComplete = true; m.lastHandResult = knockResult() },
-		"a gin":            func(m *Model) { m.handComplete = true; m.lastHandResult = ginResult() },
-		"the match over": func(m *Model) {
+	screens := map[string]func(*model){
+		"the table":        func(*model) {},
+		"awaiting a draw":  func(m *model) { m.phase = logic.PhaseAwaitingDraw },
+		"the hand summary": func(m *model) { m.handComplete = true; m.lastHandResult = knockResult() },
+		"a gin":            func(m *model) { m.handComplete = true; m.lastHandResult = ginResult() },
+		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
 			m.Base.Winner = "alice"
@@ -118,20 +119,16 @@ func TestView_FitsTheTerminal(t *testing.T) {
 		},
 	}
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for name, setup := range screens {
-			t.Run(fmt.Sprintf("%dx%d_%s", size.w, size.h, strings.ReplaceAll(name, " ", "_")), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%dx%d_%s", size.Width, size.Height, strings.ReplaceAll(name, " ", "_")), func(t *testing.T) {
 				t.Parallel()
-				m := viewAt(size.w, size.h)
+				m := viewAt(size.Width, size.Height)
 				setup(m)
 
 				out := m.View().Content
-				assert.LessOrEqual(t, lg.Width(out), size.w)
-				assert.LessOrEqual(t, lg.Height(out), size.h)
+				assert.LessOrEqual(t, lg.Width(out), size.Width)
+				assert.LessOrEqual(t, lg.Height(out), size.Height)
 			})
 		}
 	}

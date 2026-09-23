@@ -1,10 +1,10 @@
 package poker
 
 import (
-	"regexp"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func TestRenderChipStack_BreaksAmountIntoWholeChips(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, stripANSI(renderChipStack(styles.NewTheme(true), tt.amount)))
+			assert.Equal(t, tt.want, tuitest.StripANSI(renderChipStack(styles.NewTheme(true), tt.amount)))
 		})
 	}
 }
@@ -49,13 +49,6 @@ func TestChipForKey(t *testing.T) {
 
 	_, ok = chipForKey("5")
 	assert.False(t, ok, "there is no fifth chip")
-}
-
-var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// stripANSI drops styling so an assertion reads the chips, not the colour codes.
-func stripANSI(s string) string {
-	return sgrPattern.ReplaceAllString(s, "")
 }
 
 // Denomination is carried by shape, not just hue, so a colour-blind player - or

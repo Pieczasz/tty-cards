@@ -16,7 +16,7 @@ import (
 )
 
 // TopDiscard from the base state is unused - Hearts has no discard pile.
-type Model struct {
+type model struct {
 	gameview.Session
 
 	// passSelected holds the cards staged for ActionPassCards (space toggles). Keyed
@@ -40,7 +40,7 @@ type Model struct {
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
 	session, _ := gameview.NewSession(global, engine, "hearts")
-	m := &Model{
+	m := &model{
 		Session:          session,
 		passSelected:     map[deck.Card]struct{}{},
 		trickCards:       map[string]deck.Card{},
@@ -51,7 +51,7 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	return m
 }
 
-func (m *Model) syncState() {
+func (m *model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
 			m.phase = s.Phase
@@ -71,7 +71,7 @@ func (m *Model) syncState() {
 
 // prunePassSelection drops staged cards that are no longer in the hand, and clears the
 // staging outright once the pass is over.
-func (m *Model) prunePassSelection() {
+func (m *model) prunePassSelection() {
 	if m.phase != logic.PhasePassing {
 
 		m.passSelected = map[deck.Card]struct{}{}
@@ -84,7 +84,7 @@ func (m *Model) prunePassSelection() {
 
 // passIndices maps the staged cards onto their positions in the hand as it stands
 // right now, which is what the multi-select fan draws its markers from.
-func (m *Model) passIndices() map[int]struct{} {
+func (m *model) passIndices() map[int]struct{} {
 	idx := make(map[int]struct{}, len(m.passSelected))
 	for i, c := range m.Base.Hand {
 		if _, ok := m.passSelected[c]; ok {
@@ -92,8 +92,4 @@ func (m *Model) passIndices() map[int]struct{} {
 		}
 	}
 	return idx
-}
-
-func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), m.ClockTick())
 }

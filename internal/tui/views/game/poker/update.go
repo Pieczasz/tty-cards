@@ -103,8 +103,6 @@ func (m *model) stepRaise(direction int) {
 // confirm deals the next hand, leaves a finished match, or commits the pending raise.
 func (m *model) confirm() (tea.Model, tea.Cmd) {
 	if m.matchComplete {
-		// Separate statement on purpose: m is returned by value and Leave mutates it
-		// through the pointer receiver; the order of those two in one return is unspecified.
 		cmd := m.Leave()
 		return m, cmd
 	}

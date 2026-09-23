@@ -12,9 +12,9 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
-	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,7 +97,7 @@ func TestRenderMiniCard_PrintsTheRankOnTheCard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
-			got := stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: tt.rank, Suit: deck.Hearts}))
+			got := tuitest.StripANSI(components.RenderMiniCard(theme, deck.Card{Rank: tt.rank, Suit: deck.Hearts}))
 			assert.Equal(t, fmt.Sprintf("[%2s♥]", tt.want), got)
 		})
 	}
@@ -109,9 +109,9 @@ func TestRenderMiniCard_IsAFixedWidth(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	want := lg.Width(stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: deck.Ace, Suit: deck.Spades})))
+	want := lg.Width(tuitest.StripANSI(components.RenderMiniCard(theme, deck.Card{Rank: deck.Ace, Suit: deck.Spades})))
 	for _, rank := range []deck.Rank{deck.Ten, deck.King, deck.Two} {
-		got := lg.Width(stripANSI(components.RenderMiniCard(theme, deck.Card{Rank: rank, Suit: deck.Spades})))
+		got := lg.Width(tuitest.StripANSI(components.RenderMiniCard(theme, deck.Card{Rank: rank, Suit: deck.Spades})))
 		assert.Equal(t, want, got, "rank %d changes the card width", rank)
 	}
 }
@@ -127,12 +127,12 @@ func TestRenderSeatCards_ShowsNoBacksForASeatWithNoCards(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		t.Run(fmt.Sprintf("compact=%v", compact), func(t *testing.T) {
 			t.Parallel()
-			assert.Empty(t, stripANSI(m.renderSeatCards(busted, compact)))
+			assert.Empty(t, tuitest.StripANSI(m.renderSeatCards(busted, compact)))
 		})
 	}
 
 	dealt := seat{Name: "live", HandSize: 2}
-	assert.NotEmpty(t, stripANSI(m.renderSeatCards(dealt, true)),
+	assert.NotEmpty(t, tuitest.StripANSI(m.renderSeatCards(dealt, true)),
 		"a seat holding cards still shows them face down")
 }
 
@@ -220,22 +220,18 @@ func TestView_FitsTheTerminal(t *testing.T) {
 		"the match over": func(m *model) { m.handComplete, m.matchComplete = true, true },
 	}
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for _, n := range []int{2, 6, 9} {
 			for name, setup := range screens {
-				sub := fmt.Sprintf("%dx%d_%dseats_%s", size.w, size.h, n, strings.ReplaceAll(name, " ", "_"))
+				sub := fmt.Sprintf("%dx%d_%dseats_%s", size.Width, size.Height, n, strings.ReplaceAll(name, " ", "_"))
 				t.Run(sub, func(t *testing.T) {
 					t.Parallel()
-					m := tableOf(size.w, size.h, n)
+					m := tableOf(size.Width, size.Height, n)
 					setup(m)
 
 					out := m.View().Content
-					assert.LessOrEqual(t, lg.Width(out), size.w)
-					assert.LessOrEqual(t, lg.Height(out), size.h)
+					assert.LessOrEqual(t, lg.Width(out), size.Width)
+					assert.LessOrEqual(t, lg.Height(out), size.Height)
 				})
 			}
 		}
@@ -347,11 +343,11 @@ func TestRaisePrompt_OpensAndCancelsWithoutSubmitting(t *testing.T) {
 	t.Parallel()
 
 	m := tableOf(120, 50, 3)
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	_, _ = m.Update(tuitest.Key("r"))
 	require.True(t, m.raising)
 	assert.Equal(t, m.raiseMin, m.raiseAmount, "the prompt opens on a legal amount")
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tuitest.Key("esc"))
 	assert.Nil(t, cmd, "esc cancels the prompt rather than leaving the table")
 	assert.False(t, m.raising)
 }
@@ -363,7 +359,7 @@ func TestBeginRaise_IsANoOpWhenARaiseIsIllegal(t *testing.T) {
 	m.seats[0].Chips = 0 // busted: nothing left to raise with
 	m.raiseOK = false
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	_, _ = m.Update(tuitest.Key("r"))
 	assert.False(t, m.raising)
 }
 
@@ -389,13 +385,13 @@ func TestHandleKey_DispatchesEveryAdvertisedAction(t *testing.T) {
 			m.toCall = tc.toCall
 			m.Base.MyTurn = false
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: rune(tc.key[0]), Text: tc.key})
+			_, _ = m.Update(tuitest.Key(tc.key))
 			require.NoError(t, m.ActionErr, "off turn the key never reaches the engine")
 
 			// With no engine bound, submit stops at the nil check - which is the same
 			// guard that keeps a key from acting for a seat this session does not hold.
 			m.Base.MyTurn = true
-			_, cmd := m.Update(tea.KeyPressMsg{Code: rune(tc.key[0]), Text: tc.key})
+			_, cmd := m.Update(tuitest.Key(tc.key))
 			assert.Nil(t, cmd, "an action key never navigates away on its own")
 		})
 	}
@@ -411,7 +407,7 @@ func TestHandleKey_RaiseNudgesAreInertUntilThePromptIsOpen(t *testing.T) {
 			t.Parallel()
 			m := tableOf(120, 50, 3)
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+			_, _ = m.Update(tuitest.Key(key))
 			assert.Zero(t, m.raiseAmount, "nothing is staged while the prompt is shut")
 			assert.False(t, m.raising)
 		})
@@ -420,13 +416,13 @@ func TestHandleKey_RaiseNudgesAreInertUntilThePromptIsOpen(t *testing.T) {
 	t.Run("with the prompt open they move the amount", func(t *testing.T) {
 		t.Parallel()
 		m := tableOf(120, 50, 3)
-		_, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		_, _ = m.Update(tuitest.Key("r"))
 		opened := m.raiseAmount
 
-		_, _ = m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+		_, _ = m.Update(tuitest.Key("]"))
 		assert.Greater(t, m.raiseAmount, opened)
 
-		_, _ = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+		_, _ = m.Update(tuitest.Key("1"))
 		assert.Greater(t, m.raiseAmount, opened)
 	})
 }
@@ -438,11 +434,11 @@ func TestConfirm_LeavesOnlyAFinishedMatch(t *testing.T) {
 
 	m := tableOf(120, 50, 3)
 	m.handComplete = true
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd := m.Update(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "between hands enter deals rather than leaving")
 
 	m.matchComplete = true
-	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd = m.Update(tuitest.Key("enter"))
 	assert.NotNil(t, cmd, "once the match is over enter is the way out")
 }
 
@@ -450,11 +446,11 @@ func TestHandleEscape_AsksThenLeavesTheTableWhenNoPromptIsOpen(t *testing.T) {
 	t.Parallel()
 
 	m := tableOf(120, 50, 3)
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "esc asks before forfeiting")
 	assert.Contains(t, m.View().Content, "Leave and forfeit this game?",
 		"the question has to be on screen, or the next key forfeits blind")
-	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.Update(tuitest.Key("y"))
 	assert.NotNil(t, cmd)
 }
 
@@ -463,7 +459,7 @@ func TestHandleKey_AnUnboundKeyChangesNothing(t *testing.T) {
 
 	m := tableOf(120, 50, 3)
 	before := *m
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	_, cmd := m.Update(tuitest.Key("z"))
 	assert.Nil(t, cmd)
 	assert.Equal(t, before.raiseAmount, m.raiseAmount)
 	assert.Equal(t, before.raising, m.raising)

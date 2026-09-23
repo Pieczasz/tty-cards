@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	lg "charm.land/lipgloss/v2"
@@ -21,7 +22,7 @@ import (
 
 func TestView_HandOverShowsScores(t *testing.T) {
 	t.Parallel()
-	m := &Model{
+	m := &model{
 		Global: router.GlobalContext{
 			Theme:  styles.NewTheme(true),
 			Width:  80,
@@ -47,7 +48,7 @@ func TestView_HandOverShowsScores(t *testing.T) {
 
 func TestView_HeartsBrokenIndicator(t *testing.T) {
 	t.Parallel()
-	m := &Model{
+	m := &model{
 		Global:       router.GlobalContext{Theme: styles.NewTheme(true)},
 		heartsBroken: true,
 		trickCards:   map[string]deck.Card{},
@@ -64,7 +65,7 @@ func TestView_HeartsBrokenIndicator(t *testing.T) {
 func TestOpponentAt_RefusesATableThatIsNotFourHanded(t *testing.T) {
 	t.Parallel()
 
-	m := &Model{
+	m := &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 30},
 		Bound:  game.Bind(&game.Engine{}, "1"),
 		Base: gameview.BaseState{
@@ -97,11 +98,14 @@ func TestOpponentAt_RefusesATableThatIsNotFourHanded(t *testing.T) {
 func TestOpponentAt_MapsTheThreeEdgesAtAFullTable(t *testing.T) {
 	t.Parallel()
 
-	m := &Model{
+	// Opponents as the base state lays it out for seat 3: from the hero's left.
+	m := &model{
 		Bound: game.Bind(&game.Engine{}, "3"),
-		Base: gameview.BaseState{Seats: []game.PlayerSnapshot{
-			{ID: "1"}, {ID: "2"}, {ID: "3"}, {ID: "4"},
-		}}}
+		Base: gameview.BaseState{
+			Seats:     []game.PlayerSnapshot{{ID: "1"}, {ID: "2"}, {ID: "3"}, {ID: "4"}},
+			Opponents: []game.PlayerSnapshot{{ID: "4"}, {ID: "1"}, {ID: "2"}},
+		},
+	}
 
 	seen := make([]string, 0, 3)
 	for rel := range 3 {
@@ -132,12 +136,12 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 		"4": {Rank: deck.Jack, Suit: deck.Clubs},
 	}
 
-	for _, size := range []struct{ w, h int }{{64, 20}, {80, 24}, {100, 30}, {120, 40}} {
-		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
+	for _, size := range []struct{ Width, Height int }{{64, 20}, {80, 24}, {100, 30}, {120, 40}} {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
 			t.Parallel()
 
-			m := &Model{
-				Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: size.w, Height: size.h},
+			m := &model{
+				Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height},
 				Bound:  game.Bind(&game.Engine{}, "1"),
 				Base: gameview.BaseState{
 					Phase: game.Playing, Seats: seats, Opponents: seats[1:],
@@ -146,7 +150,7 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 				trickCards: trick,
 			}
 
-			out := stripANSI(m.View().Content)
+			out := tuitest.StripANSI(m.View().Content)
 			for id, card := range trick {
 				assert.Containsf(t, out, components.RankLabel(card.Rank),
 					"the card played from seat %s is not on screen", id)
@@ -155,24 +159,7 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 	}
 }
 
-// stripANSI drops the colour sequences so a frame can be searched as plain text.
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && (r == 'm' || r == 'K' || r == 'H'):
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
-}
-
-func fourHanded(width, height int) *Model {
+func fourHanded(width, height int) *model {
 	seats := []game.PlayerSnapshot{
 		{ID: "1", Username: "alice", HandSize: 13},
 		{ID: "2", Username: "bob", HandSize: 13},
@@ -183,7 +170,7 @@ func fourHanded(width, height int) *Model {
 	for i := range 13 {
 		hand = append(hand, deck.Card{Rank: deck.Rank(i + 1), Suit: deck.Hearts})
 	}
-	return &Model{
+	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Bound:  game.Bind(&game.Engine{}, "1"),
 		Base: gameview.BaseState{
@@ -211,39 +198,35 @@ func fourHanded(width, height int) *Model {
 func TestView_EveryScreenFitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	screens := map[string]func(*Model){
-		"trick play": func(*Model) {},
-		"the pass phase": func(m *Model) {
+	screens := map[string]func(*model){
+		"trick play": func(*model) {},
+		"the pass phase": func(m *model) {
 			m.phase = logic.PhasePassing
 			m.passSelected = map[deck.Card]struct{}{m.Base.Hand[0]: {}, m.Base.Hand[3]: {}}
 		},
-		"the hand summary": func(m *Model) { m.phase = logic.PhaseHandOver; m.handComplete = true },
-		"the match over": func(m *Model) {
+		"the hand summary": func(m *model) { m.phase = logic.PhaseHandOver; m.handComplete = true },
+		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
 			m.Base.Winner = "carol"
 		},
-		"a seat lost mid-hand": func(m *Model) {
+		"a seat lost mid-hand": func(m *model) {
 			m.Base.Seats = m.Base.Seats[:3]
 			m.Base.Opponents = m.Base.Seats[1:]
 		},
 	}
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for name, setup := range screens {
-			sub := fmt.Sprintf("%dx%d_%s", size.w, size.h, strings.ReplaceAll(name, " ", "_"))
+			sub := fmt.Sprintf("%dx%d_%s", size.Width, size.Height, strings.ReplaceAll(name, " ", "_"))
 			t.Run(sub, func(t *testing.T) {
 				t.Parallel()
-				m := fourHanded(size.w, size.h)
+				m := fourHanded(size.Width, size.Height)
 				setup(m)
 
 				out := m.View().Content
-				assert.LessOrEqual(t, lg.Width(out), size.w)
-				assert.LessOrEqual(t, lg.Height(out), size.h)
+				assert.LessOrEqual(t, lg.Width(out), size.Width)
+				assert.LessOrEqual(t, lg.Height(out), size.Height)
 			})
 		}
 	}

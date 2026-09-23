@@ -13,8 +13,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Model is the Gin Rummy view of one seat at the table.
-type Model struct {
+// model is the Gin Rummy view of one seat at the table.
+type model struct {
 	gameview.Session
 
 	phase            logic.Phase
@@ -29,7 +29,7 @@ type Model struct {
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
 	session, _ := gameview.NewSession(global, engine, "gin rummy")
-	m := &Model{
+	m := &model{
 		Session:          session,
 		cumulativeScores: map[string]int{},
 	}
@@ -37,7 +37,7 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	return m
 }
 
-func (m *Model) syncState() {
+func (m *model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
 			m.phase = s.Phase
@@ -49,8 +49,4 @@ func (m *Model) syncState() {
 			m.lastHandResult = s.LastHandResult.Clone()
 		}
 	})
-}
-
-func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), m.ClockTick())
 }

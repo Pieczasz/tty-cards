@@ -9,8 +9,8 @@ import (
 	logic "github.com/Pieczasz/terminal-card/internal/game/ginrummy"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +20,7 @@ func testUser() *db.User {
 	return &db.User{ID: testutil.UID(1), Username: "alice"}
 }
 
-func startedTable(t *testing.T) (*game.Engine, *Model) {
+func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.StandardDeck())
 	require.NoError(t, engine.Start())
@@ -34,7 +34,7 @@ func startedTable(t *testing.T) (*game.Engine, *Model) {
 		Width:        80,
 		Height:       40,
 	}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
 	return engine, m
 }
@@ -136,7 +136,7 @@ func TestHandleKnock_OnlyFiresWhenAKnockIsLegal(t *testing.T) {
 			m.phase = tc.phase
 			m.Selected = 0
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+			_, _ = m.Update(tuitest.Key("k"))
 			if tc.wantReach {
 				// The seat holds ten cards, so the engine rejects the knock - which is
 				// what proves the key reached it rather than being swallowed.
@@ -158,12 +158,12 @@ func TestDrawKeys_OnlyActOnYourOwnTurn(t *testing.T) {
 			_, m := startedTable(t)
 			m.Base.MyTurn = false
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+			_, _ = m.Update(tuitest.Key(key))
 			require.NoError(t, m.ActionErr, "an off-turn draw never reaches the engine")
 
 			m.Base.MyTurn = true
 			m.phase = logic.PhaseAwaitingDraw
-			_, _ = m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+			_, _ = m.Update(tuitest.Key(key))
 			m.syncState()
 			assert.True(t, m.phase == logic.PhaseAwaitingDiscard || m.ActionErr != nil,
 				"on turn the draw either lands or is rejected, but it is not swallowed")
@@ -181,7 +181,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		_, m := startedTable(t)
 		m.Base.Phase = game.Finished
 
-		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := m.Update(tuitest.Key("enter"))
 		assert.NotNil(t, cmd)
 	})
 
@@ -191,7 +191,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.handComplete = true
 		m.Base.MyTurn = false
 
-		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := m.Update(tuitest.Key("enter"))
 		assert.Nil(t, cmd)
 		assert.NoError(t, m.ActionErr, "waiting for the other seat is not an error")
 	})
@@ -202,7 +202,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.Base.MyTurn = true
 		m.phase = logic.PhaseAwaitingDraw
 
-		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, _ = m.Update(tuitest.Key("enter"))
 		assert.NoError(t, m.ActionErr, "the discard never reaches the engine")
 	})
 }
@@ -211,10 +211,10 @@ func TestHandleKey_EscapeAsksThenLeavesTheTable(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "esc asks before forfeiting")
 	assert.Contains(t, m.View().Content, "forfeit")
-	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.Update(tuitest.Key("y"))
 	assert.NotNil(t, cmd)
 }
 

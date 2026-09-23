@@ -2,7 +2,6 @@ package hearts
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	logic "github.com/Pieczasz/terminal-card/internal/game/hearts"
@@ -21,7 +20,7 @@ const (
 	keyHintsOver = "enter: next hand | esc: leave match"
 )
 
-func (m *Model) View() tea.View {
+func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
@@ -41,14 +40,14 @@ func (m *Model) View() tea.View {
 		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
 }
 
-func (m *Model) keyHints() string {
+func (m *model) keyHints() string {
 	if m.phase == logic.PhasePassing {
 		return keyHintsPass
 	}
 	return keyHintsPlay
 }
 
-func (m *Model) renderMiddleLayer(height int, minimalSeats bool) string {
+func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
 	leftOpponent := m.renderSideOpponent(seatLeft, minimalSeats, height)
 	rightOpponent := m.renderSideOpponent(seatRight, minimalSeats, height)
 	centerStack := lg.JoinVertical(lg.Center,
@@ -76,24 +75,20 @@ const (
 
 // opponentAt is the opponent on edge rel: seatLeft, seatTop or seatRight.
 //
-// It only answers for a full table. The three edges map back to three distinct players
-// only when there are four seats; with three, rel of 2 wraps round onto the hero and
-// the view would draw the player their own hand count. Hearts deals four, but a seat
+// It only answers for a full table with the hero at it: Opponents, which runs clockwise
+// from the hero's left, is then exactly the three edges. Hearts deals four, but a seat
 // stays empty for as long as it takes the engine to end the match after somebody
-// leaves, and that is a frame the view still has to render.
-func (m *Model) opponentAt(rel int) (game.PlayerSnapshot, bool) {
-	if len(m.Base.Seats) != heartsSeats || rel < 0 || rel >= heartsSeats-1 {
+// leaves, and that is a frame the view still has to render; a session with no seat
+// sees every seat as an opponent and has no edge of its own to draw them around.
+func (m *model) opponentAt(rel int) (game.PlayerSnapshot, bool) {
+	opponents := m.Base.Opponents
+	if len(m.Base.Seats) != heartsSeats || len(opponents) != heartsSeats-1 || rel < 0 || rel >= len(opponents) {
 		return game.PlayerSnapshot{}, false
 	}
-	heroID := m.Bound.PlayerID()
-	heroIdx := slices.IndexFunc(m.Base.Seats, func(s game.PlayerSnapshot) bool { return s.ID == heroID })
-	if heroIdx < 0 {
-		return game.PlayerSnapshot{}, false
-	}
-	return m.Base.Seats[(heroIdx+rel+1)%heartsSeats], true
+	return opponents[rel], true
 }
 
-func (m *Model) renderTopOpponent(minimal bool) string {
+func (m *model) renderTopOpponent(minimal bool) string {
 	o, ok := m.opponentAt(seatTop)
 	if !ok {
 		// Off the art layout: name every opponent on one line rather than leave the
@@ -110,7 +105,7 @@ func (m *Model) renderTopOpponent(minimal bool) string {
 
 // renderSeatSummary is the degraded layout for a table that is not four-handed: names
 // and hand counts, laid out along the top edge.
-func (m *Model) renderSeatSummary() string {
+func (m *model) renderSeatSummary() string {
 	if len(m.Base.Opponents) == 0 {
 		return ""
 	}
@@ -122,7 +117,7 @@ func (m *Model) renderSeatSummary() string {
 	return lg.JoinHorizontal(lg.Center, parts...)
 }
 
-func (m *Model) renderSideOpponent(rel int, minimal bool, height int) string {
+func (m *model) renderSideOpponent(rel int, minimal bool, height int) string {
 	o, ok := m.opponentAt(rel)
 	if !ok {
 		return ""
@@ -139,7 +134,7 @@ func (m *Model) renderSideOpponent(rel int, minimal bool, height int) string {
 	return gameview.RenderOpponent(m.Global.Theme, o, isTurn, orient, m.Base.TurnRemaining, height-2)
 }
 
-func (m *Model) opponentID(rel int) string {
+func (m *model) opponentID(rel int) string {
 	o, ok := m.opponentAt(rel)
 	if !ok {
 		return ""
@@ -157,7 +152,7 @@ const trickArtRows = 3*(components.FaceHeight+3) + 2
 // The four cards of a trick are the one thing in Hearts a player cannot play without
 // seeing - which card led, whether hearts are in - so a trick that does not fit has to
 // shrink rather than be cut off at the band's edge.
-func (m *Model) renderTrickArea(height int) string {
+func (m *model) renderTrickArea(height int) string {
 	mini := height > 0 && height < trickArtRows
 
 	hero := m.renderTrickSlot(m.Bound.PlayerID(), mini)
@@ -171,7 +166,7 @@ func (m *Model) renderTrickArea(height int) string {
 	)
 }
 
-func (m *Model) renderTrickSlot(playerID string, mini bool) string {
+func (m *model) renderTrickSlot(playerID string, mini bool) string {
 	card, ok := m.trickCards[playerID]
 	if playerID == "" || !ok {
 		if mini {
@@ -185,14 +180,14 @@ func (m *Model) renderTrickSlot(playerID string, mini bool) string {
 	return components.RenderCard(m.Global.Theme, card, false)
 }
 
-func (m *Model) renderHeartsBrokenIndicator() string {
+func (m *model) renderHeartsBrokenIndicator() string {
 	if m.heartsBroken {
 		return lg.NewStyle().Foreground(m.Global.Theme.Warning).Render("♥ Hearts: broken")
 	}
 	return m.Global.Theme.Muted.Render("♥ Hearts: not yet broken")
 }
 
-func (m *Model) renderPassDirection() string {
+func (m *model) renderPassDirection() string {
 	if m.phase != logic.PhasePassing {
 		return ""
 	}
@@ -201,7 +196,7 @@ func (m *Model) renderPassDirection() string {
 	return m.Global.Theme.Dim.Render("Pass: " + m.passDirection.String())
 }
 
-func (m *Model) renderPlayerSection() string {
+func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth := gameview.HandWidth(m.Global.Width)
 	handRows := gameview.HandRows(m.Global.Height)
@@ -216,7 +211,7 @@ func (m *Model) renderPlayerSection() string {
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
 }
 
-func (m *Model) renderHandOver() string {
+func (m *model) renderHandOver() string {
 	h := gameview.HandOver{Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber), Hint: keyHintsOver}
 	if m.matchComplete || m.Base.Phase == game.Finished {
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.Winner), gameview.LobbyHint

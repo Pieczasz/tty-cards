@@ -11,9 +11,9 @@ import (
 	logic "github.com/Pieczasz/terminal-card/internal/game/hearts"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +23,7 @@ func testUser() *db.User {
 	return &db.User{ID: testutil.UID(1), Username: "alice"}
 }
 
-func startedTable(t *testing.T) (*game.Engine, *Model) {
+func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	players := testutil.NamedPlayers("alice", "bob", "carol", "dave")
 	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
@@ -38,7 +38,7 @@ func startedTable(t *testing.T) (*game.Engine, *Model) {
 		Width:        80,
 		Height:       40,
 	}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
 	return engine, m
 }
@@ -74,7 +74,7 @@ func TestPassSelection_FollowsTheCardsNotThePositions(t *testing.T) {
 		{Rank: deck.King, Suit: deck.Spades},
 		{Rank: deck.Nine, Suit: deck.Diamonds},
 	}
-	m := &Model{
+	m := &model{
 		Base:         gameview.BaseState{Hand: slices.Clone(hand), MyTurn: true},
 		passSelected: map[deck.Card]struct{}{},
 		phase:        logic.PhasePassing,
@@ -159,12 +159,12 @@ func TestHandleSpace_StagesAtMostThreeCards(t *testing.T) {
 
 	for i := range 4 {
 		m.Selected = i
-		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+		_, _ = m.Update(tuitest.Key("space"))
 	}
 	assert.Len(t, m.passSelected, 3, "the fourth card is refused")
 
 	m.Selected = 0
-	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	_, _ = m.Update(tuitest.Key("space"))
 	assert.Len(t, m.passSelected, 2, "space on a staged card takes it back")
 }
 
@@ -184,7 +184,7 @@ func TestHandleSpace_IsInertOutsideThePassPhase(t *testing.T) {
 			_, m := startedTable(t)
 			m.phase, m.Base.MyTurn, m.Selected = tc.phase, tc.myTurn, 0
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+			_, _ = m.Update(tuitest.Key("space"))
 			assert.Empty(t, m.passSelected)
 		})
 	}
@@ -198,9 +198,9 @@ func TestSubmitPass_RefusesAnythingButThreeCards(t *testing.T) {
 	m.phase = logic.PhasePassing
 	m.Base.MyTurn = true
 	m.Selected = 0
-	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	_, _ = m.Update(tuitest.Key("space"))
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, _ = m.Update(tuitest.Key("enter"))
 	require.ErrorIs(t, m.ActionErr, errNeedThreeCards)
 	assert.Len(t, m.passSelected, 1, "the staging survives a refused pass")
 }
@@ -213,7 +213,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		_, m := startedTable(t)
 		m.Base.Phase = game.Finished
 
-		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := m.Update(tuitest.Key("enter"))
 		assert.NotNil(t, cmd)
 	})
 
@@ -223,7 +223,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.phase = logic.PhaseHandOver
 		m.Base.MyTurn = false
 
-		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := m.Update(tuitest.Key("enter"))
 		assert.Nil(t, cmd)
 		assert.NoError(t, m.ActionErr, "waiting for another seat is not an error")
 	})
@@ -234,7 +234,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 		m.phase = logic.PhaseTrickPlay
 		m.Base.MyTurn = false
 
-		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, _ = m.Update(tuitest.Key("enter"))
 		assert.NoError(t, m.ActionErr, "the play never reaches the engine")
 	})
 }
@@ -243,17 +243,17 @@ func TestHandleKey_CursorAndEscape(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	_, _ = m.Update(tuitest.Key("l"))
 	require.Equal(t, 1, m.Selected)
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	_, _ = m.Update(tuitest.Key("h"))
 	require.Equal(t, 0, m.Selected)
-	_, _ = m.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
+	_, _ = m.Update(tuitest.Key("4"))
 	require.Equal(t, 4, m.Selected)
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "esc asks before forfeiting")
 	assert.Contains(t, m.View().Content, "forfeit")
-	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.Update(tuitest.Key("y"))
 	assert.NotNil(t, cmd, "y leaves the table")
 }
 

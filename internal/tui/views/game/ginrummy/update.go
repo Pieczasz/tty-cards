@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, handled := m.HandleFrame(msg, m.syncState, nil); handled {
 		return m, cmd
 	}
@@ -18,7 +18,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
 		return m, cmd
 	}
@@ -45,7 +45,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
+func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.handComplete && !m.matchComplete {
 		if m.Base.MyTurn {
 			return m.submit(logic.ActionNextHand{})
@@ -63,7 +63,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 	return m.submit(logic.ActionDiscard{Card: card})
 }
 
-func (m *Model) handleKnock() (tea.Model, tea.Cmd) {
+func (m *model) handleKnock() (tea.Model, tea.Cmd) {
 	card, ok := m.SelectedCard()
 	if !m.Base.MyTurn || !ok || m.phase != logic.PhaseAwaitingDiscard {
 		return m, nil
@@ -71,16 +71,16 @@ func (m *Model) handleKnock() (tea.Model, tea.Cmd) {
 	return m.submit(logic.ActionKnock{Discard: card})
 }
 
-func (m *Model) submitIfTurn(action game.Action) (tea.Model, tea.Cmd) {
+func (m *model) submitIfTurn(action game.Action) (tea.Model, tea.Cmd) {
 	if !m.Base.MyTurn {
 		return m, nil
 	}
 	return m.submit(action)
 }
 
-func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
+func (m *model) submit(action game.Action) (tea.Model, tea.Cmd) {
 	_ = m.Submit(action) // kept in ActionErr, which the hero band renders
 	return m, nil
 }
 
-var _ router.Closer = (*Model)(nil)
+var _ router.Closer = (*model)(nil)
