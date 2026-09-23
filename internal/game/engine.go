@@ -2,11 +2,10 @@
 package game
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
+	"math/rand/v2"
 	"runtime/debug"
 	"slices"
 	"sync"
@@ -263,9 +262,10 @@ func (e *Engine) standingsLocked() []*Player {
 	return out
 }
 
-// Start deals and opens the table. A failure hands the dealt cards back, so the lobby
-// can try again rather than sitting on a table stuck mid-deal.
-func (e *Engine) Start() (err error) {
+// Start deals and opens the table. A failed start leaves the engine half-dealt and
+// unusable: the lobby builds a new engine per attempt, and the seats are the engine's
+// own copies, so nothing outside it sees the partial deal.
+func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -279,22 +279,6 @@ func (e *Engine) Start() (err error) {
 		return errors.New("cannot start game with no players")
 	}
 
-	// One rollback for every failure past this point: restoring a field a path never
-	// touched is a no-op, and per-path partial rollbacks leak dealt cards.
-	undealt := e.state.Deck.Cards()
-	defer func() {
-		if err == nil {
-			return
-		}
-		for _, p := range e.state.Players {
-			p.Cards = nil
-		}
-		e.state.Deck = deck.New(undealt)
-		e.state.Discard = nil
-		e.state.CurrentTurn = 0
-		e.state.Phase = Waiting
-	}()
-
 	e.state.Deck.Shuffle()
 
 	hands := make([][]deck.Card, len(e.state.Players))
@@ -306,16 +290,13 @@ func (e *Engine) Start() (err error) {
 		hands[playerIdx] = cards
 	}
 
-	startIdx, err := cryptoIntN(len(e.state.Players))
-	if err != nil {
-		return fmt.Errorf("selecting first player: %w", err)
-	}
-
 	for playerIdx, hand := range hands {
 		e.state.Players[playerIdx].Cards = hand
 	}
 	e.state.Phase = Playing
-	e.state.CurrentTurn = startIdx
+	// math/rand: who acts first is public the moment the table opens, so it is no
+	// secret worth crypto/rand, and there is no error to handle.
+	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret, see above
 
 	if err := e.state.Rules.OnGameStart(e.state); err != nil {
 		return fmt.Errorf("failed to setup game: %w", err)
@@ -327,17 +308,6 @@ func (e *Engine) Start() (err error) {
 	})
 
 	return nil
-}
-
-func cryptoIntN(n int) (int, error) {
-	if n <= 0 {
-		return 0, errors.New("n must be positive")
-	}
-	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
-	if err != nil {
-		return 0, fmt.Errorf("crypto/rand: %w", err)
-	}
-	return int(v.Int64()), nil
 }
 
 // SubmitAction applies action for playerID, who must be on turn. Acting for yourself
