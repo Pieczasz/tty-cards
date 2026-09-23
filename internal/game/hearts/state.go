@@ -30,8 +30,8 @@ const (
 	passDirectionCount = iota
 )
 
-// DefaultTargetScore is the total that ends the match once a player reaches it.
-const DefaultTargetScore = 100
+// targetScore is the total that ends the match once a player reaches it.
+const targetScore = 100
 
 const (
 	playerCount  = 4

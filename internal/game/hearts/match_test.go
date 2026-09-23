@@ -68,7 +68,7 @@ func TestMatch_PassDirectionCycles(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
 	extra := extra(t, state)
-	extra.TargetScore = DefaultTargetScore
+	extra.TargetScore = targetScore
 
 	want := []PassDirection{PassLeft, PassRight, PassAcross, PassNone, PassLeft}
 	dealer := 0

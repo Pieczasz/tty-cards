@@ -1,4 +1,4 @@
-// Package hearts is four-handed Hearts played to DefaultTargetScore: the three-card
+// Package hearts is four-handed Hearts played to 100 points: the three-card
 // pass, trick play with broken hearts and the queen of spades, and shooting the moon.
 package hearts
 
@@ -57,7 +57,7 @@ func (r *Rules) OnGameStart(state *game.State) error {
 		CumulativeScores: make(map[string]int, n),
 		HandPoints:       make(map[string]int, n),
 		TrickCards:       make(map[string]deck.Card, n),
-		TargetScore:      DefaultTargetScore,
+		TargetScore:      targetScore,
 	}
 	for _, p := range state.Players {
 		extra.CumulativeScores[p.ID] = 0

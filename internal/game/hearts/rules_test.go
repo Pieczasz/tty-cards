@@ -36,7 +36,7 @@ func createTestState(hands ...[]deck.Card) *game.State {
 		TrickCards:       make(map[string]deck.Card, playerCount),
 		HandPoints:       make(map[string]int, playerCount),
 		CumulativeScores: make(map[string]int, playerCount),
-		TargetScore:      DefaultTargetScore,
+		TargetScore:      targetScore,
 	}
 	for _, p := range players {
 		extra.HandPoints[p.ID] = 0
@@ -921,6 +921,6 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 			})
 			require.NoError(rt, engine.SubmitAction(id, act))
 		}
-		rt.Fatalf("a match played entirely by the clock never reached %d points", DefaultTargetScore)
+		rt.Fatalf("a match played entirely by the clock never reached %d points", targetScore)
 	})
 }
