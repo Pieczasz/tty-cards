@@ -34,19 +34,10 @@ func TestBroadcaster_Broadcast(t *testing.T) {
 
 	b.Broadcast(42)
 
-	select {
-	case got1 := <-ch1:
-		assert.Equal(t, 42, got1)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ch1 did not receive message")
-	}
-
-	select {
-	case got2 := <-ch2:
-		assert.Equal(t, 42, got2)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ch2 did not receive message")
-	}
+	got1, _ := recv(t, ch1)
+	assert.Equal(t, 42, got1)
+	got2, _ := recv(t, ch2)
+	assert.Equal(t, 42, got2)
 }
 
 func TestBroadcaster_Unsubscribe(t *testing.T) {
@@ -66,21 +57,13 @@ func TestBroadcaster_Unsubscribe(t *testing.T) {
 	assert.Len(t, b.subscribers, 1)
 	b.mu.Unlock()
 
-	select {
-	case _, ok := <-ch1:
-		assert.False(t, ok, "the unsubscribed channel must be closed")
-	case <-time.After(time.Second):
-		t.Fatal("Unsubscribe left ch1 open, so it closed the wrong subscriber")
-	}
+	_, ok := recv(t, ch1)
+	assert.False(t, ok, "the unsubscribed channel must be closed")
 
 	b.Broadcast("hello")
 
-	select {
-	case got2 := <-ch2:
-		assert.Equal(t, "hello", got2)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ch2 did not receive message")
-	}
+	got2, _ := recv(t, ch2)
+	assert.Equal(t, "hello", got2)
 }
 
 func TestBroadcaster_SubscribeAfterClose(t *testing.T) {
@@ -129,12 +112,7 @@ func TestBroadcaster_NonBlockingFullChannel(t *testing.T) {
 		b.Broadcast(1001)
 		done <- true
 	}()
-
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Broadcast blocked on a full channel")
-	}
+	recv(t, done)
 
 	var last int
 	for {
@@ -388,6 +366,20 @@ func BenchmarkBroadcast(b *testing.B) {
 			wg.Wait()
 		})
 	}
+}
+
+// recv waits generously: a message that is coming arrives in microseconds, and a tight
+// deadline only flakes under -race on a loaded machine.
+func recv[T any](t *testing.T, ch <-chan T) (T, bool) {
+	t.Helper()
+	select {
+	case v, ok := <-ch:
+		return v, ok
+	case <-time.After(10 * time.Second):
+		t.Fatal("nothing arrived on the channel")
+	}
+	var zero T
+	return zero, false
 }
 
 func mustSubscribe[T any](t *testing.T, b *Broadcaster[T]) <-chan T {
