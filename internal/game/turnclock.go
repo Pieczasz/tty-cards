@@ -43,12 +43,6 @@ func (e *Engine) stopTurnTimerLocked() {
 	e.turnDeadline = time.Time{}
 }
 
-func (e *Engine) rearmTurnTimer() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.armTurnTimerLocked()
-}
-
 func (e *Engine) TurnDeadline() time.Time {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -84,12 +78,14 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 		// The player acted for themselves while the lock was dropped: their action
 		// armed a fresh clock, so re-arming would hand the next player a double turn.
 		return
-	default:
-		// TimeoutAction returned a move ValidateAction refuses: a rules bug. The seat
-		// is taken on the next expiry instead.
+	case errors.Is(err, errActionRefused):
+		// TimeoutAction returned a move ValidateAction refuses: a rules bug. The clock
+		// was re-armed under the lock, and each expiry still counts a miss.
 		slog.Warn("auto-play for an expired turn was refused",
 			"error", err, "player_id", playerID, "action", action.Name())
-		e.rearmTurnTimer()
+	default:
+		slog.Error("auto-play ended the table on a rules error",
+			"error", err, "player_id", playerID, "action", action.Name())
 	}
 }
 

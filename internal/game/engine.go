@@ -24,6 +24,10 @@ var ErrInvalidState = errors.New("invalid state type")
 // the lock and the submit re-acquiring it. Internal: a non-event, not a failure.
 var errStaleTurn = errors.New("turn already settled")
 
+// errActionRefused is an auto-play ValidateAction refused: a rules bug, logged and
+// re-armed, where an apply failure has already ended the game.
+var errActionRefused = errors.New("auto-play refused")
+
 // Engine owns one mutex covering its clock fields and the State: they are always read
 // together, and a second lock would only add orderings to get wrong.
 type Engine struct {
@@ -345,7 +349,16 @@ func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64
 	if seq != e.turnSeq {
 		return errStaleTurn
 	}
-	return e.submitActionLocked(playerID, action, false)
+	err := e.submitActionLocked(playerID, action, false)
+	if err != nil && e.state.Phase == Playing {
+		// Still playing after a failure means ValidateAction refused the move: an apply
+		// failure ends the game, and seq rules out a wrong seat. Re-armed on this lock
+		// hold, because after it is dropped a player's own move may already have armed
+		// the next seat's clock, and re-arming then would reset it.
+		e.armTurnTimerLocked()
+		return fmt.Errorf("%w: %w", errActionRefused, err)
+	}
+	return err
 }
 
 // playerPresent is false when playing for an absent player: that timeout is already

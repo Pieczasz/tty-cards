@@ -517,3 +517,26 @@ func TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable(t *testing.T) {
 	require.NotNil(t, ended, "the end is announced so the lobby can finalize")
 	assert.Equal(t, EndReasonRulesError, ended.Reason, "a panic is a rules error: the match is not rated")
 }
+
+// The re-arm after a refused auto-play used to run after the lock was dropped, so a
+// player move landing in that gap had its fresh clock overwritten by the stale turn's
+// re-arm. It has to happen on the same lock hold as the refusal.
+func TestEngine_TurnTimeout_RefusalRearmsUnderTheSameLock(t *testing.T) {
+	t.Parallel()
+	rules := &timeoutRules{safe: namedAction{name: "safe"}, reject: true}
+	engine := newTimeoutEngine(t, rules, "a", "b")
+
+	engine.mu.Lock()
+	seq := engine.turnSeq
+	engine.mu.Unlock()
+
+	id, action, takeSeat := engine.resolveTurnTimeout(seq)
+	require.False(t, takeSeat)
+	err := engine.submitTimedOutAction(id, action, seq)
+	require.ErrorIs(t, err, errActionRefused, "a refusal is told apart from an apply failure")
+
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	assert.NotEqual(t, seq, engine.turnSeq, "the clock was re-armed before the lock was released")
+	assert.False(t, engine.turnDeadline.IsZero())
+}
