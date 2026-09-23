@@ -305,13 +305,10 @@ func serve(ctx context.Context, d serveDeps) error {
 	if err != nil {
 		return fmt.Errorf("create tcp listener: %w", err)
 	}
-	limitListener := netutil.LimitListener(listener, 2*cfg.MaxConnections)
-	// proxyproto defaults to REQUIRE: every connection must open with a PROXY header,
-	// which is right behind nginx and is why 6969 must never be published - any peer's
-	// header is honored. PROXY_PROTOCOL=false is the local escape hatch for bare ssh.
-	acceptListener := limitListener
-	if cfg.ProxyProtocol {
-		acceptListener = &proxyproto.Listener{Listener: limitListener, ReadHeaderTimeout: 10 * time.Second}
+	acceptListener, err := proxyListener(netutil.LimitListener(listener, 2*cfg.MaxConnections), cfg)
+	if err != nil {
+		_ = listener.Close()
+		return err
 	}
 	defer func() {
 		if err := acceptListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -351,6 +348,31 @@ func serve(ctx context.Context, d serveDeps) error {
 
 	drainServer(d.onShutdown, server)
 	return nil
+}
+
+// proxyListener puts the PROXY protocol in front of the ssh listener. proxyproto
+// defaults to REQUIRE: every connection must open with a PROXY header, which is right
+// behind nginx. Without PROXY_TRUSTED_CIDRS any peer's header is honored, which is why
+// 6969 must never be published; with it, a connection from anywhere else is dropped
+// before its header is read. PROXY_PROTOCOL=false is the local escape hatch for bare
+// ssh.
+func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error) {
+	if !cfg.ProxyProtocol {
+		return inner, nil
+	}
+	listener := &proxyproto.Listener{Listener: inner, ReadHeaderTimeout: 10 * time.Second}
+	if len(cfg.ProxyTrustedCIDRs) > 0 {
+		ranges := make([]string, len(cfg.ProxyTrustedCIDRs))
+		for i, prefix := range cfg.ProxyTrustedCIDRs {
+			ranges[i] = prefix.String()
+		}
+		policy, err := proxyproto.TrustProxyHeaderFromRanges(ranges)
+		if err != nil {
+			return nil, fmt.Errorf("proxy trusted cidrs: %w", err)
+		}
+		listener.ConnPolicy = policy
+	}
+	return listener, nil
 }
 
 func drainServer(onShutdown func(), server sshServer) {
