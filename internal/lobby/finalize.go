@@ -22,15 +22,21 @@ type finalizeRequest struct {
 	startedAt time.Time
 }
 
-// finalizeFinishedGame persists the result of a game that just ended.
-// registerFinalizer runs before anything else: every statement between observing
-// the end and that call is a window for shutdown to begin, and a refusal then
-// drops a finished match with nothing left for WaitForFinalizers to wait on.
-func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason) {
-	if m == nil || m.matchRepo == nil {
+// finalizeFinishedGame persists the result of a game that just ended. registered is
+// the caller's registerFinalizer result, taken before anything else: every statement
+// between observing the end and that call is a window for shutdown to begin, and a
+// refusal then drops a finished match with nothing left for WaitForFinalizers to
+// wait on. A true registration is released here on every path.
+func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason, registered bool) {
+	if m == nil {
 		return
 	}
-	registered := m.registerFinalizer()
+	if registered {
+		defer m.finalizing.Done()
+	}
+	if m.matchRepo == nil {
+		return
+	}
 	parentCtx := m.shutdownCtx()
 
 	if !registered {
@@ -39,7 +45,6 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 		observability.MatchFinalize(parentCtx, "dropped", req.isRanked)
 		return
 	}
-	defer m.finalizing.Done()
 
 	if !req.startedAt.IsZero() {
 		observability.GameFinished(parentCtx, req.game.Name, req.isRanked, endReasonLabel(reason), time.Since(req.startedAt))

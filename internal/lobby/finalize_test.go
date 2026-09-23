@@ -574,7 +574,7 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 			engine := game.NewEngine(&noStandingsRules{}, nil, deck.StandardDeck())
 			t.Cleanup(engine.Close)
 
-			m.finalizeFinishedGame(tt.req, engine, tt.reason)
+			m.finalizeFinishedGame(tt.req, engine, tt.reason, m.registerFinalizer())
 
 			assert.True(t, logged.contains(tt.wantLog), "the drop was silent: %s", logged.String())
 			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -602,5 +602,43 @@ func TestEndReasonLabel_NamesEveryReason(t *testing.T) {
 		game.EndReasonUnknown:     "unknown",
 	} {
 		assert.Equal(t, want, endReasonLabel(reason))
+	}
+}
+
+// The watcher reopens the table before it persists, and reopening waits on m.mu in
+// releaseHeldSeats. Registering the finalizer only after that left the drain a window
+// to see zero writes in flight and stop accepting them: the match was dropped at
+// shutdown with the process already told it was safe to exit.
+func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
+	t.Parallel()
+
+	repo := new(MockMatchRepo)
+	recorded := make(chan struct{}, 1)
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
+	repo.On("RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
+
+	m, l, engine := newFinishedGameLobby(t, repo)
+	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
+
+	m.mu.Lock()
+	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	// The table is Waiting again, so the watcher is parked in releaseHeldSeats on m.mu.
+	require.Eventually(t, func() bool {
+		l.mu.RLock()
+		defer l.mu.RUnlock()
+		return l.state == Waiting
+	}, 2*time.Second, time.Millisecond)
+
+	assert.False(t, m.WaitForFinalizers(50*time.Millisecond),
+		"the drain finished while a finished match had not been written")
+	m.mu.Unlock()
+
+	require.True(t, m.WaitForFinalizers(2*time.Second))
+	select {
+	case <-recorded:
+	default:
+		t.Fatal("the match that ended during the drain was dropped")
 	}
 }

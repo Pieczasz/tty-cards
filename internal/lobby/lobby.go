@@ -593,9 +593,6 @@ func (l *Lobby) handleBroadcasterEvents(ch <-chan game.Event, engine *game.Engin
 			// back to ID, so a zero-UserID stub still matches.
 			l.manager.LeaveLobby(&game.Player{ID: event.PlayerID})
 		case game.EventGameEnded:
-			// Reopen before persist: a 15s write must not pin InGame while the TUI
-			// is already back in the lobby and ready-ing the next hand.
-			l.releaseFinishedGame()
 			l.requestFinalize(engine, event.Reason, req)
 			return
 		default:
@@ -607,19 +604,25 @@ func (l *Lobby) handleBroadcasterEvents(ch <-chan game.Event, engine *game.Engin
 	// latest-wins and can drop EventGameEnded, and RemoveLobby closes the feed from
 	// under this goroutine.
 	if engine.IsFinished() {
-		l.releaseFinishedGame()
 		l.requestFinalize(engine, game.EndReasonUnknown, req)
 	}
 }
 
-// requestFinalize hands the finished table to Manager for persistence. req was
-// snapshotted by watchGameLocked when this game started, so a lobby that has since
-// reopened cannot rewrite what the finished match is recorded as.
+// requestFinalize reopens the finished table and hands it to Manager for persistence.
+// req was snapshotted by watchGameLocked when this game started, so a lobby that has
+// since reopened cannot rewrite what the finished match is recorded as.
+//
+// Register, reopen, persist - in that order. Reopening comes before the write, so a
+// 15s write does not pin InGame while the TUI is already back in the lobby; but it
+// waits on m.mu in releaseHeldSeats, and a shutdown that began inside that wait would
+// have refused the registration and dropped the match.
 func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
 	if l.manager == nil {
 		return
 	}
-	l.manager.finalizeFinishedGame(req, engine, reason)
+	registered := l.manager.registerFinalizer()
+	l.releaseFinishedGame()
+	l.manager.finalizeFinishedGame(req, engine, reason, registered)
 }
 
 // releaseFinishedGameLocked returns a finished lobby to Waiting and hands back the
