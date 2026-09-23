@@ -99,7 +99,6 @@ func (o Outcome) String() string {
 }
 
 // HandResult is the settle-up summary shown between hands.
-
 type HandResult struct {
 	Outcome Outcome
 

@@ -1,7 +1,6 @@
 package poker
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -138,14 +137,7 @@ func TestClampRaise_BoundsToLegalRange(t *testing.T) {
 // test does not depend on where the button landed.
 func tableOnTurn(t *testing.T, seats int) (*game.Engine, *model) {
 	t.Helper()
-	players := make([]*game.Player, 0, seats)
-	for i := range seats {
-		players = append(players, &game.Player{
-			ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1),
-			Name: fmt.Sprintf("p%d", i+1),
-		})
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(seats), deck.StandardDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
