@@ -60,7 +60,7 @@ func TestJoin_RefreshPicksUpNewTables(t *testing.T) {
 
 	openPublicTable(t, m, "host", testutil.UID(1), testGameName)
 
-	updated, cmd := view.Update(refreshMsg{})
+	updated, cmd := view.Update(refreshMsg{owner: view})
 
 	require.NotNil(t, cmd, "the refresh must reschedule itself or the list freezes")
 	browser, ok := updated.(*joinModel)
@@ -354,8 +354,22 @@ func TestJoin_InitStartsTheRefreshLoop(t *testing.T) {
 // Update actually matches - a plain time.Time would be ignored and the list would freeze.
 func TestJoin_RefreshTickProducesARefreshMsg(t *testing.T) {
 	t.Parallel()
+	view := newJoinModel(t, lobby.NewManager(context.Background(), nil))
 
-	assert.IsType(t, refreshMsg{}, refreshTick()())
+	assert.Equal(t, refreshMsg{owner: view}, view.refreshTick()())
+}
+
+// Every join screen arms its own tick, and a tick already in flight when the player
+// left lands on whatever screen is up next. esc then f inside the window used to hand
+// the old tick to the new screen, which re-armed it: two refresh chains, then three.
+func TestJoin_AStaleRefreshIsDroppedWithoutRearming(t *testing.T) {
+	t.Parallel()
+	m := lobby.NewManager(context.Background(), nil)
+	left, current := newJoinModel(t, m), newJoinModel(t, m)
+
+	_, cmd := current.Update(refreshMsg{owner: left})
+
+	assert.Nil(t, cmd, "the old screen's tick must not start a second chain here")
 }
 
 func TestJoin_JoinByCode(t *testing.T) {

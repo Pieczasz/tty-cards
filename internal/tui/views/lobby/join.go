@@ -46,10 +46,13 @@ func listLayout(contentHeight int) (rows int, compact bool) {
 	return min(max(contentHeight-chrome, 1), maxVisibleRows), compact
 }
 
-type refreshMsg time.Time
+// refreshMsg names the screen that armed it. The router builds a new join screen on
+// every visit, and a tick in flight from the last one would otherwise re-arm itself
+// here and run a second chain.
+type refreshMsg struct{ owner *joinModel }
 
-func refreshTick() tea.Cmd {
-	return tea.Tick(browseRefresh, func(t time.Time) tea.Msg { return refreshMsg(t) })
+func (m *joinModel) refreshTick() tea.Cmd {
+	return tea.Tick(browseRefresh, func(time.Time) tea.Msg { return refreshMsg{owner: m} })
 }
 
 type joinModel struct {
@@ -93,7 +96,7 @@ func NewJoin(global router.GlobalContext) tea.Model {
 }
 
 func (m *joinModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, refreshTick())
+	return tea.Batch(textinput.Blink, m.refreshTick())
 }
 
 // refresh re-reads the list and keeps the cursor on a real row. Tables appear and
@@ -108,9 +111,12 @@ func (m *joinModel) refresh() {
 }
 
 func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(refreshMsg); ok {
+	if tick, ok := msg.(refreshMsg); ok {
+		if tick.owner != m {
+			return m, nil
+		}
 		m.refresh()
-		return m, refreshTick()
+		return m, m.refreshTick()
 	}
 
 	// The shared handler claims resizes, the theme switch and ctrl+c, and nothing
