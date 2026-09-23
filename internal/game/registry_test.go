@@ -52,8 +52,8 @@ func TestRegistry_GameNamesKeepDeclarationOrder(t *testing.T) {
 
 // A half-declared module is a wiring bug, and a registry that accepted one would fail
 // later as a missing route or a nil factory panic at the moment somebody starts a
-// table. catalog_test.go leans on this being loud. A name declared twice is the same
-// bug: GameNames drives the menu, and one of the two would be unreachable.
+// table. catalog_test.go leans on this being loud. A name declared twice is the
+// same mistake: GameNames drives the menu, and one of the two would be unreachable.
 func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {
 	t.Parallel()
 

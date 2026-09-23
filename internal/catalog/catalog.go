@@ -41,43 +41,33 @@ func NewRegistry() *game.Registry {
 // field or duplicate slug. A new game ships by adding one entry here.
 var All = []Entry{
 	{
-		Module: game.Module{
-			Name:    "Crazy Eights",
-			Slug:    "crazy_eights",
-			Factory: func() game.Rules { return &crazyeightrules.Rules{} },
-		},
-		View: crazyeightview.New,
+		Name:    "Crazy Eights",
+		Slug:    "crazy_eights",
+		Factory: func() game.Rules { return &crazyeightrules.Rules{} },
+		View:    crazyeightview.New,
 	},
 	{
-		Module: game.Module{
-			Name:    "Poker",
-			Slug:    "poker",
-			Factory: func() game.Rules { return &pokerrules.Rules{} },
-		},
-		View: pokerview.New,
+		Name:    "Poker",
+		Slug:    "poker",
+		Factory: func() game.Rules { return &pokerrules.Rules{} },
+		View:    pokerview.New,
 	},
 	{
-		Module: game.Module{
-			Name:    "Uno",
-			Slug:    "uno",
-			Factory: func() game.Rules { return &unorules.Rules{} },
-		},
-		View: unoview.New,
+		Name:    "Uno",
+		Slug:    "uno",
+		Factory: func() game.Rules { return &unorules.Rules{} },
+		View:    unoview.New,
 	},
 	{
-		Module: game.Module{
-			Name:    "Hearts",
-			Slug:    "hearts",
-			Factory: func() game.Rules { return &heartsrules.Rules{} },
-		},
-		View: heartsview.New,
+		Name:    "Hearts",
+		Slug:    "hearts",
+		Factory: func() game.Rules { return &heartsrules.Rules{} },
+		View:    heartsview.New,
 	},
 	{
-		Module: game.Module{
-			Name:    "Gin Rummy",
-			Slug:    "gin_rummy",
-			Factory: func() game.Rules { return &ginrummyrules.Rules{} },
-		},
-		View: ginrummyview.New,
+		Name:    "Gin Rummy",
+		Slug:    "gin_rummy",
+		Factory: func() game.Rules { return &ginrummyrules.Rules{} },
+		View:    ginrummyview.New,
 	},
 }
