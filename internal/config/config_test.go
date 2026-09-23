@@ -22,7 +22,7 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("DB_PORT", "")
 	t.Setenv("DB_MAX_OPEN_CONNS", "")
 	t.Setenv("RATE_LIMIT_CONNECTIONS", "")
-	t.Setenv("RATE_LIMIT_WINDOW_MS", "")
+	t.Setenv("RATE_LIMIT_WINDOW", "")
 	t.Setenv("DB_SSLMODE", "")
 	t.Setenv("SERVER_HOST", "")
 	t.Setenv("DB_HOST", "")
@@ -392,6 +392,34 @@ func TestLoad_RegistrationBudget(t *testing.T) {
 	})
 }
 
+// RATE_LIMIT_WINDOW is a Go duration, like REGISTRATION_WINDOW, and replaced the
+// millisecond RATE_LIMIT_WINDOW_MS. The old name has to fail the boot: silently
+// ignored, an operator's tuned window would fall back to the default.
+func TestLoad_RateLimitWindow(t *testing.T) {
+	t.Run("a duration", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("RATE_LIMIT_WINDOW", "250ms")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, 250*time.Millisecond, cfg.RateLimitWindow)
+	})
+	t.Run("a bare number is not a duration", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("RATE_LIMIT_WINDOW", "1000")
+
+		_, err := config.Load()
+		require.ErrorContains(t, err, "RATE_LIMIT_WINDOW")
+	})
+	t.Run("the old millisecond name fails the boot", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("RATE_LIMIT_WINDOW_MS", "1000")
+
+		_, err := config.Load()
+		require.ErrorContains(t, err, "renamed RATE_LIMIT_WINDOW")
+	})
+}
+
 // The PROXY header names the client address every limiter keys on, so accepting it
 // from anyone lets anyone choose their own address.
 func TestLoad_ProxyTrustedCIDRs(t *testing.T) {
@@ -458,7 +486,7 @@ func TestValidate_LowestAllowedValuesAreValid(t *testing.T) {
 		want    string
 	}{
 		{name: "no connections allowed", breakIt: func(c *config.Config) { c.RateLimitCount = 0 }, want: "RATE_LIMIT_CONNECTIONS"},
-		{name: "sub-millisecond window", breakIt: func(c *config.Config) { c.RateLimitWindow = time.Microsecond }, want: "RATE_LIMIT_WINDOW_MS"},
+		{name: "sub-millisecond window", breakIt: func(c *config.Config) { c.RateLimitWindow = time.Microsecond }, want: "RATE_LIMIT_WINDOW"},
 		{name: "no db connections", breakIt: func(c *config.Config) { c.DBMaxOpenConnections = 0 }, want: "DB_MAX_OPEN_CONNS"},
 		{
 			name:    "no api requests allowed",

@@ -198,7 +198,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
 | `MAX_CONNECTIONS` | `1000` | concurrent TCP connections |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
-| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW_MS` | `5` / `1000` | SSH **auth attempts** per client network |
+| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network |
 | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network; raise for `make loadtest` |
 | `DB_*` | see `.env.example` | Postgres; in production `DB_SSLMODE` defaults to `require` and must be `require`, `verify-ca` or `verify-full` unless the host is internal or `ALLOW_INSECURE_DB=true` |
 | `DB_MAX_OPEN_CONNS` | `25` | pool size, independent of the SSH cap |

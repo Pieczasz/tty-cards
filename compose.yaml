@@ -97,7 +97,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=alloy:4317
       - OTEL_EXPORTER_OTLP_INSECURE=true
       - RATE_LIMIT_CONNECTIONS=5
-      - RATE_LIMIT_WINDOW_MS=1000
+      - RATE_LIMIT_WINDOW=1s
       - MAX_CONNECTIONS=1000
       # Rendering a frame costs ~4k allocations against a live heap of a few tens of
       # MB, so the default GOGC=100 collects constantly and GC, not the cores, becomes

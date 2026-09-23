@@ -110,6 +110,14 @@ func (r *envReader) duration(key string, fallback time.Duration) time.Duration {
 	return v
 }
 
+// renamed fails the boot on a variable that no longer exists: left alone, a setting an
+// operator tuned would be dropped for its default without a word.
+func (r *envReader) renamed(key, replacement string) {
+	if os.Getenv(key) != "" {
+		r.fail(key, fmt.Errorf("renamed %s", replacement))
+	}
+}
+
 // bool takes what strconv.ParseBool does (1, t, true, 0, f, false, any case of
 // those words). Anything else fails the boot: "yes" used to mean false for some
 // variables and true for others.
@@ -185,6 +193,7 @@ func Load() (*Config, error) {
 	}
 
 	r := &envReader{}
+	r.renamed("RATE_LIMIT_WINDOW_MS", "RATE_LIMIT_WINDOW, a duration such as 1s")
 	cfg := &Config{
 		Env:            env,
 		ServerHost:     getEnv("SERVER_HOST", "0.0.0.0"),
@@ -216,7 +225,7 @@ func Load() (*Config, error) {
 		OTelInsecure:    r.bool("OTEL_EXPORTER_OTLP_INSECURE", !production),
 		ServiceVersion:  getEnv("SERVICE_VERSION", detectVersion()),
 		RateLimitCount:  r.int("RATE_LIMIT_CONNECTIONS", 5),
-		RateLimitWindow: time.Duration(r.int("RATE_LIMIT_WINDOW_MS", 1000)) * time.Millisecond,
+		RateLimitWindow: r.duration("RATE_LIMIT_WINDOW", time.Second),
 		LogLevel:        r.level("LOG_LEVEL"),
 	}
 	if r.err != nil {
@@ -241,7 +250,7 @@ func (c *Config) Validate() error {
 		msg string
 	}{
 		{c.RateLimitCount < 1, "RATE_LIMIT_CONNECTIONS must be at least 1"},
-		{c.RateLimitWindow < time.Millisecond, "RATE_LIMIT_WINDOW_MS must be at least 1"},
+		{c.RateLimitWindow < time.Millisecond, "RATE_LIMIT_WINDOW must be at least 1ms"},
 		{c.APIRequestsPerMinute < 1, "API_REQUESTS_PER_MINUTE must be at least 1"},
 		{c.DBMaxOpenConnections < 1, "DB_MAX_OPEN_CONNS must be at least 1"},
 		// netutil.LimitListener treats a non-positive limit as "accept nothing", so the
