@@ -128,9 +128,13 @@ jobs:
         DB_PASSWORD: ci
       run: |
         docker compose config --quiet
-        docker run --rm --add-host backend:127.0.0.1 \
-          -v "$PWD/internal/config/nginx.conf:/etc/nginx/nginx.conf:ro" \
-          nginx:1.27-alpine nginx -t
+        # The image compose runs, digest and all, so this tests what is deployed.
+        nginx_image=$(docker compose config --format json | jq -r '.services.proxy.image')
+        docker run --rm -v "$PWD/internal/config/nginx.conf:/etc/nginx/nginx.conf:ro" \
+          "$nginx_image" nginx -t
+        alloy_image=$(docker compose config --format json | jq -r '.services.alloy.image')
+        docker run --rm -v "$PWD/internal/config/alloy/config.alloy:/c/config.alloy:ro" \
+          "$alloy_image" fmt /c/config.alloy > /dev/null
 
     # Grafana is anonymous-admin on purpose, so the VPS itself is the gate: it must
     # never be published on anything but loopback. This is the one line that keeps
@@ -142,3 +146,61 @@ jobs:
         bindings=$(docker compose config --format json | jq -r '.services.grafana.ports[]? | "\(.host_ip // "0.0.0.0"):\(.published)"')
         echo "grafana publishes: $bindings"
         [ "$bindings" = "127.0.0.1:3000" ] || { echo "grafana must publish only 127.0.0.1:3000" >&2; exit 1; }
+
+    # A missing DB_PASSWORD used to interpolate to an empty string, and the stack came
+    # up with a passwordless database. It has to be a parse error instead.
+    - name: Compose refuses to start without DB_PASSWORD
+      run: |
+        if env -u DB_PASSWORD docker compose config --quiet 2>/dev/null; then
+          echo "docker compose config must fail when DB_PASSWORD is unset" >&2; exit 1
+        fi
+
+    # The hardening below is all configuration, so no Go test can fail when someone
+    # edits it away. These assertions are that test.
+    - name: Deployment hardening holds
+      env:
+        DB_PASSWORD: ci
+      run: |
+        cfg=$(docker compose config --format json)
+        fail() { echo "$1" >&2; exit 1; }
+
+        # D1: every image pinned by digest (backend is built, so it has none).
+        unpinned=$(jq -r '.services | to_entries[] | select(.value.image != null and (.value.image | test("@sha256:[0-9a-f]{64}$") | not)) | .key' <<<"$cfg")
+        [ -z "$unpinned" ] || fail "images not pinned by digest: $unpinned"
+
+        # D10: no service may gain privileges; the proxy keeps only what nginx needs.
+        missing=$(jq -r '.services | to_entries[] | select((.value.security_opt // []) | index("no-new-privileges:true") | not) | .key' <<<"$cfg")
+        [ -z "$missing" ] || fail "services without no-new-privileges: $missing"
+        jq -e '.services.proxy.cap_drop == ["ALL"]' <<<"$cfg" >/dev/null || fail "proxy must cap_drop ALL"
+        jq -e '.services.proxy.cap_add | sort == ["CHOWN","NET_BIND_SERVICE","SETGID","SETUID"]' <<<"$cfg" >/dev/null \
+          || fail "proxy cap_add must be exactly NET_BIND_SERVICE, CHOWN, SETUID, SETGID"
+
+        # D2: IPv6 on the proxy's network, nginx listening on both families, and the
+        # backend trusting PROXY headers from that network only.
+        jq -e '.networks.edge.enable_ipv6 == true' <<<"$cfg" >/dev/null || fail "edge network must enable IPv6"
+        jq -e '.services.proxy.networks | keys == ["edge"]' <<<"$cfg" >/dev/null || fail "proxy must sit on edge only"
+        subnets=$(jq -r '[.networks.edge.ipam.config[].subnet] | join(",")' <<<"$cfg")
+        trusted=$(jq -r '.services.backend.environment.PROXY_TRUSTED_CIDRS' <<<"$cfg")
+        [ "$trusted" = "$subnets" ] || fail "PROXY_TRUSTED_CIDRS ($trusted) must equal the edge subnets ($subnets)"
+        grep -q 'listen \[::\]:22 ' internal/config/nginx.conf || fail "nginx must listen on [::]:22"
+        grep -q 'listen \[::\]:80;' internal/config/nginx.conf || fail "nginx must listen on [::]:80"
+
+        # D3: Grafana answers only to Host: localhost (DNS rebinding).
+        jq -e '.services.grafana.environment.GF_SERVER_ENFORCE_DOMAIN == "true"' <<<"$cfg" >/dev/null \
+          || fail "grafana must set GF_SERVER_ENFORCE_DOMAIN=true"
+
+        # D9: Alloy reads Docker through the socket proxy, never the socket.
+        jq -e '[.services.alloy.volumes[]? | .source] | any(test("docker.sock")) | not' <<<"$cfg" >/dev/null \
+          || fail "alloy must not mount the Docker socket"
+
+        # P2: no client address reaches Loki from nginx's error log.
+        for d in 'error_log stderr error;' 'limit_req_log_level warn;' 'limit_conn_log_level warn;' \
+                 'limit_req_status 429;' 'proxy_connect_timeout 5s;'; do
+          grep -qF "$d" internal/config/nginx.conf || fail "nginx.conf lost: $d"
+        done
+        grep -q 'stage.replace' internal/config/alloy/config.alloy || fail "alloy must redact nginx client addresses"
+
+        # P3: local backups never enter the image build context.
+        grep -qx 'backups/' .dockerignore || fail ".dockerignore must exclude backups/"
+
+        echo "deployment hardening holds"
