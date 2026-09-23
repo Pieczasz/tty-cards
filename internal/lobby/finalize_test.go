@@ -33,15 +33,8 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	rules := new(MockRules)
-	rules.On("MinPlayers").Return(2).Maybe()
-	rules.On("MaxPlayers").Return(4).Maybe()
-	rules.On("InitialDeck").Return(deck.StandardDeck()).Maybe()
-	rules.On("InitialDealCount").Return(2).Maybe()
-	rules.On("OnGameStart", mock.Anything).Return(nil).Maybe()
-	rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
-	rules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest}).Maybe()
-	registry := gameRegistry("MockGame", rules)
+	// The standings are the seats in order: leader, then guest.
+	registry := gameRegistry("MockGame", stubRules{minPlayers: 2, maxPlayers: 4})
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -257,8 +250,9 @@ func TestWaitForFinalizers_TimeoutDoesNotLeakItsWaiter(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(2*time.Second))
 }
 
-// A ranked hand the deploy interrupted has no honest winner, so it is history only.
-func TestFinalize_InterruptedRankedMatchIsRecordedWithoutElo(t *testing.T) {
+// A ranked hand that ends while the server shuts down has no honest winner - teardown
+// order, not play, decided it - so it is history only.
+func TestFinalize_RankedMatchEndingDuringShutdownIsRecordedWithoutElo(t *testing.T) {
 	t.Parallel()
 
 	repo := new(MockMatchRepo)
@@ -275,7 +269,7 @@ func TestFinalize_InterruptedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 	select {
 	case <-recorded:
 	case <-time.After(2 * time.Second):
-		t.Fatal("the interrupted match was never recorded")
+		t.Fatal("the match ending during shutdown was never recorded")
 	}
 	require.True(t, m.WaitForFinalizers(2*time.Second))
 	repo.AssertNotCalled(t, "FinalizeRankedMatch",

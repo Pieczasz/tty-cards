@@ -3,7 +3,6 @@
 package repository_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ func TestUserRepository_RegisterUserWithKey(t *testing.T) {
 
 	t.Run("successful registration", func(t *testing.T) {
 		t.Parallel()
-		user, key, err := repo.RegisterUserWithKey(context.Background(), "reg_ok", "fp_reg_ok")
+		user, key, err := repo.RegisterUserWithKey(t.Context(), "reg_ok", "fp_reg_ok")
 		require.NoError(t, err)
 		require.NotNil(t, user)
 		assert.Equal(t, "reg_ok", user.Username)
@@ -37,42 +36,42 @@ func TestUserRepository_RegisterUserWithKey(t *testing.T) {
 
 	t.Run("username already taken", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := repo.RegisterUserWithKey(context.Background(), "dup_name", "fp_name_1")
+		_, _, err := repo.RegisterUserWithKey(t.Context(), "dup_name", "fp_name_1")
 		require.NoError(t, err, "seed the name first")
 
-		_, _, err = repo.RegisterUserWithKey(context.Background(), "dup_name", "fp_name_2")
+		_, _, err = repo.RegisterUserWithKey(t.Context(), "dup_name", "fp_name_2")
 		require.ErrorContains(t, err, "username already taken")
 	})
 
 	// D-4: "Alice" and "alice" read as one player on a leaderboard.
 	t.Run("a case variant of a taken name is taken", func(t *testing.T) {
 		t.Parallel()
-		first, _, err := repo.RegisterUserWithKey(context.Background(), "Case_Name", "fp_case_1")
+		first, _, err := repo.RegisterUserWithKey(t.Context(), "Case_Name", "fp_case_1")
 		require.NoError(t, err, "seed the name first")
 		assert.Equal(t, "Case_Name", first.Username, "the display case is kept")
 
-		_, _, err = repo.RegisterUserWithKey(context.Background(), "case_NAME", "fp_case_2")
+		_, _, err = repo.RegisterUserWithKey(t.Context(), "case_NAME", "fp_case_2")
 		require.ErrorIs(t, err, db.ErrUsernameTaken)
 	})
 
 	t.Run("invalid username length", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := repo.RegisterUserWithKey(context.Background(), "this_username_is_way_too_long", "fp_too_long")
+		_, _, err := repo.RegisterUserWithKey(t.Context(), "this_username_is_way_too_long", "fp_too_long")
 		require.ErrorContains(t, err, "username cannot exceed 16 characters")
 	})
 
 	t.Run("erasure prefix is not registerable", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := repo.RegisterUserWithKey(context.Background(), "deleted_1", "fp_deleted")
+		_, _, err := repo.RegisterUserWithKey(t.Context(), "deleted_1", "fp_deleted")
 		require.ErrorIs(t, err, db.ErrInvalidUsername)
 	})
 
 	t.Run("duplicate fingerprint", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := repo.RegisterUserWithKey(context.Background(), "fp_owner", "fp_shared")
+		_, _, err := repo.RegisterUserWithKey(t.Context(), "fp_owner", "fp_shared")
 		require.NoError(t, err, "seed the fingerprint first")
 
-		_, _, err = repo.RegisterUserWithKey(context.Background(), "fp_thief", "fp_shared")
+		_, _, err = repo.RegisterUserWithKey(t.Context(), "fp_thief", "fp_shared")
 		require.ErrorContains(t, err, "public key already registered")
 	})
 }
@@ -89,7 +88,7 @@ func TestUserRepository_RegisterUserWithKey_ConcurrentSameFingerprint(t *testing
 	errs := make(chan error, workers)
 	for i := range workers {
 		go func(i int) {
-			_, _, err := repo.RegisterUserWithKey(context.Background(), fmt.Sprintf("user_%d", i), "shared_fingerprint")
+			_, _, err := repo.RegisterUserWithKey(t.Context(), fmt.Sprintf("user_%d", i), "shared_fingerprint")
 			errs <- err
 		}(i)
 	}
@@ -116,7 +115,7 @@ func TestUserRepository_LoadUserByFingerprint(t *testing.T) {
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
 
-	registered, _, err := repo.RegisterUserWithKey(context.Background(), "player_two", "fingerprint_abc")
+	registered, _, err := repo.RegisterUserWithKey(t.Context(), "player_two", "fingerprint_abc")
 	require.NoError(t, err)
 	game := &db.Game{Slug: "loadgame", Name: "LoadGame"}
 	require.NoError(t, database.Create(game).Error)
@@ -124,7 +123,7 @@ func TestUserRepository_LoadUserByFingerprint(t *testing.T) {
 
 	t.Run("existing user", func(t *testing.T) {
 		t.Parallel()
-		user, key, err := repo.LoadUserByFingerprint(context.Background(), "fingerprint_abc")
+		user, key, err := repo.LoadUserByFingerprint(t.Context(), "fingerprint_abc")
 		require.NoError(t, err)
 		require.NotNil(t, user)
 		require.NotNil(t, key)
@@ -137,7 +136,7 @@ func TestUserRepository_LoadUserByFingerprint(t *testing.T) {
 
 	t.Run("non-existent user", func(t *testing.T) {
 		t.Parallel()
-		user, key, err := repo.LoadUserByFingerprint(context.Background(), "fingerprint_unknown")
+		user, key, err := repo.LoadUserByFingerprint(t.Context(), "fingerprint_unknown")
 		require.NoError(t, err)
 		assert.Nil(t, user)
 		assert.Nil(t, key)
@@ -149,7 +148,7 @@ func TestUserRepository_UpdateUserActivity(t *testing.T) {
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
 
-	user, key, err := repo.RegisterUserWithKey(context.Background(), "player_three", "fingerprint_xyz")
+	user, key, err := repo.RegisterUserWithKey(t.Context(), "player_three", "fingerprint_xyz")
 	require.NoError(t, err)
 
 	// Backdate both timestamps. Asserting only "After or Equal" would pass even if
@@ -160,9 +159,9 @@ func TestUserRepository_UpdateUserActivity(t *testing.T) {
 	require.NoError(t, database.Model(&db.PublicKey{}).Where("id = ?", key.ID).
 		Update("last_used_at", stale).Error)
 
-	require.NoError(t, repo.UpdateUserActivity(context.Background(), user, key))
+	require.NoError(t, repo.UpdateUserActivity(t.Context(), user, key))
 
-	updatedUser, updatedKey, err := repo.LoadUserByFingerprint(context.Background(), "fingerprint_xyz")
+	updatedUser, updatedKey, err := repo.LoadUserByFingerprint(t.Context(), "fingerprint_xyz")
 	require.NoError(t, err)
 
 	assert.True(t, updatedUser.LastSeenAt.After(stale),
@@ -179,7 +178,7 @@ func TestUserRepository_SoftDeletedUserDoesNotAuthenticate(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, createdKey, err := repo.RegisterUserWithKey(ctx, "activity_user", "activity_fp")
 	require.NoError(t, err)
@@ -206,7 +205,7 @@ func TestUserRepository_UpdateUserActivityDoesNotWriteUsers(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, createdKey, err := repo.RegisterUserWithKey(ctx, "activity_two", "activity_fp2")
 	require.NoError(t, err)
@@ -234,7 +233,7 @@ func TestUserRepository_UserMatchHistoryRejectsNegativeLimit(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, _, err := repo.RegisterUserWithKey(ctx, "neg_limit", "neg_limit_fp")
 	require.NoError(t, err)
@@ -255,7 +254,7 @@ func TestUserRepository_BestPlayersCachesShortTables(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	game := &db.Game{Slug: "shorttable", Name: "ShortTable"}
 	require.NoError(t, database.Create(game).Error)
@@ -283,7 +282,7 @@ func TestUserRepository_BestPlayersBypassesCacheAboveItsSize(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	game := &db.Game{Slug: "bigask", Name: "BigAsk"}
 	require.NoError(t, database.Create(game).Error)
@@ -307,7 +306,7 @@ func TestUserRepository_BestPlayers(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	game := &db.Game{Slug: "testgame", Name: "TestGame"}
 	database.Create(game)
@@ -334,7 +333,7 @@ func TestUserRepository_BestPlayers_FiltersByGame(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	poker := &db.Game{Slug: "poker", Name: "Poker"}
 	uno := &db.Game{Slug: "uno", Name: "Uno"}
@@ -367,7 +366,7 @@ func TestUserRepository_BestPlayers_FiltersBySlugAfterRename(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	poker := &db.Game{Slug: "poker", Name: "Poker"}
 	require.NoError(t, database.Create(poker).Error)
@@ -393,7 +392,7 @@ func TestUserRepository_UserProfile(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, _, _ := repo.RegisterUserWithKey(ctx, "profile_user", "profile_fp")
 
@@ -416,7 +415,7 @@ func TestUserRepository_UserMatchHistory(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	u, _, _ := repo.RegisterUserWithKey(ctx, "history_user", "history_fp")
 
@@ -442,7 +441,7 @@ func TestUserRepository_UserMatchHistory(t *testing.T) {
 func TestUserRepository_BestPlayersOrderIsStableAcrossEqualRatings(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	game := &db.Game{Slug: "tiebreak", Name: "Tiebreak"}
 	require.NoError(t, database.Create(game).Error)
@@ -482,7 +481,7 @@ func TestUserRepository_UpdateUserActivityWritesNoAssociations(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	user, key, err := repo.RegisterUserWithKey(ctx, "assoc_owner", "assoc_fp")
 	require.NoError(t, err)
@@ -527,7 +526,7 @@ type deletionFixture struct {
 
 func seedDeletionFixture(t *testing.T, database *gorm.DB, repo db.UserRepository) deletionFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	leaver, _, err := repo.RegisterUserWithKey(ctx, "leaver", "fp_leaver")
 	require.NoError(t, err)
@@ -583,7 +582,7 @@ func assertIdentityErased(t *testing.T, database *gorm.DB, f deletionFixture) {
 
 func assertHistorySurvives(t *testing.T, database *gorm.DB, repo db.UserRepository, f deletionFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	history, err := repo.UserMatchHistory(ctx, f.other.ID, 10)
 	require.NoError(t, err)
@@ -612,7 +611,7 @@ func TestUserRepository_DeleteAccount(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 	f := seedDeletionFixture(t, database, repo)
 
 	// Warming the cache first is the point: the erased name has to go within the
@@ -646,7 +645,7 @@ func TestUserRepository_DeleteAccountErasesASoftDeletedUser(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	user, _, err := repo.RegisterUserWithKey(ctx, "hidden", "fp_hidden")
 	require.NoError(t, err)
@@ -666,5 +665,5 @@ func TestUserRepository_DeleteAccountUnknownUser(t *testing.T) {
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
 
-	assert.ErrorIs(t, repo.DeleteAccount(context.Background(), uuid.New()), db.ErrUserNotFound)
+	assert.ErrorIs(t, repo.DeleteAccount(t.Context(), uuid.New()), db.ErrUserNotFound)
 }

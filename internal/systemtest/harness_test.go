@@ -2,11 +2,11 @@ package systemtest
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/game/poker"
@@ -75,7 +75,7 @@ func (r *rankedFinalizeRecorder) FinalizeRankedMatch(
 	r.mu.Lock()
 	r.finalized = append(r.finalized, finalizedMatch{
 		gameName: ref.Name,
-		userIDs:  append([]uuid.UUID(nil), orderedUserIDs...),
+		userIDs:  slices.Clone(orderedUserIDs),
 	})
 	r.mu.Unlock()
 
@@ -91,16 +91,10 @@ func (r *rankedFinalizeRecorder) calls() []finalizedMatch {
 	for i, call := range r.finalized {
 		calls[i] = finalizedMatch{
 			gameName: call.gameName,
-			userIDs:  append([]uuid.UUID(nil), call.userIDs...),
+			userIDs:  slices.Clone(call.userIDs),
 		}
 	}
 	return calls
-}
-
-func realRegistry(t *testing.T) *game.Registry {
-	t.Helper()
-	registry := catalog.NewRegistry()
-	return registry
 }
 
 func newPlayer(id uuid.UUID, name string) *game.Player {

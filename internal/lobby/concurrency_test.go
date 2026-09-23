@@ -133,15 +133,11 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(players), WithCardGame("TestGame"))
+	all := testutil.Players(players)
+	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("TestGame"))
 	require.NoError(t, err)
-
-	all := []*game.Player{leader}
-	for i := 1; i < players; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
+	for _, g := range all[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
-		all = append(all, g)
 	}
 	require.Equal(t, players, l.CurrentPlayers())
 
@@ -252,15 +248,11 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(members), WithCardGame("NeverStarts"))
+	roster := testutil.Players(members)
+	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members), WithCardGame("NeverStarts"))
 	require.NoError(t, err)
-
-	roster := []*game.Player{leader}
-	for i := 1; i < members; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
+	for _, g := range roster[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
-		roster = append(roster, g)
 	}
 
 	// Rules requiring far more players than present: an all-ready roster fails to

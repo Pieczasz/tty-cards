@@ -2,8 +2,8 @@ package lobby
 
 import (
 	"bytes"
+	"cmp"
 	"context"
-	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -93,7 +93,7 @@ func gameRef(name string) db.GameRef {
 // floor would strand the goroutine and trip goleak.
 func newTestManager(t *testing.T, repo db.MatchRepository) *Manager {
 	t.Helper()
-	m := NewManager(context.Background(), repo)
+	m := NewManager(t.Context(), repo)
 	t.Cleanup(func() {
 		m.mu.RLock()
 		codes := slices.Collect(maps.Keys(m.lobbies))
@@ -375,15 +375,7 @@ func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby, *game.Registr
 	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("Mock"))
 	require.NoError(t, err)
 
-	rules := new(MockRules)
-	rules.On("MinPlayers").Return(2).Maybe()
-	rules.On("MaxPlayers").Return(maxPlayers).Maybe()
-	rules.On("InitialDeck").Return(deck.StandardDeck()).Maybe()
-	rules.On("InitialDealCount").Return(2).Maybe()
-	rules.On("OnGameStart", mock.Anything).Return(nil).Maybe()
-	rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
-	rules.On("Standings", mock.Anything).Return([]*game.Player{}).Maybe()
-	registry := gameRegistry("Mock", rules)
+	registry := gameRegistry("Mock", stubRules{minPlayers: 2, maxPlayers: maxPlayers})
 
 	return m, l, registry
 }
@@ -507,8 +499,9 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m, l, _ := newTestLobby(t, 9)
-			for i := range tt.guests {
-				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(10+i))))))
+			// Seat 1 is the leader newTestLobby already sat down.
+			for _, g := range testutil.Players(tt.guests + 1)[1:] {
+				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 			}
 
 			err := l.SetMaxPlayers(l.Leader(), tt.limit, tt.rulesMin, tt.rulesMax)
@@ -751,12 +744,12 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 	repo.AssertExpectations(t)
 }
 
-// stubRules is the smallest Rules that lets an engine hand back standings; the
-// finalize path only needs Standings to resolve.
-type stubRules struct{}
+// stubRules is the smallest Rules that lets an engine start and hand back standings,
+// the seats in order. A zero bound means 1 to 9 seats.
+type stubRules struct{ minPlayers, maxPlayers int }
 
-func (stubRules) MinPlayers() int                               { return 1 }
-func (stubRules) MaxPlayers() int                               { return 9 }
+func (r stubRules) MinPlayers() int                             { return cmp.Or(r.minPlayers, 1) }
+func (r stubRules) MaxPlayers() int                             { return cmp.Or(r.maxPlayers, 9) }
 func (stubRules) InitialDeck() []deck.Card                      { return deck.StandardDeck() }
 func (stubRules) InitialDealCount() int                         { return 1 }
 func (stubRules) OnGameStart(*game.State) error                 { return nil }

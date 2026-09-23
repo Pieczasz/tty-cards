@@ -3,10 +3,11 @@
 package systemtest
 
 import (
-	"context"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -24,8 +25,8 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	t.Parallel()
 
 	repo := newRankedFinalizeRecorder()
-	manager := lobby.NewManager(context.Background(), repo)
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), repo)
+	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
 	guests := []*game.Player{newPlayer(testutil.UID(2), "bob"), newPlayer(testutil.UID(3), "carol"), newPlayer(testutil.UID(4), "dave")}
@@ -57,7 +58,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.NoError(t, subErr)
 	t.Cleanup(func() { l.Unsubscribe(leader.ID, events) })
 
-	all := append([]*game.Player{leader}, guests...)
+	all := slices.Concat([]*game.Player{leader}, guests)
 	for _, p := range all {
 		require.NoError(t, l.ToggleReady(p, registry))
 	}
@@ -99,8 +100,8 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
 	l, err := manager.CreateLobby(leader,
@@ -122,7 +123,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
 	leader := newPlayer(testutil.UID(1), "alice")
 	guest := newPlayer(testutil.UID(2), "bob")
 

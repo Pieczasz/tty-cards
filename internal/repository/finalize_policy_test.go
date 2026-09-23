@@ -23,7 +23,7 @@ import (
 func TestFinalizeRankedMatchSkipsAnErasedSeat(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	gameID, ids := antiFarmTable(t, gormDB,
 		seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10})
 	erased, second, third := ids[0], ids[1], ids[2]
@@ -59,7 +59,7 @@ func TestFinalizeRankedMatchSkipsAnErasedSeat(t *testing.T) {
 func TestEraseAndFinalizeSerialize(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, ids := antiFarmTable(t, gormDB, seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10})
 
 	users := repository.NewUserRepository(gormDB)
@@ -83,7 +83,7 @@ func TestEraseAndFinalizeSerialize(t *testing.T) {
 func TestRecordCasualMatchDoesNotWaitOnTheGameRow(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	u := &db.User{Username: "solo"}
 	require.NoError(t, gormDB.Create(u).Error)
 	repo := repository.NewMatchRepository(gormDB)
@@ -106,7 +106,7 @@ func TestRecordCasualMatchDoesNotWaitOnTheGameRow(t *testing.T) {
 func TestFinalizeInterruptedMatchChargesOnlyTheLeaver(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	gameID, ids := antiFarmTable(t, gormDB,
 		seat{elo: 1600, played: 10}, seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10})
 	first, second, leaver := ids[0], ids[1], ids[2]
@@ -148,7 +148,7 @@ func TestFinalizeInterruptedMatchChargesOnlyTheLeaver(t *testing.T) {
 func TestFinalizeInterruptedMatchNeverPaysALeaver(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	gameID, ids := antiFarmTable(t, gormDB,
 		seat{elo: 1500, played: 10}, seat{elo: 1900, played: 10}, seat{elo: 1100, played: 10})
 

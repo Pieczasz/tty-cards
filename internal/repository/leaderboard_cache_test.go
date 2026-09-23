@@ -3,7 +3,6 @@
 package repository_test
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,7 +60,7 @@ func TestUserRepository_BestPlayersDoesNotRecacheAnErasedRow(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 	users := seedLeaderboard(t, database, "erased", "kept")
 	entered, release, _ := holdRankingsQueries(t, database)
 
@@ -89,7 +88,7 @@ func TestUserRepository_BestPlayersSharesOneQueryPerMiss(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
-	ctx := context.Background()
+	ctx := t.Context()
 	seedLeaderboard(t, database, "one", "two")
 	entered, release, reads := holdRankingsQueries(t, database)
 

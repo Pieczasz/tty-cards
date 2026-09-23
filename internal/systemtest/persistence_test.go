@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/elo"
 	"github.com/Pieczasz/terminal-card/internal/game"
@@ -24,11 +25,11 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := newSignallingMatchRepo(repository.NewMatchRepository(gormDB))
 	manager := lobby.NewManager(ctx, matchRepo)
-	registry := realRegistry(t)
+	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 3)
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -94,11 +95,11 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := repository.NewMatchRepository(gormDB)
 	manager := lobby.NewManager(ctx, matchRepo)
-	registry := realRegistry(t)
+	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 2)
 	for _, name := range []string{"dave", "erin"} {

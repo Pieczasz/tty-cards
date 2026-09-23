@@ -1,11 +1,11 @@
 package systemtest
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
 
+	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -39,8 +39,8 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	// A real repository, not nil: a nil db.MatchRepository is a shape the server can
 	// never have, so measuring against one measures something that does not exist -
 	// and any path that starts touching it turns this into a nil dereference.
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	registry := catalog.NewRegistry()
 
 	warm := openTable(t, manager, registry, 0, seatsPerTable)
 	require.NotNil(t, warm)

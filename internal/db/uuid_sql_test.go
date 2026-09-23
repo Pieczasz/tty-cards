@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"reflect"
 	"sync"
 	"testing"
@@ -32,7 +31,7 @@ func TestUUIDSerializer_NilPointerIsNull(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := uuidSerializer{}.Value(context.Background(), nil, reflect.Value{}, tt.value)
+			got, err := uuidSerializer{}.Value(t.Context(), nil, reflect.Value{}, tt.value)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})

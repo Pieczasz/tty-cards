@@ -351,7 +351,7 @@ func TestManager_ShutdownCtx(t *testing.T) {
 
 	t.Run("carries the context it was built with", func(t *testing.T) {
 		t.Parallel()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		m := NewManager(ctx, nil)
 
 		cancel()
