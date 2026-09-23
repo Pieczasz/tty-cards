@@ -164,6 +164,6 @@ func TestHome_Update_HandlesCommonMessages(t *testing.T) {
 	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 50})
 
 	assert.Nil(t, cmd)
-	assert.Equal(t, 120, updated.(model).global.Width)
-	assert.Equal(t, 50, updated.(model).global.Height)
+	assert.Equal(t, 120, updated.(*model).global.Width)
+	assert.Equal(t, 50, updated.(*model).global.Height)
 }

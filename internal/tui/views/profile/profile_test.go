@@ -26,11 +26,12 @@ import (
 
 var errQuery = errors.New("query failed")
 
-func loaded(t *testing.T, msg profileLoadedMsg) model {
+func loaded(t *testing.T, msg profileLoadedMsg) *model {
 	t.Helper()
-	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40}
+	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40,
+		GameRegistry: catalog.NewRegistry()}
 	updated, _ := New(global).Update(msg)
-	m, ok := updated.(model)
+	m, ok := updated.(*model)
 	require.True(t, ok)
 	return m
 }
@@ -149,28 +150,28 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				User: &db.User{ID: testutil.UID(99), Username: "alice"},
 			}
 			updated, _ := New(global).Update(profileLoadedMsg{user: user, history: history})
-			m, ok := updated.(model)
+			m, ok := updated.(*model)
 			require.True(t, ok)
 
 			// Every state the screen can be in, not only the table: the erasure
 			// confirmation is the tallest of them and would be the one to overflow.
-			states := map[string]model{"tables": m}
-			refused := m
+			states := map[string]*model{"tables": m}
+			refused := *m
 			refused.notice = "Leave your table before deleting your account."
-			states["refused"] = refused
-			confirming := m
+			states["refused"] = &refused
+			confirming := *m
 			confirming.phase = deleteConfirming
-			states["confirming"] = confirming
+			states["confirming"] = &confirming
 			typo := confirming
 			typo.typed = "DELETEDEL"
 			typo.notice = "Type DELETE exactly, then press enter."
-			states["confirming with a notice"] = typo
-			running := m
+			states["confirming with a notice"] = &typo
+			running := *m
 			running.phase = deleteRunning
-			states["deleting"] = running
-			done := m
+			states["deleting"] = &running
+			done := *m
 			done.phase = deleteDone
-			states["deleted"] = done
+			states["deleted"] = &done
 
 			for name, state := range states {
 				out := state.View().Content
@@ -309,14 +310,14 @@ func TestUpdate_CyclesFilters(t *testing.T) {
 
 	for i := 1; i <= len(m.gameFilters); i++ {
 		next, cmd := m.Update(tuitest.Key("g"))
-		m = next.(model)
+		m = next.(*model)
 		assert.Nil(t, cmd, "cycling a filter is local; it must not re-query")
 		assert.Equal(t, i%len(m.gameFilters), m.gameFilterIdx)
 	}
 
 	for i := 1; i <= len(m.resultFilters); i++ {
 		next, _ := m.Update(tuitest.Key("r"))
-		m = next.(model)
+		m = next.(*model)
 		assert.Equal(t, i%len(m.resultFilters), m.resultIdx)
 	}
 }
@@ -343,7 +344,7 @@ func TestUpdate_KeysTheViewDoesNotOwn(t *testing.T) {
 		next, cmd := m.Update(tuitest.Key("z"))
 
 		assert.Nil(t, cmd)
-		assert.Equal(t, m.gameFilterIdx, next.(model).gameFilterIdx)
+		assert.Zero(t, next.(*model).gameFilterIdx)
 	})
 
 	// A resize has to land on the view's own copy of the context, or the profile
@@ -355,8 +356,8 @@ func TestUpdate_KeysTheViewDoesNotOwn(t *testing.T) {
 		next, cmd := m.Update(tea.WindowSizeMsg{Width: 130, Height: 60})
 
 		assert.Nil(t, cmd)
-		assert.Equal(t, 130, next.(model).global.Width)
-		assert.Equal(t, 60, next.(model).global.Height)
+		assert.Equal(t, 130, next.(*model).global.Width)
+		assert.Equal(t, 60, next.(*model).global.Height)
 	})
 }
 
@@ -492,13 +493,13 @@ func TestPlacementPlain(t *testing.T) {
 	}
 }
 
-func typeWord(t *testing.T, m model, word string) model {
+func typeWord(t *testing.T, m *model, word string) *model {
 	t.Helper()
 	for _, r := range word {
 		next, cmd := m.Update(tuitest.Key(string(r)))
 		assert.Nil(t, cmd, "typing into the confirmation must not issue a command")
 		var ok bool
-		m, ok = next.(model)
+		m, ok = next.(*model)
 		require.True(t, ok)
 	}
 	return m
@@ -506,7 +507,7 @@ func typeWord(t *testing.T, m model, word string) model {
 
 // deletingModel is a profile sitting on a loaded account, with a repository whose
 // DeleteAccount reports err.
-func deletingModel(t *testing.T, err error) (model, *int) {
+func deletingModel(t *testing.T, err error) (*model, *int) {
 	t.Helper()
 	calls := 0
 	repo := fakeUsers{deleteAccount: func(_ context.Context, id uuid.UUID) error {
@@ -519,7 +520,7 @@ func deletingModel(t *testing.T, err error) (model, *int) {
 		User: alice(), UserRepository: repo,
 	}
 	updated, _ := New(global).Update(profileLoadedMsg{user: alice()})
-	m, ok := updated.(model)
+	m, ok := updated.(*model)
 	require.True(t, ok)
 	return m, &calls
 }
@@ -535,7 +536,7 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		m, calls := deletingModel(t, nil)
 
 		next, cmd := m.Update(tuitest.Key("x"))
-		m, ok := next.(model)
+		m, ok := next.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "opening the confirmation asks the database nothing")
@@ -555,7 +556,7 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), "gr")
+		m = typeWord(t, next.(*model), "gr")
 
 		assert.Equal(t, "gr", m.typed)
 		assert.Zero(t, m.gameFilterIdx, "a typed letter must not cycle the game filter")
@@ -566,10 +567,10 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), "delete")
+		m = typeWord(t, next.(*model), "delete")
 
 		after, cmd := m.Update(tuitest.Key("enter"))
-		m, ok := after.(model)
+		m, ok := after.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "a mistyped confirmation must not reach the repository")
@@ -582,10 +583,10 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), "DELETX")
+		m = typeWord(t, next.(*model), "DELETX")
 
 		after, _ := m.Update(tuitest.Key("backspace"))
-		m, ok := after.(model)
+		m, ok := after.(*model)
 		require.True(t, ok)
 		m = typeWord(t, m, "E")
 
@@ -596,11 +597,11 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 
 		after, cmd := m.Update(tuitest.Key("enter"))
 		require.NotNil(t, cmd, "the confirmed word has to issue the delete")
-		m, ok := after.(model)
+		m, ok := after.(*model)
 		require.True(t, ok)
 		assert.Equal(t, deleteRunning, m.phase, "running until the query answers")
 
@@ -610,7 +611,7 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		assert.Equal(t, 1, *calls)
 
 		done, quit := m.Update(msg)
-		m, ok = done.(model)
+		m, ok = done.(*model)
 		require.True(t, ok)
 		assert.Equal(t, deleteDone, m.phase)
 		require.NotNil(t, quit)
@@ -624,12 +625,12 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, errQuery)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 		after, cmd := m.Update(tuitest.Key("enter"))
 		require.NotNil(t, cmd)
 
-		done, quit := after.(model).Update(cmd())
-		m, ok := done.(model)
+		done, quit := after.(*model).Update(cmd())
+		m, ok := done.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, quit, "a failed erasure must not end the session")
@@ -644,21 +645,21 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 		after, cmd := m.Update(tuitest.Key("enter"))
 		require.NotNil(t, cmd)
-		m = after.(model)
+		m = after.(*model)
 
 		for _, k := range []tea.KeyPressMsg{tuitest.Key("esc"), tuitest.Key("q"), tuitest.Key("t"), tuitest.Key("enter")} {
 			after, swallowed := m.Update(k)
-			m = after.(model)
+			m = after.(*model)
 			assert.Nil(t, swallowed, "%q must not act while the delete runs", k.String())
 		}
 		assert.Equal(t, deleteRunning, m.phase)
 		assert.Zero(t, *calls, "nothing issued a second delete")
 
 		done, quit := m.Update(cmd())
-		assert.Equal(t, deleteDone, done.(model).phase)
+		assert.Equal(t, deleteDone, done.(*model).phase)
 		require.NotNil(t, quit)
 	})
 
@@ -666,10 +667,10 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
 		next, _ := m.Update(tuitest.Key("x"))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 
 		after, cmd := m.Update(tuitest.Key("esc"))
-		m, ok := after.(model)
+		m, ok := after.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "esc out of the confirmation is not navigation")
@@ -692,7 +693,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 	m.global.LobbyManager = manager
 
 	next, cmd := m.Update(tuitest.Key("x"))
-	m, ok := next.(model)
+	m, ok := next.(*model)
 	require.True(t, ok)
 
 	assert.Nil(t, cmd)
@@ -704,7 +705,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	// The refusal clears on the next key, so it cannot outlive the seat it describes.
 	after, _ := m.Update(tuitest.Key("g"))
-	assert.Empty(t, after.(model).notice)
+	assert.Empty(t, after.(*model).notice)
 }
 
 // The footer advertises the key, so the key has to be there - and a footer entry
@@ -726,7 +727,7 @@ func TestRenderConfirm_KeepsThePromptAtTheMinimumSize(t *testing.T) {
 		Theme: styles.NewTheme(true), Width: styles.MinWidth, Height: styles.MinHeight,
 		User: &db.User{ID: testutil.UID(99)},
 	}
-	m, ok := New(global).(model)
+	m, ok := New(global).(*model)
 	require.True(t, ok)
 	m.phase = deleteConfirming
 

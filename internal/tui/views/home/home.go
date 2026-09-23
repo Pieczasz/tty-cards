@@ -1,3 +1,4 @@
+// Package home is the landing screen every session starts on.
 package home
 
 import (
@@ -13,15 +14,16 @@ type model struct {
 	global router.GlobalContext
 }
 
+// New builds the home screen.
 func New(global router.GlobalContext) tea.Model {
-	return model{global: global}
+	return &model{global: global}
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
 	}
@@ -40,7 +42,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() tea.View {
+func (m *model) View() tea.View {
 	welcomeName := "Player"
 	if m.global.User != nil {
 		welcomeName = m.global.User.Username

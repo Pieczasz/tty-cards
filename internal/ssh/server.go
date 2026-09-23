@@ -267,7 +267,7 @@ func sessionModel(
 		// Built before the slot is claimed: a panic in here, or a session whose state
 		// has already been torn down, would otherwise strand a tracker slot that
 		// nothing releases - and that account cannot connect again until a restart.
-		model := tui.Model(tui.ModelDependencies{
+		model := tui.New(tui.ModelDependencies{
 			SessionCtx:   traceCtx,
 			User:         *user,
 			UserRepo:     deps.UserRepository,

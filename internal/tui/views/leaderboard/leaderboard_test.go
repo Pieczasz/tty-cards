@@ -31,9 +31,9 @@ func rankings(n int) []db.Ranking {
 	return out
 }
 
-func board(t *testing.T, n int) model {
+func board(t *testing.T, n int) *model {
 	t.Helper()
-	return model{
+	return &model{
 		global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40},
 		rankings: rankings(n),
 		filters:  []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}, {label: "Uno", slug: "uno"}},
@@ -53,7 +53,7 @@ func TestCycleFilter_AdvancesAndClearsRows(t *testing.T) {
 	m.filterIndex = 0
 
 	next, cmd := m.cycleFilter(1)
-	nm := next.(model)
+	nm := next.(*model)
 	assert.Equal(t, 1, nm.filterIndex)
 	assert.Equal(t, "Poker", nm.filters[nm.filterIndex].label)
 	assert.Nil(t, nm.rankings, "stale rows must not linger under a new filter")
@@ -68,17 +68,17 @@ func TestGoPage_StaysInsideLoadedPages(t *testing.T) {
 
 	next, cmd := m.goPage(1)
 	require.Nil(t, cmd, "page 2 is already loaded")
-	nm := next.(model)
+	nm := next.(*model)
 	assert.Equal(t, 1, nm.page)
 
 	next, cmd = nm.goPage(1)
 	require.Nil(t, cmd)
-	nm = next.(model)
+	nm = next.(*model)
 	assert.Equal(t, 2, nm.page)
 
 	next, cmd = nm.goPage(1)
 	assert.NotNil(t, cmd, "one more page past a short tail still probes the repository")
-	assert.Equal(t, 2, next.(model).page, "page only advances after the fetch lands")
+	assert.Equal(t, 2, next.(*model).page, "page only advances after the fetch lands")
 }
 
 func TestGoPage_FetchesWhenTheNextPageIsMissing(t *testing.T) {
@@ -87,7 +87,7 @@ func TestGoPage_FetchesWhenTheNextPageIsMissing(t *testing.T) {
 	m := board(t, rows) // only page 1 loaded
 
 	next, cmd := m.goPage(1)
-	nm := next.(model)
+	nm := next.(*model)
 	assert.True(t, nm.loading)
 	assert.NotNil(t, cmd, "moving past the loaded window must request more rows")
 	assert.Equal(t, rows*2, nm.needsFetch(1))
@@ -100,7 +100,7 @@ func TestGoPage_DoesNotRefetchAShortLastPage(t *testing.T) {
 
 	next, cmd := m.goPage(1)
 	require.Nil(t, cmd, "short last page is already on hand")
-	nm := next.(model)
+	nm := next.(*model)
 	assert.Equal(t, 2, nm.page)
 
 	_, cmd = nm.goPage(1)
@@ -114,7 +114,7 @@ func TestGoPage_StopsWhenExhausted(t *testing.T) {
 
 	next, cmd := m.goPage(1)
 	require.Nil(t, cmd, "an exhausted feed must not re-query")
-	assert.Equal(t, 0, next.(model).page)
+	assert.Equal(t, 0, next.(*model).page)
 }
 
 // A page shows exactly rowsPerPage ranks and no more: a window that drew fewer than
@@ -161,7 +161,7 @@ func TestView_FitsTheTerminalAtEverySupportedSize(t *testing.T) {
 	} {
 		t.Run(size.name, func(t *testing.T) {
 			t.Parallel()
-			m := model{
+			m := &model{
 				global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: size.w, Height: size.h},
 				rankings: rankings(maxLeaderboardPlayers),
 				filters:  []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},
@@ -179,12 +179,12 @@ func TestView_FitsTheTerminalAtEverySupportedSize(t *testing.T) {
 // six silently skips fourteen players.
 func TestRowsPerPage_PagesByWhatItDraws(t *testing.T) {
 	t.Parallel()
-	short := model{
+	short := &model{
 		global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: 80, Height: 24},
 		rankings: rankings(maxLeaderboardPlayers),
 		filters:  []boardFilter{{label: filterAll}},
 	}
-	tall := short
+	tall := *short
 	tall.global.Height = 50
 
 	shortRows, tallRows := short.rowsPerPage(), tall.rowsPerPage()
@@ -194,8 +194,8 @@ func TestRowsPerPage_PagesByWhatItDraws(t *testing.T) {
 
 	// Page 2 starts where page 1 stopped drawing, at both sizes.
 	next, _ := short.goPage(1)
-	assert.Equal(t, 1, next.(model).page)
-	assert.Contains(t, next.(model).renderRankings(styles.InnerWidth(80)),
+	assert.Equal(t, 1, next.(*model).page)
+	assert.Contains(t, next.(*model).renderRankings(styles.InnerWidth(80)),
 		fmt.Sprintf("ranks %d-%d", shortRows+1, shortRows*2))
 }
 
@@ -216,7 +216,7 @@ func (f fakeUsers) BestPlayers(ctx context.Context, gameName string, limit int) 
 func TestNew_BuildsAFilterPerCatalogGame(t *testing.T) {
 	t.Parallel()
 
-	m, ok := New(router.GlobalContext{}).(model)
+	m, ok := New(router.GlobalContext{GameRegistry: catalog.NewRegistry()}).(*model)
 	require.True(t, ok)
 
 	require.Len(t, m.filters, 1+len(catalog.All))
@@ -266,9 +266,9 @@ func TestUpdate_DiscardsAResponseForAFilterAlreadyCycledPast(t *testing.T) {
 		best: func(context.Context, int, string) ([]db.Ranking, error) { return nil, nil },
 	}
 
-	press := func(m model) model {
+	press := func(m *model) *model {
 		next, _ := m.Update(tuitest.Key("g"))
-		return next.(model)
+		return next.(*model)
 	}
 	m = press(m) // Poker
 	require.Equal(t, "poker", m.gameFilter())
@@ -282,12 +282,12 @@ func TestUpdate_DiscardsAResponseForAFilterAlreadyCycledPast(t *testing.T) {
 
 	// The current filter's answer lands first...
 	next, _ := m.Update(loadedMsg{rankings: uno, gameSlug: "uno"})
-	m = next.(model)
+	m = next.(*model)
 	require.Len(t, m.rankings, 2)
 
 	// ...and the abandoned one arrives afterwards.
 	next, cmd := m.Update(loadedMsg{rankings: poker, gameSlug: "poker"})
-	m = next.(model)
+	m = next.(*model)
 
 	assert.Nil(t, cmd)
 	require.Len(t, m.rankings, 2, "the stale filter's rows must not replace the current ones")
@@ -304,7 +304,7 @@ func TestUpdate_Loaded(t *testing.T) {
 		m.loading = true
 
 		next, _ := m.Update(loadedMsg{rankings: rankings(3), limit: maxRowsPerPage})
-		nm := next.(model)
+		nm := next.(*model)
 
 		assert.False(t, nm.loading)
 		assert.True(t, nm.exhausted, "fewer rows than asked for is the end of the feed")
@@ -317,7 +317,7 @@ func TestUpdate_Loaded(t *testing.T) {
 
 		next, _ := m.Update(loadedMsg{rankings: rankings(maxLeaderboardPlayers)})
 
-		assert.True(t, next.(model).exhausted, "pagination must stop at the cap")
+		assert.True(t, next.(*model).exhausted, "pagination must stop at the cap")
 	})
 
 	// A page the response cannot fill would otherwise leave the cursor pointing past
@@ -328,7 +328,7 @@ func TestUpdate_Loaded(t *testing.T) {
 
 		next, _ := m.Update(loadedMsg{rankings: rankings(2), wantPage: 5})
 
-		assert.Equal(t, 0, next.(model).page)
+		assert.Equal(t, 0, next.(*model).page)
 	})
 
 	// A failed query must not clear the board silently; the error line is the only
@@ -339,7 +339,7 @@ func TestUpdate_Loaded(t *testing.T) {
 		m.loading = true
 
 		next, cmd := m.Update(loadedMsg{err: errors.New("query failed")})
-		nm := next.(model)
+		nm := next.(*model)
 
 		assert.Nil(t, cmd)
 		assert.False(t, nm.loading)
@@ -377,7 +377,7 @@ func TestUpdate_Keys(t *testing.T) {
 			m := board(t, boardRows(t)*2)
 
 			next, _ := m.Update(tuitest.Key(tt.key))
-			nm := next.(model)
+			nm := next.(*model)
 
 			assert.Equal(t, tt.wantFilter, nm.filterIndex)
 			assert.Equal(t, tt.wantPage, nm.page)
@@ -404,7 +404,7 @@ func TestUpdate_NavigationKeysStillNavigate(t *testing.T) {
 			m := board(t, 0)
 			next, cmd := m.Update(tuitest.Key(tt.key))
 
-			assert.Equal(t, 0, next.(model).filterIndex)
+			assert.Equal(t, 0, next.(*model).filterIndex)
 			require.NotNil(t, cmd)
 			msg, ok := cmd().(router.ChangeViewMsg)
 			require.True(t, ok)
@@ -420,8 +420,8 @@ func TestUpdate_UnboundKeyDoesNothing(t *testing.T) {
 	next, cmd := m.Update(tuitest.Key("z"))
 
 	assert.Nil(t, cmd)
-	assert.Equal(t, m.page, next.(model).page)
-	assert.Equal(t, m.filterIndex, next.(model).filterIndex)
+	assert.Zero(t, next.(*model).page)
+	assert.Zero(t, next.(*model).filterIndex)
 }
 
 func TestGoPage_CannotPageBeforeTheFirstPage(t *testing.T) {
@@ -431,7 +431,7 @@ func TestGoPage_CannotPageBeforeTheFirstPage(t *testing.T) {
 	next, cmd := m.goPage(-1)
 
 	assert.Nil(t, cmd, "paging back from page 1 must not re-query")
-	assert.Equal(t, 0, next.(model).page)
+	assert.Equal(t, 0, next.(*model).page)
 }
 
 // The three empty-ish states are all a player ever sees when there is nothing to
@@ -471,18 +471,18 @@ func TestRenderStateMessages(t *testing.T) {
 func TestView_FitsTheTerminalInEveryContentState(t *testing.T) {
 	t.Parallel()
 
-	states := map[string]func(m model) model{
-		"a full page of rows": func(m model) model {
+	states := map[string]func(m *model) *model{
+		"a full page of rows": func(m *model) *model {
 			m.rankings = rankings(maxLeaderboardPlayers)
 			return m
 		},
-		"loading": func(m model) model { m.loading = true; return m },
-		"empty": func(m model) model {
+		"loading": func(m *model) *model { m.loading = true; return m },
+		"empty": func(m *model) *model {
 			m.rankings = []db.Ranking{}
 			m.filterIndex = 1
 			return m
 		},
-		"an error": func(m model) model { m.err = errors.New("query failed"); return m },
+		"an error": func(m *model) *model { m.err = errors.New("query failed"); return m },
 	}
 
 	for _, size := range []struct {
@@ -496,7 +496,7 @@ func TestView_FitsTheTerminalInEveryContentState(t *testing.T) {
 		for stateName, apply := range states {
 			t.Run(size.name+"/"+stateName, func(t *testing.T) {
 				t.Parallel()
-				m := apply(model{
+				m := apply(&model{
 					global:  router.GlobalContext{Theme: styles.NewTheme(true), Width: size.w, Height: size.h},
 					filters: []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},
 				})
@@ -544,10 +544,10 @@ func TestCycleFilter_StillPagesAt80x24(t *testing.T) {
 
 	next, cmd := m.cycleFilter(1)
 	require.NotNil(t, cmd)
-	next, _ = next.(model).Update(cmd())
-	nm := next.(model)
+	next, _ = next.(*model).Update(cmd())
+	nm := next.(*model)
 	require.False(t, nm.exhausted, "a full answer is not the end of the feed")
 
 	next, _ = nm.goPage(1)
-	assert.Equal(t, 1, next.(model).page, "the second page has to be reachable")
+	assert.Equal(t, 1, next.(*model).page, "the second page has to be reachable")
 }

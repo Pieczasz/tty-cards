@@ -1,3 +1,6 @@
+// Package components draws the pieces screens are built from: card faces and fans,
+// mini cards, the rank-and-suit strip, fixed-width tables, the grid picker and cursor
+// arithmetic.
 package components
 
 import (

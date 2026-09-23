@@ -10,7 +10,7 @@ import (
 )
 
 func BenchmarkHomeView_Render(b *testing.B) {
-	m := model{global: router.GlobalContext{
+	m := &model{global: router.GlobalContext{
 		User:  &db.User{ID: testutil.UID(1), Username: "alice"},
 		Width: 120, Height: 40, Theme: styles.NewTheme(true),
 	}}

@@ -1,3 +1,6 @@
+// Package styles holds the per-session Theme, the only place colours are defined, and
+// the layout arithmetic every screen shares: the capped box, padding, clamping and the
+// cached figlet banners.
 package styles
 
 import (

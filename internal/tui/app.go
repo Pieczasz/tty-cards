@@ -1,3 +1,5 @@
+// Package tui builds a session's Bubble Tea program: the router with every view
+// registered, the games' routes derived from the catalog.
 package tui
 
 import (
@@ -18,6 +20,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// ModelDependencies is what New needs from the session and the server.
 type ModelDependencies struct {
 	SessionCtx   context.Context
 	User         db.User
@@ -26,10 +29,10 @@ type ModelDependencies struct {
 	GameRegistry *game.Registry
 }
 
-// Model builds the session's root model. It returns the router itself rather than a
+// New builds the session's root model. It returns the router itself rather than a
 // tea.Model: the ssh layer has to Close it when the session ends, and an interface
 // value would hide the one method that releases the active view's subscription.
-func Model(deps ModelDependencies) *router.Router {
+func New(deps ModelDependencies) *router.Router {
 	global := router.GlobalContext{
 		User:           &deps.User,
 		UserRepository: deps.UserRepo,
