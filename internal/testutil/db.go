@@ -53,10 +53,33 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	// is only found during the rollback that needed it. The container is already
 	// paid for; a second pass over a handful of DDL statements is not.
 	runMigrations(t, gormDB, "*.up.sql")
+	seedRoundTripData(t, gormDB)
 	runMigrations(t, gormDB, "*.down.sql")
 	runMigrations(t, gormDB, "*.up.sql")
 
 	return gormDB
+}
+
+// seedRoundTripData gives the down pass rows to work on. On an empty schema every
+// UPDATE in a down file matches nothing, so a statement that breaks on real data -
+// 000005's rename of duplicate display names, say - passed CI and failed the one
+// rollback that needed it. The seed is the awkward case: a renamed game whose new
+// display name another game already has.
+func seedRoundTripData(t *testing.T, gormDB *gorm.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		`INSERT INTO users (username) VALUES ('round_trip')`,
+		`INSERT INTO games (slug, name) VALUES ('poker', 'Poker'), ('holdem', 'Poker')`,
+		`INSERT INTO rankings (user_id, game_id, elo)
+			SELECT u.id, g.id, 1500 FROM users u, games g WHERE u.username = 'round_trip'`,
+		`INSERT INTO matches (game_id, ranked) SELECT id, TRUE FROM games`,
+		`INSERT INTO match_participants (match_id, user_id, placement, elo_delta)
+			SELECT m.id, u.id, 1, 0 FROM matches m, users u WHERE u.username = 'round_trip'`,
+	} {
+		if err := gormDB.Exec(stmt).Error; err != nil {
+			t.Fatalf("failed to seed the migration round trip: %v", err)
+		}
+	}
 }
 
 // SetupEmptyTestDB is a fresh Postgres with no schema, for a test that drives the
