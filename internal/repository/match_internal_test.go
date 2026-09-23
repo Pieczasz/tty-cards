@@ -3,8 +3,10 @@ package repository
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 
 	"uuid"
@@ -42,6 +44,55 @@ func TestCheckDistinctPlayers(t *testing.T) {
 			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
+}
+
+// Each finalize names itself in its errors: the interrupted path used to report a
+// failure as a ranked one, and the lobby then wrapped that same prefix a second time.
+func TestFinalize_ErrorsNameTheirOwnPath(t *testing.T) {
+	t.Parallel()
+	// A duplicate seat is refused before the database is touched, so no pool is needed.
+	repo := NewMatchRepository(nil)
+	dup := []uuid.UUID{testutil.UID(1), testutil.UID(1)}
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "ranked",
+			call: func() error { return repo.FinalizeRankedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil) },
+			want: "finalize ranked match: duplicate user id",
+		},
+		{
+			name: "interrupted",
+			call: func() error {
+				return repo.FinalizeInterruptedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil, nil)
+			},
+			want: "finalize interrupted match: duplicate user id",
+		},
+		{
+			name: "casual",
+			call: func() error { return repo.RecordCasualMatch(t.Context(), db.GameRef{Slug: "x"}, dup) },
+			want: "record casual match: duplicate user id",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.call()
+			require.Error(t, err)
+			assert.True(t, strings.HasPrefix(err.Error(), tt.want), "got %q", err)
+		})
+	}
+}
+
+// likePrefix has to escape the anonymised prefix's underscore, or LIKE reads it as a
+// wildcard and a chosen name such as "deletedX..." would count as erased.
+func TestLikePrefix(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, `deleted\_%`, likePrefix(db.AnonymisedPrefix))
+	assert.Equal(t, `a\%b\\c%`, likePrefix(`a%b\c`))
 }
 
 // placeAt is what decides a seat's recorded placement, and a wrong answer here is a

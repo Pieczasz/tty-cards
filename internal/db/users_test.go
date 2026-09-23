@@ -15,7 +15,7 @@ func TestValidateUsername_Valid(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		gen := rapid.StringMatching(`^[A-Za-z0-9_]{1,16}$`).Filter(func(s string) bool {
-			return !strings.HasPrefix(s, anonymisedPrefix)
+			return !strings.HasPrefix(s, AnonymisedPrefix)
 		})
 		username := gen.Draw(t, "username")
 
@@ -69,8 +69,8 @@ func FuzzValidateUsername(f *testing.F) {
 			return // rejected: nothing more to prove
 		}
 		assert.NotEmpty(t, name, "an accepted username must not be empty")
-		assert.LessOrEqual(t, len(name), MaxUsernameLength, "an accepted username must fit the chosen-name cap")
-		assert.False(t, strings.HasPrefix(name, anonymisedPrefix),
+		assert.LessOrEqual(t, len(name), maxUsernameLength, "an accepted username must fit the chosen-name cap")
+		assert.False(t, strings.HasPrefix(name, AnonymisedPrefix),
 			"the erasure prefix is not a player-chosen name")
 		for _, r := range name {
 			isAllowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||

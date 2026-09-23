@@ -65,10 +65,10 @@ type Ranking struct {
 	DeletedAt gorm.DeletedAt
 }
 
-// MaxUsernameLength is the chosen-name cap ValidateUsername enforces. The column is
+// maxUsernameLength is the chosen-name cap ValidateUsername enforces. The column is
 // wider so AnonymisedUsername (deleted_ + 32 hex) still fits; the CHECK refuses any
 // other 17-40 character string.
-const MaxUsernameLength = 16
+const maxUsernameLength = 16
 
 const anonymisedUsernameLength = 40 // deleted_ + 32 hex
 
@@ -76,19 +76,23 @@ const anonymisedUsernameLength = 40 // deleted_ + 32 hex
 // the column CHECK - charset, and either <=16 chars or deleted_ plus 32 hex - because
 // the row stays: other players' match history still points at it.
 func AnonymisedUsername(userID uuid.UUID) string {
-	return anonymisedPrefix + hex.EncodeToString(userID[:])
+	return AnonymisedPrefix + hex.EncodeToString(userID[:])
 }
 
-const anonymisedPrefix = "deleted_"
+// AnonymisedPrefix starts every AnonymisedUsername. ValidateUsername refuses it, so a
+// name carrying it is an erased account and never a chosen one.
+const AnonymisedPrefix = "deleted_"
 
+// ValidateUsername is the chosen-name rule: at most 16 of [A-Za-z0-9_], and not the
+// erasure prefix.
 func ValidateUsername(username string) error {
-	if len(username) > MaxUsernameLength {
-		return fmt.Errorf("username cannot exceed %d characters", MaxUsernameLength)
+	if len(username) > maxUsernameLength {
+		return fmt.Errorf("username cannot exceed %d characters", maxUsernameLength)
 	}
 	if !usernamePattern.MatchString(username) {
 		return errors.New("username can only contain English letters, numbers, and underscores")
 	}
-	if strings.HasPrefix(username, anonymisedPrefix) {
+	if strings.HasPrefix(username, AnonymisedPrefix) {
 		return errors.New("username is reserved")
 	}
 	return nil
