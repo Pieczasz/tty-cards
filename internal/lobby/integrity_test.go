@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
@@ -113,4 +114,25 @@ func TestRemoveLobby_KeepsANewerLobbysMapping(t *testing.T) {
 	m.RemoveLobby(old.Code())
 
 	assert.Same(t, fresh, m.FindLobbyByPlayer(p), "removing the old table unmapped the new one")
+}
+
+// A hold can outlive its hand: releaseFinishedGame reopens the table before
+// releaseHeldSeats reaches m.mu, and a kick in that gap unmaps the guest, so the
+// release no longer finds them. The timer then fires a DisconnectGrace later and
+// LeaveLobby takes the player out of whatever table they sit at by then.
+func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
+	t.Parallel()
+	m, l, _ := newTestLobby(t, 4)
+	guest := mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+
+	m.mu.Lock()
+	m.grace.arm(guest.ID, time.Hour, func() {})
+	m.mu.Unlock()
+
+	require.NoError(t, m.Kick(l.Leader(), guest))
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	assert.NotContains(t, m.grace.pending, guest.ID, "the kicked guest's grace timer is still armed")
 }

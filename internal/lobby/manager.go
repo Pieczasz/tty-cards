@@ -544,6 +544,10 @@ func (m *Manager) Kick(host, target *game.Player) error {
 	bc := l.broadcaster
 	l.removeGuestAtLocked(idx)
 	delete(m.playerLobby, target.ID)
+	// A hold can outlive its hand for as long as releaseHeldSeats waits on m.mu, and
+	// with the mapping gone that release no longer finds this seat: the timer would
+	// later take the player out of whatever table they had moved on to.
+	m.grace.clear(target.ID)
 	l.mu.Unlock()
 	m.mu.Unlock()
 
