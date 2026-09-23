@@ -26,20 +26,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q":
-			return m, tea.Quit
-		case "n":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobbyCreate} }
-		case "f":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobbyJoin} }
-		case "p":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteProfile} }
-		case "t":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLeaderboard} }
-		}
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	// q quits rather than going "back": home is where back leads.
+	if key.String() == "q" {
+		return m, tea.Quit
+	}
+	if route, ok := views.GlobalRoute(key.String()); ok {
+		return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: route} }
 	}
 	return m, nil
 }
