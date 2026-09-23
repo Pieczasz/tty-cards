@@ -430,6 +430,9 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 		// a silent kick if it ever were reached.
 		return nil
 	case AwaitingDiscard:
+		if card, ok := ginDiscard(p.Cards, extra.TakenUpcard); ok {
+			return ActionKnock{Discard: card}
+		}
 		card, ok := autoDiscard(p.Cards, extra.TakenUpcard)
 		if !ok {
 			return nil
@@ -455,6 +458,21 @@ func autoDiscard(hand []deck.Card, forbidden *deck.Card) (deck.Card, bool) {
 	// Gin, or every deadwood card is the one card they may not lay back: break a meld.
 	if i := slices.IndexFunc(hand, allowed); i >= 0 {
 		return hand[i], true
+	}
+	return deck.Card{}, false
+}
+
+// ginDiscard finds a legal discard that leaves no deadwood. Gin scores the bonus and
+// cannot be undercut, so an absent player knocks on it rather than discarding it away.
+// Every card is tried: the priciest-deadwood pick autoDiscard makes need not be one.
+func ginDiscard(hand []deck.Card, forbidden *deck.Card) (deck.Card, bool) {
+	for _, card := range hand {
+		if forbidden != nil && card == *forbidden {
+			continue
+		}
+		if _, _, pts := bestMeldSplit(deck.RemoveOne(hand, card)); pts == 0 {
+			return card, true
+		}
 	}
 	return deck.Card{}, false
 }

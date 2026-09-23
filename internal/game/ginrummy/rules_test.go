@@ -419,6 +419,31 @@ func TestRules_CheckWinCondition(t *testing.T) {
 	assert.True(t, rules.CheckWinCondition(state))
 }
 
+// An absent player holding gin must not discard it away: gin scores the bonus and
+// cannot be undercut, so knocking is strictly the better auto-play.
+func TestRules_TimeoutAction_KnocksOnGin(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+	state, extra := startedState(t)
+	// Every card melds, and dropping the 2♥ still leaves the 3-6♥ run.
+	state.Players[state.CurrentTurn].Cards = []deck.Card{
+		c(deck.Two, deck.Hearts), c(deck.Three, deck.Hearts), c(deck.Four, deck.Hearts),
+		c(deck.Five, deck.Hearts), c(deck.Six, deck.Hearts),
+		c(deck.Jack, deck.Spades), c(deck.Jack, deck.Hearts), c(deck.Jack, deck.Diamonds),
+		c(deck.Ace, deck.Clubs), c(deck.Ace, deck.Spades), c(deck.Ace, deck.Hearts),
+	}
+	extra.HandPhase = AwaitingDiscard
+
+	action := rules.TimeoutAction(state)
+
+	knock, ok := action.(ActionKnock)
+	require.True(t, ok, "a gin hand knocks, got %T", action)
+	require.NoError(t, rules.ValidateAction(state, knock))
+	require.NoError(t, rules.ApplyAction(state, knock))
+	require.NotNil(t, extra.LastHandResult)
+	assert.True(t, extra.LastHandResult.Gin)
+}
+
 func TestRules_TimeoutAction_DrawStock(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
