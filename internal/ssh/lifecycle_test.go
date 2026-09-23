@@ -221,7 +221,7 @@ func TestReportingModel_PassesThroughWhenNothingPanics(t *testing.T) {
 	assert.IsType(t, reportingModel{}, got, "the wrapper survives an update")
 }
 
-// countingCloser stands in for the displaced session's channel.
+// countingCloser stands in for the displaced session's connection.
 type countingCloser struct {
 	closed atomic.Int32
 	err    error

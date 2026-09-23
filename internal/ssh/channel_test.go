@@ -18,7 +18,7 @@ import (
 
 // startInProcessServer runs the real SetupServer over a loopback listener, with a
 // user repository that answers every fingerprint with user.
-func startInProcessServer(t *testing.T, user *db.User) string {
+func startInProcessServer(t *testing.T, user *db.User) (string, *SessionTracker) {
 	t.Helper()
 	deps := newSessionDeps(stubUserRepo{user: user})
 	deps.Config = &config.Config{
@@ -41,7 +41,7 @@ func startInProcessServer(t *testing.T, user *db.User) string {
 		_ = server.Close()
 		<-served
 	})
-	return listener.Addr().String()
+	return listener.Addr().String(), deps.Tracker
 }
 
 func dialInProcess(t *testing.T, addr, user string) *gossh.Client {
@@ -63,7 +63,7 @@ func dialInProcess(t *testing.T, addr, user string) *gossh.Client {
 // limit, each with its own request goroutine and buffers.
 func TestSetupServer_CapsSessionChannelsBeforeAccept(t *testing.T) {
 	t.Parallel()
-	addr := startInProcessServer(t, &db.User{ID: testutil.UID(1), Username: "flooder"})
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(1), Username: "flooder"})
 	client := dialInProcess(t, addr, "flooder")
 
 	for range maxSessionsPerConnection {
@@ -82,7 +82,7 @@ func TestSetupServer_CapsSessionChannelsBeforeAccept(t *testing.T) {
 // session channel a few times locks itself out of its own connection.
 func TestSetupServer_ClosedChannelFreesItsSlot(t *testing.T) {
 	t.Parallel()
-	addr := startInProcessServer(t, &db.User{ID: testutil.UID(2), Username: "cycler"})
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(2), Username: "cycler"})
 	client := dialInProcess(t, addr, "cycler")
 
 	for range 3 * maxSessionsPerConnection {
@@ -101,7 +101,7 @@ func TestSetupServer_ClosedChannelFreesItsSlot(t *testing.T) {
 // unbounded stream of them is unbounded memory from one channel.
 func TestSetupServer_CapsEnvRequests(t *testing.T) {
 	t.Parallel()
-	addr := startInProcessServer(t, &db.User{ID: testutil.UID(3), Username: "envy"})
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(3), Username: "envy"})
 	client := dialInProcess(t, addr, "envy")
 
 	s, err := client.NewSession()
@@ -135,4 +135,40 @@ func testPrivateKey(t *testing.T) ed25519.PrivateKey {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	return priv
+}
+
+func openShell(t *testing.T, client *gossh.Client) {
+	t.Helper()
+	s, err := client.NewSession()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	require.NoError(t, s.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+	require.NoError(t, s.Shell())
+}
+
+// Displacement has to hang up on the old connection, not just its channel: closing
+// the channel leaves the TCP connection, and any other channel on it, open until the
+// peer goes away on its own.
+func TestSetupServer_DisplacementClosesTheOldConnection(t *testing.T) {
+	t.Parallel()
+	user := &db.User{ID: testutil.UID(4), Username: "twice"}
+	addr, tracker := startInProcessServer(t, user)
+
+	first := dialInProcess(t, addr, "twice")
+	openShell(t, first)
+	gone := make(chan struct{})
+	go func() {
+		_ = first.Wait()
+		close(gone)
+	}()
+	require.Eventually(t, func() bool { return tracker.Count() == 1 },
+		2*time.Second, 10*time.Millisecond, "the first session never reached the tracker")
+
+	openShell(t, dialInProcess(t, addr, "twice"))
+
+	select {
+	case <-gone:
+	case <-time.After(time.Second):
+		t.Fatal("the displaced connection is still open")
+	}
 }

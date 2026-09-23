@@ -125,9 +125,10 @@ func NewSessionTracker(maxSessions int) *SessionTracker {
 // account displaces the first: half-open TCP otherwise blocks reconnect for the whole
 // mid-game grace window. Release with a stale generation is a no-op.
 //
-// conn is how the displaced session is actually hung up on. Without closing it, the
-// account keeps every session it ever opened until each one's TCP dies, so both the
-// per-account limit and maxSessions become advisory and Count under-reports.
+// conn is the connection the displaced session is hung up on. Without closing it,
+// the account keeps every connection it ever opened until each one's TCP dies, so the
+// per-account limit becomes advisory: Count still counts accounts, but each one can
+// hold any number of live TUIs and lobby subscriptions.
 func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, error) {
 	t.mu.Lock()
 	t.next++
@@ -353,7 +354,10 @@ func sessionModel(
 			return nil, nil
 		}
 
-		gen, err := tracker.Connect(user.ID, s)
+		// The connection, not the session: closing a channel leaves the socket and any
+		// other channel on it up until the peer notices.
+		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
+		gen, err := tracker.Connect(user.ID, conn)
 		switch {
 		case errors.Is(err, ErrServerFull):
 			model.Close()
