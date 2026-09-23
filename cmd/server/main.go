@@ -139,7 +139,7 @@ func run() (err error) {
 	matchRepo := repository.NewMatchRepository(database)
 	lobbyManager := lobby.NewManager(ctx, matchRepo)
 
-	defer waitForFinalizers(lobbyManager)
+	defer waitForFinalizers(ctx, lobbyManager)
 
 	// MaxConnections is the player-visible session cap: the tracker refuses the
 	// overflow with a message, while the TCP LimitListener in serve only backstops
@@ -154,7 +154,7 @@ func run() (err error) {
 		slog.ErrorContext(ctx, "failed to register the session gauge", "error", err)
 	}
 
-	stopAPI, apiErr, err := startStatsAPI(cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
+	stopAPI, apiErr, err := startStatsAPI(ctx, cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
 	if err != nil {
 		return err
 	}
@@ -228,14 +228,14 @@ func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
 //
 // So the residual risk is stated rather than removed: a match that finishes in the
 // last seconds of a deploy, whose write then blocks for 30s, is lost from history.
-func waitForFinalizers(lobbyManager *lobby.Manager) {
+func waitForFinalizers(ctx context.Context, lobbyManager *lobby.Manager) {
 	if lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
 		return
 	}
-	slog.Warn("match finalizers exceeded their deadline; giving them one more window",
+	slog.WarnContext(ctx, "match finalizers exceeded their deadline; giving them one more window",
 		"timeout", finalizeDrainTimeout)
 	if !lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
-		slog.Error("abandoning match finalizers; a finished match may be missing from history",
+		slog.ErrorContext(ctx, "abandoning match finalizers; a finished match may be missing from history",
 			"timeout", finalizeDrainTimeout)
 	}
 }
@@ -264,6 +264,7 @@ func newSSHServer(
 // startStatsAPI takes interfaces, not the concrete tracker and manager: a nil
 // *SessionTracker in an interface is not nil, and would pass NewServer's check.
 func startStatsAPI(
+	ctx context.Context,
 	cfg *config.Config,
 	sessions httpapi.SessionCounter,
 	lobbies httpapi.LobbyCounter,
@@ -288,7 +289,7 @@ func startStatsAPI(
 
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.Info("starting stats api", "address", addr)
+		slog.InfoContext(ctx, "starting stats api", "address", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- fmt.Errorf("stats api stopped: %w", err)
 		}

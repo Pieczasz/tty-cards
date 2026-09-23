@@ -553,8 +553,11 @@ func (reg *sessionRegistry) recoverSession(s ssh.Session) {
 // session can be told about it is the caller's business.
 func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
 	err := fmt.Errorf("panic during ssh session: %v", r)
-	ctx := reg.sessionTraceContext(s)
+	var ctx context.Context = s.Context()
 	if st, ok := reg.load(s); ok {
+		if st.traceCtx != nil {
+			ctx = st.traceCtx
+		}
 		st.panicked = true
 		if st.span != nil {
 			st.span.RecordError(err, trace.WithStackTrace(true))

@@ -232,7 +232,7 @@ func TestWaitForFinalizers_ReturnsWhenThereIsNothingToWaitFor(t *testing.T) {
 	manager := lobby.NewManager(t.Context(), nil)
 
 	start := time.Now()
-	waitForFinalizers(manager)
+	waitForFinalizers(t.Context(), manager)
 
 	assert.Less(t, time.Since(start), finalizeDrainTimeout,
 		"an idle manager must not spend a drain window")
@@ -273,7 +273,7 @@ func TestStartStatsAPI_RefusesAMissingDependency(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIRequestsPerMinute: 1}
 
-	_, _, err := startStatsAPI(cfg, nil, lobbyCounts{}, emptyUsers{}, nil)
+	_, _, err := startStatsAPI(t.Context(), cfg, nil, lobbyCounts{}, emptyUsers{}, nil)
 	require.ErrorIs(t, err, httpapi.ErrMissingDeps)
 }
 
@@ -287,7 +287,7 @@ func TestStartStatsAPI_ServesAndStops(t *testing.T) {
 	require.NoError(t, listener.Close())
 
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIPort: port, APIRequestsPerMinute: 100}
-	stop, serveErr, err := startStatsAPI(cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
+	stop, serveErr, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
 	require.NoError(t, err)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
