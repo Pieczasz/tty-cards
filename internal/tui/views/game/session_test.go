@@ -468,3 +468,33 @@ func TestSyncBaseState_OpponentsExcludeTheHero(t *testing.T) {
 	}
 	assert.Len(t, s.Base.Seats, len(s.Base.Opponents)+1)
 }
+
+// SplitZones reads Opponents as clockwise from the hero's left, so the seat that acts
+// after the hero comes first and the one before comes last. Engine order put the
+// player who acts next on the far side of the table whenever the hero was not seat 0.
+func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
+	t.Parallel()
+
+	players := make([]*game.Player, 0, 4)
+	for i := 1; i <= 4; i++ {
+		players = append(players, &game.Player{ID: testutil.SeatID(i), UserID: testutil.UID(i), Name: "p"})
+	}
+	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.StandardDeck())
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+
+	// The hero is the third seat, so their left is the fourth and the order wraps.
+	global := router.GlobalContext{User: &db.User{ID: testutil.UID(3)}}
+	s, err := NewSession(global, engine, "crazy eights")
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	s.Sync(nil)
+
+	ids := make([]string, 0, len(s.Base.Opponents))
+	for _, o := range s.Base.Opponents {
+		ids = append(ids, o.ID)
+	}
+	assert.Equal(t, []string{testutil.SeatID(4), testutil.SeatID(1), testutil.SeatID(2)}, ids)
+	assert.Equal(t, []string{testutil.SeatID(1), testutil.SeatID(2), testutil.SeatID(3), testutil.SeatID(4)},
+		s.Base.SeatOrder(), "Seats stays in engine order")
+}

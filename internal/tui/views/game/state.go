@@ -14,7 +14,9 @@ type BaseState struct {
 	MyTurn     bool
 	Hand       []deck.Card
 	TopDiscard deck.Card
-	// Seats is every player in engine seat order, hero included; Opponents drops the hero.
+	// Seats is every player in engine seat order, hero included. Opponents drops the
+	// hero and runs clockwise from the hero's left - the seat that acts next comes
+	// first - which is the order SplitZones lays the table out in.
 	Seats     []game.PlayerSnapshot
 	Opponents []game.PlayerSnapshot
 	DeckSize  int
@@ -53,11 +55,19 @@ func SyncBaseState(bound *game.BoundEngine, fn func(*game.State)) BaseState {
 	heroID := bound.PlayerID()
 	base.MyTurn = base.Phase == game.Playing && heroID != "" && snap.CurrentPlayerID == heroID
 
-	base.Opponents = slices.DeleteFunc(slices.Clone(snap.Players), func(p game.PlayerSnapshot) bool {
-		return p.ID == heroID
-	})
+	base.Opponents = opponentsFrom(snap.Players, heroID)
 
 	return base
+}
+
+// opponentsFrom is seats without the hero, rotated to start on the hero's left. A
+// session with no seat at the table sees the seats in engine order.
+func opponentsFrom(seats []game.PlayerSnapshot, heroID string) []game.PlayerSnapshot {
+	hero := slices.IndexFunc(seats, func(p game.PlayerSnapshot) bool { return p.ID == heroID })
+	if hero < 0 {
+		return slices.Clone(seats)
+	}
+	return slices.Concat(seats[hero+1:], seats[:hero])
 }
 
 // SeatNames maps player ID to display name; Username falls back to the ID itself.
