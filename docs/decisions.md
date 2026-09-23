@@ -974,7 +974,7 @@ Go structs**, so a new scalar field fails CI until the migration pins it `NOT
 NULL`. That is stronger than a tag, because it cannot drift silently.
 
 **Where.** `internal/db/users.go` (the comment above `User`),
-`internal/db/gorm_test.go`, `internal/db/uuid_sql_test.go`
+`internal/db/schema_test.go`, `internal/db/uuid_sql_test.go`
 `TestModelsCarryNoDefaultTags`.
 
 ---
