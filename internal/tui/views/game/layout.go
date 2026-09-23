@@ -132,22 +132,8 @@ func renderTopCards(t styles.Theme, count, maxWidth int) string {
 	body := lg.NewStyle().Foreground(t.CardBack).Render("░░░░░░░")
 	rightEdge := lg.NewStyle().Foreground(t.CardFace).Render("│")
 
-	midLine := edge + body + rightEdge
-
-	var sb strings.Builder
-	sb.Grow(len(midLine)*4 + len(botLine) + 5)
-
-	sb.WriteString(midLine)
-	sb.WriteByte('\n')
-	sb.WriteString(midLine)
-	sb.WriteByte('\n')
-	sb.WriteString(midLine)
-	sb.WriteByte('\n')
-	sb.WriteString(midLine)
-	sb.WriteByte('\n')
-	sb.WriteString(botLine)
-
-	return sb.String()
+	// Four rows of exposed back over the bottom edge.
+	return strings.Repeat(edge+body+rightEdge+"\n", 4) + botLine
 }
 
 // sideCardsFrame is the rows a side stack costs beyond its card count: the four rows
@@ -201,14 +187,8 @@ func buildVerticalCardsString(count int, topEdge, midEdge, botEdge, cardBody str
 		sb.WriteString(midEdge)
 		sb.WriteByte('\n')
 	}
-	sb.WriteString(cardBody)
-	sb.WriteByte('\n')
-	sb.WriteString(cardBody)
-	sb.WriteByte('\n')
-	sb.WriteString(cardBody)
-	sb.WriteByte('\n')
-	sb.WriteString(cardBody)
-	sb.WriteByte('\n')
+	// The last card shows four rows of back.
+	sb.WriteString(strings.Repeat(cardBody+"\n", 4))
 	sb.WriteString(botEdge)
 
 	return sb.String()

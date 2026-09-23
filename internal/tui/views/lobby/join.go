@@ -104,9 +104,7 @@ func (m *joinModel) Init() tea.Cmd {
 func (m *joinModel) refresh() {
 	m.entries = m.global.LobbyManager.BrowseLobbies(views.SessionPlayer(m.global), m.filter)
 	m.games = m.global.LobbyManager.GameNames()
-	if m.cursor >= len(m.entries) {
-		m.cursor = max(len(m.entries)-1, 0)
-	}
+	m.cursor = components.StepCursor(m.cursor, 0, len(m.entries)-1)
 }
 
 func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
