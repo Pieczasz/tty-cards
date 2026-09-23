@@ -65,6 +65,7 @@ func NewUserRepository(conn *gorm.DB) *UserRepository {
 	}
 }
 
+// LoadUserByFingerprint is the account a key belongs to; see db.Authenticator.
 func (q *UserRepository) LoadUserByFingerprint(
 	ctx context.Context, fingerprint string,
 ) (_ *db.User, _ *db.PublicKey, err error) {
@@ -91,6 +92,7 @@ func (q *UserRepository) LoadUserByFingerprint(
 	return &dbKey.User, &dbKey, nil
 }
 
+// RegisterUserWithKey creates an account and its first key in one transaction.
 func (q *UserRepository) RegisterUserWithKey(
 	ctx context.Context, username, fingerprint string,
 ) (_ *db.User, _ *db.PublicKey, err error) {
@@ -105,7 +107,7 @@ func (q *UserRepository) RegisterUserWithKey(
 	var key *db.PublicKey
 	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		user, key, err = registerTx(tx, username, fingerprint)
+		user, key, err = registerUser(tx, username, fingerprint)
 		return err
 	})
 	if err != nil {
@@ -114,8 +116,8 @@ func (q *UserRepository) RegisterUserWithKey(
 	return user, key, nil
 }
 
-// registerTx is RegisterUserWithKey inside its transaction.
-func registerTx(tx *gorm.DB, username, fingerprint string) (*db.User, *db.PublicKey, error) {
+// registerUser is RegisterUserWithKey inside its transaction.
+func registerUser(tx *gorm.DB, username, fingerprint string) (*db.User, *db.PublicKey, error) {
 	// Case-folded, matching idx_users_username_lower (decision D-4), which is also
 	// what catches a concurrent registration this read cannot see. Unscoped: the
 	// index covers soft-deleted rows too, so a hidden one still owns its name.
@@ -182,6 +184,7 @@ func (q *UserRepository) cachedBestPlayers(gameSlug string, limit int) ([]db.Ran
 	return slices.Clone(entry.rankings[:min(limit, len(entry.rankings))]), q.bestPlayersGen, true
 }
 
+// BestPlayers is the leaderboard, served from a per-game cache; see db.Leaderboard.
 func (q *UserRepository) BestPlayers(
 	ctx context.Context, gameSlug string, limit int,
 ) (_ []db.Ranking, err error) {
@@ -268,6 +271,7 @@ func (q *UserRepository) storeBestPlayers(gameSlug string, gen uint64, rankings 
 	}
 }
 
+// UserProfile is the account with its keys and rankings.
 func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *db.User, err error) {
 	ctx, span := tracer.Start(ctx, "db.UserProfile",
 		trace.WithAttributes(attribute.String("user_id", userID.String())))
@@ -309,6 +313,7 @@ func (q *UserRepository) UpdateUserActivity(
 	return nil
 }
 
+// UserMatchHistory is the player's newest limit matches, newest first.
 func (q *UserRepository) UserMatchHistory(
 	ctx context.Context, userID uuid.UUID, limit int,
 ) (_ []db.MatchParticipant, err error) {

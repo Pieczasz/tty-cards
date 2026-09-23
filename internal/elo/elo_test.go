@@ -16,11 +16,11 @@ import (
 func TestClampRating(t *testing.T) {
 	t.Parallel()
 	// NaN is unorderable, so min/max would pass it through to the rankings table.
-	assert.InDelta(t, DefaultRating, ClampRating(math.NaN()), 1e-9, "NaN is treated as unrated")
-	assert.InDelta(t, MinRating, ClampRating(-50), 1e-9)
-	assert.InDelta(t, MinRating, ClampRating(0), 1e-9)
-	assert.InDelta(t, MaxRating, ClampRating(9000), 1e-9)
-	assert.InDelta(t, 1500.0, ClampRating(1500), 1e-9)
+	assert.InDelta(t, DefaultRating, clampRating(math.NaN()), 1e-9, "NaN is treated as unrated")
+	assert.InDelta(t, MinRating, clampRating(-50), 1e-9)
+	assert.InDelta(t, MinRating, clampRating(0), 1e-9)
+	assert.InDelta(t, MaxRating, clampRating(9000), 1e-9)
+	assert.InDelta(t, 1500.0, clampRating(1500), 1e-9)
 	assert.Equal(t, uint32(100), ToUint32(-1))
 	assert.Equal(t, uint32(4000), ToUint32(99999))
 }
@@ -545,7 +545,7 @@ func TestCalculate_ProvisionalIsUnpaidPerPairNotPerTable(t *testing.T) {
 		assert.InDelta(t, 1500, out["a"], 1e-9, "a only faces the provisional, so a gains nothing")
 		assert.Less(t, out["c"], 1300.0, "c lost to the provisional and to nobody else it beat pays")
 		assert.Less(t, out["d"], 1100.0, "d lost to c - an ordinary pair, rated as usual")
-		assert.Greater(t, out["c"], out["c"]-KFactor, "c's loss is bounded by one pair")
+		assert.Greater(t, out["c"], out["c"]-kFactor, "c's loss is bounded by one pair")
 	})
 
 	t.Run("two provisionals play each other normally", func(t *testing.T) {
@@ -601,7 +601,7 @@ func TestCalculate_Properties(t *testing.T) {
 	t.Run("an established field only transfers rating", func(t *testing.T) {
 		t.Parallel()
 		rapid.Check(t, func(t *rapid.T) {
-			players := eloField(t, MinRating+2*KFactor, MaxRating-2*KFactor)
+			players := eloField(t, MinRating+2*kFactor, MaxRating-2*kFactor)
 			var net float64
 			for i := range players {
 				players[i].Provisional = false
@@ -652,15 +652,15 @@ func TestCalculate_Properties(t *testing.T) {
 			if rapid.Bool().Draw(t, "freshWins") {
 				established.Place, fresh.Place = 2, 1
 				got := Calculate([]Player{fresh, established})
-				require.LessOrEqual(t, got["established"], ClampRating(established.Rating),
+				require.LessOrEqual(t, got["established"], clampRating(established.Rating),
 					"beaten by a fresh account, the established side pays")
 				return
 			}
 
 			got := Calculate([]Player{established, fresh})
-			require.InDelta(t, ClampRating(established.Rating), got["established"], 1e-9,
+			require.InDelta(t, clampRating(established.Rating), got["established"], 1e-9,
 				"beating a fresh account pays nothing")
-			require.LessOrEqual(t, got["fresh"], ClampRating(fresh.Rating),
+			require.LessOrEqual(t, got["fresh"], clampRating(fresh.Rating),
 				"and the fresh account still moves, so it converges on real games")
 		})
 	})

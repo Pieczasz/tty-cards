@@ -30,6 +30,7 @@ type User struct {
 	Rankings   []Ranking
 }
 
+// BeforeCreate assigns a UUIDv7 id when the caller did not.
 func (u *User) BeforeCreate(_ *gorm.DB) error {
 	if u.ID == uuid.Nil() {
 		u.ID = uuid.NewV7()
@@ -37,6 +38,7 @@ func (u *User) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// PublicKey is one SSH key an account signs in with, by its SHA256 fingerprint.
 type PublicKey struct {
 	gorm.Model
 	Fingerprint string
@@ -46,6 +48,7 @@ type PublicKey struct {
 	User        User      `gorm:"foreignKey:UserID"`
 }
 
+// Ranking is one account's rating in one game.
 type Ranking struct {
 	UserID uuid.UUID `gorm:"primaryKey;serializer:stduuid"`
 	GameID uint      `gorm:"primaryKey"`

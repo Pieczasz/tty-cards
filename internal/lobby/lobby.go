@@ -1,3 +1,8 @@
+// Package lobby seats players at tables, starts a game once every seat is ready, and
+// hands the finished match to a db.MatchRepository. It is the only place a db.User
+// becomes a game.Player and the only writer of match results.
+//
+// Lock order is Manager.mu, then Lobby.mu, then the engine's own lock.
 package lobby
 
 import (
@@ -368,18 +373,21 @@ func (l *Lobby) GameName() string {
 	return l.options.cardGame
 }
 
+// MaxPlayers is the seat cap, leader included.
 func (l *Lobby) MaxPlayers() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.options.maxPlayers
 }
 
+// IsRanked is whether a finished match here moves Elo.
 func (l *Lobby) IsRanked() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.options.isRanked
 }
 
+// IsPrivate is whether the table is kept out of BrowseLobbies.
 func (l *Lobby) IsPrivate() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -396,36 +404,42 @@ func (l *Lobby) ActiveGame() *game.Engine {
 	return l.activeEngine
 }
 
+// Leader is the player in seat 0, who owns the settings.
 func (l *Lobby) Leader() *game.Player {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.leader
 }
 
+// Guests is every seated player but the leader, in join order. The slice is a copy.
 func (l *Lobby) Guests() []*game.Player {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return slices.Clone(l.guests)
 }
 
+// CurrentPlayers is how many seats are taken, leader included.
 func (l *Lobby) CurrentPlayers() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return 1 + len(l.guests)
 }
 
+// HasPlayer is whether p is seated here.
 func (l *Lobby) HasPlayer(p *game.Player) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.hasPlayerLocked(p)
 }
 
+// IsReady is p's ready flag for the next game.
 func (l *Lobby) IsReady(p *game.Player) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.ready[p.ID]
 }
 
+// IsLeader is whether p holds seat 0.
 func (l *Lobby) IsLeader(p *game.Player) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()

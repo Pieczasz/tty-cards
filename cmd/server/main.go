@@ -117,7 +117,7 @@ func run() (err error) {
 
 	database, err := repository.Connect(cfg.DSN(), repository.Pool{
 		MaxOpenConns: cfg.DBMaxOpenConnections,
-		Verbose:      cfg.Env == "development",
+		Verbose:      !cfg.IsProduction(),
 	})
 	if err != nil {
 		return fmt.Errorf("setup database: %w", err)

@@ -1,3 +1,6 @@
+// Package repository is the GORM implementation of the internal/db contracts. Only
+// cmd/server, the composition root, imports it; everything else depends on the db
+// interfaces.
 package repository
 
 import (

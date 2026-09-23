@@ -99,6 +99,7 @@ func getOrCreateGame(tx *gorm.DB, ref db.GameRef) (*db.Game, error) {
 	return &game, nil
 }
 
+// RecordCasualMatch writes an unranked result's history; see db.MatchRepository.
 func (q *MatchRepository) RecordCasualMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID,
 ) (err error) {

@@ -1,3 +1,7 @@
+// Package db is the persistence contract: the GORM models, the repository interfaces
+// the rest of the server depends on, the sentinel errors callers compare against, and
+// the embedded SQL migrations that own the schema. The implementations live in
+// internal/repository.
 package db
 
 import (

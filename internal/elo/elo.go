@@ -1,3 +1,5 @@
+// Package elo is the pure rating maths: Simple Multiplayer Elo over a finish order,
+// with the provisional-account rule applied per pair. It knows nothing about storage.
 package elo
 
 import (
@@ -7,19 +9,21 @@ import (
 	"slices"
 )
 
+// The rating scale. An unrated player starts at DefaultRating, and Calculate keeps
+// every result inside [MinRating, MaxRating].
 const (
 	DefaultRating float64 = 1500.0
 	MinRating     float64 = 100.0
 	MaxRating     float64 = 4000.0
 
-	// KFactor determines how much ratings can change in a single match. 32 is the
+	// kFactor determines how much ratings can change in a single match. 32 is the
 	// standard chess default; a tiered K (higher for new accounts, lower once
 	// established) is the upgrade path if rating volatility becomes a problem.
-	KFactor float64 = 32.0
+	kFactor float64 = 32.0
 )
 
-// ClampRating bounds a rating to [MinRating, MaxRating].
-func ClampRating(rating float64) float64 {
+// clampRating bounds a rating to [MinRating, MaxRating].
+func clampRating(rating float64) float64 {
 	if math.IsNaN(rating) {
 		slog.Error("NaN rating clamped to the default", "default", DefaultRating)
 		return DefaultRating
@@ -27,10 +31,12 @@ func ClampRating(rating float64) float64 {
 	return min(max(rating, MinRating), MaxRating)
 }
 
+// ToUint32 is a rating as it is stored: clamped to the scale and rounded.
 func ToUint32(rating float64) uint32 {
-	return uint32(math.Round(ClampRating(rating)))
+	return uint32(math.Round(clampRating(rating)))
 }
 
+// Player is one seat in a Calculate: who, at what rating, finishing where.
 type Player struct {
 	ID     string
 	Rating float64
@@ -72,7 +78,7 @@ func Calculate(players []Player) map[string]float64 {
 		return newRatings
 	}
 	if n == 1 {
-		newRatings[players[0].ID] = ClampRating(players[0].Rating)
+		newRatings[players[0].ID] = clampRating(players[0].Rating)
 		return newRatings
 	}
 
@@ -96,7 +102,7 @@ func Calculate(players []Player) map[string]float64 {
 			slog.Error("duplicate player id in an elo calculation; one rating change is discarded",
 				"player_id", player.ID, "players", len(ordered))
 		}
-		newRatings[player.ID] = ClampRating(player.Rating + deltas[i])
+		newRatings[player.ID] = clampRating(player.Rating + deltas[i])
 	}
 
 	return newRatings
@@ -127,10 +133,7 @@ func normalizeTies(players []Player) {
 		}
 		if end-start > 1 {
 			slices.SortFunc(players[start:end], func(a, b Player) int {
-				if c := cmp.Compare(b.Rating, a.Rating); c != 0 {
-					return c
-				}
-				return cmp.Compare(a.ID, b.ID)
+				return cmp.Or(cmp.Compare(b.Rating, a.Rating), cmp.Compare(a.ID, b.ID))
 			})
 		}
 		start = end
@@ -142,7 +145,7 @@ func rawTransfer(upper, lower Player) float64 {
 	if drew(upper, lower) {
 		score = 0.5
 	}
-	return KFactor * (score - expectedScore(upper.Rating, lower.Rating))
+	return kFactor * (score - expectedScore(upper.Rating, lower.Rating))
 }
 
 func capTransfer(moved, gainsRating, losesRating float64) float64 {
