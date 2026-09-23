@@ -224,7 +224,7 @@ type fakeUsers struct {
 	best func(ctx context.Context, limit int, gameName string) ([]db.Ranking, error)
 }
 
-func (f fakeUsers) BestPlayers(ctx context.Context, limit int, gameName string) ([]db.Ranking, error) {
+func (f fakeUsers) BestPlayers(ctx context.Context, gameName string, limit int) ([]db.Ranking, error) {
 	return f.best(ctx, limit, gameName)
 }
 

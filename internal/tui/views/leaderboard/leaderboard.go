@@ -147,7 +147,7 @@ func (m model) load(limit int, wantPage int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.global.RequestContext(), 5*time.Second)
 		defer cancel()
-		rankings, err := m.global.UserRepository.BestPlayers(ctx, limit, gameSlug)
+		rankings, err := m.global.UserRepository.BestPlayers(ctx, gameSlug, limit)
 		return loadedMsg{rankings: rankings, err: err, gameSlug: gameSlug, wantPage: wantPage, limit: limit}
 	}
 }

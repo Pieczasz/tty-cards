@@ -33,7 +33,7 @@ type stubUsers struct {
 	gotGame  string
 }
 
-func (s *stubUsers) BestPlayers(_ context.Context, limit int, gameName string) ([]db.Ranking, error) {
+func (s *stubUsers) BestPlayers(_ context.Context, gameName string, limit int) ([]db.Ranking, error) {
 	s.gotLimit = limit
 	s.gotGame = gameName
 	return s.rankings, s.err

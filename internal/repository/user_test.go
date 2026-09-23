@@ -116,8 +116,11 @@ func TestUserRepository_LoadUserByFingerprint(t *testing.T) {
 	database := testutil.SetupTestDB(t)
 	repo := repository.NewUserRepository(database)
 
-	_, _, err := repo.RegisterUserWithKey(context.Background(), "player_two", "fingerprint_abc")
+	registered, _, err := repo.RegisterUserWithKey(context.Background(), "player_two", "fingerprint_abc")
 	require.NoError(t, err)
+	game := &db.Game{Slug: "loadgame", Name: "LoadGame"}
+	require.NoError(t, database.Create(game).Error)
+	require.NoError(t, database.Create(&db.Ranking{UserID: registered.ID, GameID: game.ID, Elo: 1600}).Error)
 
 	t.Run("existing user", func(t *testing.T) {
 		t.Parallel()
@@ -126,6 +129,10 @@ func TestUserRepository_LoadUserByFingerprint(t *testing.T) {
 		require.NotNil(t, user)
 		require.NotNil(t, key)
 		assert.Equal(t, "player_two", user.Username)
+		// One nested Preload loads every level of the chain: this is what the session
+		// seats the player with.
+		require.Len(t, user.Rankings, 1)
+		assert.Equal(t, "LoadGame", user.Rankings[0].Game.Name)
 	})
 
 	t.Run("non-existent user", func(t *testing.T) {
@@ -256,7 +263,7 @@ func TestUserRepository_BestPlayersCachesShortTables(t *testing.T) {
 	require.NoError(t, database.Create(u).Error)
 	require.NoError(t, database.Create(&db.Ranking{UserID: u.ID, GameID: game.ID, Elo: 1700, MatchesPlayed: 5}).Error)
 
-	best, err := repo.BestPlayers(ctx, 25, "")
+	best, err := repo.BestPlayers(ctx, "", 25)
 	require.NoError(t, err)
 	require.Len(t, best, 1)
 
@@ -264,7 +271,7 @@ func TestUserRepository_BestPlayersCachesShortTables(t *testing.T) {
 	// rows out from under it must not change the answer.
 	require.NoError(t, database.Where("1 = 1").Delete(&db.Ranking{}).Error)
 
-	cached, err := repo.BestPlayers(ctx, 25, "")
+	cached, err := repo.BestPlayers(ctx, "", 25)
 	require.NoError(t, err)
 	assert.Len(t, cached, 1, "a table shorter than the limit must still be cached")
 }
@@ -284,14 +291,14 @@ func TestUserRepository_BestPlayersBypassesCacheAboveItsSize(t *testing.T) {
 	require.NoError(t, database.Create(u).Error)
 	require.NoError(t, database.Create(&db.Ranking{UserID: u.ID, GameID: game.ID, Elo: 1700, MatchesPlayed: 5}).Error)
 
-	best, err := repo.BestPlayers(ctx, 201, "")
+	best, err := repo.BestPlayers(ctx, "", 201)
 	require.NoError(t, err)
 	require.Len(t, best, 1)
 
 	require.NoError(t, database.Where("1 = 1").Delete(&db.Ranking{}).Error)
 
 	// Had the oversized ask been cached, this would still answer 1.
-	again, err := repo.BestPlayers(ctx, 201, "")
+	again, err := repo.BestPlayers(ctx, "", 201)
 	require.NoError(t, err)
 	assert.Empty(t, again, "an oversized limit must not be served from the cache")
 }
@@ -311,14 +318,14 @@ func TestUserRepository_BestPlayers(t *testing.T) {
 		database.Create(&db.Ranking{UserID: u.ID, GameID: game.ID, Elo: uint32(1000 + i*100), MatchesPlayed: 5})
 	}
 
-	best, err := repo.BestPlayers(ctx, 3, "")
+	best, err := repo.BestPlayers(ctx, "", 3)
 	require.NoError(t, err)
 	require.Len(t, best, 3)
 	assert.Equal(t, uint32(1500), best[0].Elo)
 	assert.Equal(t, uint32(1400), best[1].Elo)
 	assert.Equal(t, uint32(1300), best[2].Elo)
 
-	bestCached, err := repo.BestPlayers(ctx, 2, "")
+	bestCached, err := repo.BestPlayers(ctx, "", 2)
 	require.NoError(t, err)
 	assert.Len(t, bestCached, 2)
 }
@@ -341,17 +348,17 @@ func TestUserRepository_BestPlayers_FiltersByGame(t *testing.T) {
 	require.NoError(t, database.Create(&db.Ranking{UserID: alice.ID, GameID: poker.ID, Elo: 1800, MatchesPlayed: 5}).Error)
 	require.NoError(t, database.Create(&db.Ranking{UserID: bob.ID, GameID: uno.ID, Elo: 1900, MatchesPlayed: 5}).Error)
 
-	unoOnly, err := repo.BestPlayers(ctx, 10, "uno")
+	unoOnly, err := repo.BestPlayers(ctx, "uno", 10)
 	require.NoError(t, err)
 	require.Len(t, unoOnly, 1)
 	assert.Equal(t, "bob", unoOnly[0].User.Username)
 
-	all, err := repo.BestPlayers(ctx, 10, "")
+	all, err := repo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 	assert.Equal(t, "bob", all[0].User.Username, "highest Elo across games wins the mixed board")
 
-	missing, err := repo.BestPlayers(ctx, 10, "hearts")
+	missing, err := repo.BestPlayers(ctx, "hearts", 10)
 	require.NoError(t, err)
 	assert.Empty(t, missing)
 }
@@ -372,12 +379,12 @@ func TestUserRepository_BestPlayers_FiltersBySlugAfterRename(t *testing.T) {
 
 	require.NoError(t, database.Model(poker).Update("name", "Texas Holdem").Error)
 
-	bySlug, err := repo.BestPlayers(ctx, 10, "poker")
+	bySlug, err := repo.BestPlayers(ctx, "poker", 10)
 	require.NoError(t, err)
 	require.Len(t, bySlug, 1)
 	assert.Equal(t, "slug_alice", bySlug[0].User.Username)
 
-	byName, err := repo.BestPlayers(ctx, 10, "Texas Holdem")
+	byName, err := repo.BestPlayers(ctx, "Texas Holdem", 10)
 	require.NoError(t, err)
 	assert.Empty(t, byName, "the display name is not the filter identity")
 }
@@ -448,12 +455,12 @@ func TestUserRepository_BestPlayersOrderIsStableAcrossEqualRatings(t *testing.T)
 	}
 
 	// A fresh repository per read, so each one is a real query rather than the cache.
-	first, err := repository.NewUserRepository(database).BestPlayers(ctx, 20, "tiebreak")
+	first, err := repository.NewUserRepository(database).BestPlayers(ctx, "tiebreak", 20)
 	require.NoError(t, err)
 	require.Len(t, first, 20)
 
 	for range 5 {
-		again, err := repository.NewUserRepository(database).BestPlayers(ctx, 20, "tiebreak")
+		again, err := repository.NewUserRepository(database).BestPlayers(ctx, "tiebreak", 20)
 		require.NoError(t, err)
 		assert.Equal(t, usernamesOf(first), usernamesOf(again),
 			"the board reshuffled between two identical queries")
@@ -610,7 +617,7 @@ func TestUserRepository_DeleteAccount(t *testing.T) {
 
 	// Warming the cache first is the point: the erased name has to go within the
 	// request rather than whenever the five-minute TTL happens to lapse.
-	before, err := repo.BestPlayers(ctx, 10, "")
+	before, err := repo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	require.Len(t, before, 2, "both players start on the board")
 
@@ -619,7 +626,7 @@ func TestUserRepository_DeleteAccount(t *testing.T) {
 	assertIdentityErased(t, database, f)
 	assertHistorySurvives(t, database, repo, f)
 
-	best, err := repo.BestPlayers(ctx, 10, "")
+	best, err := repo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	require.Len(t, best, 1, "the erased account is off the leaderboard within the request")
 	assert.Equal(t, "stayer", best[0].User.Username)

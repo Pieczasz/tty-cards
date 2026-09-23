@@ -39,7 +39,7 @@ func TestFinalizeRankedMatchSkipsAnErasedSeat(t *testing.T) {
 		Where("user_id = ?", erased.String()).Count(&rows).Error)
 	assert.Zero(t, rows, "the finalize re-created the erased account's ranking")
 
-	best, err := users.BestPlayers(ctx, 10, "")
+	best, err := users.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	for _, r := range best {
 		assert.NotEqual(t, erased, r.UserID, "the erased account is back on the leaderboard")

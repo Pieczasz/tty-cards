@@ -56,7 +56,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "the leaderboard",
-			call: func() error { _, err := users.BestPlayers(ctx, 10, ""); return err },
+			call: func() error { _, err := users.BestPlayers(ctx, "", 10); return err },
 			want: "get best players",
 		},
 		{

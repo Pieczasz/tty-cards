@@ -62,7 +62,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	matchRepo.awaitFinalize(t)
 	require.True(t, manager.WaitForFinalizers(30*time.Second), "ranked write must drain")
 
-	best, err := userRepo.BestPlayers(ctx, 10, "")
+	best, err := userRepo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	require.NotEmpty(t, best, "a finished ranked game must populate the leaderboard")
 

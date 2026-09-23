@@ -67,7 +67,7 @@ func TestUserRepository_BestPlayersDoesNotRecacheAnErasedRow(t *testing.T) {
 
 	slow := make(chan error, 1)
 	go func() {
-		_, err := repo.BestPlayers(ctx, 10, "")
+		_, err := repo.BestPlayers(ctx, "", 10)
 		slow <- err
 	}()
 	<-entered // the slow read has its pre-erasure rows in hand
@@ -76,7 +76,7 @@ func TestUserRepository_BestPlayersDoesNotRecacheAnErasedRow(t *testing.T) {
 	release()
 	require.NoError(t, <-slow)
 
-	best, err := repo.BestPlayers(ctx, 10, "")
+	best, err := repo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	for _, r := range best {
 		assert.NotEqual(t, users[0].ID, r.UserID, "the erased account was re-cached by a read that started before the erasure")
@@ -98,7 +98,7 @@ func TestUserRepository_BestPlayersSharesOneQueryPerMiss(t *testing.T) {
 	errs := make(chan error, callers)
 	for range callers {
 		wg.Go(func() {
-			best, err := repo.BestPlayers(ctx, 10, "")
+			best, err := repo.BestPlayers(ctx, "", 10)
 			if err == nil && len(best) != 2 {
 				err = assert.AnError
 			}

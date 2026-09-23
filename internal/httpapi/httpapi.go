@@ -179,7 +179,7 @@ func leaderboardHandler(deps Deps) http.Handler {
 		// No per-game filter: the only client never asked for one, and a caller-supplied
 		// game name is a cache miss by construction - one indexed join per request for
 		// any string that is not a real game.
-		rankings, err := deps.Users.BestPlayers(r.Context(), limit, "")
+		rankings, err := deps.Users.BestPlayers(r.Context(), "", limit)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "leaderboard query failed", "error", err)
 			writeError(w, r, http.StatusServiceUnavailable, "leaderboard unavailable")
