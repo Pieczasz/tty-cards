@@ -435,11 +435,11 @@ func TestEngine_Snapshot(t *testing.T) {
 
 		assert.Equal(t, Playing, snap.Phase)
 		assert.Equal(t, len(deck.Standard())-2*5, snap.DeckSize, "what is left after dealing five each")
-		assert.NotEmpty(t, snap.CurrentPlayer, "somebody is always on turn while playing")
+		assert.NotEmpty(t, snap.CurrentPlayerName, "somebody is always on turn while playing")
 		require.Len(t, snap.Players, 2, "every seat is listed")
 		assert.Equal(t, "p1", snap.Players[0].ID)
 		assert.Equal(t, 5, snap.Players[0].HandSize)
-		assert.Empty(t, snap.Winner, "nobody has won yet")
+		assert.Empty(t, snap.WinnerName, "nobody has won yet")
 	})
 
 	t.Run("a finished game names the winner", func(t *testing.T) {
@@ -450,7 +450,7 @@ func TestEngine_Snapshot(t *testing.T) {
 			state.Winner = state.Players[1]
 		})
 
-		assert.Equal(t, "p2", engine.Snapshot().Winner)
+		assert.Equal(t, "p2", engine.Snapshot().WinnerName)
 	})
 
 	// The cursor is clamped everywhere it is set, but Snapshot is reached from views
@@ -478,7 +478,7 @@ func TestEngine_Snapshot(t *testing.T) {
 
 				var snap StateSnapshot
 				require.NotPanics(t, func() { snap = engine.Snapshot() })
-				assert.Equal(t, tt.want, snap.CurrentPlayer)
+				assert.Equal(t, tt.want, snap.CurrentPlayerName)
 			})
 		}
 	})

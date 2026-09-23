@@ -40,7 +40,7 @@ func handOf(n int) []deck.Card {
 func seatsOf(names ...string) []game.PlayerSnapshot {
 	seats := make([]game.PlayerSnapshot, 0, len(names))
 	for i, n := range names {
-		seats = append(seats, game.PlayerSnapshot{ID: n, Username: n, HandSize: 3 + i})
+		seats = append(seats, game.PlayerSnapshot{ID: n, Name: n, HandSize: 3 + i})
 	}
 	return seats
 }
@@ -50,16 +50,16 @@ func viewAt(width, height int, opponents ...string) *model {
 	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Base: gameview.BaseState{
-			Phase:           game.Playing,
-			MyTurn:          true,
-			Hand:            handOf(12),
-			TopDiscard:      deck.Card{Rank: deck.Five, Suit: logic.ColorRed},
-			Seats:           append(seatsOf("hero"), opps...),
-			Opponents:       opps,
-			DeckSize:        20,
-			CurrentPlayer:   "hero",
-			CurrentPlayerID: "hero",
-			TurnRemaining:   12 * time.Second,
+			Phase:             game.Playing,
+			MyTurn:            true,
+			Hand:              handOf(12),
+			TopDiscard:        deck.Card{Rank: deck.Five, Suit: logic.ColorRed},
+			Seats:             append(seatsOf("hero"), opps...),
+			Opponents:         opps,
+			DeckSize:          20,
+			CurrentPlayerName: "hero",
+			CurrentPlayerID:   "hero",
+			TurnRemaining:     12 * time.Second,
 		},
 		currentColor: logic.ColorRed,
 		direction:    1,
@@ -162,7 +162,7 @@ func TestView_WaitingAndFinishedScreens(t *testing.T) {
 			t.Parallel()
 			m := viewAt(80, 24, "bob")
 			m.Base.Phase = tc.phase
-			m.Base.Winner = "bob"
+			m.Base.WinnerName = "bob"
 
 			out := m.View().Content
 			assert.Contains(t, out, tc.want)

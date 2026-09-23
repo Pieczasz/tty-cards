@@ -181,7 +181,7 @@ func TestHandOverHint_NamesTheHandAboutToBeDealt(t *testing.T) {
 	assert.Contains(t, m.handOverHint(), "deal hand 2", "the hero is on the button")
 
 	m.Base.MyTurn = false
-	m.Base.CurrentPlayer = "bob"
+	m.Base.CurrentPlayerName = "bob"
 	assert.Contains(t, m.handOverHint(), "hand 2", "and bob is when he is")
 }
 

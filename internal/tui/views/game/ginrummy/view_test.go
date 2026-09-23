@@ -68,7 +68,7 @@ func TestView_HandOverWallBanner(t *testing.T) {
 	assert.Contains(t, out, "WALL")
 }
 
-var aliceAndBob = []game.PlayerSnapshot{{ID: "1", Username: "alice"}, {ID: "2", Username: "bob"}}
+var aliceAndBob = []game.PlayerSnapshot{{ID: "1", Name: "alice"}, {ID: "2", Name: "bob"}}
 
 func handOf(n int) []deck.Card {
 	suits := []deck.Suit{deck.Spades, deck.Hearts, deck.Diamonds, deck.Clubs}
@@ -80,20 +80,20 @@ func handOf(n int) []deck.Card {
 }
 
 func viewAt(width, height int) *model {
-	opponent := game.PlayerSnapshot{ID: "2", Username: "bob", HandSize: 10}
+	opponent := game.PlayerSnapshot{ID: "2", Name: "bob", HandSize: 10}
 	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Base: gameview.BaseState{
-			Phase:           game.Playing,
-			MyTurn:          true,
-			Hand:            handOf(11),
-			TopDiscard:      deck.Card{Rank: deck.Seven, Suit: deck.Clubs},
-			Seats:           []game.PlayerSnapshot{{ID: "1", Username: "alice", HandSize: 11}, opponent},
-			Opponents:       []game.PlayerSnapshot{opponent},
-			DeckSize:        20,
-			CurrentPlayer:   "alice",
-			CurrentPlayerID: "1",
-			TurnRemaining:   9 * time.Second,
+			Phase:             game.Playing,
+			MyTurn:            true,
+			Hand:              handOf(11),
+			TopDiscard:        deck.Card{Rank: deck.Seven, Suit: deck.Clubs},
+			Seats:             []game.PlayerSnapshot{{ID: "1", Name: "alice", HandSize: 11}, opponent},
+			Opponents:         []game.PlayerSnapshot{opponent},
+			DeckSize:          20,
+			CurrentPlayerName: "alice",
+			CurrentPlayerID:   "1",
+			TurnRemaining:     9 * time.Second,
 		},
 		phase:            logic.PhaseAwaitingDiscard,
 		handNumber:       3,
@@ -114,7 +114,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
-			m.Base.Winner = "alice"
+			m.Base.WinnerName = "alice"
 			m.lastHandResult = knockResult()
 		},
 	}

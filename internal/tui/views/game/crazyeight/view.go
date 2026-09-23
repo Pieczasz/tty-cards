@@ -16,7 +16,7 @@ func (m *model) View() tea.View {
 		return tea.NewView(screen)
 	}
 	if m.Base.Phase != game.Playing {
-		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.Winner))
+		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.WinnerName))
 	}
 
 	// Seat art is the first thing to go: it costs seven rows per seat, and a name
@@ -57,7 +57,7 @@ func (m *model) renderCurrentSuitIndicator() string {
 }
 
 func (m *model) renderPlayerSection() string {
-	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
+	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.suit.Open,
 		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
 

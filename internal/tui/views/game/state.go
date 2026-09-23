@@ -20,11 +20,11 @@ type BaseState struct {
 	Seats     []game.PlayerSnapshot
 	Opponents []game.PlayerSnapshot
 	DeckSize  int
-	// CurrentPlayer is for rendering only; decide turns on CurrentPlayerID, since
+	// CurrentPlayerName is for rendering only; decide turns on CurrentPlayerID, since
 	// display names are not unique.
-	CurrentPlayer   string
-	CurrentPlayerID string
-	Winner          string
+	CurrentPlayerName string
+	CurrentPlayerID   string
+	WinnerName        string
 	// TurnRemaining is time left before the engine plays for them; zero means no clock.
 	TurnRemaining time.Duration
 }
@@ -41,9 +41,9 @@ func syncBaseState(bound *game.BoundEngine, fn func(*game.State)) BaseState {
 	snap, hand, remaining := bound.Frame(fn)
 	base.Phase = snap.Phase
 	base.TopDiscard = snap.TopDiscard
-	base.CurrentPlayer = snap.CurrentPlayer
+	base.CurrentPlayerName = snap.CurrentPlayerName
 	base.CurrentPlayerID = snap.CurrentPlayerID
-	base.Winner = snap.Winner
+	base.WinnerName = snap.WinnerName
 	base.Hand = hand
 	base.TurnRemaining = remaining
 	base.Seats = snap.Players
@@ -70,11 +70,11 @@ func opponentsFrom(seats []game.PlayerSnapshot, heroID string) []game.PlayerSnap
 	return slices.Concat(seats[hero+1:], seats[:hero])
 }
 
-// SeatNames maps player ID to display name; Username falls back to the ID itself.
+// SeatNames maps player ID to display name; Name falls back to the ID itself.
 func (b BaseState) SeatNames() map[string]string {
 	names := make(map[string]string, len(b.Seats))
 	for _, seat := range b.Seats {
-		names[seat.ID] = seat.Username
+		names[seat.ID] = seat.Name
 	}
 	return names
 }

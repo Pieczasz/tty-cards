@@ -198,7 +198,7 @@ func tableOf(width, height, n int) *model {
 	m.Global = router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height}
 	m.Base = gameview.BaseState{
 		Phase: game.Playing, MyTurn: true,
-		CurrentPlayer: "player_0", CurrentPlayerID: "p0",
+		CurrentPlayerName: "player_0", CurrentPlayerID: "p0",
 		TurnRemaining: 14 * time.Second,
 	}
 	return m
@@ -473,7 +473,7 @@ func TestHandOverHint_SaysNothingIsLeftForABustedHero(t *testing.T) {
 	m.seats[0].Chips = 0
 	assert.Contains(t, m.handOverHint(), "out of chips")
 
-	m.Base.CurrentPlayer = ""
+	m.Base.CurrentPlayerName = ""
 	m.seats[0].Chips = 100
 	m.Base.MyTurn = false
 	assert.Contains(t, m.handOverHint(), "waiting for the next hand")

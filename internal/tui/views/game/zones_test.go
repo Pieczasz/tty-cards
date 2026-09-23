@@ -74,7 +74,7 @@ func TestRenderOpponentEdges_ShowsEverySeat(t *testing.T) {
 			for i := range seats {
 				base.Opponents = append(base.Opponents, game.PlayerSnapshot{
 					ID:       fmt.Sprintf("p%d", i),
-					Username: fmt.Sprintf("player%d", i),
+					Name:     fmt.Sprintf("player%d", i),
 					HandSize: i + 1,
 				})
 			}
@@ -84,9 +84,9 @@ func TestRenderOpponentEdges_ShowsEverySeat(t *testing.T) {
 			rendered := tuitest.StripANSI(strings.Join([]string{top, left, right}, "\n"))
 
 			for _, o := range base.Opponents {
-				assert.Containsf(t, rendered, o.Username, "%s is not on the table", o.Username)
+				assert.Containsf(t, rendered, o.Name, "%s is not on the table", o.Name)
 				assert.Containsf(t, rendered, fmt.Sprintf("[%d cards]", o.HandSize),
-					"%s's hand count is missing", o.Username)
+					"%s's hand count is missing", o.Name)
 			}
 		})
 	}
@@ -101,8 +101,8 @@ func TestRenderOpponentEdges_MarksTheSeatOnTurn(t *testing.T) {
 	base := BaseState{
 		CurrentPlayerID: "p1",
 		Opponents: []game.PlayerSnapshot{
-			{ID: "p0", Username: "same", HandSize: 3},
-			{ID: "p1", Username: "same", HandSize: 3},
+			{ID: "p0", Name: "same", HandSize: 3},
+			{ID: "p1", Name: "same", HandSize: 3},
 		},
 	}
 
@@ -132,7 +132,7 @@ func TestRenderOpponentSides_FitTheHeightTheyAreGiven(t *testing.T) {
 					for i := range seats {
 						base.Opponents = append(base.Opponents, game.PlayerSnapshot{
 							ID:       fmt.Sprintf("p%d", i),
-							Username: fmt.Sprintf("player%d", i),
+							Name:     fmt.Sprintf("player%d", i),
 							HandSize: handSize,
 						})
 					}
@@ -157,8 +157,8 @@ func TestRenderOpponentSeat_FallsBackToNamesWhenTheArtCannotFit(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	base := BaseState{Opponents: []game.PlayerSnapshot{
-		{ID: "p0", Username: "player0", HandSize: 5},
-		{ID: "p1", Username: "player1", HandSize: 5},
+		{ID: "p0", Name: "player0", HandSize: 5},
+		{ID: "p1", Name: "player1", HandSize: 5},
 	}}
 
 	left, _ := RenderOpponentSides(theme, base, 4, false)

@@ -252,7 +252,7 @@ func TestSession_SyncBase_PullsTheCursorBackIntoAShrinkingHand(t *testing.T) {
 
 func TestSession_SeatNamesFallBackToThePlayerID(t *testing.T) {
 	t.Parallel()
-	base := BaseState{Seats: []game.PlayerSnapshot{{ID: "7", Username: "7"}}}
+	base := BaseState{Seats: []game.PlayerSnapshot{{ID: "7", Name: "7"}}}
 	assert.Equal(t, map[string]string{"7": "7"}, base.SeatNames())
 }
 

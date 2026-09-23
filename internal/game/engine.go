@@ -159,17 +159,17 @@ func (e *Engine) snapshotLocked() StateSnapshot {
 		}
 	}
 	if state.Winner != nil {
-		snap.Winner = state.Winner.DisplayName()
+		snap.WinnerName = state.Winner.DisplayName()
 	}
 	if current := e.currentPlayerLocked(); current != nil {
-		snap.CurrentPlayer = current.DisplayName()
+		snap.CurrentPlayerName = current.DisplayName()
 		snap.CurrentPlayerID = current.ID
 	}
 	snap.Players = make([]PlayerSnapshot, 0, len(state.Players))
 	for _, p := range state.Players {
 		snap.Players = append(snap.Players, PlayerSnapshot{
 			ID:       p.ID,
-			Username: p.DisplayName(),
+			Name:     p.DisplayName(),
 			HandSize: len(p.Cards),
 		})
 	}

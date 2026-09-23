@@ -209,7 +209,7 @@ func RenderOpponent(
 	if isCurrentTurn {
 		nameStyle = t.TurnName
 	}
-	nameView := nameStyle.Render(o.Username)
+	nameView := nameStyle.Render(o.Name)
 	cardsCountView := t.Muted.Render(fmt.Sprintf("[%d cards]", o.HandSize))
 
 	infoView := lg.JoinVertical(lg.Center, nameView, cardsCountView)
@@ -237,7 +237,7 @@ func RenderOpponentMinimal(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn 
 	if isCurrentTurn {
 		nameStyle = t.TurnName
 	}
-	nameView := nameStyle.Render(o.Username)
+	nameView := nameStyle.Render(o.Name)
 	cardsCountView := t.Muted.Render(fmt.Sprintf("[%d cards]", o.HandSize))
 
 	return lg.JoinHorizontal(lg.Center, nameView, " ", cardsCountView)

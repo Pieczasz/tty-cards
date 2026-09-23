@@ -29,8 +29,8 @@ func TestView_HandOverShowsScores(t *testing.T) {
 			Height: 24,
 		},
 		Base: gameview.BaseState{Phase: game.Playing, Seats: []game.PlayerSnapshot{
-			{ID: "1", Username: "alice"}, {ID: "2", Username: "bob"},
-			{ID: "3", Username: "carol"}, {ID: "4", Username: "dave"},
+			{ID: "1", Name: "alice"}, {ID: "2", Name: "bob"},
+			{ID: "3", Name: "carol"}, {ID: "4", Name: "dave"},
 		}},
 		phase:            logic.PhaseHandOver,
 		handComplete:     true,
@@ -71,13 +71,13 @@ func TestOpponentAt_RefusesATableThatIsNotFourHanded(t *testing.T) {
 		Base: gameview.BaseState{
 			Phase: game.Playing,
 			Seats: []game.PlayerSnapshot{
-				{ID: "1", Username: "alice", HandSize: 13},
-				{ID: "2", Username: "bob", HandSize: 13},
-				{ID: "3", Username: "carol", HandSize: 13},
+				{ID: "1", Name: "alice", HandSize: 13},
+				{ID: "2", Name: "bob", HandSize: 13},
+				{ID: "3", Name: "carol", HandSize: 13},
 			},
 			Opponents: []game.PlayerSnapshot{
-				{ID: "2", Username: "bob", HandSize: 13},
-				{ID: "3", Username: "carol", HandSize: 13},
+				{ID: "2", Name: "bob", HandSize: 13},
+				{ID: "3", Name: "carol", HandSize: 13},
 			},
 		},
 		trickCards: map[string]deck.Card{},
@@ -124,10 +124,10 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 	t.Parallel()
 
 	seats := []game.PlayerSnapshot{
-		{ID: "1", Username: "alice", HandSize: 10},
-		{ID: "2", Username: "bob", HandSize: 10},
-		{ID: "3", Username: "carol", HandSize: 10},
-		{ID: "4", Username: "dave", HandSize: 10},
+		{ID: "1", Name: "alice", HandSize: 10},
+		{ID: "2", Name: "bob", HandSize: 10},
+		{ID: "3", Name: "carol", HandSize: 10},
+		{ID: "4", Name: "dave", HandSize: 10},
 	}
 	trick := map[string]deck.Card{
 		"1": {Rank: deck.Ace, Suit: deck.Spades},
@@ -161,10 +161,10 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 
 func fourHanded(width, height int) *model {
 	seats := []game.PlayerSnapshot{
-		{ID: "1", Username: "alice", HandSize: 13},
-		{ID: "2", Username: "bob", HandSize: 13},
-		{ID: "3", Username: "carol", HandSize: 13},
-		{ID: "4", Username: "dave", HandSize: 13},
+		{ID: "1", Name: "alice", HandSize: 13},
+		{ID: "2", Name: "bob", HandSize: 13},
+		{ID: "3", Name: "carol", HandSize: 13},
+		{ID: "4", Name: "dave", HandSize: 13},
 	}
 	hand := make([]deck.Card, 0, 13)
 	for i := range 13 {
@@ -174,14 +174,14 @@ func fourHanded(width, height int) *model {
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Bound:  game.Bind(&game.Engine{}, "1"),
 		Base: gameview.BaseState{
-			Phase:           game.Playing,
-			MyTurn:          true,
-			Hand:            hand,
-			Seats:           seats,
-			Opponents:       seats[1:],
-			CurrentPlayer:   "alice",
-			CurrentPlayerID: "1",
-			TurnRemaining:   11 * time.Second,
+			Phase:             game.Playing,
+			MyTurn:            true,
+			Hand:              hand,
+			Seats:             seats,
+			Opponents:         seats[1:],
+			CurrentPlayerName: "alice",
+			CurrentPlayerID:   "1",
+			TurnRemaining:     11 * time.Second,
 		},
 		phase:            logic.PhaseTrickPlay,
 		trickCards:       map[string]deck.Card{"2": {Rank: deck.Queen, Suit: deck.Spades}},
@@ -208,7 +208,7 @@ func TestView_EveryScreenFitsTheTerminal(t *testing.T) {
 		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
-			m.Base.Winner = "carol"
+			m.Base.WinnerName = "carol"
 		},
 		"a seat lost mid-hand": func(m *model) {
 			m.Base.Seats = m.Base.Seats[:3]
@@ -287,7 +287,7 @@ func TestRenderHandOver_ShowsEverySeatsHandAndTotal(t *testing.T) {
 	assert.Contains(t, out, "HAND 4 COMPLETE")
 
 	m.matchComplete = true
-	m.Base.Winner = "bob"
+	m.Base.WinnerName = "bob"
 	assert.Contains(t, m.View().Content, "MATCH COMPLETE - bob wins")
 }
 

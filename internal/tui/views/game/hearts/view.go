@@ -28,7 +28,7 @@ func (m *model) View() tea.View {
 		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
-		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.Winner))
+		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.WinnerName))
 	}
 
 	// Seat art is the first thing to go: it costs seven rows per seat, and a name
@@ -197,7 +197,7 @@ func (m *model) renderPassDirection() string {
 }
 
 func (m *model) renderPlayerSection() string {
-	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
+	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth := gameview.HandWidth(m.Global.Width)
 	handRows := gameview.HandRows(m.Global.Height)
 	var handView string
@@ -214,12 +214,12 @@ func (m *model) renderPlayerSection() string {
 func (m *model) renderHandOver() string {
 	h := gameview.HandOver{Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber), Hint: keyHintsOver}
 	if m.matchComplete || m.Base.Phase == game.Finished {
-		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.Winner), gameview.LobbyHint
+		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
 	}
 
 	for _, seat := range m.Base.Seats {
 		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  hand %3d  total %3d",
-			styles.PadTruncate(seat.Username, 12), m.handPoints[seat.ID], m.cumulativeScores[seat.ID])))
+			styles.PadTruncate(seat.Name, 12), m.handPoints[seat.ID], m.cumulativeScores[seat.ID])))
 	}
 	return gameview.RenderHandOver(m.Global, h)
 }

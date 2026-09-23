@@ -57,20 +57,18 @@ func NewState(rules Rules, players []*Player, cards []deck.Card) *State {
 // cards.
 type PlayerSnapshot struct {
 	ID       string
-	Username string
+	Name     string
 	HandSize int
 }
 
 // StateSnapshot is the public face of a table at one moment, copied out under the
 // engine lock so it can be read after the lock is gone.
 type StateSnapshot struct {
-	Phase Phase
-	// CurrentPlayer is a display name; CurrentPlayerID is what identifies the seat.
-	// Two players can share a name, so never decide whose turn it is from the former.
-	CurrentPlayer   string
-	CurrentPlayerID string
-	TopDiscard      deck.Card
-	DeckSize        int
-	Players         []PlayerSnapshot
-	Winner          string
+	Phase             Phase
+	CurrentPlayerName string
+	CurrentPlayerID   string
+	TopDiscard        deck.Card
+	DeckSize          int
+	Players           []PlayerSnapshot
+	WinnerName        string
 }

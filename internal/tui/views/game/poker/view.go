@@ -102,8 +102,8 @@ func (m *model) handOverHint() string {
 		next = "out of chips - watching until the match ends"
 	case m.canDeal():
 		next = fmt.Sprintf("enter: deal hand %d", m.handNumber+1)
-	case m.Base.CurrentPlayer != "":
-		next = "waiting for " + m.Base.CurrentPlayer + " to deal hand " + strconv.Itoa(m.handNumber+1)
+	case m.Base.CurrentPlayerName != "":
+		next = "waiting for " + m.Base.CurrentPlayerName + " to deal hand " + strconv.Itoa(m.handNumber+1)
 	default:
 		next = "waiting for the next hand"
 	}
@@ -309,7 +309,7 @@ func (m *model) renderHero(compact bool) string {
 		seatBlock = m.renderSeat(*hero, compact, gameview.OrientationTop)
 	}
 
-	status := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
+	status := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	actions := m.renderActionBar()
 
 	block := gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, seatBlock, status, actions)

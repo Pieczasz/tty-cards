@@ -23,7 +23,7 @@ func (m *model) View() tea.View {
 		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
-		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.Winner))
+		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.WinnerName))
 	}
 
 	// Seat art is the first thing to go: it costs seven rows, and a name with a hand
@@ -61,13 +61,13 @@ func (m *model) renderMiddleLayer(height int) string {
 func (m *model) renderScoreLine() string {
 	parts := make([]string, 0, len(m.Base.Seats))
 	for _, seat := range m.Base.Seats {
-		parts = append(parts, fmt.Sprintf("%s %d", seat.Username, m.cumulativeScores[seat.ID]))
+		parts = append(parts, fmt.Sprintf("%s %d", seat.Name, m.cumulativeScores[seat.ID]))
 	}
 	return m.Global.Theme.Dim.Render(fmt.Sprintf("hand %d · %s", m.handNumber, strings.Join(parts, "  ")))
 }
 
 func (m *model) renderPlayerSection() string {
-	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
+	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, false,
 		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
 
@@ -81,12 +81,12 @@ func (m *model) renderHandOver() string {
 		Hint:  "enter: deal next hand | esc: leave",
 	}
 	if m.matchComplete || m.Base.Phase == game.Finished {
-		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.Winner), gameview.LobbyHint
+		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
 	}
 
 	for _, seat := range m.Base.Seats {
 		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  total %3d",
-			styles.PadTruncate(seat.Username, 12), m.cumulativeScores[seat.ID])))
+			styles.PadTruncate(seat.Name, 12), m.cumulativeScores[seat.ID])))
 	}
 	return gameview.RenderHandOver(m.Global, h)
 }
