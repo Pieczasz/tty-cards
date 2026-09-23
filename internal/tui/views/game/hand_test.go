@@ -132,7 +132,7 @@ func TestCompactBreakpoints_AnswerOnEitherDimension(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.compact, IsCompact(tc.width, tc.height))
-			assert.Equal(t, tc.superCompact, IsSuperCompact(tc.width, tc.height))
+			assert.Equal(t, tc.superCompact, isSuperCompact(tc.width, tc.height))
 
 			want := 0
 			if tc.handRowsAreTheStripCap {

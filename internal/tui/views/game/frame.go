@@ -20,7 +20,7 @@ func IsCompact(width, height int) bool {
 	return height < compactHeight || width < compactWidth
 }
 
-func IsSuperCompact(width, height int) bool {
+func isSuperCompact(width, height int) bool {
 	return height < superCompactHeight || width < superCompactWidth
 }
 
@@ -42,7 +42,7 @@ func RenderBands(g router.GlobalContext, top, player, hints string, mid func(hei
 // bigger than the box they were given, so a band that overran would be trimmed out of
 // the frame's total - eating the opponents rather than its own overflow.
 func renderTopBand(g router.GlobalContext, top string) string {
-	if IsSuperCompact(g.Width, g.Height) {
+	if isSuperCompact(g.Width, g.Height) {
 		return styles.Clamp(g.Width, 0, top)
 	}
 	return styles.Clamp(g.Width, 0, lg.NewStyle().MarginTop(1).Render(top))

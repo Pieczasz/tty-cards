@@ -80,7 +80,7 @@ func TestFaceCells_PipCountMatchesTheRank(t *testing.T) {
 		deck.Six: 6, deck.Seven: 7, deck.Eight: 8, deck.Nine: 9, deck.Ten: 10,
 	}
 	for rank, want := range counts {
-		rows := FaceCells(deck.Card{Rank: rank, Suit: deck.Spades}, "♠")
+		rows := faceCells(deck.Card{Rank: rank, Suit: deck.Spades}, "♠")
 		pips := 0
 		// The rank corners are the first and last rows; only the art rows carry pips.
 		for _, row := range rows[1 : len(rows)-1] {
@@ -101,7 +101,7 @@ func TestFaceCells_EveryRowIsFaceWidth(t *testing.T) {
 
 	for _, c := range deck.StandardDeck() {
 		suit, _ := suitStyle(styles.NewTheme(true), c.Suit)
-		rows := FaceCells(c, suit)
+		rows := faceCells(c, suit)
 		require.Lenf(t, rows, FaceHeight, "%v row count", c)
 		for i, row := range rows {
 			assert.Lenf(t, row, FaceWidth, "%v row %d", c, i)
@@ -114,7 +114,7 @@ func TestFaceCells_CourtCardsCarryArtAndTheirSuit(t *testing.T) {
 	t.Parallel()
 
 	for _, rank := range []deck.Rank{deck.Jack, deck.Queen, deck.King} {
-		rows := FaceCells(deck.Card{Rank: rank, Suit: deck.Hearts}, "H")
+		rows := faceCells(deck.Card{Rank: rank, Suit: deck.Hearts}, "H")
 		var art strings.Builder
 		for _, row := range rows[1 : len(rows)-1] {
 			art.WriteString(strings.Join(row, ""))
@@ -132,7 +132,7 @@ func TestFaceCells_CourtCardsCarryArtAndTheirSuit(t *testing.T) {
 				}
 			}
 		}
-		assert.Equalf(t, CentreColumn, suitCol, "%v suit column", rank)
+		assert.Equalf(t, centreColumn, suitCol, "%v suit column", rank)
 	}
 }
 
@@ -146,18 +146,18 @@ func TestRenderFan_OnlyTheTopCardClosesItsEdge(t *testing.T) {
 		{Rank: deck.Three, Suit: deck.Hearts},
 	}
 
-	flat := tuitest.StripANSI(RenderFan(theme, hand, -1, overlapWidth))
+	flat := tuitest.StripANSI(RenderFan(theme, hand, nil, overlapWidth))
 	assert.Equal(t, 1, strings.Count(flat, "╮"), "only the rightmost card closes")
 	wantWidth := 0
 	for i := range hand {
-		wantWidth += CardSlotWidth(i, len(hand), -1, overlapWidth)
+		wantWidth += CardSlotWidth(i, len(hand), overlapWidth, nil)
 	}
 	assert.Equal(t, wantWidth, lg.Width(flat), "the fan is as wide as it claims")
 
-	picked := tuitest.StripANSI(RenderFan(theme, hand, 1, overlapWidth))
+	picked := tuitest.StripANSI(RenderFan(theme, hand, Selection(1), overlapWidth))
 	assert.Equal(t, 2, strings.Count(picked, "╮"), "the picked card closes over its neighbour")
 
-	assert.Empty(t, RenderFan(theme, nil, -1, overlapWidth), "no cards, nothing to draw")
+	assert.Empty(t, RenderFan(theme, nil, nil, overlapWidth), "no cards, nothing to draw")
 }
 
 // rankLabels replaced an exhaustive switch, so the compiler no longer catches a

@@ -74,8 +74,9 @@ func (tb Table) Render(t styles.Theme, rows []string) string {
 	out := make([]string, 0, len(rows)+tb.PadTo+2)
 	out = append(out, tb.Header(t))
 	out = append(out, rows...)
-	for pad := len(rows); pad < tb.PadTo; pad++ {
-		out = append(out, strings.Repeat(" ", tb.Width()))
+	blank := strings.Repeat(" ", tb.Width())
+	for range tb.PadTo - len(rows) {
+		out = append(out, blank)
 	}
 	return strings.Join(out, "\n")
 }

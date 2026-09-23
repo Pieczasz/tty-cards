@@ -9,18 +9,16 @@ import (
 
 // PadCenter centres every line of s within width columns, padding with spaces.
 func PadCenter(width int, s string) string {
-	return PadHorizontal(width, lg.Center, s)
+	return padHorizontal(width, lg.Center, s)
 }
 
-// PadHorizontal is lipgloss.PlaceHorizontal for the three positions we use.
-func PadHorizontal(width int, pos lg.Position, s string) string {
+// padHorizontal is lipgloss.PlaceHorizontal for the three positions we use.
+func padHorizontal(width int, pos lg.Position, s string) string {
 	lines := strings.Split(s, "\n")
 
 	contentWidth := 0
 	for _, line := range lines {
-		if w := lg.Width(line); w > contentWidth {
-			contentWidth = w
-		}
+		contentWidth = max(contentWidth, lg.Width(line))
 	}
 	gap := width - contentWidth
 	if gap <= 0 {
@@ -70,8 +68,8 @@ func spaces(n int) string {
 	return strings.Repeat(" ", n)
 }
 
-// PadVertical is lipgloss.PlaceVertical without the styled-whitespace machinery.
-func PadVertical(height int, pos lg.Position, s string) string {
+// padVertical is lipgloss.PlaceVertical without the styled-whitespace machinery.
+func padVertical(height int, pos lg.Position, s string) string {
 	contentHeight := strings.Count(s, "\n") + 1
 	gap := height - contentHeight
 	if gap <= 0 {
@@ -115,7 +113,7 @@ func PadVertical(height int, pos lg.Position, s string) string {
 
 // Place is lipgloss.Place without the styled-whitespace machinery.
 func Place(width, height int, hPos, vPos lg.Position, s string) string {
-	return PadVertical(height, vPos, PadHorizontal(width, hPos, s))
+	return padVertical(height, vPos, padHorizontal(width, hPos, s))
 }
 
 // Clamp trims s to at most width columns and height rows.

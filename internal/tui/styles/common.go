@@ -47,19 +47,20 @@ func (t Theme) RenderTooSmall(screenWidth, screenHeight int) string {
 	return lg.Place(max(screenWidth, 1), max(screenHeight, 1), lg.Center, lg.Center, msg)
 }
 
-// BoxWidth is the outer width of the framed layout. It must never shrink as the
+// boxWidth is the outer width of the framed layout. It must never shrink as the
 // terminal grows, and must never go negative: Router.Global.Width is 0 until the
 // first WindowSizeMsg, so every session's opening frame renders at zero.
-func BoxWidth(screenWidth int) int {
+func boxWidth(screenWidth int) int {
 	return max(min(screenWidth-4, maxBoxWidth), 0)
 }
 
-func BoxHeight(screenHeight int) int {
+func boxHeight(screenHeight int) int {
 	return max(min(screenHeight-2, maxBoxHeight), 0)
 }
 
+// InnerWidth is the width a full-screen view's content may use inside the box.
 func InnerWidth(screenWidth int) int {
-	return max(BoxWidth(screenWidth)-6, 0)
+	return max(boxWidth(screenWidth)-6, 0)
 }
 
 // opticalPadding is the two blank lines RenderMainLayout appends to content. They are
@@ -73,28 +74,29 @@ const opticalPadding = 2
 // content cannot have - and opticalPadding was never deducted. Either one alone makes
 // a full-screen view a row taller than the terminal, which the frame then hands to
 // the terminal to wrap, shifting every row under it.
+//
+// It hands back the header and footer as wrapped, so the layout places exactly what
+// was measured rather than wrapping them a second time.
 func layoutHeights(screenWidth, screenHeight int, header, footer string) (
-	innerWidth, hHeader, hFooter, hContent int,
+	wrappedHeader, wrappedFooter string, hContent int,
 ) {
-	innerWidth = max(BoxWidth(screenWidth)-6, 0)
-	innerHeight := max(BoxHeight(screenHeight)-4, 0)
+	width := InnerWidth(screenWidth)
+	innerHeight := max(boxHeight(screenHeight)-4, 0)
 
-	// go-figure leaves trailing newlines that inflate the measured height.
-	header = strings.TrimRight(header, "\r\n")
-	footer = strings.TrimRight(footer, "\r\n")
+	// go-figure leaves trailing newlines that inflate the measured height. Wrap before
+	// measuring, or lg.Height reports the unwrapped height.
+	wrap := lg.NewStyle().Width(width).Align(lg.Center)
+	wrappedHeader = wrap.Render(strings.TrimRight(header, "\r\n"))
+	wrappedFooter = wrap.Render(strings.TrimRight(footer, "\r\n"))
 
-	// Wrap before measuring, or lg.Height reports the unwrapped height.
-	header = lg.NewStyle().Width(innerWidth).Align(lg.Center).Render(header)
-	footer = lg.NewStyle().Width(innerWidth).Align(lg.Center).Render(footer)
-
-	hHeader, hFooter = lg.Height(header), lg.Height(footer)
-	return innerWidth, hHeader, hFooter, max(innerHeight-hHeader-hFooter, 0)
+	hContent = max(innerHeight-lg.Height(wrappedHeader)-lg.Height(wrappedFooter), 0)
+	return wrappedHeader, wrappedFooter, hContent
 }
 
 // AvailableContentHeight is how many lines of content a full-screen view may render
 // at this size without the frame outgrowing the terminal.
 func AvailableContentHeight(screenWidth, screenHeight int, header, footer string) int {
-	_, _, _, hContent := layoutHeights(screenWidth, screenHeight, header, footer)
+	_, _, hContent := layoutHeights(screenWidth, screenHeight, header, footer)
 	return max(hContent-opticalPadding, 0)
 }
 
@@ -134,7 +136,7 @@ type figureBanner struct {
 // plain text and the content gets those lines back - the banner is decoration, and
 // three lines of it in a fourteen-line box left some screens no room for a single row.
 func TitleHeightBudget(screenHeight int) int {
-	return max((BoxHeight(screenHeight)-4)/5, 1)
+	return max((boxHeight(screenHeight)-4)/5, 1)
 }
 
 // figureCache memoises rendered banners. go-figure re-reads and re-parses the whole
@@ -172,28 +174,22 @@ func figureFor(text, font string) figureBanner {
 	return b
 }
 
+// RenderMainLayout frames a full-screen view: the header on top, the footer at the
+// bottom and the content centred in the rows between, inside the capped box.
 func (t Theme) RenderMainLayout(width, height int, header, content, footer string) string {
-	boxWidth := BoxWidth(width)
-	boxHeight := BoxHeight(height)
-
-	innerWidth, hHeader, hFooter, hContent := layoutHeights(width, height, header, footer)
-
-	// Re-render at the measured width so the placed areas match what was measured.
-	header = lg.NewStyle().Width(innerWidth).Align(lg.Center).
-		Render(strings.TrimRight(header, "\r\n"))
-	footer = lg.NewStyle().Width(innerWidth).Align(lg.Center).
-		Render(strings.TrimRight(footer, "\r\n"))
+	header, footer, hContent := layoutHeights(width, height, header, footer)
+	inner := InnerWidth(width)
 
 	// Optical centering: two trailing blank lines push the visible text one line up,
 	// which reads as centered where true centering reads as slightly low.
 	content = strings.TrimRight(content, "\r\n") + "\n\n"
 
-	headerArea := Place(innerWidth, hHeader, lg.Center, lg.Top, header)
-	footerArea := Place(innerWidth, hFooter, lg.Center, lg.Bottom, footer)
-	contentArea := Place(innerWidth, hContent, lg.Center, lg.Center, content)
+	headerArea := Place(inner, lg.Height(header), lg.Center, lg.Top, header)
+	footerArea := Place(inner, lg.Height(footer), lg.Center, lg.Bottom, footer)
+	contentArea := Place(inner, hContent, lg.Center, lg.Center, content)
 
 	stacked := lg.JoinVertical(lg.Center, headerArea, contentArea, footerArea)
-	return t.Box.Width(boxWidth).Height(boxHeight).Render(stacked)
+	return t.Box.Width(boxWidth(width)).Height(boxHeight(height)).Render(stacked)
 }
 
 // footerKey is the action list a view offers, at one palette. Each view has a fixed
@@ -221,19 +217,4 @@ func (t Theme) RenderActionFooter(actions []string) string {
 	footer := strings.Join(renderedActions, " | ")
 	footerCache.Store(key, footer)
 	return footer
-}
-
-// ResetFigureCacheForTest empties the banner cache. Exported for the cache-size tests,
-// which cannot observe a count they share with every other test in the package.
-func ResetFigureCacheForTest() {
-	figureCache.Clear()
-}
-
-func FigureCacheLenForTest() int {
-	n := 0
-	figureCache.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	return n
 }

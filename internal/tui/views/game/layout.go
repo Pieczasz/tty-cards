@@ -45,38 +45,12 @@ func RenderHand(
 	disableSelection bool,
 	maxWidth, maxRows int,
 ) string {
-	if len(hand) == 0 {
-		return ""
-	}
 	selected := selectedIdx
 	if disableSelection {
 		selected = -1
 	}
-
-	tuck := components.FanTuck(len(hand), maxWidth)
-	if tuck == 0 || !fanFits(maxRows) {
-		return components.RenderStrip(t, hand, nil, selected, maxWidth)
-	}
-
-	fan := components.RenderFan(t, hand, selected, tuck)
-
-	// The index row sits under the fan, one number centred in each card's visible slot,
-	// so a player can see which key picks which card.
-	var labels strings.Builder
-	for i := range hand {
-		slot := components.CardSlotWidth(i, len(hand), selected, tuck)
-		label := " "
-		if i < 10 {
-			style := t.Dim
-			if i == selected {
-				style = t.PlayerItemSelected.Bold(true)
-			}
-			label = style.Render(strconv.Itoa(i))
-		}
-		labels.WriteString(styles.PadCenter(slot, label))
-	}
-
-	return lg.JoinVertical(lg.Left, fan, labels.String())
+	// The strip marks a single selection with the cursor, not as staged.
+	return renderHand(t, hand, components.Selection(selected), nil, selected, maxWidth, maxRows)
 }
 
 // RenderHandMulti is RenderHand for multi-select (Hearts pass phase). selected marks
@@ -87,22 +61,35 @@ func RenderHandMulti(
 	selected map[int]struct{},
 	cursor, maxWidth, maxRows int,
 ) string {
+	return renderHand(t, hand, selected, selected, cursor, maxWidth, maxRows)
+}
+
+// renderHand draws the fan with picked cards lifted and an index row under it, or the
+// strip with staged cards starred when no fan fits.
+func renderHand(
+	t styles.Theme,
+	hand []deck.Card,
+	picked, staged map[int]struct{},
+	cursor, maxWidth, maxRows int,
+) string {
 	if len(hand) == 0 {
 		return ""
 	}
 	tuck := components.FanTuck(len(hand), maxWidth)
 	if tuck == 0 || !fanFits(maxRows) {
-		return components.RenderStrip(t, hand, selected, cursor, maxWidth)
+		return components.RenderStrip(t, hand, staged, cursor, maxWidth)
 	}
-	fan := components.RenderFanMulti(t, hand, selected, tuck)
+	fan := components.RenderFan(t, hand, picked, tuck)
 
+	// The index row sits under the fan, one number centred in each card's visible slot,
+	// so a player can see which key picks which card.
 	var labels strings.Builder
 	for i := range hand {
-		slot := components.CardSlotWidthMulti(i, len(hand), tuck, selected)
+		slot := components.CardSlotWidth(i, len(hand), tuck, picked)
 		label := " "
 		if i < 10 {
 			style := t.Dim
-			if _, ok := selected[i]; ok {
+			if _, ok := picked[i]; ok {
 				style = t.PlayerItemSelected.Bold(true)
 			} else if i == cursor {
 				style = t.PlayerItemSelected
@@ -115,6 +102,7 @@ func RenderHandMulti(
 	return lg.JoinVertical(lg.Left, fan, labels.String())
 }
 
+// Orientation is the table edge an opponent's seat is drawn on.
 type Orientation int
 
 const (
@@ -246,24 +234,14 @@ func RenderOpponent(
 
 	infoView := lg.JoinVertical(lg.Center, nameView, cardsCountView)
 
-	var cardsView string
-	switch orientation {
-	case OrientationTop:
-		cardsView = renderTopCards(t, o.HandSize, budget)
-	case OrientationLeft:
-		cardsView = renderLeftCards(t, o.HandSize, budget)
-	case OrientationRight:
-		cardsView = renderRightCards(t, o.HandSize, budget)
-	}
-
 	var block string
 	switch orientation {
 	case OrientationTop:
-		block = lg.JoinVertical(lg.Center, cardsView, infoView)
+		block = lg.JoinVertical(lg.Center, renderTopCards(t, o.HandSize, budget), infoView)
 	case OrientationLeft:
-		block = lg.JoinVertical(lg.Left, infoView, cardsView)
-	default:
-		block = lg.JoinVertical(lg.Right, infoView, cardsView)
+		block = lg.JoinVertical(lg.Left, infoView, renderLeftCards(t, o.HandSize, budget))
+	case OrientationRight:
+		block = lg.JoinVertical(lg.Right, infoView, renderRightCards(t, o.HandSize, budget))
 	}
 
 	if !isCurrentTurn {
@@ -272,6 +250,8 @@ func RenderOpponent(
 	return AttachTurnClock(block, RenderTurnClock(t, remaining, false), orientation)
 }
 
+// RenderOpponentMinimal is a seat as its name and hand count on one line, for a table
+// with no room for card art.
 func RenderOpponentMinimal(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) string {
 	nameStyle := t.SectionHeading
 	if isCurrentTurn {
@@ -369,8 +349,8 @@ func AttachTurnClock(block, clock string, orientation Orientation) string {
 }
 
 // ClockTickMsg drives the turn countdown. Source is the feed of the session that armed
-// it, for the same reason EventMsg carries one; a nil Source is a tick armed without a
-// session (ClockTick), which any session accepts.
+// it, for the same reason EventMsg carries one: a session handles only its own ticks,
+// and every tick, the first one from ClockTick included, is armed with the feed.
 type ClockTickMsg struct{ Source <-chan game.Event }
 
 // clockTickFrom ticks once a second, or ten times a second only for the player whose
@@ -385,6 +365,8 @@ func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) 
 	return tea.Tick(interval, func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
 }
 
+// RenderWaitingScreen is the full-screen notice a table shows before it starts and
+// after it ends.
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
 	content := "Waiting for game to start..."
 	if phase == game.Finished {

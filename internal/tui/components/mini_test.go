@@ -87,9 +87,9 @@ func TestCardSlotWidth_SumsToTheRenderedFan(t *testing.T) {
 				for _, selected := range []int{-1, 0, n / 2, n - 1} {
 					sum := 0
 					for i := range n {
-						sum += CardSlotWidth(i, n, selected, tuck)
+						sum += CardSlotWidth(i, n, tuck, Selection(selected))
 					}
-					assert.Equalf(t, sum, lg.Width(RenderFan(theme, hand, selected, tuck)),
+					assert.Equalf(t, sum, lg.Width(RenderFan(theme, hand, Selection(selected), tuck)),
 						"the slot widths and the fan disagree with card %d picked out", selected)
 				}
 			})
@@ -99,7 +99,7 @@ func TestCardSlotWidth_SumsToTheRenderedFan(t *testing.T) {
 
 // Hearts' pass phase picks three cards at once, so the multi-select fan needs the
 // same agreement between what it claims and what it draws.
-func TestCardSlotWidthMulti_SumsToTheRenderedFan(t *testing.T) {
+func TestCardSlotWidth_SumsToTheRenderedFanWithSeveralPicked(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
@@ -123,9 +123,9 @@ func TestCardSlotWidthMulti_SumsToTheRenderedFan(t *testing.T) {
 				for i, selected := range selections {
 					sum := 0
 					for card := range n {
-						sum += CardSlotWidthMulti(card, n, tuck, selected)
+						sum += CardSlotWidth(card, n, tuck, selected)
 					}
-					assert.Equalf(t, sum, lg.Width(RenderFanMulti(theme, hand, selected, tuck)),
+					assert.Equalf(t, sum, lg.Width(RenderFan(theme, hand, selected, tuck)),
 						"selection %d disagrees with what was drawn", i)
 				}
 			})
@@ -135,15 +135,15 @@ func TestCardSlotWidthMulti_SumsToTheRenderedFan(t *testing.T) {
 
 // Every staged card is lifted out, so the pass phase shows three closed edges plus the
 // one the rightmost card always has.
-func TestRenderFanMulti_ClosesEveryStagedCard(t *testing.T) {
+func TestRenderFan_ClosesEveryStagedCard(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
 	hand := testHand(7)
-	flat := tuitest.StripANSI(RenderFanMulti(theme, hand, map[int]struct{}{1: {}, 3: {}}, overlapWidth))
+	flat := tuitest.StripANSI(RenderFan(theme, hand, map[int]struct{}{1: {}, 3: {}}, overlapWidth))
 	assert.Equal(t, 3, strings.Count(flat, "╮"), "two staged cards plus the rightmost one")
 
-	assert.Empty(t, RenderFanMulti(theme, nil, nil, overlapWidth), "no cards, nothing to draw")
+	assert.Empty(t, RenderFan(theme, nil, nil, overlapWidth), "no cards, nothing to draw")
 }
 
 // A hand of thirteen cannot fan at any tuck inside 64 columns, which is the size the

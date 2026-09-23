@@ -108,13 +108,13 @@ func (m *model) renderHandColorRow(maxWidth, maxRows int) string {
 		return ""
 	}
 	tuck := components.FanTuck(n, maxWidth)
-	selected := m.Selected
+	selected := components.Selection(m.Selected)
 	if m.color.Open {
-		selected = -1
+		selected = nil
 	}
 	parts := make([]string, 0, n)
 	for i, c := range hand {
-		w := components.CardSlotWidth(i, n, selected, tuck)
+		w := components.CardSlotWidth(i, n, tuck, selected)
 		glyph, fg := colorGlyph(m.Global.Theme, c)
 		cell := lg.NewStyle().Foreground(fg).Width(w).Align(lg.Center).Render(glyph)
 		parts = append(parts, cell)

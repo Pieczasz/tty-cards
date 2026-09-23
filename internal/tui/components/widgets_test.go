@@ -44,7 +44,7 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 				// Worst case: the picked-out card is in the middle of the hand, where
 				// it keeps its own closing border.
 				for _, selected := range []int{-1, 0, n / 2, n - 1} {
-					fan := RenderFan(theme, hand, selected, tuck)
+					fan := RenderFan(theme, hand, Selection(selected), tuck)
 					assert.LessOrEqualf(t, lg.Width(fan), width,
 						"a fan with card %d picked out overran its budget", selected)
 				}
@@ -58,12 +58,12 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 func TestFanTuck_NeverHidesTheSuit(t *testing.T) {
 	t.Parallel()
 
-	assert.GreaterOrEqual(t, minTuckWidth, CentreColumn+1,
+	assert.GreaterOrEqual(t, minTuckWidth, centreColumn+1,
 		"the tightest tuck still has to show the centre pip column")
 
 	theme := styles.NewTheme(true)
 	ace := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
-	fan := tuitest.StripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, -1, minTuckWidth))
+	fan := tuitest.StripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, nil, minTuckWidth))
 	assert.Equal(t, 3, strings.Count(fan, "♠"), "every card in the fan shows its suit")
 }
 

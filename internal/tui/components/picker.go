@@ -51,7 +51,7 @@ func (p GridPicker) Render(t styles.Theme) string {
 	// One width for every cell keeps the grid a rectangle whatever the label
 	// lengths. lipgloss counts border and padding inside Width, so the widest label
 	// needs four extra columns - without them "♦ Diamonds" wraps under its own glyph.
-	width := WidestLabel(p.Labels) + 4
+	width := widestLabel(p.Labels) + 4
 
 	cells := make([]string, 0, len(p.Labels))
 	for i, label := range p.Labels {
@@ -84,8 +84,8 @@ func (p GridPicker) Render(t styles.Theme) string {
 	))
 }
 
-// WidestLabel is the display width of the longest label, for sizing a column of them.
-func WidestLabel(labels []string) int {
+// widestLabel is the display width of the longest label, for sizing a column of them.
+func widestLabel(labels []string) int {
 	widest := 0
 	for _, l := range labels {
 		widest = max(widest, lg.Width(l))

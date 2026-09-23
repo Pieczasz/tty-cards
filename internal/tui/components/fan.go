@@ -17,7 +17,7 @@ const (
 	overlapWidth = FaceWidth - 1
 	// The centre pip column and no less: an ace's only pip lives there, and a hand whose
 	// suits are invisible is unplayable.
-	minTuckWidth = CentreColumn + 1
+	minTuckWidth = centreColumn + 1
 	// cardRows is a framed card: the two borders plus the face.
 	cardRows = FaceHeight + 2
 	// FanRows is how many rows a fan occupies, for a caller budgeting height.
@@ -53,47 +53,34 @@ func fanWidth(n, tuck int) int {
 	return width
 }
 
-// CardSlotWidth is the visible width of card i in a fan of n at this tuck; selected is
-// the picked-out index or -1. A closed card is wider, so callers have to ask.
-func CardSlotWidth(i, n, selected, tuck int) int {
-	// Every card contributes its left border plus the columns of face it still shows;
-	// a closed one adds its right border too.
-	if i == n-1 || i == selected {
-		return 1 + FaceWidth + 1
+// Selection is the set of picked-out cards a fan is drawn with. Negative indices are
+// dropped, so a single-select caller passes its cursor, or -1 for none.
+func Selection(indices ...int) map[int]struct{} {
+	sel := make(map[int]struct{}, len(indices))
+	for _, i := range indices {
+		if i >= 0 {
+			sel[i] = struct{}{}
+		}
 	}
-	return 1 + tuck
+	return sel
 }
 
-// CardSlotWidthMulti is CardSlotWidth for a multi-select fan.
-func CardSlotWidthMulti(i, n, tuck int, selected map[int]struct{}) int {
-	if i == n-1 {
-		return 1 + FaceWidth + 1
-	}
-	if _, ok := selected[i]; ok {
+// CardSlotWidth is the visible width of card i in a fan of n at this tuck, with the
+// cards in selected picked out. A closed card is wider, so callers have to ask.
+func CardSlotWidth(i, n, tuck int, selected map[int]struct{}) int {
+	// Every card contributes its left border plus the columns of face it still shows;
+	// a closed one adds its right border too.
+	if _, picked := selected[i]; picked || i == n-1 {
 		return 1 + FaceWidth + 1
 	}
 	return 1 + tuck
 }
 
 // RenderFan draws cards overlapping left to right, each covering all but tuck columns of
-// the one before. selected (or -1) keeps its own right border and the selection colour,
-// so it reads as lying on top; there is no vertical lift, which would break the shared
-// top edge that makes the rest read as one hand.
-func RenderFan(t styles.Theme, cards []deck.Card, selected, tuck int) string {
-	sel := map[int]struct{}{}
-	if selected >= 0 {
-		sel[selected] = struct{}{}
-	}
-	return renderFanCore(t, cards, sel, tuck)
-}
-
-// RenderFanMulti is RenderFan for multi-select: every index in selected is drawn as
-// picked out. Used by Hearts' pass phase.
-func RenderFanMulti(t styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
-	return renderFanCore(t, cards, selected, tuck)
-}
-
-func renderFanCore(t styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
+// the one before. Every card in selected keeps its own right border and the selection
+// colour, so it reads as lying on top; there is no vertical lift, which would break the
+// shared top edge that makes the rest read as one hand.
+func RenderFan(t styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
 	if len(cards) == 0 {
 		return ""
 	}
@@ -201,7 +188,7 @@ func renderFanColumn(t styles.Theme, card deck.Card, selected bool, width int, c
 	edge := lg.NewStyle().Foreground(border)
 
 	suit, suitStyle := suitStyle(t, card.Suit)
-	cells := FaceCells(card, suit)
+	cells := faceCells(card, suit)
 
 	closeTop, closeMid, closeBot := "", "", ""
 	if closed {

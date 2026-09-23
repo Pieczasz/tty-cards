@@ -109,24 +109,24 @@ func renderCard(t styles.Theme, card deck.Card, selected bool) string {
 	} else {
 		style = style.MarginTop(1)
 	}
-	return style.Render(strings.Join(FaceLines(t, card), "\n"))
+	return style.Render(strings.Join(faceLines(t, card), "\n"))
 }
 
-// FaceLines renders the seven inner rows of a face, styled but unbordered, so a caller
+// faceLines renders the seven inner rows of a face, styled but unbordered, so a caller
 // can frame one card or overlap several into a fan.
-func FaceLines(t styles.Theme, card deck.Card) []string {
+func faceLines(t styles.Theme, card deck.Card) []string {
 	suit, suitStyle := suitStyle(t, card.Suit)
 	lines := make([]string, 0, FaceHeight)
-	for _, row := range FaceCells(card, suit) {
+	for _, row := range faceCells(card, suit) {
 		lines = append(lines, suitStyle.Render(strings.Join(row, "")))
 	}
 	return lines
 }
 
-// FaceCells builds the face as single-column cells. Cells rather than one string per
+// faceCells builds the face as single-column cells. Cells rather than one string per
 // row because a fan has to cut a card off mid-face, and slicing a styled string by
 // display column is a good way to cut an escape sequence in half.
-func FaceCells(card deck.Card, suit string) [][]string {
+func faceCells(card deck.Card, suit string) [][]string {
 	rank := RankLabel(card.Rank)
 	rows := make([][]string, 0, FaceHeight)
 	rows = append(rows, rankRow(rank, false))
@@ -185,8 +185,8 @@ func artRow(line, suit string) []string {
 // a numbered card put their middle mark in the same place.
 const (
 	leftColumn = 2
-	// CentreColumn is exported so the court art can be held to it by test.
-	CentreColumn = 4
+	// centreColumn is the one the court art puts its suit on (see its test).
+	centreColumn = 4
 	rightColumn  = 6
 )
 
@@ -199,7 +199,7 @@ func pipRow(cols, suit string) []string {
 		case 'L':
 			cells[leftColumn] = suit
 		case 'C':
-			cells[CentreColumn] = suit
+			cells[centreColumn] = suit
 		case 'R':
 			cells[rightColumn] = suit
 		}
@@ -245,9 +245,9 @@ func RankLabel(rank deck.Rank) string {
 	return rankLabels[rank]
 }
 
-// MiniRankWidth is the width of the widest rank label, so a ten landing on the table
+// miniRankWidth is the width of the widest rank label, so a ten landing on the table
 // does not shift the cards beside it by a column.
-const MiniRankWidth = 2
+const miniRankWidth = 2
 
 // RenderMiniCard is a card in four columns, "[ A♥]", for a table with no room for a
 // face: poker's board on a short terminal, and Hearts' trick when the middle band
@@ -255,16 +255,16 @@ const MiniRankWidth = 2
 // and a trick a player cannot see all of is a trick they cannot play into.
 func RenderMiniCard(t styles.Theme, c deck.Card) string {
 	suit, style := miniSuit(t, c.Suit)
-	return style.Render(fmt.Sprintf("[%*s%s]", MiniRankWidth, RankLabel(c.Rank), suit))
+	return style.Render(fmt.Sprintf("[%*s%s]", miniRankWidth, RankLabel(c.Rank), suit))
 }
 
 // MiniCardBack is a face-down card at mini size, the same footprint as RenderMiniCard.
 func MiniCardBack(t styles.Theme) string {
-	return t.Dim.Render("[" + strings.Repeat("?", MiniRankWidth+1) + "]")
+	return t.Dim.Render("[" + strings.Repeat("?", miniRankWidth+1) + "]")
 }
 
 func MiniCardSlot(t styles.Theme) string {
-	return t.Dim.Render("[" + strings.Repeat(" ", MiniRankWidth+1) + "]")
+	return t.Dim.Render("[" + strings.Repeat(" ", miniRankWidth+1) + "]")
 }
 
 // miniSuit is the suit symbol for a mini card. It has its own table rather than

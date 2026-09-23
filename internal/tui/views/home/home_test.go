@@ -1,6 +1,7 @@
 package home
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -134,33 +135,24 @@ func TestHome_View_Greeting(t *testing.T) {
 // The banner word is the fixed string "Welcome"; the username is styled text beside
 // it. Baking the name into the figlet keyed the banner cache on a user-controlled
 // string, so any account could mint entries, fill the cap, and push every real
-// screen title back to re-parsing the whole figlet font on every frame.
-//
-// Not parallel, and deliberately self-contained: ResetFigureCacheForTest clears
-// package-global state that every other render in this package shares.
-//
-//nolint:paralleltest // shares the package-global banner cache; see above.
+// screen title back to re-parsing the whole figlet font on every frame. Two players
+// with names of one length therefore see the same screen but for the name itself.
 func TestHome_View_BannerIsNotKeyedOnTheUsername(t *testing.T) {
-	styles.ResetFigureCacheForTest()
+	t.Parallel()
 
-	render := func(username string) {
+	render := func(username string) string {
 		m := New(router.GlobalContext{
 			User:  &db.User{Username: username},
 			Theme: styles.NewTheme(true), Width: 120, Height: 50,
 		})
-		_ = m.View()
+		return strings.Replace(m.View().Content, username, "<name>", 1)
 	}
 
-	render("alice")
-	afterFirst := styles.FigureCacheLenForTest()
-	require.Positive(t, afterFirst, "the fixed titles are cached, or this test proves nothing")
-
-	for _, username := range []string{"bob", "carol", "dave", "eve", "mallory"} {
-		render(username)
+	alice := render("alice")
+	require.Contains(t, alice, "<name>", "the name is on screen, or this test proves nothing")
+	for _, username := range []string{"bobby", "carol", "david", "eve12"} {
+		assert.Equal(t, alice, render(username), "%s changed more than the name line", username)
 	}
-
-	assert.Equal(t, afterFirst, styles.FigureCacheLenForTest(),
-		"a new username must not mint a banner cache entry")
 }
 
 // The shared handler runs first, so a resize has to be swallowed here rather than
