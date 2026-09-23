@@ -67,7 +67,7 @@ func (m *model) handleEnter() {
 
 	if m.suit.Open {
 		if suit, picked := m.suit.Pick(); picked {
-			_ = m.Submit(logic.ActionPlayCard{Card: card, Suit: suit})
+			_ = m.Submit(logic.ActionPlayCard{Card: card, ChosenSuit: suit})
 		}
 		return
 	}

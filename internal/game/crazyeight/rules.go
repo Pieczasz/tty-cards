@@ -52,13 +52,13 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	return nil
 }
 
-// ActionPlayCard plays Card onto the discard pile; Suit is the one an Eight names.
+// ActionPlayCard plays Card onto the discard pile; ChosenSuit is the one an Eight names.
 // It carries exactly one card by construction: a single field cannot express the zero-
 // or multi-card requests a slice could, so ApplyAction has no invalid length to guard
 // against.
 type ActionPlayCard struct {
-	Card deck.Card
-	Suit deck.Suit
+	Card       deck.Card
+	ChosenSuit deck.Suit
 }
 
 func (a ActionPlayCard) Name() string { return "crazyeight.PlayCard" }
@@ -80,7 +80,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
 		return shed.ValidatePlay(state, card, func(topCard deck.Card) error {
 			if card.Rank == deck.Eight {
-				if !deck.IsSuit(action.Suit) {
+				if !deck.IsSuit(action.ChosenSuit) {
 					return errors.New("must choose a suit when playing an eight")
 				}
 				return nil
@@ -117,7 +117,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		// An Eight names its own suit; ValidateAction has already refused one that
 		// does not, so there is no "no suit chosen" case left to fall through.
 		if card.Rank == deck.Eight {
-			extra.CurrentSuit = action.Suit
+			extra.CurrentSuit = action.ChosenSuit
 		} else {
 			extra.CurrentSuit = card.Suit
 		}

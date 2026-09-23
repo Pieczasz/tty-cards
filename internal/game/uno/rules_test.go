@@ -60,8 +60,8 @@ func TestRules_ValidateAction_PlayCard(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{
-			Card:        deck.Card{Rank: Wild, Suit: ColorWild},
-			ChosenColor: ColorBlue,
+			Card:       deck.Card{Rank: Wild, Suit: ColorWild},
+			ChosenSuit: ColorBlue,
 		}))
 	})
 
@@ -69,8 +69,8 @@ func TestRules_ValidateAction_PlayCard(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		err := rules.ValidateAction(state, ActionPlayCard{
-			Card:        deck.Card{Rank: Wild, Suit: ColorWild},
-			ChosenColor: ColorWild, // NoSuit sentinel, same as crazy eights
+			Card:       deck.Card{Rank: Wild, Suit: ColorWild},
+			ChosenSuit: ColorWild, // NoSuit sentinel, same as crazy eights
 		})
 		require.ErrorContains(t, err, "must choose a valid color")
 	})
@@ -105,7 +105,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorRed}}
 		extra(t, state).CurrentColor = ColorRed
 
-		err := rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenColor: ColorBlue})
+		err := rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue})
 		require.ErrorContains(t, err, "no card of the current color")
 	})
 
@@ -115,7 +115,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorGreen}}
 		extra(t, state).CurrentColor = ColorRed
 
-		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenColor: ColorBlue}))
+		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
 
 	t.Run("a matching number or symbol does not block it", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorGreen}}
 		extra(t, state).CurrentColor = ColorRed
 
-		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenColor: ColorBlue}))
+		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
 
 	t.Run("a held wild is not a card of the current color", func(t *testing.T) {
@@ -135,7 +135,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: Wild, Suit: ColorWild}}
 		extra(t, state).CurrentColor = ColorRed
 
-		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenColor: ColorBlue}))
+		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
 
 	t.Run("a plain wild is still unconditional", func(t *testing.T) {
@@ -145,8 +145,8 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		extra(t, state).CurrentColor = ColorRed
 
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{
-			Card:        deck.Card{Rank: Wild, Suit: ColorWild},
-			ChosenColor: ColorBlue,
+			Card:       deck.Card{Rank: Wild, Suit: ColorWild},
+			ChosenSuit: ColorBlue,
 		}))
 	})
 }
@@ -317,8 +317,8 @@ func TestRules_ApplyAction_WildDrawFour(t *testing.T) {
 	victimBefore := len(state.Players[1].Cards)
 
 	rules.ApplyAction(state, ActionPlayCard{
-		Card:        deck.Card{Rank: WildDrawFour, Suit: ColorWild},
-		ChosenColor: ColorBlue,
+		Card:       deck.Card{Rank: WildDrawFour, Suit: ColorWild},
+		ChosenSuit: ColorBlue,
 	})
 
 	assert.Equal(t, ColorBlue, extra(t, state).CurrentColor)
@@ -460,7 +460,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 		engine.WithState(func(s *game.State) {
 			hand := s.Players[s.CurrentTurn].Cards
 			for _, card := range hand {
-				act := ActionPlayCard{Card: card, ChosenColor: ColorRed}
+				act := ActionPlayCard{Card: card, ChosenSuit: ColorRed}
 				if rules.ValidateAction(s, act) == nil {
 					c := card
 					choice = &c
@@ -471,7 +471,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 
 		var err error
 		if choice != nil {
-			err = engine.SubmitAction(id, ActionPlayCard{Card: *choice, ChosenColor: ColorRed})
+			err = engine.SubmitAction(id, ActionPlayCard{Card: *choice, ChosenSuit: ColorRed})
 		} else {
 			err = engine.SubmitAction(id, ActionDrawCard{})
 		}
@@ -580,7 +580,7 @@ func TestRules_CardConservation(t *testing.T) {
 			var playable []deck.Card
 			engine.WithState(func(s *game.State) {
 				for _, card := range s.Players[s.CurrentTurn].Cards {
-					if rules.ValidateAction(s, ActionPlayCard{Card: card, ChosenColor: color}) == nil {
+					if rules.ValidateAction(s, ActionPlayCard{Card: card, ChosenSuit: color}) == nil {
 						playable = append(playable, card)
 					}
 				}
@@ -589,7 +589,7 @@ func TestRules_CardConservation(t *testing.T) {
 			var err error
 			if len(playable) > 0 {
 				pick := rapid.SampledFrom(playable).Draw(rt, "card")
-				err = engine.SubmitAction(id, ActionPlayCard{Card: pick, ChosenColor: color})
+				err = engine.SubmitAction(id, ActionPlayCard{Card: pick, ChosenSuit: color})
 			} else {
 				err = engine.SubmitAction(id, ActionDrawCard{})
 			}
@@ -654,7 +654,7 @@ func TestRules_ApplyAction_ForcedDrawHeadsUp(t *testing.T) {
 			total := gametest.CardsInPlay(state)
 
 			require.NoError(t, (&Rules{}).ApplyAction(state,
-				ActionPlayCard{Card: tt.card, ChosenColor: ColorBlue}))
+				ActionPlayCard{Card: tt.card, ChosenSuit: ColorBlue}))
 
 			assert.Len(t, state.Players[1].Cards, victimBefore+tt.drew)
 			require.NotNil(t, state.OverrideNextTurn)

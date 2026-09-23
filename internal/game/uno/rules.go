@@ -75,11 +75,12 @@ func applyOpeningCard(state *game.State, extra *State, card deck.Card) {
 	state.SetTurn(first)
 }
 
-// ActionPlayCard plays Card onto the discard pile, naming the colour play continues in
-// when it is a Wild.
+// ActionPlayCard plays Card onto the discard pile. ChosenSuit is the colour play
+// continues in when it is a Wild: uno colours are deck suits, and the field has the
+// name crazy eights uses for its Eight.
 type ActionPlayCard struct {
-	Card        deck.Card
-	ChosenColor deck.Suit // required for Wild/WildDrawFour, ignored otherwise
+	Card       deck.Card
+	ChosenSuit deck.Suit // required for Wild/WildDrawFour, ignored otherwise
 }
 
 func (a ActionPlayCard) Name() string { return "uno.PlayCard" }
@@ -110,7 +111,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 
 func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck.Card) error {
 	if isWild(a.Card.Rank) {
-		if !deck.IsSuit(a.ChosenColor) {
+		if !deck.IsSuit(a.ChosenSuit) {
 			return errors.New("must choose a valid color")
 		}
 		// A Wild Draw Four is the one card the official rules gate on the hand
@@ -148,7 +149,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		extra.Passes = 0
 
 		if isWild(a.Card.Rank) {
-			extra.CurrentColor = a.ChosenColor
+			extra.CurrentColor = a.ChosenSuit
 		} else {
 			extra.CurrentColor = a.Card.Suit
 		}

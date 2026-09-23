@@ -59,8 +59,8 @@ func TestRules_ValidateAction_PlayCard(t *testing.T) {
 		// An eight matches neither the suit nor the rank on the pile; naming a suit
 		// is what makes it playable.
 		action := ActionPlayCard{
-			Card: deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
-			Suit: deck.Clubs,
+			Card:       deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
+			ChosenSuit: deck.Clubs,
 		}
 
 		err := rules.ValidateAction(state, action)
@@ -114,7 +114,7 @@ func TestRules_ApplyAction(t *testing.T) {
 		state := createTestState()
 		state.Players[0].Cards = []deck.Card{{Rank: deck.Eight, Suit: deck.Diamonds}, {Rank: deck.King, Suit: deck.Hearts}}
 		rules := &Rules{}
-		action := ActionPlayCard{Card: deck.Card{Rank: deck.Eight, Suit: deck.Diamonds}, Suit: deck.Clubs}
+		action := ActionPlayCard{Card: deck.Card{Rank: deck.Eight, Suit: deck.Diamonds}, ChosenSuit: deck.Clubs}
 
 		rules.ApplyAction(state, action)
 
@@ -206,8 +206,8 @@ func TestRules_PlayEight_SuitSelection(t *testing.T) {
 		state := createTestState()
 		rules := &Rules{}
 		action := ActionPlayCard{
-			Card: deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
-			Suit: deck.NoSuit,
+			Card:       deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
+			ChosenSuit: deck.NoSuit,
 		}
 
 		err := rules.ValidateAction(state, action)
@@ -219,8 +219,8 @@ func TestRules_PlayEight_SuitSelection(t *testing.T) {
 		state := createTestState()
 		rules := &Rules{}
 		action := ActionPlayCard{
-			Card: deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
-			Suit: deck.Hearts,
+			Card:       deck.Card{Rank: deck.Eight, Suit: deck.Diamonds},
+			ChosenSuit: deck.Hearts,
 		}
 
 		err := rules.ValidateAction(state, action)
@@ -291,7 +291,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 		engine.WithState(func(s *game.State) {
 			hand := s.Players[s.CurrentTurn].Cards
 			for _, card := range hand {
-				if rules.ValidateAction(s, ActionPlayCard{Card: card, Suit: deck.Spades}) == nil {
+				if rules.ValidateAction(s, ActionPlayCard{Card: card, ChosenSuit: deck.Spades}) == nil {
 					played = true
 					return
 				}
@@ -303,13 +303,13 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 			var choice deck.Card
 			engine.WithState(func(s *game.State) {
 				for _, card := range s.Players[s.CurrentTurn].Cards {
-					if rules.ValidateAction(s, ActionPlayCard{Card: card, Suit: deck.Spades}) == nil {
+					if rules.ValidateAction(s, ActionPlayCard{Card: card, ChosenSuit: deck.Spades}) == nil {
 						choice = card
 						return
 					}
 				}
 			})
-			err = engine.SubmitAction(id, ActionPlayCard{Card: choice, Suit: deck.Spades})
+			err = engine.SubmitAction(id, ActionPlayCard{Card: choice, ChosenSuit: deck.Spades})
 		} else {
 			err = engine.SubmitAction(id, ActionDrawCard{})
 		}
@@ -423,7 +423,7 @@ func TestRules_CardConservation(t *testing.T) {
 			var playable []deck.Card
 			engine.WithState(func(s *game.State) {
 				for _, card := range s.Players[s.CurrentTurn].Cards {
-					if rules.ValidateAction(s, ActionPlayCard{Card: card, Suit: suit}) == nil {
+					if rules.ValidateAction(s, ActionPlayCard{Card: card, ChosenSuit: suit}) == nil {
 						playable = append(playable, card)
 					}
 				}
@@ -432,7 +432,7 @@ func TestRules_CardConservation(t *testing.T) {
 			var err error
 			if len(playable) > 0 {
 				pick := rapid.SampledFrom(playable).Draw(rt, "card")
-				err = engine.SubmitAction(id, ActionPlayCard{Card: pick, Suit: suit})
+				err = engine.SubmitAction(id, ActionPlayCard{Card: pick, ChosenSuit: suit})
 			} else {
 				err = engine.SubmitAction(id, ActionDrawCard{})
 			}
@@ -466,7 +466,7 @@ func TestRules_ValidateAction_EightNeedsARealSuit(t *testing.T) {
 		state := createTestState()
 		state.Players[0].Cards = append(state.Players[0].Cards, eight)
 
-		err := rules.ValidateAction(state, ActionPlayCard{Card: eight, Suit: suit})
+		err := rules.ValidateAction(state, ActionPlayCard{Card: eight, ChosenSuit: suit})
 
 		require.ErrorContains(t, err, "must choose a suit when playing an eight",
 			"suit %d", suit)
