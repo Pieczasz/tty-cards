@@ -17,6 +17,9 @@ import (
 )
 
 func (m *Model) View() tea.View {
+	if screen, ok := m.LeaveConfirmScreen(); ok {
+		return tea.NewView(screen)
+	}
 	if m.handComplete || m.matchComplete || m.handPhase == logic.HandOver {
 		return tea.NewView(styles.Clamp(m.Global.Width, m.Global.Height, m.renderHandOver()))
 	}

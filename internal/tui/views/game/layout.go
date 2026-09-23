@@ -391,17 +391,17 @@ func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) 
 func ClockTick() tea.Cmd { return clockTickFrom(nil, 0, false) }
 
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
-	innerWidth := styles.InnerWidth(g.Width)
-	titleFig := styles.RenderFigureASCII("Active Game", innerWidth, styles.TitleHeightBudget(g.Height))
-	header := g.Theme.Title.Render(titleFig)
-	footer := g.Theme.RenderActionFooter(styles.GlobalActions)
-
-	var content string
+	content := "Waiting for game to start..."
 	if phase == game.Finished {
 		content = fmt.Sprintf("Game Over! Winner: %s\n\nPress Esc to go back.", winner)
-	} else {
-		content = "Waiting for game to start..."
 	}
+	return renderGameNotice(g, content)
+}
 
+// renderGameNotice is the full-screen frame a table shows in place of itself.
+func renderGameNotice(g router.GlobalContext, content string) string {
+	titleFig := styles.RenderFigureASCII("Active Game", styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height))
+	header := g.Theme.Title.Render(titleFig)
+	footer := g.Theme.RenderActionFooter(styles.GlobalActions)
 	return views.RenderCenteredLayout(g, header, content, footer)
 }

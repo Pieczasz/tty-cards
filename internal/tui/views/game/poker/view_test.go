@@ -446,11 +446,13 @@ func TestConfirm_LeavesOnlyAFinishedMatch(t *testing.T) {
 	assert.NotNil(t, cmd, "once the match is over enter is the way out")
 }
 
-func TestHandleEscape_LeavesTheTableWhenNoPromptIsOpen(t *testing.T) {
+func TestHandleEscape_AsksThenLeavesTheTableWhenNoPromptIsOpen(t *testing.T) {
 	t.Parallel()
 
 	m := tableOf(120, 50, 3)
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, cmd, "esc asks before forfeiting")
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	assert.NotNil(t, cmd)
 }
 

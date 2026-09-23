@@ -25,6 +25,9 @@ var suitChoices = []struct {
 }
 
 func (m *Model) View() tea.View {
+	if screen, ok := m.LeaveConfirmScreen(); ok {
+		return tea.NewView(screen)
+	}
 	if m.Base.Phase != game.Playing {
 		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.Winner))
 	}

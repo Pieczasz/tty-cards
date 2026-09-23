@@ -192,8 +192,8 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 	assert.NotNil(t, m.Init())
 }
 
-// Esc is overloaded: it cancels the picker while one is open and leaves the table
-// otherwise. Collapsing the two would forfeit a seat on a mistyped cancel.
+// Esc is overloaded: it cancels the picker while one is open and asks to leave the
+// table otherwise. Collapsing the two would forfeit a seat on a mistyped cancel.
 func TestHandleEscape_CancelsThePickerBeforeLeavingTheTable(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
@@ -204,7 +204,11 @@ func TestHandleEscape_CancelsThePickerBeforeLeavingTheTable(t *testing.T) {
 	assert.False(t, m.pickingColor)
 
 	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	assert.NotNil(t, cmd, "the second esc leaves the table")
+	require.Nil(t, cmd, "the second esc asks before forfeiting")
+	assert.Contains(t, m.View().Content, "forfeit")
+
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	assert.NotNil(t, cmd, "y leaves the table")
 }
 
 // A wild is the one card that needs a second decision, so enter opens the picker

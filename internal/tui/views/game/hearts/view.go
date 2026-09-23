@@ -23,6 +23,9 @@ const (
 )
 
 func (m *Model) View() tea.View {
+	if screen, ok := m.LeaveConfirmScreen(); ok {
+		return tea.NewView(screen)
+	}
 	if m.handComplete || m.matchComplete || m.stage == logic.StageHandOver {
 		return tea.NewView(styles.Clamp(m.Global.Width, m.Global.Height, m.renderHandOver()))
 	}

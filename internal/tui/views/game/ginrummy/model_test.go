@@ -211,11 +211,14 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 	})
 }
 
-func TestHandleKey_EscapeLeavesTheTable(t *testing.T) {
+func TestHandleKey_EscapeAsksThenLeavesTheTable(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, cmd, "esc asks before forfeiting")
+	assert.Contains(t, m.View().Content, "forfeit")
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	assert.NotNil(t, cmd)
 }
 

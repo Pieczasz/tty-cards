@@ -21,9 +21,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// esc closes the picker before it can mean leaving the table.
+	if msg.String() == "esc" && m.pickingColor {
+		m.pickingColor = false
+		return m, nil
+	}
+	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
+		return m, cmd
+	}
+
 	switch key := msg.String(); key {
-	case "esc":
-		return m.handleEscape()
 	case "left", "h":
 		return m.step(-1, 0)
 	case "right", "l":
@@ -45,17 +52,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleEscape() (tea.Model, tea.Cmd) {
-	if m.pickingColor {
-		m.pickingColor = false
-		return m, nil
-	}
-	// Separate statement on purpose: m is returned by value and Leave mutates it
-	// through the pointer receiver; the order of those two in one return is unspecified.
-	cmd := m.Leave()
-	return m, cmd
-}
-
 // step moves the colour picker's cursor while it is open, and the hand cursor
 // otherwise. Left/right walk a row of the picker grid, up/down move between rows.
 func (m *Model) step(dx, dy int) (tea.Model, tea.Cmd) {
@@ -68,13 +64,6 @@ func (m *Model) step(dx, dy int) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.Base.Phase == game.Finished {
-		// Separate statement on purpose: m is returned by value and Leave mutates it
-		// through the pointer receiver; the order of those two in one return is unspecified.
-		cmd := m.Leave()
-		return m, cmd
-	}
-
 	card, ok := m.SelectedCard()
 	if !m.Base.MyTurn || !ok {
 		return m, nil

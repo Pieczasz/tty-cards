@@ -23,9 +23,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// esc takes the raise prompt down before it can mean leaving the table.
+	if msg.String() == "esc" && m.raising {
+		m.raising = false
+		return m, nil
+	}
+	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
+		return m, cmd
+	}
+
 	switch msg.String() {
-	case "esc":
-		return m.handleEscape()
 	case "f":
 		if m.canFold() {
 			return m.submit(logic.ActionFold{})
@@ -137,17 +144,6 @@ func (m *Model) submit(action game.Action) (tea.Model, tea.Cmd) {
 	m.raising = false
 	m.syncState()
 	return m, nil
-}
-
-func (m *Model) handleEscape() (tea.Model, tea.Cmd) {
-	if m.raising {
-		m.raising = false
-		return m, nil
-	}
-	// Separate statement on purpose: m is returned by value and Leave mutates it
-	// through the pointer receiver; the order of those two in one return is unspecified.
-	cmd := m.Leave()
-	return m, cmd
 }
 
 // Close comes from the embedded Session. Without it a mid-game disconnect never runs

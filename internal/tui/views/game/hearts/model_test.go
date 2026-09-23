@@ -257,7 +257,10 @@ func TestHandleKey_CursorAndEscape(t *testing.T) {
 	require.Equal(t, 4, m.Selected)
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	assert.NotNil(t, cmd, "esc leaves the table")
+	require.Nil(t, cmd, "esc asks before forfeiting")
+	assert.Contains(t, m.View().Content, "forfeit")
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	assert.NotNil(t, cmd, "y leaves the table")
 }
 
 func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {

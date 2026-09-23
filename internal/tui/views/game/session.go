@@ -13,6 +13,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
+	lg "charm.land/lipgloss/v2"
 )
 
 // EventMsg carries an engine event into the bubbletea loop. Source is the feed that
@@ -38,6 +39,13 @@ type Session struct {
 	Base BaseState
 	// Selected indexes Base.Hand and is clamped by Sync as the hand shrinks.
 	Selected int
+
+	// ActionErr is the last move the engine rejected, or why this view cannot play at
+	// all. Submit keeps it, so the hero band renders it without a copy in every view.
+	ActionErr error
+
+	// confirmLeave is the armed forfeit prompt (HandleLeaveKey).
+	confirmLeave bool
 }
 
 // NewSession binds engine to the session player and subscribes to its events. The error
@@ -55,7 +63,8 @@ func NewSession(global router.GlobalContext, engine *game.Engine, gameName strin
 	if err != nil {
 		slog.Error("game view could not subscribe to engine events",
 			"error", err, "game", gameName, "player_id", playerID)
-		return s, fmt.Errorf("live table updates unavailable, leave and rejoin: %w", err)
+		s.ActionErr = fmt.Errorf("live table updates unavailable, leave and rejoin: %w", err)
+		return s, s.ActionErr
 	}
 	s.Events = ch
 	return s, nil
@@ -148,21 +157,21 @@ func (s *Session) handleClockTick(sync func()) tea.Cmd {
 
 var errNotSeated = errors.New("you are not seated at this table")
 
-// Submit sends action as this session's player. The error is rendered to the player
+// Submit sends action as this session's player and keeps the outcome in ActionErr, so
+// an accepted move clears the last complaint. The error is rendered to the player
 // as-is, hence no wrap.
-//
-//nolint:wrapcheck // engine errors are player-facing prose; a wrap adds call-site noise to the UI line.
 func (s *Session) Submit(action game.Action) error {
 	if s.Bound == nil {
-		return errNotSeated
+		s.ActionErr = errNotSeated
+		return s.ActionErr
 	}
-	err := s.Bound.Submit(action)
-	if err != nil {
+	s.ActionErr = s.Bound.Submit(action)
+	if s.ActionErr != nil {
 		// Background, not the session context: a rejection counts even when the
 		// disconnect itself caused it.
 		observability.ActionRejected(context.Background(), s.gameName)
 	}
-	return err
+	return s.ActionErr
 }
 
 func (s *Session) SelectedCard() (deck.Card, bool) {
@@ -209,6 +218,51 @@ func (s *Session) IdleExempt() bool {
 }
 
 var _ router.IdleExempt = (*Session)(nil)
+
+// HandleLeaveKey owns the keys that leave a table, and a view calls it before its own
+// bindings - after closing any prompt of its own on esc (decision D-8). Mid-game one
+// esc used to forfeit, a ranked loss on a stray key, so while playing esc only arms a
+// confirmation: y then leaves, and any other key disarms and is swallowed rather than
+// also playing a card. Once the game is over esc and enter leave at once. It reports
+// whether the key was consumed.
+func (s *Session) HandleLeaveKey(key string) (tea.Cmd, bool) {
+	armed := s.confirmingLeave()
+	s.confirmLeave = false
+	switch {
+	case armed && key == "y":
+		return s.Leave(), true
+	case armed:
+		return nil, true
+	case key == "esc" && s.Base.Phase == game.Playing:
+		s.confirmLeave = true
+		return nil, true
+	case key == "esc", key == "enter" && s.Base.Phase == game.Finished:
+		return s.Leave(), true
+	}
+	return nil, false
+}
+
+// confirmingLeave drops a prompt the game outlived: a finished table has nothing left
+// to forfeit.
+func (s *Session) confirmingLeave() bool {
+	return s.confirmLeave && s.Base.Phase == game.Playing
+}
+
+// LeaveConfirmScreen is the forfeit prompt while it is armed; a view returns it from
+// View before anything else. It takes the whole screen rather than a row of the table
+// because every table already spends its full height, and the between-hands screens
+// have no hero band to put a row in.
+func (s *Session) LeaveConfirmScreen() (string, bool) {
+	if !s.confirmingLeave() {
+		return "", false
+	}
+	t := s.Global.Theme
+	return renderGameNotice(s.Global, lg.JoinVertical(lg.Center,
+		t.ErrorText.Render("Leave and forfeit this game?"),
+		"",
+		t.Muted.Render("y - leave and forfeit | any other key - keep playing"),
+	)), true
+}
 
 // Leave navigates away from the table: back to the lobby once the game has finished,
 // otherwise out of the lobby entirely, since leaving mid-game forfeits the seat.
