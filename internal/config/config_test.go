@@ -168,6 +168,24 @@ func TestLoad_BlankEnvFallsBackToDefault(t *testing.T) {
 	assert.NotEmpty(t, cfg.ServiceVersion, "version always resolves to something")
 }
 
+// httpapi.Handler applies no defaults of its own, so Load is the only place the
+// stats API gets a rate and an origin: a zero rate refuses every visitor and an empty
+// origin breaks the website's fetch.
+func TestLoad_StatsAPIDefaults(t *testing.T) {
+	t.Setenv("ENV", "development")
+	t.Setenv("API_REQUESTS_PER_MINUTE", "")
+	t.Setenv("API_ALLOW_ORIGIN", "")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 120, cfg.APIRequestsPerMinute)
+	assert.Equal(t, "*", cfg.APIAllowOrigin)
+
+	t.Setenv("API_REQUESTS_PER_MINUTE", "0")
+	_, err = config.Load()
+	require.ErrorContains(t, err, "API_REQUESTS_PER_MINUTE")
+}
+
 // Trusting X-Forwarded-For on a directly reachable listener lets any caller forge an
 // X-Forwarded-For on a directly reachable listener can be forged, so off is the only
 // safe default and turning it on takes an explicit opt-in.
@@ -347,6 +365,16 @@ func TestLoad_ProxyTrustedCIDRs(t *testing.T) {
 		require.Len(t, cfg.ProxyTrustedCIDRs, 2)
 		assert.Equal(t, "172.30.0.0/24", cfg.ProxyTrustedCIDRs[0].String())
 		assert.Equal(t, "fd00:30::/64", cfg.ProxyTrustedCIDRs[1].String())
+	})
+	t.Run("the list compose sets", func(t *testing.T) {
+		t.Setenv("ENV", "development")
+		t.Setenv("PROXY_TRUSTED_CIDRS", "172.29.69.0/24,fd6b:1e37:9a52:6969::/64")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		require.Len(t, cfg.ProxyTrustedCIDRs, 2)
+		assert.Equal(t, "172.29.69.0/24", cfg.ProxyTrustedCIDRs[0].String())
+		assert.Equal(t, "fd6b:1e37:9a52:6969::/64", cfg.ProxyTrustedCIDRs[1].String())
 	})
 	t.Run("a typo fails the boot rather than trusting nobody or everybody", func(t *testing.T) {
 		t.Setenv("ENV", "development")
