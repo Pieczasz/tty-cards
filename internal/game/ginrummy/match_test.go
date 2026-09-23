@@ -125,7 +125,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 		{ID: "p1"},
 		{ID: "p2"},
 	}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

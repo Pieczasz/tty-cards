@@ -140,13 +140,13 @@ func TestNewEngine_EnginesNeverShareSeats(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "a"}, {ID: "b"}}
 
-	finished := NewEngine(bindRules{}, players, deck.StandardDeck())
+	finished := NewEngine(bindRules{}, players, deck.Standard())
 	t.Cleanup(finished.Close)
 	require.NoError(t, finished.Start())
 	finished.RemovePlayer("b")
 	require.True(t, finished.IsFinished())
 
-	next := NewEngine(bindRules{}, players, deck.StandardDeck())
+	next := NewEngine(bindRules{}, players, deck.Standard())
 	t.Cleanup(next.Close)
 
 	var wg sync.WaitGroup

@@ -124,7 +124,7 @@ func TestLobby_ToggleReady(t *testing.T) {
 
 	mockRules.On("MinPlayers").Return(2)
 	mockRules.On("MaxPlayers").Return(4)
-	mockRules.On("InitialDeck").Return(deck.StandardDeck())
+	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 
@@ -212,7 +212,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 
 	mockRules.On("MinPlayers").Return(2)
 	mockRules.On("MaxPlayers").Return(4)
-	mockRules.On("InitialDeck").Return(deck.StandardDeck())
+	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true) // Immediate win to end game
@@ -274,7 +274,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	mockRules := new(MockRules)
 	mockRules.On("MinPlayers").Return(2)
 	mockRules.On("MaxPlayers").Return(4)
-	mockRules.On("InitialDeck").Return(deck.StandardDeck())
+	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true)
@@ -338,7 +338,7 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	mockRules2 := new(MockRules)
 	mockRules2.On("MinPlayers").Return(2)
 	mockRules2.On("MaxPlayers").Return(4)
-	mockRules2.On("InitialDeck").Return(deck.StandardDeck())
+	mockRules2.On("InitialDeck").Return(deck.Standard())
 	mockRules2.On("InitialDealCount").Return(5)
 	mockRules2.On("OnGameStart", mock.Anything).Return(nil)
 	registry = gameRegistry("Mock2", mockRules2)
@@ -729,7 +729,7 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 	l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("Mock"), WithRanked(true))
 	require.NoError(t, err)
 
-	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))}, deck.StandardDeck())
+	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))}, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	l.requestFinalize(engine, game.EndReasonWin, finalizeRequest{
@@ -750,7 +750,7 @@ type stubRules struct{ minPlayers, maxPlayers int }
 
 func (r stubRules) MinPlayers() int                             { return cmp.Or(r.minPlayers, 1) }
 func (r stubRules) MaxPlayers() int                             { return cmp.Or(r.maxPlayers, 9) }
-func (stubRules) InitialDeck() []deck.Card                      { return deck.StandardDeck() }
+func (stubRules) InitialDeck() []deck.Card                      { return deck.Standard() }
 func (stubRules) InitialDealCount() int                         { return 1 }
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }

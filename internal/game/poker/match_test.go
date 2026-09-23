@@ -148,7 +148,7 @@ func tableWithChips(stacks ...uint) (*game.State, *State) {
 		players = append(players, &game.Player{ID: id})
 		extra.Seats[id] = &Seat{Chips: chips}
 	}
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Extra = extra
 	state.Phase = game.Playing
 	return state, extra

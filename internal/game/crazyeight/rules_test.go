@@ -21,7 +21,7 @@ func createTestState() *game.State {
 		{Rank: deck.King, Suit: deck.Hearts},
 		{Rank: deck.Eight, Suit: deck.Diamonds},
 	}}}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	state.Extra = &State{CurrentSuit: deck.Spades}
 	state.Discard = deck.New([]deck.Card{{Rank: deck.Nine, Suit: deck.Spades}})
 	state.CurrentTurn = 0
@@ -268,7 +268,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -389,7 +389,7 @@ func TestRules_CardConservation(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
-		engine := game.NewEngine(rules, players, deck.StandardDeck())
+		engine := game.NewEngine(rules, players, deck.Standard())
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

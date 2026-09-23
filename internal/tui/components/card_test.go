@@ -46,14 +46,14 @@ func TestRenderCard_EveryCardIsDistinct(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	seen := make(map[string]deck.Card)
-	for _, c := range deck.StandardDeck() {
+	for _, c := range deck.Standard() {
 		rendered := RenderCard(theme, c, false)
 		if previous, clash := seen[rendered]; clash {
 			t.Fatalf("%v and %v render identically", previous, c)
 		}
 		seen[rendered] = c
 	}
-	require.Len(t, seen, len(deck.StandardDeck()))
+	require.Len(t, seen, len(deck.Standard()))
 }
 
 // The cache must return the same string on the miss that fills it and every hit after, or
@@ -99,7 +99,7 @@ func TestFaceCells_PipCountMatchesTheRank(t *testing.T) {
 func TestFaceCells_EveryRowIsFaceWidth(t *testing.T) {
 	t.Parallel()
 
-	for _, c := range deck.StandardDeck() {
+	for _, c := range deck.Standard() {
 		suit, _ := suitStyle(styles.NewTheme(true), c.Suit)
 		rows := faceCells(c, suit)
 		require.Lenf(t, rows, FaceHeight, "%v row count", c)

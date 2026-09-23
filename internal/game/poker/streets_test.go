@@ -62,7 +62,7 @@ func TestBetting_CheckThroughFlop(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 
 	for i := 0; i < 20 && !engine.IsFinished(); i++ {
@@ -107,7 +107,7 @@ func TestLeave_NonCurrentPlayerKeepsTurn(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 
 	current := engine.CurrentPlayerID()
@@ -128,7 +128,7 @@ func TestLeave_CurrentPlayerPassesTurnToValidActor(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 
 	current := engine.CurrentPlayerID()
@@ -149,7 +149,7 @@ func TestBetting_AllInShortStackSidePotAward(t *testing.T) {
 		{ID: "mid", Cards: []deck.Card{{Rank: deck.King, Suit: deck.Spades}, {Rank: deck.King, Suit: deck.Hearts}}},
 		{ID: "big", Cards: []deck.Card{{Rank: deck.Two, Suit: deck.Clubs}, {Rank: deck.Three, Suit: deck.Clubs}}},
 	}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	state.Deck.Shuffle()
 	state.Phase = game.Playing
 	state.CurrentTurn = 0
@@ -202,7 +202,7 @@ func TestBuildSidePots_LayeredWithDeadMoney(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	extra := &State{
 		// p1/p2/p3 contribute distinct amounts; folded p4 leaves 50 of dead money.
 		Seats: map[string]*Seat{
@@ -240,7 +240,7 @@ func TestBuildSidePots_UncalledOvershoveReturned(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	extra := &State{
 		Seats: map[string]*Seat{"p1": {Contributed: 300}, "p2": {Contributed: 100}},
 	}
@@ -288,7 +288,7 @@ func TestLeave_MultiwayContinues(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	engine := game.NewEngine(rules, players, deck.Standard())
 	require.NoError(t, engine.Start())
 
 	engine.RemovePlayer("b")
@@ -345,7 +345,7 @@ func TestSmoke_PassiveHands(t *testing.T) {
 			for i := range players {
 				players[i] = &game.Player{ID: fmt.Sprintf("p%d", i)}
 			}
-			engine := game.NewEngine(rules, players, deck.StandardDeck())
+			engine := game.NewEngine(rules, players, deck.Standard())
 			require.NoError(t, engine.Start())
 			// Every hand of a passive match: check it down, then deal the next one.
 			for i := 0; i < 100*HandsPerMatch && !engine.IsFinished(); i++ {
@@ -373,7 +373,7 @@ func startTable(t testingT, n int) *game.Engine {
 	for i := range n {
 		players = append(players, &game.Player{ID: fmt.Sprintf("p%d", i+1)})
 	}
-	engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	return engine
 }
@@ -602,7 +602,7 @@ func sidePotState(t testingT, contributed map[string]uint, folded ...string) (*g
 		extra.Seats[id].Folded = true
 	}
 
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Extra = extra
 	return state, extra
 }
@@ -676,7 +676,7 @@ func TestRunShowdown_NamesTheWinnersItPaid(t *testing.T) {
 		{ID: "p1", Cards: []deck.Card{{Rank: deck.King, Suit: deck.Spades}, {Rank: deck.King, Suit: deck.Hearts}}},
 		{ID: "p2", Cards: []deck.Card{{Rank: deck.Two, Suit: deck.Clubs}, {Rank: deck.Three, Suit: deck.Clubs}}},
 	}
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	extra := &State{
 		Phase: PhaseRiver,
 		Table: []deck.Card{
@@ -925,7 +925,7 @@ func TestRunShowdown_UncalledBetComesBackToADepartedOverBettor(t *testing.T) {
 		{ID: "d", Cards: []deck.Card{card(deck.King, deck.Hearts), card(deck.King, deck.Diamonds)}},
 		{ID: "c"},
 	}
-	state := game.NewState(&Rules{}, shortStacks, deck.StandardDeck())
+	state := game.NewState(&Rules{}, shortStacks, deck.Standard())
 	state.LeftPlayers = []*game.Player{{ID: "b"}}
 	extra := &State{
 		Phase: PhaseRiver,
@@ -1060,7 +1060,7 @@ func TestLeave_BetweenHandsReParksTheDealer(t *testing.T) {
 func TestLeave_TheOnlyPlayerWithChipsBehindStillPaysTheAllIns(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Phase = game.Playing
 	extra := &State{
 		Phase: PhaseFlop,

@@ -58,7 +58,7 @@ func (a ActionNextHand) Name() string { return "ginrummy.NextHand" }
 func (r *Rules) MinPlayers() int { return 2 }
 func (r *Rules) MaxPlayers() int { return 2 }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 
 // InitialDealCount is zero: beginHand owns the deal for every hand of the match.
 func (r *Rules) InitialDealCount() int { return 0 }
@@ -85,10 +85,10 @@ func beginHand(state *game.State, extra *State) error {
 	extra.TakenUpcard = nil
 	extra.TurnsThisHand = 0
 
-	state.Deck = deck.New(deck.StandardDeck())
+	state.Deck = deck.New(deck.Standard())
 	state.Deck.Shuffle()
 	for _, p := range state.Players {
-		cards, ok := state.Deck.DrawNCards(dealCount)
+		cards, ok := state.Deck.DrawN(dealCount)
 		if !ok {
 			return errors.New("not enough cards to deal")
 		}
@@ -214,7 +214,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		state.OverrideTurn(state.CurrentTurn)
 	case ActionDiscard:
 		p.Cards = deck.RemoveOne(p.Cards, action.Card)
-		state.Discard.AddCard(action.Card)
+		state.Discard.Add(action.Card)
 		extra.TakenUpcard = nil
 		extra.TurnsThisHand++
 		extra.Phase = PhaseAwaitingDraw

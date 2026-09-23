@@ -44,7 +44,7 @@ func seatedRound(currentBet uint, seats ...seat) (*game.State, *State) {
 			AllIn:        s.allIn,
 		}
 	}
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Extra = extra
 	state.Phase = game.Playing
 	return state, extra
@@ -777,7 +777,7 @@ func TestAfterPlayerRemoved_LeavesTheCursorOnARealSeat(t *testing.T) {
 		t.Run("removing "+victim, func(t *testing.T) {
 			t.Parallel()
 			engine := game.NewEngine(&Rules{},
-				[]*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}, deck.StandardDeck())
+				[]*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}, deck.Standard())
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 
@@ -884,7 +884,7 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 // A state that is not poker's must not be read as one.
 func TestRules_TurnTimeout_ForeignStateFallsBackToTheDefault(t *testing.T) {
 	t.Parallel()
-	state := game.NewState(&Rules{}, nil, deck.StandardDeck())
+	state := game.NewState(&Rules{}, nil, deck.Standard())
 
 	assert.Zero(t, (&Rules{}).TurnTimeout(state))
 }

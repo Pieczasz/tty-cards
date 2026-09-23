@@ -24,7 +24,7 @@ func TestMiniCards_ShareOneFootprint(t *testing.T) {
 	want := lg.Width(MiniCardSlot(theme))
 	assert.Equal(t, want, lg.Width(MiniCardBack(theme)), "a face-down card is the same width as an empty slot")
 
-	for _, card := range deck.StandardDeck() {
+	for _, card := range deck.Standard() {
 		assert.Equalf(t, want, lg.Width(RenderMiniCard(theme, card)),
 			"%v is a different width from the slot it lands in", card)
 	}

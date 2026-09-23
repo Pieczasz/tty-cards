@@ -32,7 +32,7 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 func (r *Rules) MinPlayers() int { return 2 }
 func (r *Rules) MaxPlayers() int { return 6 }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 func (r *Rules) InitialDealCount() int    { return 7 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
@@ -113,7 +113,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		card := action.Card
 
 		p.Cards = deck.RemoveOne(p.Cards, card)
-		state.Discard.AddCard(card)
+		state.Discard.Add(card)
 
 		// An Eight names its own suit; ValidateAction has already refused one that
 		// does not, so there is no "no suit chosen" case left to fall through.

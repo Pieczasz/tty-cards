@@ -138,7 +138,7 @@ go test -race -run 'TestX/subtest_name' ./internal/lobby/
 
 Fuzz targets (8 of them: `FuzzBestMeldSplit`, `FuzzClassifyHand`,
 `FuzzEvaluateHand`, `FuzzJoinLobbyByCode`, `FuzzNetKey`, `FuzzToUint32`,
-`FuzzPile_DrawNCards`, `FuzzValidateUsername`) run as ordinary tests over their
+`FuzzPile_DrawN`, `FuzzValidateUsername`) run as ordinary tests over their
 seed corpus; to actually fuzz one:
 
 ```bash

@@ -26,7 +26,7 @@ var (
 func (r *Rules) MinPlayers() int { return playerCount }
 func (r *Rules) MaxPlayers() int { return playerCount }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 func (r *Rules) InitialDealCount() int    { return 0 }
 
 // ActionPassCards hands exactly three cards to the seat PassDirection names.
@@ -71,10 +71,10 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	extra.HandNumber++
 	extra.DealerIndex = dealer
 
-	state.Deck = deck.New(deck.StandardDeck())
+	state.Deck = deck.New(deck.Standard())
 	state.Deck.Shuffle()
 	for _, p := range state.Players {
-		cards, ok := state.Deck.DrawNCards(cardsPerHand)
+		cards, ok := state.Deck.DrawN(cardsPerHand)
 		if !ok {
 			return errNotEnoughCards
 		}

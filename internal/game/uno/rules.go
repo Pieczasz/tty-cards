@@ -145,7 +145,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	case ActionPlayCard:
 		actor := state.Players[state.CurrentTurn]
 		actor.Cards = deck.RemoveOne(actor.Cards, a.Card)
-		state.Discard.AddCard(a.Card)
+		state.Discard.Add(a.Card)
 		extra.Passes = 0
 
 		if isWild(a.Card.Rank) {

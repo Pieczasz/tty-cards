@@ -564,7 +564,7 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 
 			repo := new(MockMatchRepo)
 			m := newTestManager(t, repo)
-			engine := game.NewEngine(&noStandingsRules{}, nil, deck.StandardDeck())
+			engine := game.NewEngine(&noStandingsRules{}, nil, deck.Standard())
 			t.Cleanup(engine.Close)
 
 			require.True(t, m.registerFinalizer())
@@ -688,7 +688,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 				m.shuttingDown.Store(true)
 			}
 
-			engine := game.NewEngine(&stubRules{}, seated, deck.StandardDeck())
+			engine := game.NewEngine(&stubRules{}, seated, deck.Standard())
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
 

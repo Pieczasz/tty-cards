@@ -426,7 +426,7 @@ func TestRules_OnPlayerLeave_EndsMatch(t *testing.T) {
 func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 	events, err := engine.Broadcaster().Subscribe()
@@ -446,7 +446,7 @@ func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
 
 func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -707,7 +707,7 @@ func TestRules_ApplyAction_QueenOfSpadesDoesNotBreakHearts(t *testing.T) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -728,7 +728,7 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	engine := game.NewEngine(rules, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(rules, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -796,7 +796,7 @@ func TestRules_TurnTimeout(t *testing.T) {
 func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -902,7 +902,7 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-		engine := game.NewEngine(rules, players, deck.StandardDeck())
+		engine := game.NewEngine(rules, players, deck.Standard())
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

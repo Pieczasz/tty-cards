@@ -321,7 +321,7 @@ func TestRules_DrawStock_WallBoundary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state, _ := startedState(t)
-			state.Deck = deck.New(deck.StandardDeck()[:tt.stock])
+			state.Deck = deck.New(deck.Standard()[:tt.stock])
 
 			err := rules.ValidateAction(state, ActionDrawStock{})
 			if tt.wantErr {
@@ -344,7 +344,7 @@ func TestRules_TimeoutAction_AtTheWall(t *testing.T) {
 	t.Run("draws the discard while there is one", func(t *testing.T) {
 		t.Parallel()
 		state, _ := startedState(t)
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 
 		action := rules.TimeoutAction(state)
 		assert.Equal(t, ActionDrawDiscard{}, action)
@@ -354,7 +354,7 @@ func TestRules_TimeoutAction_AtTheWall(t *testing.T) {
 	t.Run("an empty pile at the wall has no legal move", func(t *testing.T) {
 		t.Parallel()
 		state, _ := startedState(t)
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 		state.Discard = deck.New(nil)
 
 		assert.Nil(t, rules.TimeoutAction(state), "every draw here is one ValidateAction refuses")
@@ -550,7 +550,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 	for range maxHands + 5 {
 		// Put the stock at its reserve so the next completed discard walls the hand.
 		extra.Phase = PhaseAwaitingDiscard
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 		card := state.Players[state.CurrentTurn].Cards[0]
 		rules.ApplyAction(state, ActionDiscard{Card: card})
 		require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
@@ -576,7 +576,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -764,7 +764,7 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}}
-		engine := game.NewEngine(rules, players, deck.StandardDeck())
+		engine := game.NewEngine(rules, players, deck.Standard())
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

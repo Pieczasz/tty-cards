@@ -49,7 +49,7 @@ func (s Shed) Table(t testing.TB, hands ...int) *game.State {
 
 	players := make([]*game.Player, 0, len(hands))
 	for i, n := range hands {
-		cards, ok := stock.DrawNCards(n)
+		cards, ok := stock.DrawN(n)
 		require.True(t, ok, "fixture deck must hold %d cards", n)
 		players = append(players, &game.Player{ID: fmt.Sprintf("p%d", i+1), Cards: cards})
 	}
@@ -61,7 +61,7 @@ func (s Shed) Table(t testing.TB, hands ...int) *game.State {
 		top, ok = stock.Draw()
 	}
 	require.True(t, ok, "fixture deck ran out before a card could open the discard")
-	stock.AddCard(skipped...)
+	stock.Add(skipped...)
 
 	state := game.NewState(s.Rules, players, nil)
 	state.Deck = stock

@@ -20,7 +20,7 @@ func reshuffleDiscardIntoStock(state *State) {
 	}
 	rest := state.Discard.Cards()
 	state.Discard = deck.New([]deck.Card{top})
-	state.Deck.AddCard(rest...)
+	state.Deck.Add(rest...)
 	state.Deck.Shuffle()
 }
 
@@ -55,7 +55,7 @@ func returnHandToStock(state *State, playerID string) {
 		return
 	}
 	p := state.Players[i]
-	state.Deck.AddCard(p.Cards...)
+	state.Deck.Add(p.Cards...)
 	p.Cards = nil
 	state.Deck.Shuffle()
 }
@@ -109,7 +109,7 @@ func OpenDiscard(state *State, playable func(deck.Card) bool) (deck.Card, error)
 		if !ok {
 			// Every card was set aside, so the stock has to come back whole before
 			// the caller reports a table it cannot open.
-			state.Deck.AddCard(setAside...)
+			state.Deck.Add(setAside...)
 			return deck.Card{}, errors.New("not enough cards to start")
 		}
 		if !playable(card) {
@@ -120,7 +120,7 @@ func OpenDiscard(state *State, playable func(deck.Card) bool) (deck.Card, error)
 		if len(setAside) == 0 {
 			return card, nil
 		}
-		state.Deck.AddCard(setAside...)
+		state.Deck.Add(setAside...)
 		state.Deck.Shuffle()
 		return card, nil
 	}

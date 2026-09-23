@@ -18,7 +18,7 @@ func createTestState() *game.State {
 		{ID: "p2", Cards: []deck.Card{{Rank: deck.Three, Suit: deck.Diamonds}, {Rank: deck.Queen, Suit: deck.Clubs}}},
 		{ID: "p3", Cards: []deck.Card{{Rank: deck.Four, Suit: deck.Clubs}, {Rank: deck.Jack, Suit: deck.Spades}}},
 	}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	state.Extra = &State{
 		Pool:       0,
 		CurrentBet: 0,
@@ -264,7 +264,7 @@ func BenchmarkPlayFullMatch(b *testing.B) {
 
 			b.ReportAllocs()
 			for b.Loop() {
-				engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+				engine := game.NewEngine(&Rules{}, players, deck.Standard())
 				if err := engine.Start(); err != nil {
 					b.Fatal(err)
 				}
@@ -470,7 +470,7 @@ func TestRoundPhase_String(t *testing.T) {
 func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	state := game.NewState(rules, []*game.Player{{ID: "a"}, {ID: "b"}}, deck.StandardDeck())
+	state := game.NewState(rules, []*game.Player{{ID: "a"}, {ID: "b"}}, deck.Standard())
 	state.Extra = struct{ NotPoker bool }{}
 
 	assert.False(t, rules.CheckWinCondition(state))

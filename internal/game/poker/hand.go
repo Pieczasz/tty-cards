@@ -44,7 +44,7 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	extra.HandNumber++
 	extra.handStartChips = chipsInPlay(extra)
 
-	state.Deck = deck.New(deck.StandardDeck())
+	state.Deck = deck.New(deck.Standard())
 	state.Deck.Shuffle()
 	if err := dealHoleCards(state, extra); err != nil {
 		return err
@@ -104,7 +104,7 @@ func dealHoleCards(state *game.State, extra *State) error {
 			seat.Acted = true
 			continue
 		}
-		cards, ok := state.Deck.DrawNCards(HoleCards)
+		cards, ok := state.Deck.DrawN(HoleCards)
 		if !ok {
 			slog.Error("poker deck empty dealing hole cards",
 				"hand", extra.HandNumber, "player", p.ID, "dealt", funded)

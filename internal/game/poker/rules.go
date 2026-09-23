@@ -88,7 +88,7 @@ func (r *Rules) TurnTimeout(state *game.State) time.Duration {
 func (r *Rules) MinPlayers() int { return 2 }
 func (r *Rules) MaxPlayers() int { return 9 }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 
 // InitialDealCount is zero because a match deals a fresh hand every round, not
 // once at the start: beginHand owns the deal so there is a single code path for

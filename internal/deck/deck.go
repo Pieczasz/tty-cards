@@ -51,9 +51,9 @@ func (p *Pile) Draw() (Card, bool) {
 	return topCard, true
 }
 
-// DrawNCards takes the top cardsToDraw cards, topmost first. Asking for more than the
+// DrawN takes the top cardsToDraw cards, topmost first. Asking for more than the
 // pile holds draws nothing and answers false.
-func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
+func (p *Pile) DrawN(cardsToDraw int) ([]Card, bool) {
 	if cardsToDraw < 0 || cardsToDraw > len(p.cards) {
 		return nil, false
 	}
@@ -67,8 +67,8 @@ func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
 	return nCards, true
 }
 
-// AddCard puts cards on top, the last one uppermost.
-func (p *Pile) AddCard(cards ...Card) {
+// Add puts cards on top, the last one uppermost.
+func (p *Pile) Add(cards ...Card) {
 	p.cards = append(p.cards, cards...)
 }
 
@@ -85,4 +85,18 @@ func (p *Pile) IsEmpty() bool {
 // Cards is a copy of the pile, bottom first.
 func (p *Pile) Cards() []Card {
 	return slices.Clone(p.cards)
+}
+
+// Standard is the 52 cards of a standard deck, no jokers, in suit then rank order.
+func Standard() []Card {
+	cards := make([]Card, 0, 52)
+	for s := Spades; s <= Clubs; s++ {
+		for r := Ace; r <= King; r++ {
+			cards = append(cards, Card{
+				Suit: s,
+				Rank: r,
+			})
+		}
+	}
+	return cards
 }

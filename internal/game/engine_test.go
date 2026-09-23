@@ -70,7 +70,7 @@ func (m *MockRules) Standings(state *State) []*Player {
 
 func setupMockRules() *MockRules {
 	m := new(MockRules)
-	m.On("InitialDeck").Return(deck.StandardDeck()).Maybe()
+	m.On("InitialDeck").Return(deck.Standard()).Maybe()
 	m.On("InitialDealCount").Return(5)
 	m.On("OnGameStart", mock.Anything).Return(nil)
 	return m
@@ -80,7 +80,7 @@ func TestEngine_Start(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	err := engine.Start()
@@ -112,7 +112,7 @@ func TestEngine_Start_Failures(t *testing.T) {
 		t.Parallel()
 		m := setupMockRules()
 		players := []*Player{{ID: "p1"}, {ID: "p2"}}
-		engine := NewEngine(m, players, deck.StandardDeck()[:4])
+		engine := NewEngine(m, players, deck.Standard()[:4])
 		t.Cleanup(engine.Close)
 
 		require.ErrorContains(t, engine.Start(), "insufficient number of cards")
@@ -124,7 +124,7 @@ func TestEngine_Start_Failures(t *testing.T) {
 		m := new(MockRules)
 		m.On("InitialDealCount").Return(5)
 		m.On("OnGameStart", mock.Anything).Return(assert.AnError)
-		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 
 		require.ErrorContains(t, engine.Start(), "set up game")
@@ -144,7 +144,7 @@ func TestEngine_SubmitAction(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -178,7 +178,7 @@ func TestEngine_SubmitAction_SetsWinnerFromStandings(t *testing.T) {
 	players := []*Player{loser, winner}
 
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -203,7 +203,7 @@ func TestEngine_SubmitAction_PostConditionBeforeBroadcast(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	ch, subErr := engine.Subscribe()
@@ -264,7 +264,7 @@ func TestEngine_RemovePlayer(t *testing.T) {
 	players := []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
 	m := setupMockRules()
 	m.On("CheckWinCondition", mock.Anything).Return(false)
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -333,7 +333,7 @@ func TestEngine_RemovePlayer_MidTurnOverrideClamped(t *testing.T) {
 			state.OverrideNextTurn = new(preRemovalCount)
 		}
 
-		engine := NewEngine(r, players, deck.StandardDeck())
+		engine := NewEngine(r, players, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 		return engine
@@ -416,7 +416,7 @@ func newStartedEngine(t *testing.T, ids ...string) *Engine {
 	m.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	m.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
 
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 	return engine
@@ -434,7 +434,7 @@ func TestEngine_Snapshot(t *testing.T) {
 		snap := engine.Snapshot()
 
 		assert.Equal(t, Playing, snap.Phase)
-		assert.Equal(t, len(deck.StandardDeck())-2*5, snap.DeckSize, "what is left after dealing five each")
+		assert.Equal(t, len(deck.Standard())-2*5, snap.DeckSize, "what is left after dealing five each")
 		assert.NotEmpty(t, snap.CurrentPlayer, "somebody is always on turn while playing")
 		require.Len(t, snap.Players, 2, "every seat is listed")
 		assert.Equal(t, "p1", snap.Players[0].ID)
@@ -511,7 +511,7 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 
 		m := setupMockRules()
 		m.On("Standings", mock.Anything).Return([]*Player{stayed})
-		engine := NewEngine(m, []*Player{stayed}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{stayed}, deck.Standard())
 		t.Cleanup(engine.Close)
 		engine.WithState(func(state *State) {
 			state.LeftPlayers = []*Player{leftFirst, leftLast}
@@ -529,7 +529,7 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 		// Poker ranks a departed player on the chips they walked out with, so the
 		// engine must not append them a second time.
 		m.On("Standings", mock.Anything).Return([]*Player{stayed, left})
-		engine := NewEngine(m, []*Player{stayed}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{stayed}, deck.Standard())
 		t.Cleanup(engine.Close)
 		engine.WithState(func(state *State) { state.LeftPlayers = []*Player{left} })
 
@@ -567,7 +567,7 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 	m.On("CheckWinCondition", mock.Anything).Return(true)
 	m.On("Standings", mock.Anything).Return([]*Player{winner, loser})
 
-	engine := NewEngine(m, []*Player{loser, winner}, deck.StandardDeck())
+	engine := NewEngine(m, []*Player{loser, winner}, deck.Standard())
 	t.Cleanup(engine.Close)
 	events, err := engine.Subscribe()
 	require.NoError(t, err)
@@ -597,7 +597,7 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 func TestEngine_SubscriberHeadroomAbovePlayerCount(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
-	engine := NewEngine(setupMockRules(), players, deck.StandardDeck())
+	engine := NewEngine(setupMockRules(), players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	for i := range len(players) + 8 {
@@ -642,7 +642,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	base.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	base.On("Standings", mock.Anything).Return(players).Maybe()
 
-	engine := NewEngine(base, players, deck.StandardDeck())
+	engine := NewEngine(base, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -731,7 +731,7 @@ func TestEngine_Places_LeaverNeverTiesASeatedPlayer(t *testing.T) {
 
 			m := setupMockRules()
 			m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-			engine := NewEngine(tt.rules(m), []*Player{stayed, alsoStayed}, deck.StandardDeck())
+			engine := NewEngine(tt.rules(m), []*Player{stayed, alsoStayed}, deck.Standard())
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *State) { state.LeftPlayers = []*Player{quitter} })
 
@@ -757,7 +757,7 @@ func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
 
 	m := setupMockRules()
 	m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-	engine := NewEngine(tiedScorer{m}, []*Player{stayed, alsoStayed}, deck.StandardDeck())
+	engine := NewEngine(tiedScorer{m}, []*Player{stayed, alsoStayed}, deck.Standard())
 	t.Cleanup(engine.Close)
 	engine.WithState(func(state *State) {
 		state.LeftPlayers = []*Player{quitFirst, quitSecond}
@@ -803,7 +803,7 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	ch, err := engine.Subscribe()
@@ -877,7 +877,7 @@ func TestEngine_GameEndedCarriesItsReason(t *testing.T) {
 				r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
 			}
 
-			engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.StandardDeck())
+			engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.Standard())
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 
@@ -912,7 +912,7 @@ func TestEngine_RemovePlayer_OverrideKeepsTheLastSeatPlaying(t *testing.T) {
 	r := &leaveAwareRules{MockRules: base}
 	r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
 
-	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -933,7 +933,7 @@ func TestEngine_FinishWithoutStandingsFallsBackToASeat(t *testing.T) {
 	m := setupMockRules()
 	m.On("Standings", mock.Anything).Return([]*Player{})
 	m.On("CheckWinCondition", mock.Anything).Return(true)
-	engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.StandardDeck())
+	engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -953,14 +953,14 @@ func TestEngine_StartRefusesAnEmptyOrClosedTable(t *testing.T) {
 
 	t.Run("no players", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), nil, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), nil, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.ErrorContains(t, engine.Start(), "no players")
 	})
 
 	t.Run("already closed", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.Standard())
 		engine.Close()
 		require.ErrorContains(t, engine.Start(), "game is closed")
 	})
@@ -975,7 +975,7 @@ func TestEngine_StartRefusesAnEmptyOrClosedTable(t *testing.T) {
 
 	t.Run("submitting before the deal", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.ErrorContains(t, engine.SubmitAction("p1", MockAction{name: "Move"}), "not in playing phase")
 	})
@@ -1002,7 +1002,7 @@ func TestEngine_RemovePlayer_OutsideThePlayingPhase(t *testing.T) {
 	t.Run("a waiting table cannot be won by leaving it", func(t *testing.T) {
 		t.Parallel()
 		m := setupMockRules()
-		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 
 		engine.RemovePlayer("p2")
@@ -1025,7 +1025,7 @@ func BenchmarkEngine_Frame(b *testing.B) {
 	m := new(MockRules)
 	m.On("InitialDealCount").Return(5)
 	m.On("OnGameStart", mock.Anything).Return(nil)
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	defer engine.Close()
 	if err := engine.Start(); err != nil {
 		b.Fatal(err)

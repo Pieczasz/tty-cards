@@ -311,7 +311,7 @@ func (e *Engine) Start() error {
 
 	hands := make([][]deck.Card, len(e.state.Players))
 	for playerIdx := range e.state.Players {
-		cards, ok := e.state.Deck.DrawNCards(e.state.Rules.InitialDealCount())
+		cards, ok := e.state.Deck.DrawN(e.state.Rules.InitialDealCount())
 		if !ok {
 			return errors.New("insufficient number of cards to deal for all players")
 		}

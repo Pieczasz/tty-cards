@@ -20,7 +20,7 @@ import (
 // games actually support.
 func benchTable(b *testing.B, n int) *model {
 	b.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 
@@ -74,7 +74,7 @@ func BenchmarkPokerView_Frame(b *testing.B) {
 //
 //nolint:paralleltest // measures process-wide heap, so it cannot share the process
 func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(6), deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(6), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -147,7 +147,7 @@ func BenchmarkPokerView_RenderParallel(b *testing.B) {
 //
 //nolint:thelper // runs on a parallel worker, so it must not register as a helper
 func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
 	if err := engine.Start(); err != nil {
 		b.Error(err)
 	}

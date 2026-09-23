@@ -27,7 +27,7 @@ type timeoutRules struct {
 
 func (r *timeoutRules) MinPlayers() int                  { return 2 }
 func (r *timeoutRules) MaxPlayers() int                  { return 4 }
-func (r *timeoutRules) InitialDeck() []deck.Card         { return deck.StandardDeck() }
+func (r *timeoutRules) InitialDeck() []deck.Card         { return deck.Standard() }
 func (r *timeoutRules) InitialDealCount() int            { return 1 }
 func (r *timeoutRules) OnGameStart(*State) error         { return nil }
 func (r *timeoutRules) AfterAction(*State, Action) error { return nil }
@@ -73,7 +73,7 @@ func newTimeoutEngine(t *testing.T, rules Rules, ids ...string) *Engine {
 	for _, id := range ids {
 		players = append(players, &Player{ID: id})
 	}
-	engine := NewEngine(rules, players, deck.StandardDeck(), WithTurnTimeout(time.Hour))
+	engine := NewEngine(rules, players, deck.Standard(), WithTurnTimeout(time.Hour))
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 	return engine
@@ -253,7 +253,7 @@ func TestEngine_TurnTimeout_RefusedSafeMoveStillLosesTheSeat(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rules := &timeoutRules{safe: namedAction{name: "safe"}, reject: true}
 		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-			deck.StandardDeck(), WithTurnTimeout(20*time.Millisecond))
+			deck.Standard(), WithTurnTimeout(20*time.Millisecond))
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 
@@ -272,7 +272,7 @@ func TestEngine_TurnTimeout_ClockLifecycle(t *testing.T) {
 		t.Parallel()
 		rules := setupMockRules()
 		rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
-		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}}, deck.StandardDeck())
+		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 
@@ -306,7 +306,7 @@ func TestEngine_TurnTimeout_ClockLifecycle(t *testing.T) {
 		t.Parallel()
 		rules := &timeoutRules{safe: namedAction{name: "safe"}}
 		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-			deck.StandardDeck(), WithTurnTimeout(0))
+			deck.Standard(), WithTurnTimeout(0))
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 
@@ -320,7 +320,7 @@ func TestEngine_TurnTimeout_TimerActuallyFires(t *testing.T) {
 		const timeout = 20 * time.Millisecond
 		rules := &timeoutRules{safe: namedAction{name: "safe"}}
 		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-			deck.StandardDeck(), WithTurnTimeout(timeout))
+			deck.Standard(), WithTurnTimeout(timeout))
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 
@@ -464,7 +464,7 @@ func TestEngine_TurnTimeout_RulesCanStretchATurn(t *testing.T) {
 				override:     tt.override,
 			}
 			engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-				deck.StandardDeck(), WithTurnTimeout(engineDefault))
+				deck.Standard(), WithTurnTimeout(engineDefault))
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 
@@ -485,7 +485,7 @@ func TestEngine_TurnTimeout_StretchCannotResurrectADisabledClock(t *testing.T) {
 		override:     time.Hour,
 	}
 	engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}},
-		deck.StandardDeck(), WithTurnTimeout(0))
+		deck.Standard(), WithTurnTimeout(0))
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 

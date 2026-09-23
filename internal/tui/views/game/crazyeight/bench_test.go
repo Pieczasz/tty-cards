@@ -25,7 +25,7 @@ func benchTable(b *testing.B, n int) *model {
 			ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1), Name: fmt.Sprintf("p%d", i+1),
 		})
 	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&logic.Rules{}, players, deck.Standard())
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 

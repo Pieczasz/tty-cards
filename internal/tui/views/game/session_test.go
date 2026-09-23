@@ -195,7 +195,7 @@ func startedSession(t *testing.T) (*game.Engine, Session) {
 		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
 		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
 	}
-	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -479,7 +479,7 @@ func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		players = append(players, &game.Player{ID: testutil.SeatID(i), UserID: testutil.UID(i), Name: "p"})
 	}
-	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

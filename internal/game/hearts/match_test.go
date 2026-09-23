@@ -132,7 +132,7 @@ func TestMatch_DealerRotatesOneSeatPerHand(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	state := game.NewState(rules, players, deck.StandardDeck())
+	state := game.NewState(rules, players, deck.Standard())
 	state.CurrentTurn = 1
 	require.NoError(t, rules.OnGameStart(state))
 
