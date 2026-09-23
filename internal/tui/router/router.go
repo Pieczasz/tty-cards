@@ -55,10 +55,11 @@ func Navigate(route Route, ctx any) tea.Cmd {
 // GlobalContext is the session state every view is built from. Each view holds its own
 // copy, so a change a view makes to it is local until the router rebuilds the view.
 type GlobalContext struct {
-	User           *db.User
-	UserRepository db.UserRepository
-	LobbyManager   *lobby.Manager
-	GameRegistry   *game.Registry
+	User         *db.User
+	Profiles     db.Profiles
+	Leaderboard  db.Leaderboard
+	LobbyManager *lobby.Manager
+	GameRegistry *game.Registry
 	// SessionCtx is canceled when the SSH session ends.
 	SessionCtx context.Context
 	Width      int

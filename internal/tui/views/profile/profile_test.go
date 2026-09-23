@@ -175,11 +175,8 @@ func TestView_FitsTheTerminal(t *testing.T) {
 	}
 }
 
-// fakeUsers stands in for the repository. Only the two profile queries are reachable
-// from this view; the embedded interface turns any other call into a loud nil panic
-// rather than a quietly passing test.
+// fakeUsers stands in for the repository's profile queries.
 type fakeUsers struct {
-	db.UserRepository
 	profile       func(ctx context.Context, userID uuid.UUID) (*db.User, error)
 	history       func(ctx context.Context, userID uuid.UUID, limit int) ([]db.MatchParticipant, error)
 	deleteAccount func(ctx context.Context, userID uuid.UUID) error
@@ -285,7 +282,7 @@ func TestInit(t *testing.T) {
 		}
 		user := alice()
 
-		cmd := New(router.GlobalContext{User: user, UserRepository: repo}).Init()
+		cmd := New(router.GlobalContext{User: user, Profiles: repo}).Init()
 		require.NotNil(t, cmd)
 		_, ok := cmd().(profileLoadedMsg)
 
@@ -510,7 +507,7 @@ func deletingModel(t *testing.T, err error) (*model, *int) {
 	}}
 	global := router.GlobalContext{
 		Theme: styles.NewTheme(true), Width: 100, Height: 40,
-		User: alice(), UserRepository: repo,
+		User: alice(), Profiles: repo,
 	}
 	updated, _ := New(global).Update(profileLoadedMsg{user: alice()})
 	m, ok := updated.(*model)

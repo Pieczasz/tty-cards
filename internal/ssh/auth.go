@@ -46,7 +46,7 @@ func SessionFingerprint(s ssh.Session) (string, error) {
 // its budget - and may be nil where registration needs no limit. Auth deliberately
 // knows nothing about how the budget is counted; it only asks.
 func LoadOrRegisterUser(
-	ctx context.Context, userRepo db.UserRepository, sshUsername, fingerprint string,
+	ctx context.Context, userRepo db.Authenticator, sshUsername, fingerprint string,
 	allowRegister func() bool,
 ) (*db.User, error) {
 	user, key, err := userRepo.LoadUserByFingerprint(ctx, fingerprint)

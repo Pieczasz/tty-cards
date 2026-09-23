@@ -44,7 +44,7 @@ func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.Use
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	registry := catalog.NewRegistry()
 
-	r := New(ModelDependencies{
+	r := New(Deps{
 		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
@@ -163,7 +163,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	// The grace window is what keeps the seat; without it the drop is a forfeit.
 	manager.DisconnectPlayer(host)
 
-	r := New(ModelDependencies{
+	r := New(Deps{
 		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,

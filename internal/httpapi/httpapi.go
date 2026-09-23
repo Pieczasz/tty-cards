@@ -58,11 +58,10 @@ var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies and Users")
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
-	// Users is the concrete db interface while Sessions and Lobbies are local
-	// one-method interfaces. That asymmetry is deliberate and shipped: the two
-	// counters exist only to keep this package from importing ssh and lobby, whereas
-	// db.UserRepository is already the contract every consumer depends on.
-	Users db.UserRepository
+	// Users is a db interface while Sessions and Lobbies are local one-method
+	// interfaces: the two counters exist only to keep this package from importing ssh
+	// and lobby, whereas db.Leaderboard is already the contract.
+	Users db.Leaderboard
 
 	// Both required: config.Load owns the defaults and validates them, so a second
 	// copy here could only drift from it.

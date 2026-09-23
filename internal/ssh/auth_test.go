@@ -13,10 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// MockUserRepository mocks the three methods LoadOrRegisterUser calls. The embedded
-// interface is nil, so a call to anything else is a panic, not a silent zero.
+// MockUserRepository mocks db.Authenticator, the three methods LoadOrRegisterUser calls.
 type MockUserRepository struct {
-	db.UserRepository
 	mock.Mock
 }
 

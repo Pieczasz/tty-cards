@@ -192,11 +192,8 @@ func TestRowsPerPage_PagesByWhatItDraws(t *testing.T) {
 		fmt.Sprintf("ranks %d-%d", shortRows+1, shortRows*2))
 }
 
-// fakeUsers stands in for the repository. Only BestPlayers is reachable from this
-// view; the embedded interface makes any other call a loud nil panic rather than a
-// quietly passing test.
+// fakeUsers stands in for the repository's leaderboard.
 type fakeUsers struct {
-	db.UserRepository
 	best func(ctx context.Context, limit int, gameName string) ([]db.Ranking, error)
 }
 
@@ -228,7 +225,7 @@ func TestInit_AsksForAFullPageOfEveryGame(t *testing.T) {
 
 	var gotLimit int
 	var gotGame string
-	m := New(router.GlobalContext{UserRepository: fakeUsers{
+	m := New(router.GlobalContext{Leaderboard: fakeUsers{
 		best: func(_ context.Context, limit int, gameName string) ([]db.Ranking, error) {
 			gotLimit, gotGame = limit, gameName
 			return rankings(3), nil
@@ -255,7 +252,7 @@ func TestUpdate_DiscardsAResponseForAFilterAlreadyCycledPast(t *testing.T) {
 
 	m := board(t, 0)
 	m.filterIndex = 0
-	m.global.UserRepository = fakeUsers{
+	m.global.Leaderboard = fakeUsers{
 		best: func(context.Context, int, string) ([]db.Ranking, error) { return nil, nil },
 	}
 
@@ -521,7 +518,7 @@ func TestCycleFilter_StillPagesAt80x24(t *testing.T) {
 	all := rankings(100)
 	m := board(t, 0)
 	m.global.Width, m.global.Height = 80, 24
-	m.global.UserRepository = fakeUsers{
+	m.global.Leaderboard = fakeUsers{
 		best: func(_ context.Context, limit int, _ string) ([]db.Ranking, error) {
 			return all[:min(limit, len(all))], nil
 		},

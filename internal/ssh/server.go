@@ -105,11 +105,14 @@ func (reg *sessionRegistry) delete(s ssh.Session) {
 // Deps is what NewServer wires every session to. Tracker is required and is shared
 // with the stats API, which counts who is online from it.
 type Deps struct {
-	Config         *config.Config
-	UserRepository db.UserRepository
-	LobbyManager   *lobby.Manager
-	GameRegistry   *game.Registry
-	Tracker        *SessionTracker
+	Config *config.Config
+	// Auth signs players in; Profiles and Leaderboard are handed on to the TUI.
+	Auth         db.Authenticator
+	Profiles     db.Profiles
+	Leaderboard  db.Leaderboard
+	LobbyManager *lobby.Manager
+	GameRegistry *game.Registry
+	Tracker      *SessionTracker
 }
 
 // ErrNoTracker refuses a server with no session tracker. A default one used to be
@@ -258,7 +261,7 @@ func sessionModel(
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
 		}
-		user, err := LoadOrRegisterUser(traceCtx, deps.UserRepository, s.User(), fingerprint,
+		user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
 			func() bool { return allowRegistration(traceCtx, registerLimiter, s) })
 		if err != nil {
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
@@ -267,10 +270,11 @@ func sessionModel(
 		// Built before the slot is claimed: a panic in here, or a session whose state
 		// has already been torn down, would otherwise strand a tracker slot that
 		// nothing releases - and that account cannot connect again until a restart.
-		model := tui.New(tui.ModelDependencies{
+		model := tui.New(tui.Deps{
 			SessionCtx:   traceCtx,
 			User:         *user,
-			UserRepo:     deps.UserRepository,
+			Profiles:     deps.Profiles,
+			Leaderboard:  deps.Leaderboard,
 			LobbyManager: deps.LobbyManager,
 			GameRegistry: deps.GameRegistry,
 		})

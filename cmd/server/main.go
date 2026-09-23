@@ -247,11 +247,13 @@ func newSSHServer(
 	tracker *ssh.SessionTracker,
 ) (*charmssh.Server, error) {
 	server, err := ssh.NewServer(ssh.Deps{
-		Config:         cfg,
-		UserRepository: userRepo,
-		LobbyManager:   lobbyManager,
-		GameRegistry:   catalog.NewRegistry(),
-		Tracker:        tracker,
+		Config:       cfg,
+		Auth:         userRepo,
+		Profiles:     userRepo,
+		Leaderboard:  userRepo,
+		LobbyManager: lobbyManager,
+		GameRegistry: catalog.NewRegistry(),
+		Tracker:      tracker,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("setup ssh server: %w", err)
@@ -265,7 +267,7 @@ func startStatsAPI(
 	cfg *config.Config,
 	sessions httpapi.SessionCounter,
 	lobbies httpapi.LobbyCounter,
-	users db.UserRepository,
+	users db.Leaderboard,
 	health func(ctx context.Context) error,
 ) (func(), <-chan error, error) {
 	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.APIPort))

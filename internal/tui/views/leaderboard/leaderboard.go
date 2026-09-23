@@ -148,7 +148,7 @@ func (m *model) needsFetch(page int) int {
 // read here, on the update goroutine, rather than off m inside the command.
 func (m *model) load(limit, wantPage int) tea.Cmd {
 	gameSlug := m.gameFilter()
-	reqCtx, users := m.global.RequestContext(), m.global.UserRepository
+	reqCtx, users := m.global.RequestContext(), m.global.Leaderboard
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(reqCtx, views.RequestTimeout)
 		defer cancel()

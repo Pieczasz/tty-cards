@@ -20,11 +20,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// ModelDependencies is what New needs from the session and the server.
-type ModelDependencies struct {
+// Deps is what New needs from the session and the server.
+type Deps struct {
 	SessionCtx   context.Context
 	User         db.User
-	UserRepo     db.UserRepository
+	Profiles     db.Profiles
+	Leaderboard  db.Leaderboard
 	LobbyManager *internallobby.Manager
 	GameRegistry *game.Registry
 }
@@ -32,13 +33,14 @@ type ModelDependencies struct {
 // New builds the session's root model. It returns the router itself rather than a
 // tea.Model: the ssh layer has to Close it when the session ends, and an interface
 // value would hide the one method that releases the active view's subscription.
-func New(deps ModelDependencies) *router.Router {
+func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
-		User:           &deps.User,
-		UserRepository: deps.UserRepo,
-		LobbyManager:   deps.LobbyManager,
-		GameRegistry:   deps.GameRegistry,
-		SessionCtx:     deps.SessionCtx,
+		User:         &deps.User,
+		Profiles:     deps.Profiles,
+		Leaderboard:  deps.Leaderboard,
+		LobbyManager: deps.LobbyManager,
+		GameRegistry: deps.GameRegistry,
+		SessionCtx:   deps.SessionCtx,
 	}
 
 	r := router.New(global)

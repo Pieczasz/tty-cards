@@ -63,10 +63,12 @@ func setupTestEnvironment(t *testing.T) testEnv {
 			RegistrationLimit:  5,
 			RegistrationWindow: time.Hour,
 		},
-		UserRepository: userRepo,
-		LobbyManager:   lobby.NewManager(t.Context(), matchRepo),
-		GameRegistry:   game.NewRegistry(),
-		Tracker:        NewSessionTracker(0),
+		Auth:         userRepo,
+		Profiles:     userRepo,
+		Leaderboard:  userRepo,
+		LobbyManager: lobby.NewManager(t.Context(), matchRepo),
+		GameRegistry: game.NewRegistry(),
+		Tracker:      NewSessionTracker(0),
 	}
 
 	server, err := NewServer(deps)

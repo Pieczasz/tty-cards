@@ -105,15 +105,15 @@ type profileLoadedMsg struct {
 	historyErr error
 }
 
-func loadProfile(ctx context.Context, userRepo db.UserRepository, userID uuid.UUID) tea.Cmd {
+func loadProfile(ctx context.Context, profiles db.Profiles, userID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
 		reqCtx, cancel := context.WithTimeout(ctx, views.RequestTimeout)
 		defer cancel()
-		user, err := userRepo.UserProfile(reqCtx, userID)
+		user, err := profiles.UserProfile(reqCtx, userID)
 		if err != nil {
 			return profileLoadedMsg{err: err}
 		}
-		history, historyErr := userRepo.UserMatchHistory(reqCtx, userID, historyFetchLimit)
+		history, historyErr := profiles.UserMatchHistory(reqCtx, userID, historyFetchLimit)
 		return profileLoadedMsg{user: user, history: history, historyErr: historyErr}
 	}
 }
@@ -122,7 +122,7 @@ func (m *model) Init() tea.Cmd {
 	if m.global.User == nil {
 		return nil
 	}
-	return loadProfile(m.global.RequestContext(), m.global.UserRepository, m.global.User.ID)
+	return loadProfile(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -355,11 +355,11 @@ var placementWords = [3]string{"1st place", "2nd place", "3rd place"}
 // is already anonymised and the session has nothing left to authenticate.
 type accountDeletedMsg struct{ err error }
 
-func deleteAccount(ctx context.Context, userRepo db.UserRepository, userID uuid.UUID) tea.Cmd {
+func deleteAccount(ctx context.Context, profiles db.Profiles, userID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
 		reqCtx, cancel := context.WithTimeout(ctx, views.RequestTimeout)
 		defer cancel()
-		return accountDeletedMsg{err: userRepo.DeleteAccount(reqCtx, userID)}
+		return accountDeletedMsg{err: profiles.DeleteAccount(reqCtx, userID)}
 	}
 }
 
@@ -391,7 +391,7 @@ func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.phase = deleteRunning
-		return m, deleteAccount(m.global.RequestContext(), m.global.UserRepository, m.global.User.ID)
+		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
 	case "backspace":
 		if runes := []rune(m.typed); len(runes) > 0 {
 			m.typed = string(runes[:len(runes)-1])

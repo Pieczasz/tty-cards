@@ -26,7 +26,6 @@ type fakeLobbies struct{ inGame, waiting int }
 func (f fakeLobbies) Stats() (int, int) { return f.inGame, f.waiting }
 
 type stubUsers struct {
-	db.UserRepository
 	rankings []db.Ranking
 	err      error
 	gotLimit int

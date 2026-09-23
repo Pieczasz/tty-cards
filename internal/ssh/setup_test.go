@@ -255,7 +255,7 @@ func (s *stubSession) Context() ssh.Context     { return newStubSSHContext(s.add
 
 // stubUserRepo answers only what sessionModel asks of it.
 type stubUserRepo struct {
-	db.UserRepository
+	db.Authenticator
 	user *db.User
 	err  error
 }
@@ -269,13 +269,13 @@ func (r stubUserRepo) LoadUserByFingerprint(context.Context, string) (*db.User, 
 
 func (stubUserRepo) UpdateUserActivity(context.Context, *db.User, *db.PublicKey) error { return nil }
 
-func newSessionDeps(t *testing.T, repo db.UserRepository) Deps {
+func newSessionDeps(t *testing.T, repo db.Authenticator) Deps {
 	t.Helper()
 	return Deps{
-		Config:         &config.Config{},
-		UserRepository: repo,
-		LobbyManager:   lobby.NewManager(t.Context(), nil),
-		GameRegistry:   game.NewRegistry(),
+		Config:       &config.Config{},
+		Auth:         repo,
+		LobbyManager: lobby.NewManager(t.Context(), nil),
+		GameRegistry: game.NewRegistry(),
 	}
 }
 
@@ -288,7 +288,7 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 	tests := []struct {
 		name       string
 		session    *stubSession
-		repo       db.UserRepository
+		repo       db.Authenticator
 		tracker    *SessionTracker
 		storeState bool
 		wantOutput string
