@@ -20,6 +20,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/ratelimit"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
@@ -53,6 +54,8 @@ type Deps struct {
 	// db.UserRepository is already the contract every consumer depends on.
 	Users db.UserRepository
 
+	// Both required: config.Load owns the defaults and validates them, so a second
+	// copy here could only drift from it.
 	AllowOrigin       string
 	RequestsPerMinute int
 	TrustedProxy      bool
@@ -84,11 +87,7 @@ type leaderboardEntry struct {
 }
 
 func Handler(deps Deps) http.Handler {
-	perMinute := deps.RequestsPerMinute
-	if perMinute <= 0 {
-		perMinute = 120
-	}
-	limiter := ratelimit.NewSlidingWindowLimiter(perMinute, time.Minute)
+	limiter := ratelimit.NewSlidingWindowLimiter(deps.RequestsPerMinute, time.Minute)
 	clientAddr := clientIPFunc(deps.TrustedProxy)
 
 	mux := http.NewServeMux()
@@ -109,23 +108,15 @@ func Handler(deps Deps) http.Handler {
 	return otelhttp.NewHandler(
 		withCORS(deps.AllowOrigin, withRateLimit(limiter, clientAddr, mux)),
 		"stats-api",
-		otelhttp.WithSpanNameFormatter(routeSpanName),
-		// Without this, otelhttp labels every request metric with the client's own
-		// Host header - the same unbounded-cardinality hole routeSpanName closes
-		// for span names.
-		otelhttp.WithServerName("stats-api"),
+		// No spans: every website visitor polls this API, and a span per request put
+		// each visitor's address and User-Agent into Tempo. The request metrics, which
+		// carry neither, are what an operator reads here.
+		otelhttp.WithTracerProvider(tracenoop.NewTracerProvider()),
+		// Pins server.address and, through the explicit default port, server.port.
+		// Without both, otelhttp labels every request metric from the client's own
+		// Host header - an unbounded name, and up to 65535 port series.
+		otelhttp.WithServerName("stats-api:80"),
 	)
-}
-
-// routeSpanName names a span after the route, never after the raw path: anything
-// else lets a caller mint unbounded span names by inventing URLs.
-func routeSpanName(operation string, r *http.Request) string {
-	switch r.URL.Path {
-	case "/v1/stats", "/v1/leaderboard":
-		return r.Method + " " + r.URL.Path
-	default:
-		return operation
-	}
 }
 
 func statsHandler(deps Deps) http.Handler {
@@ -250,9 +241,6 @@ func encodeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 }
 
 func withCORS(origin string, next http.Handler) http.Handler {
-	if origin == "" {
-		origin = "*"
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")

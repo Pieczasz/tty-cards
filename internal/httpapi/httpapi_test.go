@@ -58,8 +58,10 @@ func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder
 func TestStats_ReportsLiveCounts(t *testing.T) {
 	t.Parallel()
 	h := Handler(Deps{
-		Sessions: fakeSessions(4),
-		Lobbies:  fakeLobbies{inGame: 2, waiting: 3},
+		Sessions:          fakeSessions(4),
+		Lobbies:           fakeLobbies{inGame: 2, waiting: 3},
+		RequestsPerMinute: 120,
+		AllowOrigin:       "*",
 	})
 
 	rec := get(t, h, "/v1/stats")
@@ -74,7 +76,7 @@ func TestStats_ReportsLiveCounts(t *testing.T) {
 
 func TestStats_NilDepsDoNotPanic(t *testing.T) {
 	t.Parallel()
-	rec := get(t, Handler(Deps{}), "/v1/stats")
+	rec := get(t, Handler(Deps{RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/stats")
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{"players_online":0,"hands_in_play":0,"tables_open":0}`, rec.Body.String())
@@ -87,7 +89,7 @@ func TestLeaderboard_ShapesRanks(t *testing.T) {
 		ranking("bob", "Poker", 1700),
 	}}
 
-	rec := get(t, Handler(Deps{Users: users}), "/v1/leaderboard")
+	rec := get(t, Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/leaderboard")
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got []leaderboardEntry
@@ -118,7 +120,7 @@ func TestLeaderboard_LimitIsClampedAndValidated(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			users := &stubUsers{}
-			rec := get(t, Handler(Deps{Users: users}), "/v1/leaderboard"+tt.query)
+			rec := get(t, Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/leaderboard"+tt.query)
 
 			require.Equal(t, tt.wantCode, rec.Code)
 			if tt.wantCode == http.StatusOK {
@@ -132,7 +134,7 @@ func TestLeaderboard_RepositoryErrorIsOpaque(t *testing.T) {
 	t.Parallel()
 	users := &stubUsers{err: errors.New("pq: relation \"rankings\" does not exist")}
 
-	rec := get(t, Handler(Deps{Users: users}), "/v1/leaderboard")
+	rec := get(t, Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/leaderboard")
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "relation")
@@ -149,7 +151,7 @@ func TestLeaderboard_GameParamIsIgnored(t *testing.T) {
 		t.Run("query="+query, func(t *testing.T) {
 			t.Parallel()
 			users := &stubUsers{}
-			rec := get(t, Handler(Deps{Users: users}), "/v1/leaderboard"+query)
+			rec := get(t, Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/leaderboard"+query)
 
 			require.Equal(t, http.StatusOK, rec.Code)
 			assert.Empty(t, users.gotGame, "the repository must never be handed a caller-supplied game name")
@@ -159,13 +161,13 @@ func TestLeaderboard_GameParamIsIgnored(t *testing.T) {
 
 func TestUnknownRouteIs404(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, http.StatusNotFound, get(t, Handler(Deps{}), "/v1/secrets").Code)
-	assert.Equal(t, http.StatusNotFound, get(t, Handler(Deps{}), "/").Code)
+	assert.Equal(t, http.StatusNotFound, get(t, Handler(Deps{RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/secrets").Code)
+	assert.Equal(t, http.StatusNotFound, get(t, Handler(Deps{RequestsPerMinute: 120, AllowOrigin: "*"}), "/").Code)
 }
 
 func TestWriteMethodsAreRejected(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1)})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 120, AllowOrigin: "*"})
 
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		t.Run(method, func(t *testing.T) {
@@ -190,7 +192,7 @@ func options(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 
 func TestPreflightIsAnswered(t *testing.T) {
 	t.Parallel()
-	rec := options(t, Handler(Deps{}))
+	rec := options(t, Handler(Deps{RequestsPerMinute: 120, AllowOrigin: "*"}))
 
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Methods"), "GET")
@@ -198,7 +200,7 @@ func TestPreflightIsAnswered(t *testing.T) {
 
 func TestPreflightIsRateLimited(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{RequestsPerMinute: 2})
+	h := Handler(Deps{RequestsPerMinute: 2, AllowOrigin: "*"})
 
 	require.Equal(t, http.StatusNoContent, options(t, h).Code)
 	require.Equal(t, http.StatusNoContent, options(t, h).Code)
@@ -217,19 +219,19 @@ func TestErrorsAreJSON(t *testing.T) {
 	}{
 		{
 			name:     "bad request",
-			handler:  Handler(Deps{Users: &stubUsers{}}),
+			handler:  Handler(Deps{Users: &stubUsers{}, RequestsPerMinute: 120, AllowOrigin: "*"}),
 			target:   "/v1/leaderboard?limit=0",
 			wantCode: http.StatusBadRequest,
 		},
 		{
 			name:     "not found",
-			handler:  Handler(Deps{}),
+			handler:  Handler(Deps{RequestsPerMinute: 120, AllowOrigin: "*"}),
 			target:   "/v1/secrets",
 			wantCode: http.StatusNotFound,
 		},
 		{
 			name:     "repository down",
-			handler:  Handler(Deps{Users: &stubUsers{err: errors.New("boom")}}),
+			handler:  Handler(Deps{Users: &stubUsers{err: errors.New("boom")}, RequestsPerMinute: 120, AllowOrigin: "*"}),
 			target:   "/v1/leaderboard",
 			wantCode: http.StatusServiceUnavailable,
 		},
@@ -251,7 +253,7 @@ func TestErrorsAreJSON(t *testing.T) {
 
 func TestRateLimitErrorIsJSON(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, AllowOrigin: "*"})
 
 	require.Equal(t, http.StatusOK, get(t, h, "/v1/stats").Code)
 	rec := get(t, h, "/v1/stats")
@@ -266,7 +268,7 @@ func TestRateLimitErrorIsJSON(t *testing.T) {
 
 func TestRateLimitRejectsAFlood(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 3})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 3, AllowOrigin: "*"})
 
 	var lastCode int
 	for range 6 {
@@ -278,13 +280,13 @@ func TestRateLimitRejectsAFlood(t *testing.T) {
 
 func TestAllowOriginCanBePinned(t *testing.T) {
 	t.Parallel()
-	rec := get(t, Handler(Deps{AllowOrigin: "https://tty.cards"}), "/v1/stats")
+	rec := get(t, Handler(Deps{AllowOrigin: "https://tty.cards", RequestsPerMinute: 120}), "/v1/stats")
 	assert.Equal(t, "https://tty.cards", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
 func TestRateLimit_TrustedProxySeparatesClients(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 2, TrustedProxy: true})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 2, TrustedProxy: true, AllowOrigin: "*"})
 
 	send := func(clientIP string) int {
 		req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
@@ -303,7 +305,7 @@ func TestRateLimit_TrustedProxySeparatesClients(t *testing.T) {
 
 func TestRateLimit_UntrustedProxyHeaderIsIgnored(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 2})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 2, AllowOrigin: "*"})
 
 	var last int
 	for i := range 4 {
@@ -320,7 +322,7 @@ func TestRateLimit_UntrustedProxyHeaderIsIgnored(t *testing.T) {
 
 func TestTrustedProxy_UsesLeftmostForwardedAddress(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, TrustedProxy: true})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, TrustedProxy: true, AllowOrigin: "*"})
 
 	send := func(xff string) int {
 		req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
@@ -340,7 +342,7 @@ func TestTrustedProxy_UsesLeftmostForwardedAddress(t *testing.T) {
 // nothing else, or a client that trusts Content-Length reads a truncated body.
 func TestHeadReturnsHeadersWithoutABody(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(3), Lobbies: fakeLobbies{inGame: 1, waiting: 2}})
+	h := Handler(Deps{Sessions: fakeSessions(3), Lobbies: fakeLobbies{inGame: 1, waiting: 2}, RequestsPerMinute: 120, AllowOrigin: "*"})
 
 	req := httptest.NewRequest(http.MethodHead, "/v1/stats", nil)
 	req.RemoteAddr = "203.0.113.9:5555"
@@ -356,7 +358,7 @@ func TestHeadReturnsHeadersWithoutABody(t *testing.T) {
 func TestLeaderboard_LimitOverflowIsRejected(t *testing.T) {
 	t.Parallel()
 	users := &stubUsers{}
-	h := Handler(Deps{Users: users})
+	h := Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"})
 
 	rec := get(t, h, "/v1/leaderboard?limit=99999999999999999999")
 
@@ -384,7 +386,7 @@ func TestLeaderboard_RepeatedLimitUsesTheFirstValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			users := &stubUsers{}
-			rec := get(t, Handler(Deps{Users: users}), "/v1/leaderboard"+tt.query)
+			rec := get(t, Handler(Deps{Users: users, RequestsPerMinute: 120, AllowOrigin: "*"}), "/v1/leaderboard"+tt.query)
 
 			require.Equal(t, tt.wantCode, rec.Code)
 			if tt.wantCode == http.StatusOK {
@@ -403,7 +405,7 @@ func TestTrustedProxy_BlankForwardedHeaderFallsBackToTheSocket(t *testing.T) {
 	for _, xff := range []string{",", " ", ", 10.0.0.1", "not-an-address", "10.0.0.256"} {
 		t.Run("xff="+xff, func(t *testing.T) {
 			t.Parallel()
-			h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, TrustedProxy: true})
+			h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, TrustedProxy: true, AllowOrigin: "*"})
 
 			send := func(socket string) int {
 				req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
@@ -425,7 +427,7 @@ func TestTrustedProxy_BlankForwardedHeaderFallsBackToTheSocket(t *testing.T) {
 // addresses; without it, a fresh address per request is a free pass.
 func TestRateLimit_IPv6AddressesInOneNetworkShareABudget(t *testing.T) {
 	t.Parallel()
-	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1})
+	h := Handler(Deps{Sessions: fakeSessions(1), RequestsPerMinute: 1, AllowOrigin: "*"})
 
 	send := func(addr string) int {
 		req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
@@ -469,7 +471,7 @@ func TestHealthz(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			rec := get(t, Handler(Deps{Health: tt.health}), "/healthz")
+			rec := get(t, Handler(Deps{Health: tt.health, RequestsPerMinute: 120, AllowOrigin: "*"}), "/healthz")
 
 			require.Equal(t, tt.wantCode, rec.Code)
 			assert.JSONEq(t, tt.wantBody, rec.Body.String())
