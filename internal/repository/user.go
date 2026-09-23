@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -23,6 +24,10 @@ const (
 	pgUniqueViolationCode = "23505"
 	bestPlayersCacheSize  = 200
 	bestPlayersCacheTTL   = 5 * time.Minute
+	// bestPlayersQueryTimeout bounds a shared leaderboard read. The query runs detached
+	// from whichever caller started it, so one closing screen does not fail everyone
+	// queued behind it - and something still has to stop it.
+	bestPlayersQueryTimeout = 10 * time.Second
 )
 
 func isUniqueViolation(err error) bool {
@@ -39,6 +44,14 @@ type gormUserRepository struct {
 	db                    *gorm.DB
 	bestPlayersCache      map[string]bestPlayersCacheEntry
 	bestPlayersCacheMutex sync.RWMutex
+	// bestPlayersGen is bumped by every erasure, under bestPlayersCacheMutex. A read
+	// stores its rows only if the generation it started under is still current: one
+	// that fetched before an erasure committed would otherwise re-cache the erased
+	// account for the whole TTL.
+	bestPlayersGen uint64
+	// bestPlayersFlight folds concurrent misses into one query. A cold board is read
+	// by every lobby screen and the website at once.
+	bestPlayersFlight singleflight.Group
 }
 
 func NewUserRepository(database *gorm.DB) db.UserRepository {
@@ -143,16 +156,17 @@ func (q *gormUserRepository) RegisterUserWithKey(
 	return &currentUser, &dbKey, nil
 }
 
-// Read lock only: the database query must never run while the mutex is held.
-func (q *gormUserRepository) cachedBestPlayers(gameSlug string, limit int) ([]db.Ranking, bool) {
+// Read lock only: the database query must never run while the mutex is held. On a
+// miss it returns the generation the caller's query will run under.
+func (q *gormUserRepository) cachedBestPlayers(gameSlug string, limit int) ([]db.Ranking, uint64, bool) {
 	q.bestPlayersCacheMutex.RLock()
 	defer q.bestPlayersCacheMutex.RUnlock()
 
 	entry, ok := q.bestPlayersCache[gameSlug]
 	if !ok || time.Since(entry.at) >= bestPlayersCacheTTL {
-		return nil, false
+		return nil, q.bestPlayersGen, false
 	}
-	return slices.Clone(entry.rankings[:min(limit, len(entry.rankings))]), true
+	return slices.Clone(entry.rankings[:min(limit, len(entry.rankings))]), q.bestPlayersGen, true
 }
 
 func (q *gormUserRepository) BestPlayers(
@@ -166,10 +180,9 @@ func (q *gormUserRepository) BestPlayers(
 	// An entry holds at most bestPlayersCacheSize rows, so a larger ask cannot be served
 	// from it and must not be stored into it: later callers would get a truncated board.
 	cacheable := limit <= bestPlayersCacheSize
-	if cacheable {
-		if out, fresh := q.cachedBestPlayers(gameSlug, limit); fresh {
-			return out, nil
-		}
+	out, gen, fresh := q.cachedBestPlayers(gameSlug, limit)
+	if cacheable && fresh {
+		return out, nil
 	}
 
 	fetch := bestPlayersCacheSize
@@ -177,6 +190,28 @@ func (q *gormUserRepository) BestPlayers(
 		fetch = limit
 	}
 
+	// The generation is in the key, so a caller arriving after an erasure starts its
+	// own read instead of joining one that began before it.
+	key := fmt.Sprintf("%s/%d/%d", gameSlug, fetch, gen)
+	shared, err, _ := q.bestPlayersFlight.Do(key, func() (any, error) {
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bestPlayersQueryTimeout)
+		defer cancel()
+		return q.fetchBestPlayers(readCtx, fetch, gameSlug, gen, cacheable)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get best players: %w", err)
+	}
+	rankings, _ := shared.([]db.Ranking)
+	span.SetAttributes(attribute.Int("rows", len(rankings)))
+	return slices.Clone(rankings[:min(limit, len(rankings))]), nil
+}
+
+// fetchBestPlayers is one leaderboard query, stored into the cache when cacheable and
+// gen is still current. The rows it returns are shared by every caller of the flight,
+// so they are only ever cloned from, never handed out.
+func (q *gormUserRepository) fetchBestPlayers(
+	ctx context.Context, fetch int, gameSlug string, gen uint64, cacheable bool,
+) ([]db.Ranking, error) {
 	// Provisional accounts stay on the board: a player's first ranked win should show
 	// up, and hiding it made the board empty on a young server. The anti-farm rules
 	// live in the finalize path - an established player gains nothing from a fresh
@@ -194,22 +229,22 @@ func (q *gormUserRepository) BestPlayers(
 	}
 
 	var rankings []db.Ranking
-	if err = query.Find(&rankings).Error; err != nil {
-		return nil, fmt.Errorf("get best players: %w", err)
+	if err := query.Find(&rankings).Error; err != nil {
+		return nil, fmt.Errorf("query rankings: %w", err)
 	}
-	span.SetAttributes(attribute.Int("rows", len(rankings)))
 
 	// Not caching an empty result is what bounds this map: gameSlug is caller-controlled,
 	// and an unknown game returns no rows, so it never becomes a key.
 	if cacheable && len(rankings) > 0 {
 		at := time.Now()
 		q.bestPlayersCacheMutex.Lock()
-		if entry, ok := q.bestPlayersCache[gameSlug]; !ok || entry.at.Before(at) {
+		entry, ok := q.bestPlayersCache[gameSlug]
+		if q.bestPlayersGen == gen && (!ok || entry.at.Before(at)) {
 			q.bestPlayersCache[gameSlug] = bestPlayersCacheEntry{rankings: rankings, at: at}
 		}
 		q.bestPlayersCacheMutex.Unlock()
 	}
-	return slices.Clone(rankings[:min(limit, len(rankings))]), nil
+	return rankings, nil
 }
 
 func (q *gormUserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *db.User, err error) {
@@ -301,6 +336,7 @@ func (q *gormUserRepository) DeleteAccount(ctx context.Context, userID uuid.UUID
 	// whole map goes: a five-minute TTL is five minutes of an erased name on screen.
 	q.bestPlayersCacheMutex.Lock()
 	clear(q.bestPlayersCache)
+	q.bestPlayersGen++
 	q.bestPlayersCacheMutex.Unlock()
 	return nil
 }
