@@ -102,7 +102,7 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 	// it out. A tenths-rate tick lands well inside a second; a whole-second one does
 	// not land at all in that window.
 	fast := make(chan tea.Msg, 1)
-	go func() { fast <- ClockTickFor(2*time.Second, true)() }()
+	go func() { fast <- clockTickFrom(nil, 2*time.Second, true)() }()
 	select {
 	case <-fast:
 	case <-time.After(500 * time.Millisecond):
@@ -110,7 +110,7 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 	}
 
 	slow := make(chan tea.Msg, 1)
-	go func() { slow <- ClockTickFor(30*time.Second, true)() }()
+	go func() { slow <- clockTickFrom(nil, 30*time.Second, true)() }()
 	select {
 	case <-slow:
 		t.Fatal("a countdown in whole seconds must not tick ten times a second")
@@ -128,7 +128,7 @@ func TestClockTickFor_OnlyThePlayerOnTurnTicksInTenths(t *testing.T) {
 	t.Parallel()
 
 	watching := make(chan tea.Msg, 1)
-	go func() { watching <- ClockTickFor(2*time.Second, false)() }()
+	go func() { watching <- clockTickFrom(nil, 2*time.Second, false)() }()
 
 	select {
 	case <-watching:

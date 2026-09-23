@@ -100,5 +100,5 @@ func (m *Model) passIndices() map[int]struct{} {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), gameview.ClockTick())
+	return tea.Batch(m.Listen(), m.ClockTick())
 }

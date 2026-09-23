@@ -368,24 +368,27 @@ func AttachTurnClock(block, clock string, orientation Orientation) string {
 	return lg.JoinVertical(lg.Center, block, clock)
 }
 
-// ClockTickMsg drives the turn countdown.
-type ClockTickMsg time.Time
+// ClockTickMsg drives the turn countdown. Source is the feed of the session that armed
+// it, for the same reason EventMsg carries one; a nil Source is a tick armed without a
+// session (ClockTick), which any session accepts.
+type ClockTickMsg struct{ Source <-chan game.Event }
 
-// ClockTickFor ticks once a second, or ten times a second only for the player whose clock
-// is running out. onTurn is what keeps a table cheap: a frame costs thousands of
+// clockTickFrom ticks once a second, or ten times a second only for the player whose
+// clock is running out. onTurn is what keeps a table cheap: a frame costs thousands of
 // allocations, and every seat paying that rate for somebody else's digit multiplies the
 // table's work for nothing.
-func ClockTickFor(remaining time.Duration, onTurn bool) tea.Cmd {
+func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) tea.Cmd {
 	interval := time.Second
 	if onTurn && remaining > 0 && remaining < preciseClockThreshold {
 		interval = tenthTickInterval
 	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg { return ClockTickMsg(t) })
+	return tea.Tick(interval, func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
 }
 
-// ClockTick starts the countdown before any deadline is known, which is what a view's
-// Init has to work with.
-func ClockTick() tea.Cmd { return ClockTickFor(0, false) }
+// ClockTick is Session.ClockTick for a view that has not switched to it. Its tick
+// carries no Source, so a stale one cannot be told apart from a live one; prefer the
+// method.
+func ClockTick() tea.Cmd { return clockTickFrom(nil, 0, false) }
 
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
 	innerWidth := styles.InnerWidth(g.Width)

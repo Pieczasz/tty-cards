@@ -3,7 +3,6 @@ package poker
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	logic "github.com/Pieczasz/terminal-card/internal/game/poker"
@@ -244,7 +243,10 @@ func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 	engine, m := startedTable(t)
 	t.Cleanup(engine.Close)
 
-	_, cmd := m.Update(gameview.EventMsg(game.Event{Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1)}))
+	_, cmd := m.Update(gameview.EventMsg{
+		Event:  game.Event{Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1)},
+		Source: m.Events,
+	})
 
 	require.NotNil(t, cmd)
 	_, isQuit := cmd().(tea.QuitMsg)
@@ -258,7 +260,7 @@ func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 	engine, m := startedTable(t)
 	t.Cleanup(engine.Close)
 
-	_, cmd := m.Update(gameview.ClockTickMsg(time.Now()))
+	_, cmd := m.Update(gameview.ClockTickMsg{Source: m.Events})
 	require.NotNil(t, cmd, "a live hand keeps counting down")
 	_, isTick := cmd().(gameview.ClockTickMsg)
 	assert.True(t, isTick)
@@ -268,7 +270,7 @@ func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 	engine.RemovePlayer(testutil.SeatID(2))
 	require.True(t, engine.IsFinished())
 
-	_, cmd = m.Update(gameview.ClockTickMsg(time.Now()))
+	_, cmd = m.Update(gameview.ClockTickMsg{Source: m.Events})
 	assert.Nil(t, cmd, "a finished game must not keep ticking")
 }
 

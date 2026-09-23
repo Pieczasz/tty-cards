@@ -9,6 +9,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game/crazyeight"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,44 @@ func TestSession_Listen_DeliversWhatTheEngineBroadcasts(t *testing.T) {
 	msg := s.Listen()()
 
 	require.IsType(t, EventMsg{}, msg)
-	assert.Equal(t, game.EventTurnAdvanced, game.Event(msg.(EventMsg)).Type)
+	assert.Equal(t, game.EventTurnAdvanced, msg.(EventMsg).Type)
+}
+
+// A listener or a clock tick in flight when the router replaced a view lands on the
+// next one. Handling it there re-armed it on the new view's feed, next to the chain
+// the new view already runs: two listeners racing for one channel, two clocks.
+func TestHandleFrame_DropsWhatAnotherSessionArmed(t *testing.T) {
+	t.Parallel()
+
+	mine, theirs := make(chan game.Event), make(chan game.Event)
+	s := &Session{Events: mine, Base: BaseState{Phase: game.Playing}}
+	synced := false
+	sync := func() { synced = true }
+
+	for name, msg := range map[string]tea.Msg{
+		"an event":     EventMsg{Event: game.Event{Type: game.EventTurnAdvanced}, Source: theirs},
+		"a clock tick": ClockTickMsg{Source: theirs},
+	} {
+		cmd, handled := s.HandleFrame(msg, sync, nil)
+		assert.True(t, handled, "%s is still consumed", name)
+		assert.Nil(t, cmd, "%s from another session must not re-arm anything", name)
+	}
+	assert.False(t, synced, "nor resync this one")
+
+	cmd, _ := s.HandleFrame(ClockTickMsg{Source: mine}, sync, nil)
+	assert.NotNil(t, cmd, "this session's own tick still keeps the clock going")
+}
+
+func TestSession_Listen_TagsItsOwnFeed(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan game.Event, 1)
+	events <- game.Event{Type: game.EventTurnAdvanced}
+	s := Session{Events: events}
+
+	msg, ok := s.Listen()().(EventMsg)
+	require.True(t, ok)
+	assert.Equal(t, (<-chan game.Event)(events), msg.Source)
 }
 
 func TestSession_Listen_EndsQuietlyWithoutAFeed(t *testing.T) {

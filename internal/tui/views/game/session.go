@@ -15,8 +15,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// EventMsg carries an engine event into the bubbletea loop.
-type EventMsg game.Event
+// EventMsg carries an engine event into the bubbletea loop. Source is the feed that
+// delivered it: a listener in flight when the router replaced a view hands its event
+// to the next view, and handling it there re-armed it beside that view's own listener.
+type EventMsg struct {
+	game.Event
+	Source <-chan game.Event
+}
 
 // Session is the plumbing every game view repeats: the engine binding, the event
 // subscription, the cached base state and the hand cursor.
@@ -57,7 +62,14 @@ func NewSession(global router.GlobalContext, engine *game.Engine, gameName strin
 }
 
 func (s *Session) Listen() tea.Cmd {
-	return views.ListenOn(s.Events, func(ev game.Event) tea.Msg { return EventMsg(ev) })
+	ch := s.Events
+	return views.ListenOn(ch, func(ev game.Event) tea.Msg { return EventMsg{Event: ev, Source: ch} })
+}
+
+// ClockTick starts this session's countdown before any deadline is known, which is
+// what a view's Init has to work with.
+func (s *Session) ClockTick() tea.Cmd {
+	return clockTickFrom(s.Events, 0, false)
 }
 
 // IdleRemoved is this session's own player losing their seat; anyone else's removal is
@@ -85,10 +97,18 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func(), onEvent func()) (tea.Cmd
 		return cmd, true
 	}
 
+	// Something another session armed is consumed and dropped, never re-armed: that
+	// session's chain ended with it, and this one runs its own.
 	switch msg := msg.(type) {
 	case EventMsg:
-		return s.handleEvent(game.Event(msg), sync, onEvent), true
+		if msg.Source != s.Events {
+			return nil, true
+		}
+		return s.handleEvent(msg.Event, sync, onEvent), true
 	case ClockTickMsg:
+		if msg.Source != nil && msg.Source != s.Events {
+			return nil, true
+		}
 		return s.handleClockTick(sync), true
 	}
 
@@ -113,7 +133,7 @@ func (s *Session) handleEvent(ev game.Event, sync func(), onEvent func()) tea.Cm
 	// tick, so the clock has to be re-armed once the table starts playing or it never
 	// runs again for that player.
 	if !wasPlaying && s.Base.Phase == game.Playing {
-		cmds = append(cmds, ClockTickFor(s.Base.TurnRemaining, s.Base.MyTurn))
+		cmds = append(cmds, clockTickFrom(s.Events, s.Base.TurnRemaining, s.Base.MyTurn))
 	}
 	return tea.Batch(cmds...)
 }
@@ -123,7 +143,7 @@ func (s *Session) handleClockTick(sync func()) tea.Cmd {
 	if s.Base.Phase != game.Playing {
 		return nil
 	}
-	return ClockTickFor(s.Base.TurnRemaining, s.Base.MyTurn)
+	return clockTickFrom(s.Events, s.Base.TurnRemaining, s.Base.MyTurn)
 }
 
 var errNotSeated = errors.New("you are not seated at this table")

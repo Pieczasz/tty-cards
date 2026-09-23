@@ -18,7 +18,12 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
-type lobbyMsg lobby.Event
+// lobbyMsg carries the feed that delivered it: the router rebuilds this view on every
+// visit, and a listener in flight from the last one would otherwise re-arm itself here.
+type lobbyMsg struct {
+	lobby.Event
+	src <-chan lobby.Event
+}
 
 type model struct {
 	global       router.GlobalContext
@@ -39,7 +44,7 @@ type model struct {
 }
 
 func listenToLobbyBroadcaster(ch <-chan lobby.Event) tea.Cmd {
-	return views.ListenOn(ch, func(ev lobby.Event) tea.Msg { return lobbyMsg(ev) })
+	return views.ListenOn(ch, func(ev lobby.Event) tea.Msg { return lobbyMsg{Event: ev, src: ch} })
 }
 
 // New returns a new lobby model. We pass the current active lobby through Context.
@@ -171,7 +176,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case lobbyMsg:
-		return m.handleLobbyEvent(lobby.Event(msg))
+		if msg.src != m.lobbyChan {
+			return m, nil
+		}
+		return m.handleLobbyEvent(msg.Event)
 	}
 	return m, nil
 }

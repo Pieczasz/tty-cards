@@ -43,5 +43,5 @@ func (m *Model) syncState() {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), gameview.ClockTick())
+	return tea.Batch(m.Listen(), m.ClockTick())
 }
