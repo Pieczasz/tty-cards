@@ -51,6 +51,27 @@ is only the *why*.
 | [35](#35-migration-000004-backfills-some-columns-and-refuses-to-backfill-others) | 000004 backfills some columns and refuses others |
 | [36](#36-nginx-has-two-health-endpoints-and-duplicates-one-map) | nginx has two health endpoints and duplicates one map |
 | [37](#37-a-rules-panic-on-the-turn-timer-ends-one-table-not-the-process) | A rules panic on the turn timer ends one table |
+| [38](#38-the-turn-clock-keeps-a-seats-deadline-while-its-turn-carries-on) | The turn clock keeps a seat's deadline while its turn carries on |
+| [39](#39-an-interrupted-match-charges-only-its-leavers) | An interrupted match charges only its leavers |
+| [40](#40-fold-out-dead-money-goes-to-the-winner) | Fold-out dead money goes to the winner |
+| [41](#41-short-all-ins-that-add-up-to-a-full-raise-reopen-the-betting) | Short all-ins that add up to a full raise reopen the betting |
+| [42](#42-usernames-are-unique-case-insensitively) | Usernames are unique case-insensitively |
+| [43](#43-the-edge-network-runs-ipv6) | The edge network runs IPv6 |
+| [44](#44-leaving-a-live-game-asks-first) | Leaving a live game asks first |
+| [45](#45-the-session-tracker-lock-comes-before-the-managers) | The session tracker lock comes before the manager's |
+| [46](#46-an-unknown-env-fails-the-boot-and-production-refuses-a-plaintext-capable-sslmode) | An unknown `ENV` fails the boot; production refuses a plaintext-capable `sslmode` |
+| [47](#47-proxy-and-x-forwarded-for-are-believed-only-from-the-proxys-networks) | PROXY and `X-Forwarded-For` only from the proxy's networks |
+| [48](#48-migration-000005s-down-is-lossy) | Migration 000005's down is lossy |
+
+The 2026-09-23 review labelled its policy choices D-1 to D-8, and code comments
+still cite them: D-1 is [#39](#39-an-interrupted-match-charges-only-its-leavers),
+D-2 [#40](#40-fold-out-dead-money-goes-to-the-winner),
+D-3 [#41](#41-short-all-ins-that-add-up-to-a-full-raise-reopen-the-betting),
+D-4 [#42](#42-usernames-are-unique-case-insensitively),
+D-5 the revision of [#17](#17-registration-has-its-own-limiter-and-its-own-refusal),
+D-6 [#38](#38-the-turn-clock-keeps-a-seats-deadline-while-its-turn-carries-on),
+D-7 [#43](#43-the-edge-network-runs-ipv6) and
+D-8 [#44](#44-leaving-a-live-game-asks-first).
 
 ---
 
@@ -70,7 +91,9 @@ an ordering to get right on every path.
 **Consequences.** Coarse: a `Frame` from one session briefly blocks a `Submit`
 from another. That is acceptable because everything under the lock is in-memory
 map and slice work; nothing does I/O. In exchange there is exactly one lock order
-to remember (manager -> lobby -> engine) and no fourth level.
+to remember (tracker -> manager -> lobby -> engine, see
+[#45](#45-the-session-tracker-lock-comes-before-the-managers)) and nothing below
+the engine.
 
 **Where.** `internal/game/engine.go` - the comment on the `Engine` struct says it.
 `internal/game/state.go` says the same from the other side.
@@ -158,23 +181,27 @@ states the argument in full. Tests:
 
 ## 5. `BoundEngine` is a façade, not a capability
 
-*2026-07-18, `e879142` "close empty lobbies and bind game actions to sessions".*
+*2026-07-18, `e879142` "close empty lobbies and bind game actions to sessions".
+`BoundEngine.Engine()` deleted 2026-09-23, `b64132b`.*
 
 **Context.** A game view needs to submit actions and read state. Handing it the
 `*Engine` means every view can act as any player and read every hand.
 
 **Decision.** `game.Bind(engine, playerID)` returns a session-scoped handle that
-submits only as that player and returns only that player's hand. But
-`BoundEngine.Engine()` still hands back the whole engine, and poker uses it.
+submits only as that player, and whose `Frame` returns only that player's hand.
+`Subscribe`/`Unsubscribe` join the event feed without exposing the broadcaster. The
+old `Engine()` accessor is gone (there never was a separate `Hand()`; the hand
+comes from `Frame`): `Frame`'s callback is the one way to the rest of the table,
+and it hands the view the live, unredacted `*State`.
 
 **Consequences.** This is explicitly **not** a security boundary - a view that
-wants whole-table state can have it, because rendering a card table means
-rendering every seat. What the façade buys is that the *default* path is the safe
-one, so reaching past it is a visible detour in review, and the redaction becomes
+wants whole-table state has it through the `Frame` callback, because rendering a
+card table means rendering every seat, and poker reads every seat that way. What
+the façade buys is that the *default* path is the safe one, and the redaction is
 the view's named, testable job. In poker that function is `buildSeats`, and it has
 its own test file.
 
-**Where.** `internal/game/bound.go` (the comment on `Engine()`),
+**Where.** `internal/game/bound.go` (the comment on `Frame`),
 `internal/tui/views/game/poker/model.go` `buildSeats`,
 `internal/tui/views/game/poker/redaction_test.go`.
 
@@ -317,7 +344,15 @@ A damped table still writes `matches_played` and records the match; it just writ
 no `elo` and no delta. Switching game does not reset the budget, which is why the
 window spans all five. Because the count is read inside the transaction,
 `lockPairing` has to be held first, or two concurrent finalizes sharing a seat both
-read an undamped count.
+read an undamped count. The scan drives from the server's ranked matches inside the
+window (`idx_matches_ranked_created`, migration `000007`, 2026-09-23, `2cfe7e1`), so
+it costs the last day's ranked traffic, not a veteran's history.
+
+The cap bounds a Sybil farm; it does not rule one out. Alts that play their five
+provisional matches among themselves are established too, and each graduated alt
+still pays up to three wins a day against any established account. The ceiling is
+linear in the number of graduated alts someone is willing to run (the comment in
+`fetchBestPlayers` says the same, 2026-09-23, `f8b190d`).
 
 **Where.** `internal/repository/match.go` - `maxSamePairingPerDay`,
 `repeatedPairCountLast24h`, `worstPairCount`, and the damping branch inside
@@ -349,6 +384,11 @@ is an honest result.
 outside; both read as "no Elo change". `unratedReason` logs which of the three it
 was, and the metric label distinguishes them. An abandoned match with no standings
 at all writes nothing and counts as `dropped`.
+
+`EndReasonInterrupted` (2026-09-23, `141f979`) is a fourth, partial case: it stays
+rated, but only against its leavers
+([#39](#39-an-interrupted-match-charges-only-its-leavers)); its metric label is
+`interrupted`.
 
 **Where.** `internal/lobby/finalize.go` - the gate, `unratedReason`,
 `endReasonLabel`. `internal/game/action.go` for the enum.
@@ -410,8 +450,10 @@ indefinitely instead would let one person freeze a table.
 `LeaveLobby`. Mid-game it arms `DisconnectGrace` (90 seconds). The engine keeps
 auto-playing the absent seat through `TimeoutAction`, and `MaxMissedTurns` (3) is
 the backstop that takes the seat even inside the grace window.
-`Manager.ResumePlayer` - wired into the TUI's initial route - cancels a pending
-leave and lands the player back at the table.
+`Manager.ResumePlayer` - reached through `tui.ResumeSeat`, which the ssh layer
+calls only once the session owns its tracker slot
+([#45](#45-the-session-tracker-lock-comes-before-the-managers)) - cancels a
+pending leave and lands the player back at the table.
 
 **Consequences.** The other players are never made to wait: three 30-second
 auto-played turns is the worst case, and the clock keeps running. A waiting-lobby
@@ -421,35 +463,52 @@ hand to come back to. The hold is released at three points, not one - its timer,
 hold keeps the player out of every other table and this one unable to reach
 all-ready.
 
-**Where.** `internal/lobby/manager.go` (`DisconnectGrace`, `DisconnectPlayer`,
-`ResumePlayer`, `releaseHeldSeats`, `BeginShutdown`),
-`internal/lobby/disconnect.go` (`pending` -> `expiring`).
+**Where.** `internal/lobby/disconnect.go` (`DisconnectPlayer`, `ResumePlayer`,
+`releaseHeldSeats`, the `pending` -> `expiring` state machine),
+`internal/lobby/manager.go` (`DisconnectGrace`), `internal/lobby/finalize.go`
+(`BeginShutdown`).
 
 ---
 
 ## 15. A second session displaces the first and closes it
 
-*Generations 2026-09-06, `97eed0a`. Closing the displaced connection 2026-09-19, `f97b624`.*
+*Generations 2026-09-06, `97eed0a`. Closing the displaced connection 2026-09-19, `f97b624`;
+the connection rather than its channel, and the channel cap before `Accept`,
+2026-09-23, `4b5fe9f` and `26e70b2`.*
 
 **Context.** There used to be an `ErrAlreadyConnected`. A half-open TCP session -
 a laptop that slammed shut - kept the account locked out of its own seat for the
 whole 90-second grace window.
 
 **Decision.** `SessionTracker.Connect(userID, conn)` bumps a per-account
-generation and **closes the displaced connection**. Only the owning generation may
-free the tracker slot or give up the lobby seat (`Owns` / `Release`).
+generation and **closes the displaced connection** - the `gossh.Conn`, not the
+session channel, because closing a channel leaves the socket and any other
+channel on it up until the peer notices. Only the owning generation may free the
+tracker slot or give up the lobby seat (`ReleaseWith`, `Owns`).
 
 **Consequences.** Reconnecting always works, which is the behaviour a player
 expects. The close happens **outside** the tracker lock: a wedged peer must not
 hold every other account's `Connect` behind it. A displaced session's teardown
 must touch neither the seat nor the slot, or the new session loses both -
-`releaseSession` returns early on `!Owns`. Capacity is still refused, with a
-distinct `ErrServerFull`.
+`ReleaseWith` does nothing for a stale generation. Capacity is still refused, with
+a distinct `ErrServerFull`.
 
-**Where.** `internal/ssh/server.go` `SessionTracker`, `releaseSession`.
+The per-connection channel cap (`maxSessionsPerConnection`, 2) that bounds the
+overlap lives in the `session` `ChannelHandler` and rejects the extra channel with
+`ResourceShortage` **before** `Accept`: counted in the middleware it bound nothing,
+because a channel that never asks for a shell never reaches the middleware but
+holds its goroutine and buffers. An accepted channel's `env` requests are capped
+at 32 or 8 KiB, since charm ssh keeps every accepted one for the session's life;
+a small budget rather than none, because bubbletea reads `TERM` and colour hints
+from the environment.
+
+**Where.** `internal/ssh/tracker.go` `SessionTracker`, `internal/ssh/server.go`
+`releaseSession`, `limitSessionChannels`, `envCappedChannel`.
 `internal/ssh/lifecycle_test.go`
-`TestSessionTracker_ConnectClosesTheDisplacedSession` and
-`TestReleaseSession_GivesUpTheSeatBeforeTheSlot`.
+`TestSessionTracker_ConnectClosesTheDisplacedSession`,
+`internal/ssh/channel_test.go` `TestSetupServer_CapsSessionChannelsBeforeAccept`,
+`TestSetupServer_CapsEnvRequests` and
+`TestSetupServer_DisplacementClosesTheOldConnection`.
 
 ---
 
@@ -481,32 +540,44 @@ never stored. The SSH login name becomes the username on first connect
 
 ## 17. Registration has its own limiter, and its own refusal
 
-*2026-09-19, `f97b624`.*
+*2026-09-19, `f97b624`. Revised 2026-09-23 (review decision D-5): the budget from
+config, `6353327`; an invalid name validated first and told why, `9eb2037`.*
 
 **Context.** The auth limiter counts **auth attempts** (5 per second per network
 by default) because an ssh-agent offers every key it holds. That is the wrong unit
 for "how many accounts may this network create".
 
-**Decision A - a second limiter.** `registrationLimit` = 5 per
-`registrationWindow` = 1 hour, per client network. `LoadOrRegisterUser` takes an
-`allowRegister func() bool` and consults it **only** on the `user == nil` branch,
-so a returning player never spends the budget. Auth deliberately knows nothing
-about how the budget is counted; it only asks.
+**Decision A - a second limiter.** `REGISTRATION_LIMIT` (5) per
+`REGISTRATION_WINDOW` (1h), per client network - configuration, because
+`make loadtest` registers an account per session and needs far more.
+`LoadOrRegisterUser` takes an `allowRegister func() bool` and consults it **only**
+on the `user == nil` branch, so a returning player never spends the budget, and
+only after `db.ValidateUsername` has passed, so a typo does not either. Auth
+deliberately knows nothing about how the budget is counted; it only asks.
 
-**Decision B - the refusal says nothing.** `mapRegisterError` folds
-`db.ErrUsernameTaken` and `db.ErrInvalidUsername` into one `ErrNameUnavailable`.
+**Decision B - "taken" says nothing, "invalid" says why.** `mapRegisterError`
+folds `db.ErrUsernameTaken` into `ErrNameUnavailable`. An invalid name returns
+`db.ErrInvalidUsername` wrapped with the validation reason. The first version
+folded both, which left a player with a name that was too long or held a bad
+character guessing.
 
 **Consequences.** Registration stays open - that is the point of a public demo -
-but at a rate, not a floodgate. The uninformative refusal is the deliberate part:
+but at a rate, not a floodgate. The uninformative "taken" is the deliberate part:
 a distinguishable message turns the login banner into a "does this account exist"
-oracle over every username, to an entirely unauthenticated caller. The distinct
-sentinels survive server-side, and `LoadOrRegisterUser` logs the real cause.
-`ErrKeyAlreadyRegistered` **is** returned verbatim, because the key is the
-caller's own and tells them nothing they could not learn by connecting again.
+oracle over every username, to an entirely unauthenticated caller. "Invalid" is
+not such an oracle - it is a fixed rule, not a fact about other accounts - so
+hiding it bought nothing. The taken sentinel survives server-side, and
+`LoadOrRegisterUser` logs the real cause. `ErrKeyAlreadyRegistered` **is**
+returned verbatim, because the key is the caller's own and tells them nothing they
+could not learn by connecting again. Since usernames are unique case-insensitively
+([#42](#42-usernames-are-unique-case-insensitively)), "taken" also covers a name
+that differs only by case.
 
 **Where.** `internal/ssh/auth.go` (the comments on `ErrNameUnavailable` and
-`LoadOrRegisterUser`), `internal/ssh/server.go` `registrationLimit` /
-`allowRegistration`.
+`LoadOrRegisterUser`, `mapRegisterError`), `internal/ssh/server.go`
+`allowRegistration`, `internal/config/config.go` `RegistrationLimit` /
+`RegistrationWindow`. `internal/ssh/auth_test.go`
+`TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget`.
 
 ---
 
@@ -560,7 +631,9 @@ while the client cannot reach the port. `API_TRUST_PROXY` therefore defaults to
 **false** and compose opts in explicitly: the unsafe direction has to be chosen.
 
 A bare local `ssh` client sends no PROXY header, so local development needs
-`PROXY_PROTOCOL=false`.
+`PROXY_PROTOCOL=false`. Keeping the ports unpublished protects against the outside
+world only; `PROXY_TRUSTED_CIDRS` also shuts out every other container on the
+network ([#47](#47-proxy-and-x-forwarded-for-are-believed-only-from-the-proxys-networks)).
 
 **Where.** `compose.yaml` (the comment above `proxy.ports`),
 `internal/config/nginx.conf`, `cmd/server/main.go` `serve`,
@@ -614,6 +687,13 @@ without adding authentication is a vulnerability**, and CI asserts it stays:
 `.github/workflows/test.yml` has a step that fails if Grafana publishes anything
 but `127.0.0.1:3000`. The comment in the workflow says why the assertion exists.
 
+Loopback alone does not stop DNS rebinding: a web page the operator visits can point
+its own hostname at `127.0.0.1` and, through the operator's ssh tunnel, reach the
+anonymous Admin from the browser. `GF_SERVER_DOMAIN=localhost` with
+`GF_SERVER_ENFORCE_DOMAIN=true` refuses any other `Host` (2026-09-23, `a30556e`),
+so it is opened as `http://localhost:3000`, and the container's healthcheck sends
+`Host: localhost` for the same reason.
+
 **Where.** `compose.yaml` (the `grafana` service), `.github/workflows/test.yml`
 (the `compose` job), [`SECURITY.md`](SECURITY.md) "Hardening the deployment you
 run".
@@ -646,6 +726,18 @@ would walk the associations the transaction just deleted and write them back. Th
 leaderboard cache is cleared wholesale afterwards: a five-minute TTL is five more
 minutes of an erased name on screen.
 
+Refined 2026-09-23 (`9d7e47f`, `bdd87f0`, `262f5da`), because a ranked finalize
+racing the erasure could put the account back:
+
+- The erasure takes the same per-seat advisory lock a ranked finalize holds, and
+  the finalize drops anonymised seats after taking it (`unerasedSeats`): such a
+  seat keeps its participant row with a delta of 0 and gets no ranking. So a
+  ranking is never re-created for an erased account.
+- The `users` update is `Unscoped`, so an operator soft-delete does not make a
+  still-named account read as unknown.
+- The leaderboard cache carries a generation that the erasure bumps; a read that
+  fetched before the erasure committed cannot store its rows.
+
 **Where.** `internal/repository/user.go` `DeleteAccount` / `eraseUserLocked`,
 `internal/db/users.go` `AnonymisedUsername` / `ValidateUsername`,
 `internal/db/migrations/000001_init.up.sql` (`username_valid`),
@@ -676,13 +768,25 @@ same reasoning and belong with it - the session span carries **no client address
 (the comment in `startSession` says joining an IP to an account for 48 hours is
 the record a trace store should not hold), and connect/disconnect logs carry
 `client_net`, the /64, with the full `remote_addr` surviving only on WARN and
-ERROR where abuse investigation needs it. nginx contributes nothing: the `stream`
-block is `access_log off` and the `http` block uses a `log_format privacy` with no
-`$remote_addr` and no User-Agent.
+ERROR where abuse investigation needs it. nginx's access logs carry no address:
+the `stream` block is `access_log off` and the `http` block uses a
+`log_format privacy` with no `$remote_addr` and no User-Agent.
+
+Refined 2026-09-23 (`c4bd412`, `a30556e`): the stats API makes **no spans** at all
+(a noop tracer provider) - every website visitor polls it, and a span per request
+put each visitor's address and User-Agent into Tempo for 48 hours. nginx's error
+log, which names the client on every line, goes to stderr at `error` only, with the
+`limit_*` rejections logged at `warn` below that threshold, and Alloy rewrites the
+`client:` field on the proxy's lines to `redacted`. Database dumps from
+`scripts/backup.sh` are kept `RETENTION_DAYS` (14) days, written `0600`
+(`umask 077`), and never enter the image build context (`.dockerignore`).
 
 Metrics carry no personal data at all, and that is **enforced**:
 `internal/observability/metrics_test.go` collects every instrument and fails if
-any attribute key falls outside a fixed allow-list.
+any attribute key falls outside a fixed allow-list, and
+`internal/httpapi/telemetry_test.go` does the same for otelhttp's `http.server.*`
+metrics (with `server.address` pinned to `stats-api` and no `server.port` from the
+client's `Host`).
 
 **Where.** The table above, plus [`data-inventory.md`](data-inventory.md) for the
 per-field version.
@@ -836,7 +940,11 @@ schema - so those tags enforced nothing, and one of them had already drifted fro
 the SQL.
 
 **Decision.** Delete them. Only the tags GORM actually uses to build queries
-remain: `primaryKey`, `foreignKey`, `autoIncrement`, `serializer`.
+remain: `primaryKey`, `foreignKey`, `autoIncrement`, `serializer`, and `type:uuid`
+on `User.ID`. The last `default:uuidv7()` tag, on `User.ID`, went on 2026-09-23
+(`262f5da`); the default lives in `000001` and `User.BeforeCreate` is the Go side.
+The same commit made a nil UUID serialise as SQL `NULL`: its string would satisfy
+`NOT NULL` and read back as a real-looking id.
 
 **Consequences.** Nothing in the struct now reads like a guarantee it does not
 make. The guarantee is re-established from the other direction:
@@ -845,7 +953,8 @@ Go structs**, so a new scalar field fails CI until the migration pins it `NOT
 NULL`. That is stronger than a tag, because it cannot drift silently.
 
 **Where.** `internal/db/users.go` (the comment above `User`),
-`internal/db/gorm_test.go`.
+`internal/db/gorm_test.go`, `internal/db/uuid_sql_test.go`
+`TestModelsCarryNoDefaultTags`.
 
 ---
 
@@ -963,13 +1072,21 @@ the healthcheck runs against `127.0.0.1` with no `Host` of its own.
 once in `http {}`. nginx cannot share a map across the two contexts, so this is a
 deliberate duplicate rather than an oversight - if you change one, change both.
 
+**Decision D** (2026-09-23, `a30556e`). Both upstreams resolve `backend` at run
+time through Docker's DNS (`resolver 127.0.0.11 valid=10s`, `server backend:6969
+resolve` in a `zone`d upstream). nginx otherwise looks the name up once at start,
+and a recreated backend with a new address strands the proxy on a dead IP until
+someone restarts it too.
+
 **Where.** `internal/config/nginx.conf`, `internal/httpapi/httpapi.go`.
 
 ---
 
 ## 37. A rules panic on the turn timer ends one table, not the process
 
-*2026-09-20, `7cf2423` "a rules panic on the turn timer ends one table, not the process".*
+*2026-09-20, `7cf2423` "a rules panic on the turn timer ends one table, not the process".
+Extended to the player path, and no longer asking the rules for standings,
+2026-09-23, `881a668`.*
 
 **Context.** `onTurnTimeout` runs on a goroutine `time.AfterFunc` started, and
 nothing above it recovers. A panic in any rules hook reached from there -
@@ -977,12 +1094,23 @@ nothing above it recovers. A panic in any rules hook reached from there -
 would take the whole process down: every table in memory, for one game package's
 defect.
 
-**Decision.** `Engine.recoverRulesPanic` is a direct `defer` on that goroutine. It
-logs the panic with `debug.Stack()`, re-takes `e.mu`, and if the game is still
-`Playing` on a live engine calls `finishGameLocked(nil, EndReasonRulesError)`.
+**Decision.** `Engine.recoverRulesPanic` is a direct `defer` on that goroutine and
+re-takes `e.mu`; `SubmitAction` has its own direct deferred `recover`, which runs
+before the unlock. Both call `endOnRulesPanicLocked`, which logs the panic with
+`debug.Stack()` and, on a live engine, calls `finishAfterPanicLocked`:
+`Phase = Finished`, the clock stopped, `EventGameEnded{Reason:
+EndReasonRulesError}`. It does **not** call `Rules.Standings` - the state a hook
+panicked on cannot be trusted to rank a winner, and a second panic from
+`Standings` inside the timer's recover would take the process down after all - and
+it does not check for `Playing`, because a panic inside `finishGameLocked`'s own
+`Standings` call has already set `Finished` without announcing it.
+`StandingsWithPlaces` recovers as well and returns `nil, nil`, so finalize has
+nothing to write. On the player path the panic comes back to the view as an error
+rather than unwinding into the session, whose recover would have left the table
+running on half-applied state.
 
-**Consequences.** An auto-play panic now gets exactly the treatment a rules error
-from `SubmitAction` gets: the table ends, the match is recorded **unrated**
+**Consequences.** A rules panic now gets the treatment a rules error gets: the
+table ends, the match is recorded **unrated**
 (§[11](#11-three-end-states-are-recorded-without-elo)), and every other table
 keeps playing. Re-taking the lock in the recover is safe because the locked
 helpers release `e.mu` in their own defers as the panic unwinds. This is a
@@ -993,6 +1121,329 @@ them from doing so. `bestSplitBy`'s over-long-hand guard in
 than panicking; its comment predates this recover and now understates the
 blast-radius reduction, but the guard itself is still the right behaviour.
 
-**Where.** `internal/game/turnclock.go` `onTurnTimeout` / `recoverRulesPanic`.
-Test: `internal/game/engine_timeout_test.go`
-`TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable`.
+**Where.** `internal/game/turnclock.go` `onTurnTimeout` / `recoverRulesPanic` /
+`endOnRulesPanicLocked` / `finishAfterPanicLocked`, `internal/game/engine.go`
+`SubmitAction` / `StandingsWithPlaces`. Tests:
+`internal/game/engine_timeout_test.go`
+`TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable`,
+`internal/game/engine_panic_test.go`.
+
+---
+
+## 38. The turn clock keeps a seat's deadline while its turn carries on
+
+*2026-09-23, `ef09991` "keep a seat's deadline while its turn carries on (D-6)".*
+
+**Context.** `applyNextTurnLocked` re-armed a full 30 seconds on every cursor
+settle, even when the same seat kept the turn. Gin rummy's draw and discard are two
+actions of one turn, so an absent player got two expiries - and two misses - per
+turn and lost the seat after one and a half turns instead of three. The reverse
+also held: a leave elsewhere at the table, an Uno heads-up skip or reverse, or a
+hearts trick winner leading again handed the seat on turn a fresh 30 seconds.
+
+**Decision.** `armTurnTimerLocked` remembers the seat and turn length it last armed
+for. The same seat with the same length is the same turn carrying on and keeps its
+running deadline, floored at `minTurnRemaining` (10 seconds, or the whole timeout if
+that is shorter), so it never lands on a clock already at zero. A different seat or
+a different length (a `TurnDurationHandler` stretch) is a fresh turn at full
+length. A miss is charged once per seat-turn: `turnMissCharged` is set by
+`resolveTurnTimeout` and cleared only on a fresh turn. An auto-play the rules refuse
+re-arms on the same lock hold as a chargeable turn with the floor
+(`submitTimedOutAction`), so a rules set that always refuses still loses the seat.
+
+**Consequences.** An absent gin player loses the seat after three turns, as the
+rule says. A seat that keeps the turn keeps its clock too, down to the floor -
+including after its own accepted move, which is the case the floor exists for. The
+decision is keyed on seat id and length rather than on who acted, so the engine
+does not need to know why the cursor settled where it did.
+
+**Where.** `internal/game/turnclock.go` `armTurnTimerLocked`,
+`resolveTurnTimeout`, `minTurnRemaining`; `internal/game/engine.go`
+`submitTimedOutAction`. Tests: `internal/game/engine_clock_test.go`.
+
+---
+
+## 39. An interrupted match charges only its leavers
+
+*2026-09-23, `141f979` (the game side, review decision D-1) and `605f580` (the
+finalize).*
+
+**Context.** Hearts is four-handed or nothing, so one seat leaving ends the match
+for everyone. That was reported as a win and rated in full: the leader at that
+moment banked the lead, so a friend quitting on cue was a way to lock in a win, and
+a player losing badly paid only the ordinary loss for walking out.
+
+**Decision.** A new `game.EndReasonInterrupted`. Hearts' `OnPlayerLeave` sets
+`State.Interrupted`, and `removePlayerLocked` reports that reason instead of
+`EndReasonWin` when the removal ends the game with it set; the engine knows nothing
+about ratings. The lobby routes a ranked interrupted match to
+`FinalizeInterruptedMatch` with the engine's `LeftPlayers` as leavers. Elo is
+computed over the whole table, leavers ranked last as always, but only the
+leavers' rows are written, and only downwards (`min(new, old)`). Seated players
+keep their rating and their `matches_played`; a seated player without a ranking row
+is not seeded one. The leavers' `matches_played` goes up by one.
+
+**Consequences.** Quitting a match you are losing still costs you, and nobody at
+the table is paid by it. The match is stored `ranked = true`, so it counts towards
+the per-pair cap ([#10](#10-the-anti-farm-cap-counts-pairs-across-every-game)), and
+a shutdown still overrides it to casual like any ranked match. It is the fourth
+partial end state ([#11](#11-three-end-states-are-recorded-without-elo)), labelled
+`interrupted` on the metric. Only hearts sets `Interrupted` today; a new game whose
+table cannot continue short-handed opts in the same way.
+
+**Where.** `internal/game/state.go` `Interrupted`, `internal/game/engine.go`
+`removePlayerLocked`, `internal/game/hearts/rules.go` `OnPlayerLeave`,
+`internal/lobby/finalize.go` `recordFinishedMatch` / `leaverIDs`,
+`internal/repository/match.go` `FinalizeInterruptedMatch` / `writeRanking`. Tests:
+`internal/game/hearts/rules_test.go` `TestRules_LeaveEndsTheMatchAsInterrupted`,
+`internal/repository/finalize_policy_test.go`
+`TestFinalizeInterruptedMatchChargesOnlyTheLeaver`,
+`internal/lobby/finalize_test.go` `TestFinalize_InterruptedMatchNamesItsLeavers`.
+
+---
+
+## 40. Fold-out dead money goes to the winner
+
+*2026-09-23, `114c195` "pay fold-out dead money to the winner, as showdown does"
+(review decision D-2).*
+
+**Context.** When everyone but one player folds or leaves, `awardUncontested` pays
+the pot. It used to refund each folder their excess over the winner's
+contribution. After the top bettor left, a player who had called and then folded
+took chips back that the showdown path - where `buildSidePots` rides folders' dead
+money with the last live layer - would have paid out. The same hand paid
+differently depending on whether it reached a showdown.
+
+**Decision.** `awardUncontested` splits the pot the way the showdown does:
+`refundUncalled` hands back the one slice nobody matched - the top contributor's
+excess over the second-highest contribution - and everything else, dead money from
+folders included, goes to the winner.
+
+**Consequences.** One rule for dead money on both paths, and nobody wins chips
+nobody matched. A folder never gets a partial refund.
+
+**Where.** `internal/game/poker/streets.go` `awardUncontested`, `refundUncalled`.
+Test: `internal/game/poker/streets_test.go`
+`TestAwardUncontested_DeadMoneyGoesToTheWinner`.
+
+---
+
+## 41. Short all-ins that add up to a full raise reopen the betting
+
+*2026-09-23, `2d00ec8` "reopen betting when short all-ins add up to a full raise"
+(review decision D-3).*
+
+**Context.** A sub-minimum all-in raises the amount owed without reopening the
+betting for players who already acted. The code treated each short all-in on its
+own, so A bets 100, B shoves 150, C shoves 220: A faced 120 more, a full raise, and
+could still only call or fold.
+
+**Decision.** The TDA rule. `State.LastBetLevel[p]` is the `CurrentBet` when `p`
+last acted. `checkBettingReopened` lets a player who already acted raise again once
+`CurrentBet - LastBetLevel[p] >= MinRaise`. A single full raise still clears
+`ActedThisRound` outright (`applyBetIncrease`).
+
+**Consequences.** The table follows the rule players expect from a casino. The
+raise prompt reads the band from `RaiseBounds`, which runs the same check, so it
+can only offer amounts the rules take.
+
+**Where.** `internal/game/poker/betting.go` `checkBettingReopened`,
+`applyBetIncrease`, `RaiseBounds`; `internal/game/poker/state.go` `LastBetLevel`.
+Test: `internal/game/poker/betting_test.go`
+`TestValidateAction_ShortAllInsThatAddUpToAFullRaiseReopen`.
+
+---
+
+## 42. Usernames are unique case-insensitively
+
+*2026-09-23, `4cd68d0` "usernames are unique case-insensitively" (review decision
+D-4).*
+
+**Context.** `Alice` and `alice` read as the same player on a leaderboard, so
+letting both register is an impersonation surface.
+
+**Decision.** Migration `000006_username_ci` adds
+`CREATE UNIQUE INDEX idx_users_username_lower ON users (lower(username))`. The
+display case is kept; only the comparison folds. `RegisterUserWithKey` checks
+`lower(username) = lower(?)`, `Unscoped`, so a soft-deleted account's name is taken
+too. Existing rows that already collide are not guessed at: the migration refuses
+and names every clash, because which account keeps the name is an operator's
+decision.
+
+**Consequences.** A deployment with existing case collisions cannot migrate until
+someone renames one side. The refusal to a new player is the ordinary "taken"
+([#17](#17-registration-has-its-own-limiter-and-its-own-refusal)), which says
+nothing about which spelling exists.
+
+**Where.** `internal/db/migrations/000006_username_ci.up.sql`,
+`internal/repository/user.go` `RegisterUserWithKey`. Tests:
+`internal/db/migrations_test.go` `TestMigration000006_RefusesExistingCaseCollisions`,
+`internal/repository/user_test.go` `TestUserRepository_RegisterUserWithKey`.
+
+---
+
+## 43. The edge network runs IPv6
+
+*2026-09-23, `a30556e` "harden the proxy, the compose stack and what reaches Loki"
+(review decision D-7).*
+
+**Context.** Compose's default network is IPv4-only. An IPv6 client reaching port 22
+or 80 was accepted by Docker's userland proxy and re-originated from the bridge
+gateway, so nginx saw one address for every IPv6 player: one `limit_conn` bucket,
+one rate-limit key, for all of them.
+
+**Decision.** nginx and the backend sit on an explicit `edge` network with
+`enable_ipv6: true` and fixed private subnets, `172.29.69.0/24` and
+`fd6b:1e37:9a52:6969::/64`. nginx listens on both families (`listen [::]:22`,
+`listen [::]:80`).
+
+**Consequences.** IPv6 players are keyed on their own /64
+([#20](#20-every-network-limit-keys-on-the-ipv6-64)). The host's Docker needs IPv6
+enabled for user networks. The subnets are fixed because `PROXY_TRUSTED_CIDRS`
+names them ([#47](#47-proxy-and-x-forwarded-for-are-believed-only-from-the-proxys-networks));
+if they collide with the host's, change both together.
+
+**Where.** `compose.yaml` (`networks:` at the bottom, and the backend's
+`PROXY_TRUSTED_CIDRS`), `internal/config/nginx.conf` (the `listen` lines).
+
+---
+
+## 44. Leaving a live game asks first
+
+*2026-09-23, `7a65dd3` "ask before forfeiting a live game on esc" (review decision
+D-8).*
+
+**Context.** Mid-game, one esc left the table, and leaving mid-game forfeits the
+seat - a ranked loss on a stray key. esc is also the key that cancels the pickers
+and the raise entry, so it is exactly the key a player presses by reflex.
+
+**Decision.** While the game is `Playing`, esc only arms a prompt, "Leave and
+forfeit this game?". `y` leaves; any other key disarms it and is swallowed rather
+than also playing a card. Once the game is over, esc and enter leave at once. A
+view calls `gameview.Session.HandleLeaveKey` before its own bindings, after closing
+any prompt of its own on esc, and returns `LeaveConfirmScreen` from `View` before
+anything else.
+
+**Consequences.** One extra key to leave on purpose. The prompt takes the whole
+screen rather than a row of the table, because every table already spends its full
+height and the between-hands screens have no hero band, so no layout budget
+changed.
+
+**Where.** `internal/tui/views/game/session.go` `HandleLeaveKey`,
+`LeaveConfirmScreen`. Test: `internal/tui/views/game/session_test.go`
+`TestSession_HandleLeaveKey`.
+
+---
+
+## 45. The session tracker lock comes before the manager's
+
+*2026-09-23, `01f1257` "serialize session teardown with a reconnect's resume".*
+
+**Context.** Teardown used to give up the lobby seat and then free the tracker slot
+as two steps. In between, a reconnect could take the slot and resume the seat, and
+the old session's `DisconnectPlayer` then armed a grace timer on the seat the
+replacement was playing. On the other side, resuming inside `tui.Model` meant a
+session refused with `ErrServerFull` still cancelled the grace timer holding the
+player's seat.
+
+**Decision.** `SessionTracker.ReleaseWith(userID, gen, fn)` runs `fn` - the
+`DisconnectPlayer` call - under the tracker lock, for the owning generation only.
+The seat resume moved out of `tui.Model` into `tui.ResumeSeat`, which the ssh layer
+calls only after `Connect` has handed it the slot. The lock order is therefore
+`SessionTracker.mu` -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu`.
+
+**Consequences.** Teardown and a reconnect's resume cannot interleave, and a
+refused session never touches the grace timer. The cost is that `Count` and
+`Connect` wait behind a teardown's `DisconnectPlayer`, which takes the manager lock
+and is in-memory work only. Nothing below the tracker may call back into it; that
+holds structurally, since `internal/lobby` does not import `internal/ssh`.
+
+**Where.** `internal/ssh/tracker.go` `ReleaseWith`, `internal/ssh/server.go`
+`releaseSession` / `sessionModel`, `internal/tui/app.go` `ResumeSeat`. Tests:
+`internal/ssh/lifecycle_test.go` `TestSessionTracker_ReleaseWithHoldsOffTheReconnect`,
+`internal/ssh/teardown_race_test.go`.
+
+---
+
+## 46. An unknown `ENV` fails the boot, and production refuses a plaintext-capable `sslmode`
+
+*2026-09-23, `5b1c810` "refuse an unknown ENV and a plaintext-capable production
+sslmode".*
+
+**Context.** `resolveEnv` fell back to `development` for any value it did not
+recognise, so a typo like `ENV=prod` started a production server with every
+production check off - and loaded `.env`. The production database check refused
+only `DB_SSLMODE=disable`, but `prefer` and `allow` quietly fall back to plaintext
+whenever the server declines TLS.
+
+**Decision.** `ENV` must be `production`, `staging` or `development`; anything else
+is an error from `config.Load`. In production `DB_SSLMODE` defaults to `require` and
+must be `require`, `verify-ca` or `verify-full`, unless the host is internal (`db`,
+`localhost`, `127.0.0.1`) or `ALLOW_INSECURE_DB=true`. `DB_PASSWORD` stays required.
+
+**Consequences.** A misconfigured deploy fails loudly at boot instead of running
+with the wrong posture. Compose's `DB_SSLMODE=disable` for its internal `db` host
+is still allowed, because that traffic never leaves the compose network.
+
+**Where.** `internal/config/config.go` `resolveEnv`, `validateProductionDB`. Tests:
+`internal/config/config_test.go` `TestResolveEnv_UnknownIsAnError`,
+`TestValidate_ProductionNeedsAnSSLModeThatRequiresTLS`.
+
+---
+
+## 47. PROXY and `X-Forwarded-For` are believed only from the proxy's networks
+
+*2026-09-23, `e058732` "honor a PROXY header only from PROXY_TRUSTED_CIDRS" and
+`858d199` "believe X-Forwarded-For only from the proxy's networks".*
+
+**Context.** Not publishing `:6969` and `:6970`
+([#19](#19-the-backend-speaks-proxy-protocol-and-6969-is-never-published)) keeps
+the outside world from forging a PROXY header or `X-Forwarded-For`, but any
+container on the backend's networks could still reach both ports and forge either,
+walking past every per-network limit.
+
+**Decision.** `PROXY_TRUSTED_CIDRS` is a comma-separated CIDR list; one bad entry
+fails the whole list rather than silently trusting fewer peers. When it is set, the
+ssh listener's `proxyproto` policy refuses a connection from outside it before its
+header is read (`proxyListener`), and the stats API believes `X-Forwarded-For` only
+from a peer inside it (`Deps.TrustedProxyNetworks`), keying anyone else on its
+socket address. Compose sets it to the `edge` subnets, where only nginx and the
+backend sit. Empty keeps the old behaviour, trusting any peer.
+
+**Consequences.** The trust boundary is a network, not "whoever can reach the
+port". The subnets are pinned in `compose.yaml`, so the list and the network have to
+change together; a config test parses exactly the list compose sets. Local development with
+`PROXY_PROTOCOL=false` is unaffected.
+
+**Where.** `internal/config/config.go` `parsePrefixes`, `cmd/server/main.go`
+`proxyListener`, `internal/httpapi/httpapi.go` `clientIPFunc` / `fromProxy`,
+`compose.yaml`. Tests: `cmd/server/proxy_test.go`,
+`internal/httpapi/httpapi_test.go`
+`TestTrustedProxy_HeaderFromOutsideTheProxyNetworksIsIgnored`,
+`internal/config/config_test.go` `TestLoad_ProxyTrustedCIDRs`.
+
+---
+
+## 48. Migration 000005's down is lossy
+
+*2026-09-23, `e8a69e9` "seed data before the migration down pass; mark 000005 down
+lossy".*
+
+**Context.** `000005_game_slug` made the slug a game's persisted identity
+([#7](#7-a-games-identity-in-the-database-is-its-slug)). Its down drops
+`games.slug`, and running up again re-derives the slug from the display name.
+`SetupTestDB` ran the down pass on an empty schema, so every `UPDATE` in a down file
+matched nothing, and a statement that broke on real data passed CI.
+
+**Decision.** Keep the down, and say it is lossy in its first line. A game renamed
+since `000005` comes back under a slug derived from its new name, so its ratings no
+longer hang off the catalog's slug; a duplicate display name comes back suffixed
+with its id. `testutil.SetupTestDB` now seeds rows before the down pass
+(`seedRoundTripData`, including a renamed game whose new name another game has), so
+the down files are exercised against data.
+
+**Consequences.** Rolling back past `000005` needs a backup, and the file says so.
+Every future down migration is tested against rows, not an empty schema.
+
+**Where.** `internal/db/migrations/000005_game_slug.down.sql`,
+`internal/testutil/db.go` `seedRoundTripData`.
