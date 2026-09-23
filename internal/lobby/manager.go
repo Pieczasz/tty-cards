@@ -562,13 +562,12 @@ func (m *Manager) RemoveLobby(code string) {
 	m.invalidatePublicCache()
 
 	l.mu.Lock()
-	leaderID := ""
+	seats := make([]string, 0, 1+len(l.guests))
 	if l.leader != nil {
-		leaderID = l.leader.ID
+		seats = append(seats, l.leader.ID)
 	}
-	guestIDs := make([]string, len(l.guests))
-	for i, g := range l.guests {
-		guestIDs[i] = g.ID
+	for _, g := range l.guests {
+		seats = append(seats, g.ID)
 	}
 	engine := l.activeEngine
 	l.activeEngine = nil
@@ -576,11 +575,12 @@ func (m *Manager) RemoveLobby(code string) {
 	l.broadcaster = nil
 	l.mu.Unlock()
 
-	if leaderID != "" {
-		delete(m.playerLobby, leaderID)
-	}
-	for _, id := range guestIDs {
-		delete(m.playerLobby, id)
+	// Only entries still pointing here: LeaveLobby unmaps and drops m.mu before it
+	// calls this, so the player may already be seated at a newer table.
+	for _, id := range seats {
+		if m.playerLobby[id] == l {
+			delete(m.playerLobby, id)
+		}
 	}
 	m.mu.Unlock()
 
