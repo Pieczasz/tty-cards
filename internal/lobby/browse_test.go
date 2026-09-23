@@ -219,3 +219,31 @@ func TestBrowse_NilManagerIsSafe(t *testing.T) {
 	assert.Nil(t, m.BrowseLobbies(mockPlayer("p", testutil.UID(1)), BrowseFilter{}))
 	assert.Nil(t, m.GameNames())
 }
+
+// The cache holds lobby pointers, and a miss that scanned just before a table went
+// private or started stores it anyway - the invalidation it raced was already spent.
+// Each entry is re-checked under its own lock, so the cache can only be late about a
+// new table, never wrong about a closed one.
+func TestBrowseLobbies_RechecksACachedTable(t *testing.T) {
+	t.Parallel()
+
+	flips := map[string]func(l *Lobby){
+		"went private": func(l *Lobby) { l.options.isPrivate = true },
+		"started":      func(l *Lobby) { l.state = InGame },
+	}
+	for name, flip := range flips {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, nil)
+			l := openTable(t, m, "p1", testutil.UID(1), "Poker", 0)
+			require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1, "the table is cached as public")
+
+			// Behind the cache's back, the way a concurrent miss leaves it.
+			l.mu.Lock()
+			flip(l)
+			l.mu.Unlock()
+
+			assert.Empty(t, m.BrowseLobbies(nil, BrowseFilter{}), "a cached table was offered after it %s", name)
+		})
+	}
+}

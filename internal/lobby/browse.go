@@ -69,8 +69,8 @@ func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 
 	entries := make([]BrowseEntry, 0, min(len(lobbies), f.limit()))
 	for _, l := range lobbies {
-		entry := l.browseEntry()
-		if !f.matches(entry) {
+		entry, open := l.browseEntry()
+		if !open || !f.matches(entry) {
 			continue
 		}
 		delta := int(entry.AvgElo) - int(ratingFor(ratings, entry.GameName))
@@ -105,22 +105,24 @@ func ratingFor(ratings map[string]uint32, gameName string) uint32 {
 	return elo.ToUint32(elo.DefaultRating)
 }
 
-func (l *Lobby) browseEntry() BrowseEntry {
+// browseEntry is false for a table no longer on offer. The cache holds pointers, and
+// a miss that scanned just before a table went private or started stores it anyway,
+// so the list is only as right as this re-check under the lobby's own lock.
+func (l *Lobby) browseEntry() (BrowseEntry, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	gameName := ""
-	if l.options.cardGame != "" {
-		gameName = l.options.cardGame
+	if l.options.isPrivate || l.state != Waiting {
+		return BrowseEntry{}, false
 	}
 	return BrowseEntry{
 		Code:       l.code,
-		GameName:   gameName,
+		GameName:   l.options.cardGame,
 		Players:    1 + len(l.guests),
 		MaxPlayers: l.options.maxPlayers,
 		Ranked:     l.options.isRanked,
-		AvgElo:     l.averageEloLocked(gameName),
-	}
+		AvgElo:     l.averageEloLocked(l.options.cardGame),
+	}, true
 }
 
 func (m *Manager) GameNames() []string {

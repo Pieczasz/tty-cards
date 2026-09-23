@@ -614,8 +614,9 @@ func (m *Manager) invalidatePublicCache() {
 
 // getCachedPublicLobbies serves the cache under a read lock and, on a miss, copies
 // the lobby set and releases m.mu before touching any l.mu - the same shape as
-// Stats. Two simultaneous misses both rescan and the later write wins, which costs
-// one extra scan and cannot produce a wrong list.
+// Stats. Two simultaneous misses both rescan and the later write wins, so the stored
+// list can hold a table that has since gone private or started; browseEntry
+// re-checks each one, which is what keeps that out of the browse.
 func (m *Manager) getCachedPublicLobbies() []*Lobby {
 	m.mu.RLock()
 	if !m.cacheDirty.Load() && time.Since(m.cacheLastUpdated) < publicLobbyCacheTTL {
