@@ -13,6 +13,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/terminal-card/internal/elo"
 	"github.com/Pieczasz/terminal-card/internal/game"
 
 	"uuid"
@@ -891,4 +892,13 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	}
 	repo.AssertExpectations(t)
 	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestRating_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
+	t.Parallel()
+	start := elo.ToUint32(elo.DefaultRating)
+	assert.Equal(t, start, Rating(nil, "Poker"))
+	assert.Equal(t, start, Rating(&game.Player{}, "Poker"))
+	assert.Equal(t, start, Rating(&game.Player{Ratings: map[string]uint32{"Poker": 0}}, "Poker"))
+	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"Poker": 1720}}, "Poker"))
 }

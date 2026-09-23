@@ -91,6 +91,26 @@ func (e *Engine) Broadcaster() *broadcaster.Broadcaster[Event] {
 	return e.broadcaster
 }
 
+// Subscribe joins the table's event feed without handing out the broadcaster, which
+// would let the caller Broadcast or Close the feed for every seat.
+func (e *Engine) Subscribe() (<-chan Event, error) {
+	ch, err := e.broadcaster.Subscribe()
+	if err != nil {
+		return nil, fmt.Errorf("subscribe to game events: %w", err)
+	}
+	return ch, nil
+}
+
+// Unsubscribe leaves the feed Subscribe joined. Safe after Close.
+func (e *Engine) Unsubscribe(ch <-chan Event) {
+	e.broadcaster.Unsubscribe(ch)
+}
+
+// Dropped is how many events the latest-wins feed has discarded for slow readers.
+func (e *Engine) Dropped() int64 {
+	return e.broadcaster.Dropped()
+}
+
 // WithState runs fn with the engine lock held. fn must not call back into the engine:
 // every Engine method takes the same lock, so it would deadlock. A test seam: nothing
 // in production calls it, and views read through Frame.

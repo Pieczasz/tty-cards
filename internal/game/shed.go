@@ -128,3 +128,28 @@ func OpenDiscard(state *State, playable func(deck.Card) bool) (deck.Card, error)
 		return card, nil
 	}
 }
+
+// DrawInto deals up to n cards into p's hand, reshuffling the discard when the stock
+// runs dry, and reports whether any card came at all.
+func DrawInto(state *State, p *Player, n int) bool {
+	drew := false
+	for range n {
+		card, ok := DrawWithReshuffle(state)
+		if !ok {
+			break
+		}
+		p.Cards = append(p.Cards, card)
+		drew = true
+	}
+	return drew
+}
+
+// RecordDraw keeps the deadlock count: a draw that yielded nothing is a pass, any card
+// resets it.
+func (s *ShedState) RecordDraw(drew bool) {
+	if drew {
+		s.Passes = 0
+		return
+	}
+	s.Passes++
+}

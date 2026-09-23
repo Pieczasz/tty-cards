@@ -287,3 +287,23 @@ func TestLeaveShedGame(t *testing.T) {
 	assert.Equal(t, before, shedCardsInPlay(state))
 	assert.Empty(t, state.Players[1].Cards)
 }
+
+func TestDrawInto_DealsWhatTheStockHas(t *testing.T) {
+	t.Parallel()
+	p := &Player{ID: "p1"}
+	state := &State{Players: []*Player{p}, Deck: deck.New([]deck.Card{{Rank: deck.Ace}, {Rank: deck.Two}}), Discard: deck.New(nil)}
+
+	assert.True(t, DrawInto(state, p, 3), "two of three is still a draw")
+	assert.Len(t, p.Cards, 2)
+	assert.False(t, DrawInto(state, p, 1), "an empty stock and discard yield nothing")
+}
+
+func TestShedState_RecordDraw(t *testing.T) {
+	t.Parallel()
+	s := &ShedState{}
+	s.RecordDraw(false)
+	s.RecordDraw(false)
+	assert.Equal(t, 2, s.Passes)
+	s.RecordDraw(true)
+	assert.Equal(t, 0, s.Passes)
+}

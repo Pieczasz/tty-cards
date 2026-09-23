@@ -46,6 +46,46 @@ const (
 	EndReasonInterrupted
 )
 
+// String is the reason's stable label, the one metrics and logs carry.
+func (r EndReason) String() string {
+	switch r {
+	case EndReasonWin:
+		return "win"
+	case EndReasonRulesError:
+		return "rules_error"
+	case EndReasonForfeit:
+		return "forfeit"
+	case EndReasonAbandoned:
+		return "abandoned"
+	case EndReasonInterrupted:
+		return "interrupted"
+	case EndReasonUnknown:
+	}
+	return "unknown"
+}
+
+// String is the event's stable label for logs.
+func (t EventType) String() string {
+	switch t {
+	case EventTurnAdvanced:
+		return "turn_advanced"
+	case EventActionApplied:
+		return "action_applied"
+	case EventGameEnded:
+		return "game_ended"
+	case EventGameStarted:
+		return "game_started"
+	case EventTurnTimedOut:
+		return "turn_timed_out"
+	case EventPlayerIdle:
+		return "player_idle"
+	case EventPlayerLeft:
+		return "player_left"
+	case EventUnknown:
+	}
+	return "unknown"
+}
+
 type PlayerSnapshot struct {
 	ID       string
 	Username string

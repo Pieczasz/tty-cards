@@ -402,6 +402,15 @@ func (l *Lobby) IsLeader(p *game.Player) bool {
 	return l.leader.Equal(p)
 }
 
+// Rating is p's rating in gameName as the lobby matches on it: missing and zero both
+// read as the starting rating. Views show this, so a seat reads the same everywhere.
+func Rating(p *game.Player, gameName string) uint32 {
+	if p == nil {
+		return elo.ToUint32(elo.DefaultRating)
+	}
+	return ratingFor(p.Ratings, gameName)
+}
+
 // ratingFor is a player's rating in gameName. Missing and zero both mean unrated: no
 // stored rating can be zero (elo.MinRating is the floor), so a zero is a map that was
 // never filled in, and it is matched at the starting rating like any newcomer.
