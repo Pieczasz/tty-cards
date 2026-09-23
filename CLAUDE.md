@@ -19,7 +19,7 @@ make migrate-create # prompts for name, writes internal/db/migrations/
 make migrate-up # needs $DB_DSN exported
 ```
 
-Local multi-client testing: `./scripts/dev-session.sh` opens three tmux-attached SSH clients against a running server (`TC_PORT=6969` bypasses the nginx proxy; the server then needs `PROXY_PROTOCOL=false`, since a bare ssh client sends no PROXY header).
+Local multi-client testing: `./scripts/dev-session.sh` opens three tmux-attached SSH clients against a running server (`TC_PORT=6969` bypasses the nginx proxy; the server then needs `PROXY_PROTOCOL=false`, since a bare ssh client sends no PROXY header). `PROXY_TRUSTED_CIDRS`, when set, is the only set of networks whose PROXY header the ssh listener honors - every other peer is refused - and the stats API's `X-Forwarded-For` is believed only from the same networks; compose sets it to its `edge` subnets.
 
 ## Architecture
 
@@ -49,7 +49,7 @@ crypto/rand cannot fail on Go 1.24+, so the plumbed error was an unreachable bra
 ### Layer boundaries
 
 - `internal/db` - GORM models **and** the `UserRepository` / `MatchRepository` interfaces. It defines the contract.
-- `internal/repository` - the GORM implementations. Everything else depends on the `db` interfaces, never on this package (except `cmd/server`, which is the composition root, and `internal/ssh` for its error sentinels).
+- `internal/repository` - the GORM implementations. Everything else depends on the `db` interfaces, never on this package (except `cmd/server`, which is the composition root; `depguard` enforces it). The auth sentinels `internal/ssh` maps live in `internal/db/errors.go`.
 - `internal/game` - pure rules/engine, no db, no TUI, no routes. Seat identity is the scalars on `game.Player` (`UserID`, `Name`, `Ratings`), not a `*db.User`.
 - `internal/tui` - presentation only; reaches state through `router.GlobalContext`, which carries `*lobby.Manager` directly (the one-implementation `lobby.SessionAPI` interface is gone) and never a `MatchRepository`.
 
@@ -57,15 +57,15 @@ crypto/rand cannot fail on Go 1.24+, so the plumbed error was an unreachable bra
 
 `Engine` owns a single mutex covering its clock fields and the `State`, held for the whole of `Start`, `SubmitAction`, and `RemovePlayer`. `Rules` methods (and `WithState`/`Frame` callbacks) run with it held, so they must never call back into `Engine` (deadlock) and may mutate `*State` freely. The no-callback rule holds structurally today - `Rules` methods receive only `*State`, which carries no engine handle - so do not add one.
 
-Per-game state lives in `State.Extra` (`crazyeight.State`, `poker.State`, `uno.State`, `hearts.State`, `ginrummy.State`). The turn cursor is settled by `applyNextTurnLocked`: `State.OverrideNextTurn` wins, else advance, else honor `State.CurrentTurn` - that is how poker picks the next actor from `AfterAction`. `ApplyAction` runs then `AfterAction`; an error from either finishes the game (the state may be half-applied), so anything checkable up front belongs in `ValidateAction`. `EventGameEnded` carries an `EndReason` (win / rules error / forfeit / abandoned) so observers can tell them apart.
+Per-game state lives in `State.Extra` (`crazyeight.State`, `poker.State`, `uno.State`, `hearts.State`, `ginrummy.State`). The turn cursor is settled by `applyNextTurnLocked`: `State.OverrideNextTurn` wins, else advance, else honor `State.CurrentTurn` - that is how poker picks the next actor from `AfterAction`. `ApplyAction` runs then `AfterAction`; an error from either finishes the game (the state may be half-applied), so anything checkable up front belongs in `ValidateAction`. `EventGameEnded` carries an `EndReason` (win / rules error / forfeit / abandoned / interrupted) so observers can tell them apart. Interrupted is a match one seat's leave ended early for everyone: hearts' `OnPlayerLeave` sets `State.Interrupted`, and `removePlayerLocked` then reports it instead of a win; the engine knows nothing about what finalize does with it (only the leavers' losses are written). A rules panic, on the player path or the timer, ends the table through `finishAfterPanicLocked` as a rules error without asking the rules for standings.
 
 Mid-hand disconnects: implement the optional `game.PlayerLeaveHandler` (`OnPlayerLeave` before removal, `AfterPlayerRemoved` after seat indices shift).
 
 ### Turn clock
 
-`applyNextTurnLocked` also arms a per-turn timer (`DefaultTurnTimeout`, 30s). On expiry the engine plays the move from the optional `game.TurnTimeoutHandler` (`TimeoutAction`) and broadcasts `EventTurnTimedOut` on the same lock hold that charged the miss - outside it, a player whose action lands in the gap gets the miss refunded while the "timed out" they disproved still ships; after `MaxMissedTurns` (3) consecutive expiries it re-checks under the engine lock and only then broadcasts `EventPlayerIdle` and removes the seat. A player's own *accepted* action clears their count - a move the rules reject does not, or spamming garbage would dodge removal forever - so this only fires on someone who stopped playing.
+`applyNextTurnLocked` also arms a per-turn timer (`DefaultTurnTimeout`, 30s). The same seat with the same turn length is the same turn carrying on (gin's draw then discard, a re-armed auto-play, somebody else leaving): `armTurnTimerLocked` keeps its running deadline, floored at `minTurnRemaining` (10s), and a miss is charged once per seat-turn (`turnMissCharged`), not per expiry. On expiry the engine plays the move from the optional `game.TurnTimeoutHandler` (`TimeoutAction`) and broadcasts `EventTurnTimedOut` on the same lock hold that charged the miss - outside it, a player whose action lands in the gap gets the miss refunded while the "timed out" they disproved still ships; after `MaxMissedTurns` (3) consecutive missed turns it re-checks under the engine lock and only then broadcasts `EventPlayerIdle` and removes the seat. A player's own *accepted* action clears their count - a move the rules reject does not, or spamming garbage would dodge removal forever - so this only fires on someone who stopped playing.
 
-Rules opt in: no `TurnTimeoutHandler` means no clock. Poker checks when free, folds when not, and deals between hands (an absent dealer would otherwise freeze the table); crazy eights and uno draw; hearts passes its three lowest cards, plays its first legal card, and deals the next hand; gin rummy draws, sheds its priciest deadwood and deals. `TimeoutAction` must return something `ValidateAction` accepts, or the turn re-arms and the seat is taken on the next expiry instead - gin rummy's `autoDiscard` skips the card the upcard rule forbids for exactly this reason.
+Rules opt in: no `TurnTimeoutHandler` means no clock. Poker checks when free, calls when no opponent can cover more than it already has out, folds otherwise, and deals between hands (an absent dealer would otherwise freeze the table); crazy eights and uno draw; hearts passes its three most dangerous cards (Q♠, A♠, K♠, then the highest hearts), plays its first legal card, and deals the next hand; gin rummy draws, knocks when a discard leaves it gin, otherwise sheds its priciest deadwood, and deals. `TimeoutAction` must return something `ValidateAction` accepts, or the turn re-arms (on the same lock hold, as a fresh chargeable turn with the 10s floor) and each refused expiry still costs a miss - gin rummy's `autoDiscard` skips the card the upcard rule forbids for exactly this reason.
 
 `game.TurnDurationHandler` lets a rules set stretch a particular turn: hearts gives the pass phase 45s and the between-hands prompt a minute; poker and gin rummy stretch the between-hands deal the same way. Returning zero keeps the engine default; it cannot resurrect a clock `WithTurnTimeout` disabled.
 
@@ -73,19 +73,19 @@ Rules opt in: no `TurnTimeoutHandler` means no clock. Poker checks when free, fo
 
 The game view quits its bubbletea program on its own `EventPlayerIdle`, which is what ends the ssh session through the ordinary `releaseSession` path - the engine never reaches into the session layer.
 
-A dropped session calls `Manager.DisconnectPlayer`, not `LeaveLobby`: a mid-game seat survives for `DisconnectGrace` (90s, with the engine auto-playing and its idle removal as the backstop) so a reconnect - `Manager.ResumePlayer`, wired into the TUI's initial route - resumes the match instead of forfeiting it. A waiting-lobby seat and any seat during shutdown still leave immediately.
+A dropped session calls `Manager.DisconnectPlayer`, not `LeaveLobby`: a mid-game seat survives for `DisconnectGrace` (90s, with the engine auto-playing and its idle removal as the backstop) so a reconnect - `Manager.ResumePlayer`, reached through `tui.ResumeSeat`, which the ssh layer calls only once the session owns its tracker slot - resumes the match instead of forfeiting it. A waiting-lobby seat and any seat during shutdown still leave immediately.
 
 ### BoundEngine, not Engine, in views
 
-`game.Bind(engine, playerID)` gives a session-scoped handle that only submits as that player and only returns that player's hand. TUI views use `BoundEngine` / `Session.Sync` (one `Frame` lock hold: snapshot, own hand, clock and `Extra` cannot describe different moments); `Engine.WithState` and `SubmitAction` are for the server side.
+`game.Bind(engine, playerID)` gives a session-scoped handle that only submits as that player and only returns that player's hand. TUI views use `BoundEngine` / `Session.Sync` (one `Frame` lock hold: snapshot, own hand, clock and `Extra` cannot describe different moments); `Engine.WithState` and `SubmitAction` are for the server side. `Subscribe`/`Unsubscribe` join the feed without handing out the broadcaster.
 
-It is a façade, not a capability: `BoundEngine.Engine()` still reaches whole-table state, and poker uses it because rendering a table means rendering every seat. The value is that the default path is the safe one, so reaching past it is a visible detour and the redaction becomes the view's stated job (`buildSeats`).
+It is a façade, not a capability: `Frame`'s callback still hands the view the live, unredacted `*State`, and poker reads every seat from it because rendering a table means rendering every seat. There is no `Engine()` escape hatch any more. The value is that the default path is the safe one, so the redaction is the view's stated job (`buildSeats`).
 
 ### gameview.Session is the view baseline
 
-Every game view embeds `gameview.Session` (`internal/tui/views/game/session.go`). It owns the parts that are the same in all five games: binding to the engine, subscribing (`NewSession`), reading the feed and the whole `Update` loop (`HandleFrame`), losing a seat to the idle timer (`IdleRemoved`), the hand cursor (`MoveCursor` / `SelectDigit` / `SelectedCard`), leaving the table (`Leave`), and `Close` - which is what satisfies `router.Closer`. The shared layout frame (`gameview.RenderBands`, the compact breakpoints, the width-budgeted hand renderers) lives in `internal/tui/views/game`; a new game implements its own rules rendering and nothing else.
+Every game view embeds `gameview.Session` (`internal/tui/views/game/session.go`). It owns the parts that are the same in all five games: binding to the engine, subscribing (`NewSession`), reading the feed and the whole `Update` loop (`HandleFrame`), losing a seat to the idle timer (`IdleRemoved`), the turn-clock tick (`ClockTick`), the last rejected move (`ActionErr`, which `Submit` keeps and the hero band renders), the hand cursor (`MoveCursor` / `SelectDigit` / `SelectedCard`), the forfeit prompt (`HandleLeaveKey` / `LeaveConfirmScreen`: mid-game esc asks before leaving), the idle-quit exemption for a live table (`IdleExempt`), leaving the table (`Leave`), and `Close` - which is what satisfies `router.Closer`. The shared layout frame (`gameview.RenderBands`, the compact breakpoints, the width-budgeted hand renderers) lives in `internal/tui/views/game`; a new game implements its own rules rendering and nothing else.
 
-Read per-game state through the `extra` callback of `Session.Sync` (unredacted table state the view has to filter itself; `BoundEngine.Frame` is the standalone form) - and seat order, display names and stock size through `BaseState` (`Seats`, `SeatOrder()`, `SeatNames()`, `DeckSize`) rather than reaching back through `Engine().WithState` - `PlayerSnapshot.Username` already falls back to the player ID.
+Read per-game state through the `extra` callback of `Session.Sync` (unredacted table state the view has to filter itself; `BoundEngine.Frame` is the standalone form) - and seat order, display names and stock size through `BaseState` (`Seats`, `SeatOrder()`, `SeatNames()`, `DeckSize`) rather than re-deriving them from the live `*State` - `PlayerSnapshot.Username` already falls back to the player ID.
 
 Anything a view keeps after releasing the engine lock must be copied, not aliased (`maps.Clone`, `HandResult.Clone`).
 
@@ -93,13 +93,13 @@ Anything a view keeps after releasing the engine lock must be copied, not aliase
 
 `broadcaster.Broadcaster[T]` is latest-wins (drops the oldest on a full buffer) and `Subscribe` returns `ErrAtCapacity` / `ErrClosed` rather than a pre-closed channel, so a caller cannot mistake "you will never receive anything" for "the stream ended". Engines size it `len(players)+8` for the ranked-finalize watcher and reconnect overlap. Views surface a failure in their own error line; the lobby logs it loudly because it means a match result will not be persisted.
 
-Any view holding a subscription must implement `router.Closer`. The router closes the active view on navigation; `ssh.releaseSession` closes the whole model on disconnect. Skipping `Close()` parks a listener goroutine and burns a subscriber slot until the engine closes.
+Any view holding a subscription must implement `router.Closer`. The router closes the active view on navigation; `ssh.closeSessionModel` closes the whole model on disconnect. Skipping `Close()` parks a listener goroutine and burns a subscriber slot until the engine closes.
 
-Lock order when both are involved is manager (`m.mu`) then lobby (`l.mu`) - see `Manager.Kick` / `RemoveLobby`.
+Lock order is `SessionTracker.mu` -> manager (`m.mu`) -> lobby (`l.mu`) -> engine (`Engine.mu`) - see `Manager.Kick` / `RemoveLobby`. The tracker comes first because `ReleaseWith` runs `DisconnectPlayer` under it, so a session's teardown and a reconnect's resume cannot interleave.
 
 ### SSH server
 
-Middleware in `wish.WithMiddleware` runs **last-first**, so `sessionLifecycle` is listed last to be outermost. charm.land/ssh (v0.4.3) recovers on every goroutine it spawns, so `recoverSession` is a second layer - a metric and a clean lobby leave - and it must stay a **direct** `defer` (a `recover()` inside a function called *by* a deferred function returns nil). It is not what the player sees, though: nothing panics *out of* bubbletea, so `reportingModel` wraps Init/Update/View and `notifySessionPanic` writes `panicNotice` to `s.Stderr()`. Per-session state (user, model, span) lives in a session-keyed map, never on `s.Context()` - that context is per-**connection** and shared by every channel, and channels are capped per connection. Auth accepts any public key; identity is the SHA256 fingerprint, first connection registers the username. `SessionTracker.Connect` displaces an existing session for the account **and closes its conn**, outside the tracker lock. Two limiters, both keyed by `ratelimit.NetKey` (IPv6 /64): the auth one counts *attempts* (an ssh-agent offers each key it holds), and `registrationLimit`/`registrationWindow` (5/hour) gates only the `user == nil` branch of `LoadOrRegisterUser`. `NetKey` is total; `netKeyFor` is what fails closed on an unkeyable address. `mapRegisterError` folds taken and invalid into one `ErrNameUnavailable` - a distinguishable message is an account-existence oracle. Connect/disconnect log `client_net` (the /64), not `remote_addr`; the session span carries no client address at all.
+Middleware in `wish.WithMiddleware` runs **last-first**, so `sessionLifecycle` is listed last to be outermost. charm.land/ssh (v0.4.3) recovers on every goroutine it spawns, so `recoverSession` is a second layer - a metric and a clean lobby leave - and it must stay a **direct** `defer` (a `recover()` inside a function called *by* a deferred function returns nil). It is not what the player sees, though: nothing panics *out of* bubbletea, so `reportingModel` wraps Init/Update/View and `notifySessionPanic` writes `panicNotice` to `s.Stderr()`. Per-session state (user, model, span) lives in a `sessionRegistry` that `SetupServer` makes per server, never on `s.Context()` - that context is per-**connection** and shared by every channel. Session channels are capped per connection (`maxSessionsPerConnection`, 2) in the `session` `ChannelHandler`, which rejects the extra one with `ResourceShortage` before `Accept`; `env` requests are capped at 32 / 8 KiB per channel. Auth accepts any public key; identity is the SHA256 fingerprint, first connection registers the username. `SessionTracker.Connect` displaces an existing session for the account **and closes its conn**, outside the tracker lock. Two limiters, both keyed by `ratelimit.NetKey` (IPv6 /64): the auth one counts *attempts* (an ssh-agent offers each key it holds), and `REGISTRATION_LIMIT`/`REGISTRATION_WINDOW` (default 5 per 1h) gates only the `user == nil` branch of `LoadOrRegisterUser`, after `db.ValidateUsername` - a typo does not spend the budget, and the player is told why the name is invalid. `NetKey` is total; `netKeyFor` is what fails closed on an unkeyable address. `mapRegisterError` folds only taken into `ErrNameUnavailable` - a distinguishable "taken" is an account-existence oracle; an invalid name is a fixed rule, not a fact about other accounts. Usernames are unique case-insensitively (`idx_users_username_lower`, migration 000006). Connect/disconnect log `client_net` (the /64), not `remote_addr`; the session span carries no client address at all.
 
 ### Stats API
 
@@ -111,9 +111,12 @@ proxy's `/api/` location - never published to the host.
 It is deliberately narrow: no writes, no auth, no per-user data, nothing the TUI
 leaderboard does not already show any visitor. That is what makes it safe
 unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
-`lobby.Manager.Stats`, so `SetupServer` accepts an optional `Tracker` for sharing.
+`lobby.Manager.Stats`, so `SetupServer` requires the `Tracker` it shares with the stats API
+(`ErrNoTracker` without one).
 
-`API_TRUST_PROXY` makes the per-network limiter read `X-Forwarded-For`. It **defaults
+`API_TRUST_PROXY` makes the per-network limiter read `X-Forwarded-For`, and with
+`PROXY_TRUSTED_CIDRS` set only from a peer inside those networks (6970 is reachable from
+every container on the network, not just nginx). It **defaults
 to false** and compose opts in explicitly: a directly exposed listener that trusts the
 header can be evaded by forging it, so the unsafe direction has to be chosen. nginx
 sets it from `$remote_addr`, not `$proxy_add_x_forwarded_for`, so a client cannot
@@ -122,7 +125,7 @@ prepend its own value.
 Both limiters key on `ratelimit.NetKey`, which collapses IPv6 to its /64. Keying on the
 full address is meaningless there: one customer is routinely handed 2^64 of them.
 
-The backend listens on `:6969` behind nginx speaking PROXY protocol. Publishing that port lets clients spoof source IPs and defeat the per-IP rate limiter. Compose publishes 22 and 80 only, plus Grafana on `127.0.0.1:3000`. `otelhttp.WithServerName("stats-api")` keeps the client's `Host` header out of the metric labels.
+The backend listens on `:6969` behind nginx speaking PROXY protocol. Publishing that port lets clients spoof source IPs and defeat the per-IP rate limiter. Compose publishes 22 and 80 only, plus Grafana on `127.0.0.1:3000`. The stats API makes no spans (a noop tracer provider: every site visitor polls it), and `otelhttp.WithServerName("stats-api:80")` pins `server.address` and `server.port`, keeping the client's `Host` header out of the metric labels; `internal/httpapi/telemetry_test.go` asserts both.
 
 Retention is explicit and set in three places: Loki 14d (`internal/config/loki/loki.yaml`), Tempo 48h (`internal/config/tempo/tempo.yaml`), Prometheus 30d (`compose.yaml`). Per-field inventory in `docs/data-inventory.md`.
 
