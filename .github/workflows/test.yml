@@ -1,19 +1,28 @@
 name: Test
 
+# The site has its own workflow (web.yml); a site-only or docs-only change runs
+# nothing here. Markdown is safe to skip because nothing in the Go build embeds it
+# (the one go:embed is the SQL migrations).
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore: [ "web/**", "**.md" ]
   pull_request:
     branches: [ "main", "master" ]
+    paths-ignore: [ "web/**", "**.md" ]
+
+# Nothing here writes to the repository; a compromised step gets a read-only token.
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.27.1'
         cache: true
@@ -27,10 +36,10 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.27.1'
         cache: true
@@ -44,10 +53,10 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.27.1'
         cache: false
@@ -55,7 +64,7 @@ jobs:
     - name: golangci-lint
       # Prebuilt binaries lag the module's Go version (v2.12.x is go1.26 and
       # refuses go 1.27.x). goinstall builds with the setup-go toolchain.
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
       with:
         version: v2.13.2
         install-mode: goinstall
@@ -78,10 +87,10 @@ jobs:
   vulncheck:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.27.1'
 
@@ -100,12 +109,12 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-    - uses: docker/setup-buildx-action@v3
+    - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
     - name: Build the server image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
       with:
         context: .
         file: cmd/server/Dockerfile
@@ -119,7 +128,7 @@ jobs:
   compose:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     # Interpolation happens at parse time, so `docker compose config` is a real check
     # on every ${VAR} in the file - including the ones that must have no default.
