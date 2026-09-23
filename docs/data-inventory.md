@@ -40,8 +40,8 @@ Two things to say plainly in a notice:
 They go when the account is erased. Match history is kept, anonymised: other
 players at those tables still have a name to resolve.
 
-**Erasure: `db.UserRepository.DeleteAccount(ctx, userID)`**, implemented by
-`eraseUserLocked` in `internal/repository/user.go`, one transaction. Reached from the
+**Erasure: `db.Profiles.DeleteAccount(ctx, userID)`**, implemented by
+`eraseUser` in `internal/repository/user.go`, one transaction. Reached from the
 Profile screen with `x` and a typed `DELETE`; refused while the player is seated at a
 table, and the session ends afterwards.
 
@@ -105,7 +105,7 @@ Personal data in those logs today:
   signal.
 - **`player_id` = `users.id`**, at INFO and above, across `internal/lobby/disconnect.go`
   (disconnect, grace, resume), `internal/game/turnclock.go`, `internal/elo/elo.go`,
-  `internal/tui/views/game/session.go` and `internal/tui/views/lobby/lobby.go`, and as
+  `internal/tui/views/gameview/session.go` and `internal/tui/views/lobby/lobby.go`, and as
   map keys in the per-hand summaries in `internal/game/hearts/trick.go` and
   `internal/game/ginrummy/rules.go`.
 - **Lobby codes** in `internal/lobby/finalize.go`, `manager.go` and `watch.go` - a live

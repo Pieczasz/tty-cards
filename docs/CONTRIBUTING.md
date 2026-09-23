@@ -86,23 +86,37 @@ If one seat leaving means the match cannot go on (hearts is four-handed or
 nothing), set `State.Interrupted` in `OnPlayerLeave`: the removal that ends the
 game then reports `EndReasonInterrupted`, and finalize charges only the leavers
 ([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
-A shedding game should reuse `internal/game/shed.go` (`ValidateShedPlay`,
-`DrawWithReshuffle`, `ShedStandings`) rather than copy it.
+A shedding game should reuse package `internal/game/shed` (embed `shed.State`, and
+call `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
+`shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.
+Name who acts next with `State.SetTurn` / `State.OverrideTurn`, never by writing
+`CurrentTurn` and `OverrideNextTurn` by hand; refuse a foreign action with
+`game.ErrUnknownAction` and a move between hands with `game.ErrHandOver`, and gate
+the between-hands deal with `game.ValidateNextHand`. `internal/game` imports from an
+allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
+`internal/game/...`, `uuid`), so a rules package that needs anything else is a
+decision to discuss first
+([`decisions.md` #54](decisions.md#54-the-game-packages-import-from-an-allow-list)).
 
 Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 `PipValue` answer three different questions and must not be swapped, and
 `RemoveOne` / `RemoveEach` never alias.
 
-### 2. View - `internal/tui/views/game/<name>/`
+### 2. View - `internal/tui/views/gameview/<name>/`
 
-Expose `New(router.GlobalContext, *game.Engine) tea.Model`, embed
-`gameview.Session`, and implement your rules rendering and nothing else. Session
-already owns binding, subscribing, the `Update` loop (`HandleFrame`), the turn
-clock tick, the last rejected move (`ActionErr`), the hand cursor, the forfeit
-prompt, leaving, idle removal and the idle-quit exemption, and `Close`. Wire it the
-way `crazyeight` does:
-
-- `Init` returns `tea.Batch(m.Listen(), m.ClockTick())`.
+Expose `New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model`,
+keep the model itself unexported, embed `gameview.Session` (built with
+`gameview.NewSession(global, engine, slug)`), and implement your rules rendering and
+nothing else. The slug is the catalog's, and it is the `game_type` label your view's
+metrics carry, the same one the lobby's carry for this game. Session already owns
+binding, subscribing, `Init` (the feed listener and the turn-clock tick - do not
+write your own), the `Update` loop (`HandleFrame`), the last rejected move
+(`ActionErr`), the hand cursor, the forfeit prompt, leaving, idle removal and the
+idle-quit exemption, and `Close`. A suit or colour choice is `gameview.ChoicePicker`
+(crazy eights and uno share it); a between-hands result screen is
+`gameview.RenderHandOver(global, gameview.HandOver{...})` (hearts, gin rummy and
+poker share it). Draw opponents from `BaseState.Opponents`, which already runs
+clockwise from the hero's left. Wire it the way `crazyeight` does:
 - Your key handler closes any prompt of your own on esc first, then calls
   `m.HandleLeaveKey(key)` before its own bindings and returns if it consumed the
   key - mid-game esc must ask before it forfeits
@@ -123,14 +137,16 @@ and `internal/tui/app.go` both read it.
 
 ```go
 {
-    Name:  "My Game",
-    Slug:  "my_game",
-    Rules: func() game.Rules { return &mygamerules.Rules{} },
-    View:  mygameview.New,
+    Name:    "My Game",
+    Slug:    "my_game",
+    Factory: func() game.Rules { return &mygamerules.Rules{} },
+    View:    mygameview.New,
 },
 ```
 
-`catalog_test.go` fails on a missing field or a duplicate slug. **The slug is
+`catalog.Entry` embeds `game.Module` (`Name`, `Slug`, `Factory`) beside `View`.
+`catalog_test.go` fails on a missing field or a duplicate slug, and
+`game.NewRegistry` panics on either at boot. **The slug is
 persisted** (`games.slug`), so treat it as permanent: changing it later means a
 data migration, not a rename. The display `Name` is free to change.
 
@@ -138,14 +154,22 @@ data migration, not a rename. The display `Name` is free to change.
 
 - **Rules unit tests**, table-driven, covering every action the rules can reject.
 - **A timeout-action soak.** Four games have
-  `TestSoak_TimeoutActionIsAlwaysLegal` (rapid-driven; see
-  `internal/game/uno/rules_test.go`); poker has the deterministic equivalent,
+  `TestSoak_TimeoutActionIsAlwaysLegal` (rapid-driven; hearts and gin rummy write
+  their own, crazy eights and uno call `gametest.SoakTimeoutIsAlwaysLegal`); poker
+  has the deterministic equivalent,
   `TestRules_TimeoutAction_IsAcceptedByValidateAction`. Either shape is fine.
   Without one, the auto-play path is untested until it strands a real table.
-- **A fit test.** `TestView_FitsTheTerminal`-style, at 64x20, 80x24 and 120x50 -
-  `{styles.MinWidth, styles.MinHeight}`, `{80, 24}`, `{120, 50}`. Copy
-  `internal/tui/views/game/uno/view_test.go`.
-- **`goleak_test.go`** with `goleak.VerifyTestMain(m)` in both new packages. 22
+- **A shedding game runs the shared suite.** Describe it as a `gametest.Shed` and
+  call `gametest.RunShed(t, suite)`, as `internal/game/uno/helpers_test.go` does,
+  rather than copying the draw, reshuffle and deadlock tests. Other games have no
+  shared suite; `gametest` is optional for them.
+- **A fit test.** `TestView_FitsTheTerminal`-style, over `tuitest.FitSizes`
+  (`{styles.MinWidth, styles.MinHeight}`, `{80, 24}`, `{120, 50}`), driving keys
+  with `tuitest.Key`. Copy `internal/tui/views/gameview/uno/view_test.go`.
+- **Nothing per view for `Close`.** `TestAll_CloseReleasesTheEngineSubscription`
+  in `internal/catalog/close_test.go` checks every entry in `All` releases its
+  subscription (counted with `Engine.SubscriberCount`).
+- **`goleak_test.go`** with `goleak.VerifyTestMain(m)` in both new packages. 26
   packages have one; a view that subscribes and forgets to `Close` is exactly
   what it catches.
 
@@ -161,11 +185,11 @@ finalize time and upserts on the slug the first time it is missing.
 - **Fuzz targets** for anything that parses or searches untrusted or
   combinatorial input. Eight exist today: `FuzzBestMeldSplit`,
   `FuzzClassifyHand`, `FuzzEvaluateHand`, `FuzzJoinLobbyByCode`, `FuzzNetKey`,
-  `FuzzToUint32`, `FuzzPile_DrawNCards`, `FuzzValidateUsername`. They run over
+  `FuzzToUint32`, `FuzzPile_DrawN`, `FuzzValidateUsername`. They run over
   their seed corpus in the ordinary suite; commit any crasher the fuzzer finds as
   a `testdata/fuzz` seed.
 - **`go.uber.org/goleak`** `TestMain` in every package that starts a goroutine.
-- **Benchmarks** for render paths and hot evaluators - 21 exist; add one when you
+- **Benchmarks** for render paths and hot evaluators - 20 exist; add one when you
   touch a `View()` or the poker evaluator.
 - **Integration tests** behind `//go:build integration`. `testutil.SetupTestDB`
   applies the real migrations and skips when Docker is absent. Note that
