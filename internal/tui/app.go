@@ -81,7 +81,7 @@ func New(deps Deps) *router.Router {
 // ResumeSeat cancels the disconnect grace holding this session's seat, if any, and
 // starts the session there (the lobby view routes onward into a running game)
 // instead of at a home screen that pretends nothing is happening. It is separate
-// from Model because the ssh layer may only call it once the session owns its
+// from New because the ssh layer may only call it once the session owns its
 // tracker slot, and must run before the router's Init.
 func ResumeSeat(r *router.Router) {
 	if l := r.Global.LobbyManager.ResumePlayer(views.SessionPlayer(r.Global)); l != nil {
