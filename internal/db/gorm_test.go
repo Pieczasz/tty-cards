@@ -141,6 +141,8 @@ func TestSchemaHasHotPathIndexes(t *testing.T) {
 		"idx_matches_game_id",
 		"idx_rankings_game_id",
 		"idx_games_slug",
+		"idx_users_username_lower",
+		"idx_matches_ranked_created",
 	} {
 		var count int64
 		require.NoError(t, database.Raw(
