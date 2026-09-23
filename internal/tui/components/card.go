@@ -130,7 +130,7 @@ func faceLines(t styles.Theme, card deck.Card) []string {
 // row because a fan has to cut a card off mid-face, and slicing a styled string by
 // display column is a good way to cut an escape sequence in half.
 func faceCells(card deck.Card, suit string) [][]string {
-	rank := RankLabel(card.Rank)
+	rank := rankLabel(card.Rank)
 	rows := make([][]string, 0, FaceHeight)
 	rows = append(rows, rankRow(rank, false))
 	rows = append(rows, artRows(card.Rank, suit)...)
@@ -241,10 +241,10 @@ var rankLabels = map[deck.Rank]string{
 	deck.DrawTwo: "+2", deck.Wild: "W", deck.WildDrawFour: "+4",
 }
 
-// RankLabel is the rank as it is printed on a card, for callers drawing a card too
+// rankLabel is the rank as it is printed on a card, for callers drawing a card too
 // small to hold a face. It is the same table the faces use, so a mini card and the
 // card it stands for can never disagree about what rank they are.
-func RankLabel(rank deck.Rank) string {
+func rankLabel(rank deck.Rank) string {
 	return rankLabels[rank]
 }
 
@@ -258,7 +258,7 @@ const miniRankWidth = 2
 // and a trick a player cannot see all of is a trick they cannot play into.
 func RenderMiniCard(t styles.Theme, c deck.Card) string {
 	suit, style := miniSuit(t, c.Suit)
-	return style.Render(fmt.Sprintf("[%*s%s]", miniRankWidth, RankLabel(c.Rank), suit))
+	return style.Render(fmt.Sprintf("[%*s%s]", miniRankWidth, rankLabel(c.Rank), suit))
 }
 
 // MiniCardBack is a face-down card at mini size, the same footprint as RenderMiniCard.

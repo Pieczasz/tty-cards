@@ -147,7 +147,7 @@ func stripCell(t styles.Theme, card deck.Card, i int, selected map[int]struct{},
 		marker = ">"
 		style = t.PlayerItemSelected
 	}
-	return style.Render(fmt.Sprintf("%s%2s%s", marker, RankLabel(card.Rank), suit))
+	return style.Render(fmt.Sprintf("%s%2s%s", marker, rankLabel(card.Rank), suit))
 }
 
 // columnKey is everything a fan column depends on.

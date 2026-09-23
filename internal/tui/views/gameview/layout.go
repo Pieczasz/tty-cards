@@ -275,11 +275,11 @@ const preciseClockThreshold = 6 * time.Second
 // a second per client is not something to run for a whole turn over ssh.
 const tenthTickInterval = 100 * time.Millisecond
 
-// FormatTurnClock renders the turn countdown, or empty when no clock is running. precise
+// formatTurnClock renders the turn countdown, or empty when no clock is running. precise
 // asks for tenths below preciseClockThreshold, which only the player who has to act
 // needs - it costs a tick ten times a second. Both forms round up, so the display never
 // claims less time than the player has.
-func FormatTurnClock(remaining time.Duration, precise bool) string {
+func formatTurnClock(remaining time.Duration, precise bool) string {
 	if remaining <= 0 {
 		return ""
 	}
@@ -294,7 +294,7 @@ func FormatTurnClock(remaining time.Duration, precise bool) string {
 // RenderTurnClock turns urgent in the last seconds for whoever reads it, but counts in
 // tenths only for the player those seconds belong to.
 func RenderTurnClock(t styles.Theme, remaining time.Duration, precise bool) string {
-	clock := FormatTurnClock(remaining, precise)
+	clock := formatTurnClock(remaining, precise)
 	if clock == "" {
 		return ""
 	}

@@ -77,7 +77,7 @@ func NewSession(global router.GlobalContext, engine *game.Engine, slug string) (
 // Init arms the event listener and the turn clock, which is all a table view's Init
 // has to do.
 func (s *Session) Init() tea.Cmd {
-	return tea.Batch(s.Listen(), s.ClockTick())
+	return tea.Batch(s.Listen(), s.clockTick())
 }
 
 // Listen delivers the next engine event as an EventMsg tagged with this session's feed.
@@ -86,9 +86,9 @@ func (s *Session) Listen() tea.Cmd {
 	return views.ListenOn(ch, func(ev game.Event) tea.Msg { return EventMsg{Event: ev, Source: ch} })
 }
 
-// ClockTick starts this session's countdown before any deadline is known, which is
+// clockTick starts this session's countdown before any deadline is known, which is
 // what a view's Init has to work with.
-func (s *Session) ClockTick() tea.Cmd {
+func (s *Session) clockTick() tea.Cmd {
 	return clockTickFrom(s.Events, 0, false)
 }
 

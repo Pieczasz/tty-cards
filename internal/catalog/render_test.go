@@ -13,6 +13,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -103,12 +104,10 @@ func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 }
 
 // cardGlyphs is the rank-and-suit pair a card is recognisable by in a rendered frame:
-// the compact strip and the mini cards both print exactly this.
+// the compact strip and the mini cards both print exactly this, so it is read off a
+// mini card with its brackets and padding trimmed.
 func cardGlyphs(c deck.Card) string {
-	suits := map[deck.Suit]string{
-		deck.Hearts: "♥", deck.Diamonds: "♦", deck.Clubs: "♣", deck.Spades: "♠",
-	}
-	return components.RankLabel(c.Rank) + suits[c.Suit]
+	return strings.Trim(tuitest.StripANSI(components.RenderMiniCard(styles.NewTheme(true), c)), "[ ]")
 }
 
 func containsCard(hand []deck.Card, card deck.Card) bool {

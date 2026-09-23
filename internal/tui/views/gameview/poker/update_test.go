@@ -464,7 +464,7 @@ func TestView_CountdownIsDrawnOnTheSeatOnTurn(t *testing.T) {
 
 	rendered := tuitest.StripANSI(m.View().Content)
 
-	clock := gameview.FormatTurnClock(m.Base.TurnRemaining, m.Base.MyTurn)
+	clock := tuitest.StripANSI(gameview.RenderTurnClock(m.Global.Theme, m.Base.TurnRemaining, m.Base.MyTurn))
 	require.NotEmpty(t, clock, "a started hand has a clock running")
 	assert.Equal(t, 1, strings.Count(rendered, clock),
 		"the countdown is drawn exactly once, on the seat that owes an action")

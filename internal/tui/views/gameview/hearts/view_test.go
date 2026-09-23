@@ -9,7 +9,6 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	logic "github.com/Pieczasz/terminal-card/internal/game/hearts"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
@@ -151,8 +150,9 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 			}
 
 			out := tuitest.StripANSI(m.View().Content)
+			labels := map[deck.Rank]string{deck.Ace: "A", deck.King: "K", deck.Queen: "Q", deck.Jack: "J"}
 			for id, card := range trick {
-				assert.Containsf(t, out, components.RankLabel(card.Rank),
+				assert.Containsf(t, out, labels[card.Rank],
 					"the card played from seat %s is not on screen", id)
 			}
 		})
