@@ -52,7 +52,7 @@ unnoticed for so long.
   `docs/CONTRIBUTING.md` and `docs/SECURITY.md` keep their upper-case names so
   GitHub's own UI still links them.
 - **New: [`docs/decisions.md`](decisions.md)** - one record per non-obvious
-  choice, with context, consequences and the code it lives in. Forty-eight of
+  choice, with context, consequences and the code it lives in. Fifty-four of
   them, from "one mutex per engine" to "the odd chip goes to the lowest-sorted
   player id".
 - The reading guide is now a **bottom-up** walk: leaves first, so every later
@@ -194,6 +194,34 @@ unnoticed for so long.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 
+### Changed - configuration and metrics (operators)
+
+- **The `game_type` metric label is now the game's catalog slug** (`crazy_eights`,
+  `poker`, `uno`, `hearts`, `gin_rummy`) on every game metric. The lobby used to
+  label a game by its display name (`Crazy Eights`) and the game views by a
+  lower-case spelling of their own (`crazy eights`), so every game was split
+  across two series. **Update any dashboard, recording rule or alert that
+  matches on a `game_type` value.**
+- **`RATE_LIMIT_WINDOW_MS` is now `RATE_LIMIT_WINDOW`**, a Go duration (`1s`,
+  `500ms`; default `1s`) like `REGISTRATION_WINDOW`. The old name fails the boot
+  and says what to use instead, rather than being dropped for the default
+  without a word.
+- **Boolean variables are parsed strictly.** `PROXY_PROTOCOL`, `API_TRUST_PROXY`,
+  `ALLOW_INSECURE_DB` and `OTEL_EXPORTER_OTLP_INSECURE` take `true`/`false`,
+  `1`/`0` or `t`/`f`; anything else fails the boot. `PROXY_PROTOCOL=off` used to
+  be read as something, and `yes` meant false for some variables and true for
+  others: write `false`.
+- **Every invalid variable is reported at once**, not just the first, and a boot
+  failure is printed once instead of twice.
+- **The stats API refuses to start with a missing dependency** instead of
+  serving zeros and an empty leaderboard forever.
+- **An IPv6 literal `SERVER_HOST`** (`::`, say) now binds; the address used to
+  be built without brackets.
+- Every SQL statement is logged in development only; staging now logs like
+  production (warnings and slow queries).
+- A failed interrupted-match finalize now logs as `finalize interrupted match`,
+  once, instead of `finalize ranked match: finalize ranked match: ...`.
+
 ### Changed - tables and lobbies
 
 - **What a match is recorded as is decided when it starts.** Reconfiguring a
@@ -233,7 +261,18 @@ unnoticed for so long.
 - **An idle game-over screen now times out** like any menu. Only a live table is
   spared the 5-minute idle quit.
 - A reconnect is no longer routed into a table that has just finished.
-- The create form no longer offers fewer seats than the chosen game needs.
+- The create form no longer offers fewer seats than the chosen game needs. For a
+  game the server does not know, both the create screen and the lobby now fall
+  back to the same 2-6 seats (the create screen used to allow 8).
+- **Opponents sit clockwise from your left in Crazy Eights, Uno and Gin Rummy**,
+  as they already did in Poker and Hearts, so the player who acts after you is
+  drawn on your left. They used to be drawn in seat order, which could put the
+  next player on your right.
+- **The lobby shows the rating matchmaking uses.** A stored rating of 0 now shows
+  as the starting 1500, which is what the table browser ranks it by, instead of
+  as 0.
+- Hearts, Gin Rummy and Poker share one between-hands result screen, so the
+  three lay out their standings the same way.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
@@ -265,6 +304,9 @@ unnoticed for so long.
   `000005`'s down is marked lossy: take a backup before rolling back past it.
 - The `lobby.SessionAPI` interface is gone; views take the manager directly. It
   had one implementation and one consumer.
+- **Registering a game twice, or a half-declared one, panics at boot**
+  (developers). `game.NewRegistry` names the game; it used to surface as a
+  missing route or a nil factory when somebody started a table.
 - Unreachable guards removed across the engine, poker and the game packages, each
   with a comment saying why it could not fire.
 
@@ -275,7 +317,7 @@ unnoticed for so long.
   nobody matched", and the auto-play move in four of the five games; poker has a
   deterministic equivalent.
 - Eight fuzz targets, including `FuzzBestMeldSplit` and `FuzzClassifyHand`.
-- `goleak` in 22 packages, fit tests per screen, and `-race` tests pinning that
+- `goleak` in 26 packages, fit tests per screen, and `-race` tests pinning that
   hand manipulation never aliases the pile.
 - CI additionally builds the Docker image for amd64 and arm64 and validates
   `compose.yaml` and `nginx.conf`. Lint is pinned to golangci-lint v2.13.2.
