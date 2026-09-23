@@ -71,11 +71,11 @@ func TestStandings_LeavingForfeitsTheMatchButNotTheChipsWon(t *testing.T) {
 	})
 
 	engine.RemovePlayer("p2")
-	assert.Equal(t, []string{"p1", "p3", "p2"}, engine.StandingsIDs(),
+	assert.Equal(t, []string{"p1", "p3", "p2"}, standingIDs(engine),
 		"the chip leader drops behind both players still at the table")
 
 	engine.RemovePlayer("p3")
-	assert.Equal(t, []string{"p1", "p2", "p3"}, engine.StandingsIDs(),
+	assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine),
 		"between leavers the bigger stack still places higher")
 
 	engine.WithState(func(s *game.State) {
@@ -330,4 +330,13 @@ func TestValidateAction_RaiseIsCappedByTheLargestOpponentStack(t *testing.T) {
 		"no opponent can call more than 300")
 	// Shoving stays legal: the uncalled part is refunded rather than staged.
 	require.NoError(t, rules.ValidateAction(state, ActionAllIn{}))
+}
+
+func standingIDs(engine *game.Engine) []string {
+	standings, _ := engine.StandingsWithPlaces()
+	ids := make([]string, len(standings))
+	for i, p := range standings {
+		ids[i] = p.ID
+	}
+	return ids
 }

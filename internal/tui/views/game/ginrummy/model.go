@@ -44,7 +44,7 @@ func (m *Model) syncState() {
 			m.handPhase = s.HandPhase
 			m.handNumber = s.HandNumber
 			m.cumulativeScores = maps.Clone(s.CumulativeScores)
-			m.handComplete = s.HandComplete
+			m.handComplete = s.HandComplete()
 			m.matchComplete = s.MatchComplete
 			// Cloned: the view keeps rendering this after releasing the engine lock.
 			m.lastHandResult = s.LastHandResult.Clone()

@@ -228,23 +228,6 @@ func (e *Engine) placesLocked(standings []*Player) []int {
 	return places
 }
 
-// StandingsIDs is a test seam kept only for the poker match tests and the system test,
-// which live outside this package's owners; migrate them to StandingsWithPlaces and
-// delete it.
-func (e *Engine) StandingsIDs() []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	standings := e.standingsLocked()
-	ids := make([]string, 0, len(standings))
-	for _, p := range standings {
-		if p != nil {
-			ids = append(ids, p.ID)
-		}
-	}
-	return ids
-}
-
 func (e *Engine) standingsLocked() []*Player {
 	standings := e.state.Rules.Standings(e.state)
 

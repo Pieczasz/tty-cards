@@ -82,7 +82,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	playOutMatch(t, engine)
 
 	assert.Equal(t, startingChips, chipsInPlay(t, engine), "chips survive the whole match")
-	standings := engine.StandingsIDs()
+	standings := standingIDs(engine)
 	assert.NotEmpty(t, standings, "a finished hand ranks its players")
 	assert.Contains(t, standings, leaver.ID, "a player who left still places")
 
@@ -146,4 +146,13 @@ func browseCodes(manager *lobby.Manager, p *game.Player) []string {
 		codes = append(codes, e.Code)
 	}
 	return codes
+}
+
+func standingIDs(engine *game.Engine) []string {
+	standings, _ := engine.StandingsWithPlaces()
+	ids := make([]string, len(standings))
+	for i, p := range standings {
+		ids[i] = p.ID
+	}
+	return ids
 }

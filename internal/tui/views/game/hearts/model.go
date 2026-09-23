@@ -62,7 +62,7 @@ func (m *Model) syncState() {
 			m.cumulativeScores = maps.Clone(s.CumulativeScores)
 			m.handNumber = s.HandNumber
 			m.passDirection = s.PassDirection
-			m.handComplete = s.HandComplete
+			m.handComplete = s.HandComplete()
 			m.matchComplete = s.MatchComplete
 			m.lastTrickWinner = s.LastTrickWinner
 		}
