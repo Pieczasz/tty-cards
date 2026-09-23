@@ -46,7 +46,7 @@ type Engine struct {
 
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
 type turnClock struct {
-	timeout time.Duration
+	defaultLength time.Duration
 	// seq fences stale timers: every stop bumps it, and a timer only acts for the
 	// generation it was armed in.
 	seq      uint64
@@ -66,7 +66,7 @@ type EngineOption func(*Engine)
 // WithTurnTimeout sets the default turn length; zero or less disables the clock.
 func WithTurnTimeout(d time.Duration) EngineOption {
 	return func(e *Engine) {
-		e.clock.timeout = d
+		e.clock.defaultLength = d
 	}
 }
 
@@ -94,8 +94,8 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 		// ErrAtCapacity, leaving their view with no feed at all.
 		broadcaster: broadcaster.New[Event](len(players) + 8),
 		clock: turnClock{
-			timeout: DefaultTurnTimeout,
-			missed:  make(map[string]int, len(players)),
+			defaultLength: DefaultTurnTimeout,
+			missed:        make(map[string]int, len(players)),
 		},
 	}
 	for _, opt := range opts {

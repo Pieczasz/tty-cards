@@ -46,7 +46,7 @@ type TurnTimeoutHandler interface {
 // TurnDurationHandler stretches a particular turn. Zero keeps the engine's default,
 // and no value can resurrect a clock WithTurnTimeout disabled.
 type TurnDurationHandler interface {
-	TurnTimeout(state *State) time.Duration
+	TurnDuration(state *State) time.Duration
 }
 
 // PlayerLeaveHandler lets a rules set settle a seat that leaves mid-game.

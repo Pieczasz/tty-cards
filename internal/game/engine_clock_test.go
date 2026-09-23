@@ -38,7 +38,7 @@ func (r *twoStepRules) TimeoutAction(*State) Action {
 // turn's length is a new turn, the way hearts' pass phase and hand-over prompt are.
 type stretchOnDrawRules struct{ *twoStepRules }
 
-func (r stretchOnDrawRules) TurnTimeout(*State) time.Duration {
+func (r stretchOnDrawRules) TurnDuration(*State) time.Duration {
 	if r.drawn {
 		return 2 * time.Hour
 	}

@@ -652,7 +652,7 @@ func TestRules_TableSize(t *testing.T) {
 // The between-hands prompt is a decision, not a move, so it gets longer than a turn.
 // Zero elsewhere means "engine default", not "no clock": a real duration there would
 // quietly redefine every draw-and-discard turn in the game.
-func TestRules_TurnTimeout(t *testing.T) {
+func TestRules_TurnDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name         string
@@ -669,13 +669,13 @@ func TestRules_TurnTimeout(t *testing.T) {
 			if tt.handComplete {
 				extra.Phase = PhaseHandOver
 			}
-			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
+			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
 
 	t.Run("a state that is not a gin rummy state has no opinion", func(t *testing.T) {
 		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnTimeout(&game.State{}))
+		assert.Zero(t, (&Rules{}).TurnDuration(&game.State{}))
 	})
 }
 

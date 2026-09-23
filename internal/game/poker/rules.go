@@ -69,20 +69,20 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	return ActionFold{}
 }
 
-// dealTurnTimeout is how long the incoming dealer has to start the next hand. Dealing
+// dealTurnDuration is how long the incoming dealer has to start the next hand. Dealing
 // is a decision about whether to keep playing rather than a move made under pressure,
 // so it gets longer than a betting turn - but it stays bounded, because an absent
 // dealer is the one seat that can freeze the match for everybody else.
-const dealTurnTimeout = time.Minute
+const dealTurnDuration = time.Minute
 
-// TurnTimeout gives the between-hands deal its own clock and leaves every betting
+// TurnDuration gives the between-hands deal its own clock and leaves every betting
 // turn on the engine's.
-func (r *Rules) TurnTimeout(state *game.State) time.Duration {
+func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
 	if !ok || !extra.HandComplete() || extra.MatchComplete {
 		return 0
 	}
-	return dealTurnTimeout
+	return dealTurnDuration
 }
 
 func (r *Rules) MinPlayers() int { return 2 }

@@ -477,7 +477,7 @@ func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
 	assert.Nil(t, rules.Standings(state))
 	assert.Zero(t, rules.StandingScore(state, state.Players[0]))
 	assert.Nil(t, rules.TimeoutAction(state))
-	assert.Zero(t, rules.TurnTimeout(state))
+	assert.Zero(t, rules.TurnDuration(state))
 	require.ErrorIs(t, rules.ValidateAction(state, ActionFold{}), game.ErrInvalidState)
 	require.ErrorIs(t, rules.ApplyAction(state, ActionFold{}), game.ErrInvalidState)
 	require.ErrorIs(t, rules.AfterAction(state, ActionFold{}), game.ErrInvalidState)

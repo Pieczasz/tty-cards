@@ -441,7 +441,7 @@ type stretchedRules struct {
 	override time.Duration
 }
 
-func (r stretchedRules) TurnTimeout(*State) time.Duration { return r.override }
+func (r stretchedRules) TurnDuration(*State) time.Duration { return r.override }
 
 func TestEngine_TurnTimeout_RulesCanStretchATurn(t *testing.T) {
 	t.Parallel()

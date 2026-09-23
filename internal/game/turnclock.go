@@ -28,16 +28,16 @@ func (e *Engine) armTurnTimerLocked() {
 	prevDeadline, prevPlayer, prevLength := e.clock.deadline, e.clock.playerID, e.clock.length
 	e.stopTurnTimerLocked()
 
-	if e.closed || e.clock.timeout <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
+	if e.closed || e.clock.defaultLength <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
 		return
 	}
 	if _, ok := e.state.Rules.(TurnTimeoutHandler); !ok {
 		return
 	}
 
-	timeout := e.clock.timeout
+	timeout := e.clock.defaultLength
 	if h, ok := e.state.Rules.(TurnDurationHandler); ok {
-		if override := h.TurnTimeout(e.state); override > 0 {
+		if override := h.TurnDuration(e.state); override > 0 {
 			timeout = override
 		}
 	}

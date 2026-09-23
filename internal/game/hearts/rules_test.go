@@ -763,7 +763,7 @@ func TestRules_TableSize(t *testing.T) {
 // between-hands prompt, which is a decision rather than a move. Zero everywhere else
 // means "engine default", not "no clock" - returning a real duration there would
 // quietly redefine the turn length for every trick.
-func TestRules_TurnTimeout(t *testing.T) {
+func TestRules_TurnDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -779,13 +779,13 @@ func TestRules_TurnTimeout(t *testing.T) {
 			t.Parallel()
 			state := createTestState()
 			extra(t, state).Phase = tt.phase
-			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
+			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
 
 	t.Run("a state that is not a hearts state has no opinion", func(t *testing.T) {
 		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnTimeout(&game.State{}))
+		assert.Zero(t, (&Rules{}).TurnDuration(&game.State{}))
 	})
 }
 

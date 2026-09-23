@@ -862,7 +862,7 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 		{
 			name:   "between hands the dealer gets a minute",
 			mutate: func(e *State) { e.Phase = PhaseShowdown },
-			want:   dealTurnTimeout,
+			want:   dealTurnDuration,
 		},
 		{
 			name:   "a finished match needs no deal clock",
@@ -876,7 +876,7 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 			state, extra := seatedRound(0, seat{id: "a", chips: 900}, seat{id: "b", chips: 900})
 			tt.mutate(extra)
 
-			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
+			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
 }
@@ -886,7 +886,7 @@ func TestRules_TurnTimeout_ForeignStateFallsBackToTheDefault(t *testing.T) {
 	t.Parallel()
 	state := game.NewState(&Rules{}, nil, deck.Standard())
 
-	assert.Zero(t, (&Rules{}).TurnTimeout(state))
+	assert.Zero(t, (&Rules{}).TurnDuration(state))
 }
 
 // Short all-ins that are each below a full raise but together reach one reopen the

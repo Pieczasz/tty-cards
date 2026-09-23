@@ -468,14 +468,14 @@ func ginDiscard(hand []deck.Card, forbidden *deck.Card) (deck.Card, bool) {
 	return deck.Card{}, false
 }
 
-// TurnTimeout stretches the between-hands prompt. Zero everywhere else means
+// TurnDuration stretches the between-hands prompt. Zero everywhere else means
 // "engine default", not "no clock".
-func (r *Rules) TurnTimeout(state *game.State) time.Duration {
+func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
 	if !ok || !extra.HandComplete() {
 		return 0
 	}
-	return handOverTurnTimeout
+	return handOverTurnDuration
 }
 
 // StandingScore is the value Standings sorted by. Only equality is read, so the

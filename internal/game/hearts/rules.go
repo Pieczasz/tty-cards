@@ -311,19 +311,19 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	return nil
 }
 
-func (r *Rules) TurnTimeout(state *game.State) time.Duration {
+func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
 	if !ok {
 		return 0
 	}
 	switch extra.Phase {
 	case PhasePassing:
-		return passTurnTimeout
+		return passTurnDuration
 	case PhaseHandOver:
 		// The between-hands prompt is a decision, not a play, and it needs longer
 		// than a turn. Every other phase returns zero, which means "engine default"
 		// rather than "no clock".
-		return handOverTurnTimeout
+		return handOverTurnDuration
 	case PhaseTrickPlay:
 	}
 	return 0
