@@ -276,13 +276,7 @@ func (s *Session) Leave() tea.Cmd {
 	s.Unsubscribe()
 
 	if p == nil || !finished {
-		return navigateTo(router.RouteHome, nil)
+		return router.Navigate(router.RouteHome, nil)
 	}
-	return navigateTo(router.RouteLobby, s.Global.LobbyManager.FindLobbyByPlayer(p))
-}
-
-func navigateTo(route string, context any) tea.Cmd {
-	return func() tea.Msg {
-		return router.ChangeViewMsg{ViewName: route, Context: context}
-	}
+	return router.Navigate(router.RouteLobby, s.Global.LobbyManager.FindLobbyByPlayer(p))
 }

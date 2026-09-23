@@ -1,3 +1,6 @@
+// Package router is the session's root Bubble Tea model: it owns the registered views,
+// swaps the active one on a ChangeViewMsg, drops idle sessions and carries the
+// per-session GlobalContext every view is built from.
 package router
 
 import (
@@ -12,27 +15,45 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// Route names a registered view.
+type Route string
+
 // Route keys for every registered view. Games are registered dynamically, so
 // their routes are derived from the module slug via GameRoute.
 const (
-	RouteHome        = "home"
-	RouteProfile     = "profile"
-	RouteLeaderboard = "leaderboard"
-	RouteLobby       = "lobby"
-	RouteLobbyCreate = "lobby_create"
-	RouteLobbyJoin   = "lobby_join"
-	RouteGamePrefix  = "game_"
+	RouteHome        Route = "home"
+	RouteProfile     Route = "profile"
+	RouteLeaderboard Route = "leaderboard"
+	RouteLobby       Route = "lobby"
+	RouteLobbyCreate Route = "lobby_create"
+	RouteLobbyJoin   Route = "lobby_join"
 )
 
-func GameRoute(slug string) string {
-	return RouteGamePrefix + slug
+const routeGamePrefix = "game_"
+
+// GameRoute is the route a game's view is registered under, derived from its slug.
+func GameRoute(slug string) Route {
+	return Route(routeGamePrefix + slug)
 }
 
+// ViewFactory builds a view for a route. ctx is whatever the navigation carried: a
+// *lobby.Lobby for the lobby route, a *game.Engine for a game route, nil otherwise.
+type ViewFactory func(g GlobalContext, ctx any) tea.Model
+
+// ChangeViewMsg asks the router to replace the active view with the one registered
+// under ViewName, built with Context. An unknown route is ignored.
 type ChangeViewMsg struct {
-	ViewName string
+	ViewName Route
 	Context  any
 }
 
+// Navigate is the command a view returns to move the session to route.
+func Navigate(route Route, ctx any) tea.Cmd {
+	return func() tea.Msg { return ChangeViewMsg{ViewName: route, Context: ctx} }
+}
+
+// GlobalContext is the session state every view is built from. Each view holds its own
+// copy, so a change a view makes to it is local until the router rebuilds the view.
 type GlobalContext struct {
 	User           *db.User
 	UserRepository db.UserRepository
@@ -56,20 +77,30 @@ func (g GlobalContext) RequestContext() context.Context {
 	return context.Background()
 }
 
+const (
+	// idleCheckInterval is how often the router asks whether the session went idle.
+	idleCheckInterval = 10 * time.Second
+	// idleTimeout is how long a session may send no input before it is dropped,
+	// unless the active view is IdleExempt.
+	idleTimeout = 5 * time.Minute
+)
+
 type tickMsg time.Time
 
 func tick() tea.Cmd {
-	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(idleCheckInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+// Router is the session's root model. It holds one active view at a time and closes
+// it (Closer) whenever it is replaced or the session ends.
 type Router struct {
 	Global       GlobalContext
-	views        map[string]func(GlobalContext, any) tea.Model
+	views        map[Route]ViewFactory
 	active       tea.Model
-	activeKey    string
-	initialRoute string
+	activeKey    Route
+	initialRoute Route
 	initialCtx   any
 	lastActivity time.Time
 }
@@ -78,28 +109,27 @@ func New(global GlobalContext) *Router {
 	// Dark until the terminal says otherwise: most terminals are, and one that
 	// never answers the background query must still be legible.
 	global.Theme = styles.NewTheme(true)
-	r := &Router{
+	return &Router{
 		Global:       global,
-		views:        make(map[string]func(GlobalContext, any) tea.Model),
+		views:        make(map[Route]ViewFactory),
 		initialRoute: RouteHome,
 		lastActivity: time.Now(),
 	}
-	return r
 }
 
 // SetInitialRoute picks the first view Init builds. A reconnecting player starts
 // at their lobby instead of home; everyone else keeps the default.
-func (r *Router) SetInitialRoute(name string, ctx any) {
+func (r *Router) SetInitialRoute(name Route, ctx any) {
 	r.initialRoute = name
 	r.initialCtx = ctx
 }
 
-func (r *Router) Register(name string, factory func(GlobalContext, any) tea.Model) {
+func (r *Router) Register(name Route, factory ViewFactory) {
 	r.views[name] = factory
 }
 
 // HasRoute exists because Goto on an unknown route is a silent no-op.
-func (r *Router) HasRoute(name string) bool {
+func (r *Router) HasRoute(name Route) bool {
 	_, ok := r.views[name]
 	return ok
 }
@@ -141,7 +171,7 @@ func (r *Router) Close() {
 	r.activeKey = ""
 }
 
-func (r *Router) Goto(name string, context any) tea.Cmd {
+func (r *Router) Goto(name Route, context any) tea.Cmd {
 	factory, ok := r.views[name]
 	if !ok {
 		return nil
@@ -155,27 +185,24 @@ func (r *Router) Goto(name string, context any) tea.Cmd {
 func (r *Router) Init() tea.Cmd {
 	// Ask the terminal for its background so the theme can match it. Terminals
 	// that don't answer simply leave the dark default in place.
-	cmds := []tea.Cmd{tick(), tea.RequestBackgroundColor}
+	//
 	// Goto is what runs a view's Init, so the first view is built here rather than at
 	// construction: doing both armed every command twice, which for a view holding a
 	// subscription is two listener goroutines racing for one channel.
-	if cmd := r.Goto(r.initialRoute, r.initialCtx); cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	return tea.Batch(cmds...)
+	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(r.initialRoute, r.initialCtx))
 }
 
 func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
+	var routerCmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg, tea.MouseMsg:
 		r.lastActivity = time.Now()
 	case tickMsg:
-		if time.Since(r.lastActivity) > 5*time.Minute && !r.activeIdleExempt() {
+		if time.Since(r.lastActivity) > idleTimeout && !r.activeIdleExempt() {
 			return r, tea.Quit
 		}
-		cmds = append(cmds, tick())
+		routerCmd = tick()
 	case tea.WindowSizeMsg:
 		r.Global.Width = msg.Width
 		r.Global.Height = msg.Height
@@ -185,37 +212,30 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// falls through to the active view too (see views.HandleCommonMsg).
 		r.Global.Theme = styles.NewTheme(msg.IsDark())
 	case ChangeViewMsg:
-		cmd := r.Goto(msg.ViewName, msg.Context)
-		cmds = append(cmds, cmd)
-		return r, tea.Batch(cmds...)
+		return r, r.Goto(msg.ViewName, msg.Context)
 	}
 
-	if r.active != nil {
-		var cmd tea.Cmd
-		r.active, cmd = r.active.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	if r.active == nil {
+		return r, routerCmd
 	}
-
-	return r, tea.Batch(cmds...)
+	var viewCmd tea.Cmd
+	r.active, viewCmd = r.active.Update(msg)
+	return r, tea.Batch(routerCmd, viewCmd)
 }
 
 func (r *Router) View() tea.View {
+	var v tea.View
+	switch {
 	// Checked once here rather than in every view: below the minimum, lipgloss
 	// wraps tables into unreadable confetti instead of failing, so no view can
 	// render anything useful.
-	if styles.TooSmall(r.Global.Width, r.Global.Height) {
-		v := tea.NewView(r.Global.Theme.RenderTooSmall(r.Global.Width, r.Global.Height))
-		v.AltScreen = true
-		return v
+	case styles.TooSmall(r.Global.Width, r.Global.Height):
+		v = tea.NewView(r.Global.Theme.RenderTooSmall(r.Global.Width, r.Global.Height))
+	case r.active != nil:
+		v = r.active.View()
+	default:
+		v = tea.NewView("No active view")
 	}
-	if r.active != nil {
-		v := r.active.View()
-		v.AltScreen = true
-		return v
-	}
-	v := tea.NewView("No active view")
 	v.AltScreen = true
 	return v
 }

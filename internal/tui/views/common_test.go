@@ -25,7 +25,7 @@ import (
 func TestGlobalActionsAllRoute(t *testing.T) {
 	t.Parallel()
 
-	for _, action := range styles.GlobalActions {
+	for _, action := range views.GlobalFooter {
 		key, _, found := strings.Cut(action, " - ")
 		require.True(t, found, "footer entry %q must read '<key> - <label>'", action)
 		key = strings.TrimSpace(key)
@@ -52,7 +52,7 @@ func TestNavigateOn(t *testing.T) {
 	tests := []struct {
 		name    string
 		key     string
-		want    string
+		want    router.Route
 		handled bool
 	}{
 		{name: "new lobby", key: "n", want: router.RouteLobbyCreate, handled: true},
@@ -278,20 +278,20 @@ func TestRenderScreen_AgreesWithScreenContentHeight(t *testing.T) {
 	}
 }
 
-// styles.GlobalActions is one slice shared by every session. Appending the local
+// The global footer is one slice shared by every session. Appending the local
 // actions onto it would write into the array the other sessions are reading, so
 // the footer is built with slices.Concat - this is what notices if that regresses.
 func TestRenderScreen_LeavesGlobalActionsAlone(t *testing.T) {
 	t.Parallel()
 
-	before := slices.Clone(styles.GlobalActions)
+	before := slices.Clone(views.GlobalFooter)
 	g := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 30}
 
 	views.RenderScreen(g, "Profile", []string{"g - Game", "r - Result"}, func(int) string { return "" })
 	views.ScreenContentHeight(g, "Profile", []string{"x - One", "y - Two", "z - Three"})
 
-	assert.Equal(t, before, styles.GlobalActions, "the shared footer list must not be written through")
-	assert.Len(t, styles.GlobalActions, len(before))
+	assert.Equal(t, before, views.GlobalFooter, "the shared footer list must not be written through")
+	assert.Len(t, views.GlobalFooter, len(before))
 }
 
 // The local actions come first so a view's own keys read before the global ones.
@@ -303,7 +303,7 @@ func TestRenderScreen_ShowsLocalAndGlobalActions(t *testing.T) {
 
 	assert.Contains(t, out, "g - Game")
 	assert.Contains(t, out, "body")
-	for _, action := range styles.GlobalActions {
+	for _, action := range views.GlobalFooter {
 		assert.Contains(t, out, action, "the footer must still advertise %q", action)
 	}
 }

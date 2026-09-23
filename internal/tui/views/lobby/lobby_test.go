@@ -88,7 +88,7 @@ func press(m *model, key string) (tea.Model, tea.Cmd) {
 }
 
 // routeOf runs a returned command and reports the route it navigates to.
-func routeOf(t *testing.T, cmd tea.Cmd) string {
+func routeOf(t *testing.T, cmd tea.Cmd) router.Route {
 	t.Helper()
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
@@ -99,7 +99,7 @@ func routeOf(t *testing.T, cmd tea.Cmd) string {
 func TestHandleKey_Navigation(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
+	cases := map[string]router.Route{
 		"n": router.RouteLobbyCreate,
 		"f": router.RouteLobbyJoin,
 		"p": router.RouteProfile,

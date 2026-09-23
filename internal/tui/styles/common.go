@@ -223,8 +223,6 @@ func (t Theme) RenderActionFooter(actions []string) string {
 	return footer
 }
 
-var GlobalActions = []string{"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard", "ctrl+c - Quit"}
-
 // ResetFigureCacheForTest empties the banner cache. Exported for the cache-size tests,
 // which cannot observe a count they share with every other test in the package.
 func ResetFigureCacheForTest() {

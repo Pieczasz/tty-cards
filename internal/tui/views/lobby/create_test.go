@@ -154,7 +154,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
-		want string
+		want router.Route
 	}{
 		{name: "new game", key: "n", want: router.RouteLobbyCreate},
 		{name: "join game", key: "f", want: router.RouteLobbyJoin},

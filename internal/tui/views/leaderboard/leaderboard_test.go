@@ -409,7 +409,7 @@ func TestUpdate_NavigationKeysStillNavigate(t *testing.T) {
 
 	tests := []struct {
 		key  string
-		want string
+		want router.Route
 	}{
 		{key: "f", want: router.RouteLobbyJoin},
 		{key: "p", want: router.RouteProfile},

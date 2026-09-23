@@ -43,7 +43,7 @@ func Model(deps ModelDependencies) *router.Router {
 	// Navigating away from a lobby unsubscribes but keeps the seat, so a player who
 	// reached a menu would never see the game start - the engine would auto-play
 	// until the idle timer took the seat.
-	seatedOr := func(fallback func(router.GlobalContext) tea.Model) func(router.GlobalContext, any) tea.Model {
+	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
 		return func(g router.GlobalContext, _ any) tea.Model {
 			if l := g.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(g)); l != nil {
 				return lobby.New(g, l)

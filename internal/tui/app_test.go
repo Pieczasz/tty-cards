@@ -61,7 +61,7 @@ func TestModel_RegistersEveryRoute(t *testing.T) {
 	t.Parallel()
 	r, _, _ := sessionModel(t)
 
-	for _, route := range []string{
+	for _, route := range []router.Route{
 		router.RouteHome,
 		router.RouteProfile,
 		router.RouteLeaderboard,
@@ -79,14 +79,14 @@ func TestModel_RegistersEveryRoute(t *testing.T) {
 func TestModel_ASeatedPlayerIsBouncedBackToTheirLobby(t *testing.T) {
 	t.Parallel()
 
-	for _, route := range []string{
+	for _, route := range []router.Route{
 		router.RouteHome,
 		router.RouteLobbyCreate,
 		router.RouteLobbyJoin,
 		router.RouteProfile,
 		router.RouteLeaderboard,
 	} {
-		t.Run(route, func(t *testing.T) {
+		t.Run(string(route), func(t *testing.T) {
 			t.Parallel()
 			r, manager, user := sessionModel(t)
 
@@ -116,7 +116,10 @@ func TestModel_AnUnseatedPlayerGetsTheOrdinaryScreens(t *testing.T) {
 func TestModel_AWrongContextFallsBackToHome(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ name, route string }{
+	for _, tc := range []struct {
+		name  string
+		route router.Route
+	}{
 		{name: "the lobby route without a lobby", route: router.RouteLobby},
 		{name: "a game route without an engine", route: router.GameRoute(catalog.All[0].Slug)},
 	} {
@@ -181,7 +184,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	routes := []string{
+	routes := []router.Route{
 		router.RouteHome,
 		router.RouteProfile,
 		router.RouteLeaderboard,

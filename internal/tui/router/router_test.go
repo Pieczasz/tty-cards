@@ -29,7 +29,7 @@ func TestRouter_RegistrationAndRouting(t *testing.T) {
 	cmd := r.Goto("mock", nil)
 	assert.Nil(t, cmd)
 	assert.NotNil(t, r.active)
-	assert.Equal(t, "mock", r.activeKey)
+	assert.Equal(t, Route("mock"), r.activeKey)
 }
 
 func TestRouter_UpdatePropagation(t *testing.T) {
@@ -69,7 +69,7 @@ func TestRouter_ChangeViewMsg(t *testing.T) {
 	msg := ChangeViewMsg{ViewName: "mock"}
 	r.Update(msg)
 
-	assert.Equal(t, "mock", r.activeKey)
+	assert.Equal(t, Route("mock"), r.activeKey)
 }
 
 // closableModel records teardown so the router's release contract is observable.

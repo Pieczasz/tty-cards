@@ -397,6 +397,6 @@ func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string
 func renderGameNotice(g router.GlobalContext, content string) string {
 	titleFig := styles.RenderFigureASCII("Active Game", styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height))
 	header := g.Theme.Title.Render(titleFig)
-	footer := g.Theme.RenderActionFooter(styles.GlobalActions)
+	footer := views.Footer(g.Theme, nil)
 	return views.RenderCenteredLayout(g, header, content, footer)
 }

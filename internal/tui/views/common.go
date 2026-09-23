@@ -1,7 +1,10 @@
+// Package views holds what every full-screen view shares: the session player, the
+// global shortcut table, the common message handling and the framed screen layout.
 package views
 
 import (
 	"slices"
+	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
@@ -12,6 +15,10 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
+// RequestTimeout bounds one repository round trip a view makes on the player's behalf.
+const RequestTimeout = 5 * time.Second
+
+// SessionPlayer is the session user as a seat, or nil before the user is known.
 func SessionPlayer(g router.GlobalContext) *game.Player {
 	return lobby.NewPlayer(g.User)
 }
@@ -43,17 +50,39 @@ func ListenOn[T any](ch <-chan T, wrap func(T) tea.Msg) tea.Cmd {
 	}
 }
 
-// esc and q are absent: they mean "back", and each view decides what back means for it.
-var globalActionRoutes = map[string]string{
-	"n": router.RouteLobbyCreate,
-	"f": router.RouteLobbyJoin,
-	"p": router.RouteProfile,
-	"t": router.RouteLeaderboard,
+// globalActions is every screen's shortcut table: the key, what the footer calls it
+// and where it goes. The footer and the key handling both read it, so a shortcut
+// cannot be advertised without working. esc and q are absent: they mean "back", and
+// each view decides what back means for it.
+var globalActions = []struct {
+	key   string
+	label string
+	route router.Route
+}{
+	{"n", "New Game", router.RouteLobbyCreate},
+	{"f", "Join Game", router.RouteLobbyJoin},
+	{"p", "Profile", router.RouteProfile},
+	{"t", "Leaderboard", router.RouteLeaderboard},
 }
 
-func GlobalRoute(key string) (string, bool) {
-	route, ok := globalActionRoutes[key]
-	return route, ok
+// globalFooter is the footer entries for globalActions, plus quit, which
+// HandleCommonMsg owns. Shared by every session, so it is only ever read: see Footer.
+var globalFooter = func() []string {
+	out := make([]string, 0, len(globalActions)+1)
+	for _, a := range globalActions {
+		out = append(out, a.key+" - "+a.label)
+	}
+	return append(out, "ctrl+c - Quit")
+}()
+
+// GlobalRoute is where a global shortcut key goes.
+func GlobalRoute(key string) (router.Route, bool) {
+	for _, a := range globalActions {
+		if a.key == key {
+			return a.route, true
+		}
+	}
+	return "", false
 }
 
 // NavigateOn resolves the navigation keys every full-screen view shares: the global
@@ -61,14 +90,24 @@ func GlobalRoute(key string) (string, bool) {
 // lobby's leave confirmation) call GlobalRoute directly instead.
 func NavigateOn(key string) (tea.Cmd, bool) {
 	if route, ok := GlobalRoute(key); ok {
-		return func() tea.Msg { return router.ChangeViewMsg{ViewName: route} }, true
+		return router.Navigate(route, nil), true
 	}
 	if key == "esc" || key == "q" {
-		return func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteHome} }, true
+		return router.Navigate(router.RouteHome, nil), true
 	}
 	return nil, false
 }
 
+// Footer is the action line: a view's own actions, then the global ones.
+//
+// slices.Concat, never append: globalFooter is shared by every session, and appending
+// writes into the array the others are reading.
+func Footer(t styles.Theme, localActions []string) string {
+	return t.RenderActionFooter(slices.Concat(localActions, globalFooter))
+}
+
+// HandleCommonMsg handles what every view handles the same way - resizes, the theme
+// switch and ctrl+c - and reports whether msg was one of them.
 func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -90,9 +129,6 @@ func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) 
 
 // RenderScreen is the header/footer/frame ritual every full-screen view repeats.
 // content receives the rows left once the title and footer have taken theirs.
-//
-// slices.Concat, never append: styles.GlobalActions is shared by every session, and
-// appending writes into the array the others are reading.
 func RenderScreen(g router.GlobalContext, title string, localActions []string, content func(height int) string) string {
 	header, footer := screenFrame(g, title, localActions)
 	return RenderCenteredLayout(g, header, content(styles.AvailableContentHeight(g.Width, g.Height, header, footer)), footer)
@@ -110,7 +146,7 @@ func ScreenContentHeight(g router.GlobalContext, title string, localActions []st
 func screenFrame(g router.GlobalContext, title string, localActions []string) (header, footer string) {
 	header = g.Theme.Title.Render(styles.RenderFigureASCII(
 		title, styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height)))
-	footer = g.Theme.RenderActionFooter(slices.Concat(localActions, styles.GlobalActions))
+	footer = Footer(g.Theme, localActions)
 	return header, footer
 }
 

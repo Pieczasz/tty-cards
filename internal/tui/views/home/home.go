@@ -35,7 +35,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if route, ok := views.GlobalRoute(key.String()); ok {
-		return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: route} }
+		return m, router.Navigate(route, nil)
 	}
 	return m, nil
 }

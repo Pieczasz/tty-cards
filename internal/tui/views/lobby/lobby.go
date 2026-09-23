@@ -89,9 +89,7 @@ func (m *model) Init() tea.Cmd {
 		if engine := m.currentLobby.ActiveGame(); engine != nil && m.seatedIn(engine) {
 			if mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName()); ok {
 				m.unsubscribe()
-				return func() tea.Msg {
-					return router.ChangeViewMsg{ViewName: router.GameRoute(mod.Slug), Context: engine}
-				}
+				return router.Navigate(router.GameRoute(mod.Slug), engine)
 			}
 		}
 	}
@@ -125,10 +123,6 @@ func (m *model) unsubscribe() {
 	}
 }
 
-func (m *model) selfPlayer() *game.Player {
-	return views.SessionPlayer(m.global)
-}
-
 // maxCursor is the last row the cursor can sit on: the settings, then one row per guest.
 func (m *model) maxCursor() int {
 	return cursorMode + len(m.currentLobby.Guests())
@@ -144,10 +138,7 @@ const (
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.currentLobby == nil {
-		// Separate statement on purpose: m is returned by value and goHome mutates it
-		// through the pointer receiver; the order of those two in one return is unspecified.
-		cmd := m.goHome()
-		return m, cmd
+		return m, m.goHome()
 	}
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
@@ -170,55 +161,49 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleLeaveConfirm(msg.String())
 	}
 
-	self := m.selfPlayer()
-	isLeader := m.currentLobby.IsLeader(self)
+	self := views.SessionPlayer(m.global)
 
 	// Leaving via a global shortcut has to release the lobby subscription first.
 	if route, ok := views.GlobalRoute(msg.String()); ok {
 		m.unsubscribe()
-		return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: route} }
+		return m, router.Navigate(route, nil)
 	}
 
 	switch msg.String() {
 	case "esc", "x", "q":
 		m.showLeaveConfirm = true
-		return m, nil
 	case "r":
-		if err := m.currentLobby.ToggleReady(self, m.global.GameRegistry); err != nil {
-			m.actionErr = err
-			slog.Error("failed to toggle ready or start game engine", "error", err)
-		} else {
-			m.actionErr = nil
+		m.actionErr = m.currentLobby.ToggleReady(self, m.global.GameRegistry)
+		if m.actionErr != nil {
+			slog.Error("failed to toggle ready or start game engine", "error", m.actionErr)
 		}
-		return m, nil
-	case "up", "k":
-		if isLeader {
-			m.cursor = components.StepCursor(m.cursor, -1, m.maxCursor())
-		}
-	case "down", "j":
-		if isLeader {
-			m.cursor = components.StepCursor(m.cursor, +1, m.maxCursor())
-		}
-	case "left", "h":
-		if isLeader {
-			m.adjustSetting(self, -1)
-		}
-	case "right", "l":
-		if isLeader {
-			m.adjustSetting(self, +1)
-		}
-	case "enter":
-		if isLeader && m.cursor >= cursorFirstGuest {
-			guestIdx := m.cursor - cursorFirstGuest
-			guests := m.currentLobby.Guests()
-			if guestIdx < len(guests) {
-				if err := m.global.LobbyManager.Kick(self, guests[guestIdx]); err != nil {
-					slog.Error("failed to kick player", "error", err)
-				}
-			}
+	default:
+		if m.currentLobby.IsLeader(self) {
+			m.handleLeaderKey(self, msg.String())
 		}
 	}
 	return m, nil
+}
+
+// handleLeaderKey is the form and the kick key, which only the leader may drive.
+func (m *model) handleLeaderKey(self *game.Player, key string) {
+	switch key {
+	case "up", "k":
+		m.cursor = components.StepCursor(m.cursor, -1, m.maxCursor())
+	case "down", "j":
+		m.cursor = components.StepCursor(m.cursor, +1, m.maxCursor())
+	case "left", "h":
+		m.adjustSetting(self, -1)
+	case "right", "l":
+		m.adjustSetting(self, +1)
+	case "enter":
+		guests := m.currentLobby.Guests()
+		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(guests) {
+			if err := m.global.LobbyManager.Kick(self, guests[i]); err != nil {
+				slog.Error("failed to kick player", "error", err)
+			}
+		}
+	}
 }
 
 // goHome navigates to the home screen once. Without the guard a view with no lobby
@@ -229,18 +214,15 @@ func (m *model) goHome() tea.Cmd {
 		return nil
 	}
 	m.leaving = true
-	return func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteHome} }
+	return router.Navigate(router.RouteHome, nil)
 }
 
 func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y", "Y":
-		m.global.LobbyManager.LeaveLobby(m.selfPlayer())
+		m.global.LobbyManager.LeaveLobby(views.SessionPlayer(m.global))
 		m.unsubscribe()
-		// Separate statement on purpose: m is returned by value and goHome mutates it
-		// through the pointer receiver; the order of those two in one return is unspecified.
-		cmd := m.goHome()
-		return m, cmd
+		return m, m.goHome()
 	case "n", "N", "esc":
 		m.showLeaveConfirm = false
 	}
@@ -285,10 +267,7 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case lobby.EventLobbyClosed:
 		m.unsubscribe()
-		// Separate statement on purpose: m is returned by value and goHome mutates it
-		// through the pointer receiver; the order of those two in one return is unspecified.
-		cmd := m.goHome()
-		return m, cmd
+		return m, m.goHome()
 	case lobby.EventGameStarted:
 		engine := msg.Engine
 		if engine == nil {
@@ -304,26 +283,12 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
 		m.unsubscribe()
-		return m, func() tea.Msg {
-			return router.ChangeViewMsg{ViewName: router.GameRoute(mod.Slug), Context: engine}
-		}
+		return m, router.Navigate(router.GameRoute(mod.Slug), engine)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
-		self := m.selfPlayer()
-		if !m.currentLobby.Leader().Equal(self) {
-			found := false
-			for _, g := range m.currentLobby.Guests() {
-				if g.Equal(self) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.unsubscribe()
-				// Separate statement on purpose: m is returned by value and goHome mutates it
-				// through the pointer receiver; the order of those two in one return is unspecified.
-				cmd := m.goHome()
-				return m, cmd
-			}
+		self := views.SessionPlayer(m.global)
+		if !m.currentLobby.Leader().Equal(self) && !slices.ContainsFunc(m.currentLobby.Guests(), self.Equal) {
+			m.unsubscribe()
+			return m, m.goHome()
 		}
 		m.isPrivate = m.currentLobby.IsPrivate()
 		m.isRanked = m.currentLobby.IsRanked()
@@ -346,7 +311,7 @@ func (m *model) View() tea.View {
 		}
 
 		innerWidth := styles.InnerWidth(m.global.Width)
-		isLeader := m.currentLobby.IsLeader(m.selfPlayer())
+		isLeader := m.currentLobby.IsLeader(views.SessionPlayer(m.global))
 		if m.actionErr == nil {
 			return m.renderForm(isLeader, innerWidth, height)
 		}

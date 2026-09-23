@@ -244,7 +244,7 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
-	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: joined} }
+	return m, router.Navigate(router.RouteLobby, joined)
 }
 
 // modeLabel names the current mode filter for the status line.

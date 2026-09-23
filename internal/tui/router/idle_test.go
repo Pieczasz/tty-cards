@@ -39,9 +39,9 @@ func isQuit(cmd tea.Cmd) bool {
 func TestGameRoute(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "game_poker", GameRoute("poker"))
-	assert.Equal(t, RouteGamePrefix, GameRoute(""))
-	assert.Greater(t, len(GameRoute("uno")), len(RouteGamePrefix), "a slug contributes to its route")
+	assert.Equal(t, Route("game_poker"), GameRoute("poker"))
+	assert.Equal(t, Route(routeGamePrefix), GameRoute(""))
+	assert.Greater(t, len(GameRoute("uno")), len(routeGamePrefix), "a slug contributes to its route")
 }
 
 // Goto on an unknown route is a silent no-op, so callers that cannot tolerate one ask
@@ -114,7 +114,7 @@ func TestRouter_IdleQuit(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		route    string
+		route    Route
 		idleFor  time.Duration
 		keyPress bool
 		// exempt, when set, is the active view's IdleExempt answer.
@@ -271,10 +271,10 @@ func TestRouter_ChangeViewMsgRoutes(t *testing.T) {
 	r.Goto("first", nil)
 
 	r.Update(ChangeViewMsg{ViewName: "second", Context: "ctx"})
-	assert.Equal(t, "second", r.activeKey)
+	assert.Equal(t, Route("second"), r.activeKey)
 
 	r.Update(ChangeViewMsg{ViewName: "nope"})
-	assert.Equal(t, "second", r.activeKey, "an unknown route leaves the player where they were")
+	assert.Equal(t, Route("second"), r.activeKey, "an unknown route leaves the player where they were")
 
 	// The navigation message is consumed rather than handed on; the view that receives
 	// it has already been replaced.

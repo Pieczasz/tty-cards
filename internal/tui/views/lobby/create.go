@@ -140,7 +140,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
-	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: l} }
+	return m, router.Navigate(router.RouteLobby, l)
 }
 
 // defaultMaxPlayers is the seat count a lobby opens with, the same as
