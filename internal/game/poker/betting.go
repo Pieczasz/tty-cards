@@ -119,10 +119,9 @@ func commitTo(extra *State, p *game.Player, streetTotal uint) {
 // the short all-ins before it add up to a full raise over what that player last
 // acted on (checkBettingReopened).
 //
-// Deviation worth naming: MinRaise becomes the size of the last full raise, so after
-// a sub-minimum all-in the next legal raise is measured from the raised CurrentBet.
-// That is one level above the standard rule, which keeps the minimum at the last
-// *complete* raise increment. It only ever asks for more, never less.
+// MinRaise is the size of the last full raise, and the next legal raise is measured
+// from the raised CurrentBet: a sub-minimum all-in moves the bet but not the increment,
+// which is the standard rule (decisions.md #41).
 func applyBetIncrease(extra *State, state *game.State, raiser *game.Player, newBet uint) {
 	if newBet <= extra.CurrentBet {
 		return
