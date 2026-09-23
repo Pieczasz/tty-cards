@@ -1,5 +1,7 @@
 # Review fix plan
 
+> Every item in this plan is implemented on branch `fix/review-2026-09`; its decisions are recorded as `decisions.md` #38-#48 and the revision of #17. Delete this file before merge.
+
 The plan for every finding from the 2026-09-23 eight-region code review, including
 the lows, the code smells and the SOLID items. It is a working document: delete it
 once the last PR lands, and move anything still true into `decisions.md` or
