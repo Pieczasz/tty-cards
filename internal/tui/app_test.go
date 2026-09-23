@@ -156,7 +156,8 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	require.NoError(t, err)
 
 	guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), guest))
+	_, err = manager.JoinLobbyByCode(l.Code(), guest)
+	require.NoError(t, err)
 	require.NoError(t, l.ToggleReady(host, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 	require.NotNil(t, l.ActiveGame(), "the match has to be under way for the seat to survive")

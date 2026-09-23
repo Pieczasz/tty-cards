@@ -25,7 +25,8 @@ func startedTable(t *testing.T, manager *lobby.Manager, host, guest *game.Player
 	}
 	table, err := manager.New(host, lobby.WithCardGame(catalog.All[0].Name), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
-	require.NoError(t, manager.JoinLobbyByCode(table.Code(), guest))
+	_, err = manager.JoinLobbyByCode(table.Code(), guest)
+	require.NoError(t, err)
 	require.NoError(t, table.ToggleReady(host, registry))
 	require.NoError(t, table.ToggleReady(guest, registry))
 	require.NotNil(t, table.ActiveGame())

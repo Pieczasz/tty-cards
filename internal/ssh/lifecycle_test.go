@@ -79,7 +79,8 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 
 	table, err := manager.New(lobby.NewPlayer(host), lobby.WithCardGame("Mock"))
 	require.NoError(t, err)
-	require.NoError(t, manager.JoinLobbyByCode(table.Code(), guestPlayer))
+	_, err = manager.JoinLobbyByCode(table.Code(), guestPlayer)
+	require.NoError(t, err)
 
 	tracker := NewSessionTracker(0)
 	oldGen, err := tracker.Connect(guest.ID, nil)

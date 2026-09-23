@@ -282,7 +282,8 @@ func managerOf(_ *testing.T, m *model) *lobby.Manager { return m.global.LobbyMan
 func addGuest(t *testing.T, m *model, l *lobby.Lobby, id uint64, name string) *game.Player {
 	t.Helper()
 	g := lobby.NewPlayer(testUser(id, name))
-	require.NoError(t, m.global.LobbyManager.JoinLobbyByCode(l.Code(), g))
+	_, err := m.global.LobbyManager.JoinLobbyByCode(l.Code(), g)
+	require.NoError(t, err)
 	return g
 }
 

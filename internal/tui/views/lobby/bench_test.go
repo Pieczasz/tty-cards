@@ -49,7 +49,8 @@ func BenchmarkLobbyView_Render(b *testing.B) {
 	require.NoError(b, err)
 	for i := 2; i <= 4; i++ {
 		g := &game.Player{ID: testutil.SeatID(i), UserID: testutil.UID(i), Name: fmt.Sprintf("p%d", i)}
-		require.NoError(b, manager.JoinLobbyByCode(l.Code(), g))
+		_, err := manager.JoinLobbyByCode(l.Code(), g)
+		require.NoError(b, err)
 	}
 
 	global := benchGlobal(manager)
