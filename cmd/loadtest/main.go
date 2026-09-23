@@ -4,7 +4,9 @@
 // It is a measurement tool, not a test: it never asserts, it prints numbers.
 // Every client gets its own ephemeral ed25519 key, so it also registers its own
 // account on first connect - which is what keeps the one-session-per-account
-// tracker and the per-connection channel cap out of the way.
+// tracker and the per-connection channel cap out of the way. It also means the
+// server under test needs REGISTRATION_LIMIT raised past -sessions: the default
+// budget is 5 new accounts per network per hour.
 package main
 
 import (
