@@ -352,6 +352,17 @@ func TestSeatedIn(t *testing.T) {
 
 	taken := game.NewEngine(&crazyeight.Rules{}, []*game.Player{{ID: "7"}, {ID: "8"}}, nil)
 	assert.False(t, m.seatedIn(taken), "a seat the engine removed is not a seat")
+
+	// The lobby reopens a finished table on its own goroutine, so for a moment
+	// ActiveGame still hands it back. Routing there bounced the player onto a
+	// game-over screen whose esc brought them straight back here.
+	rules := &crazyeight.Rules{}
+	finished := game.NewEngine(rules, []*game.Player{{ID: testutil.SeatID(1)}, {ID: testutil.SeatID(2)}}, rules.InitialDeck())
+	t.Cleanup(finished.Close)
+	require.NoError(t, finished.Start())
+	finished.RemovePlayer(testutil.SeatID(2))
+	require.True(t, finished.IsFinished())
+	assert.False(t, m.seatedIn(finished), "a finished table has no seat to return to")
 }
 
 func TestGetElo(t *testing.T) {

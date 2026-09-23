@@ -94,7 +94,13 @@ func (m *model) Init() tea.Cmd {
 	return listenToLobbyBroadcaster(m.lobbyChan)
 }
 
+// seatedIn is a seat at a live table. A finished engine still lists its seats, and the
+// lobby reopens on its own goroutine, so ActiveGame can hand one back for a moment:
+// routing there shows a game-over screen whose esc lands straight back here.
 func (m *model) seatedIn(engine *game.Engine) bool {
+	if engine.IsFinished() {
+		return false
+	}
 	me := views.SessionPlayerID(m.global)
 	return slices.ContainsFunc(engine.Snapshot().Players, func(p game.PlayerSnapshot) bool {
 		return p.ID == me
