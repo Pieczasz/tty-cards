@@ -367,18 +367,16 @@ func unerasedSeats(tx *gorm.DB, userIDs []uuid.UUID, places []int) ([]uuid.UUID,
 // table. A and B co-occurring is what the cap is actually about, and switching game
 // does not make it legitimate either, so the window spans every game.
 //
-// The scan is bounded by the recent ranked matches these seats played; the pair
-// counting happens in Go, which is cheap at these volumes. Callers must hold
-// lockPairing, or two concurrent finalizes sharing a seat both read an undamped count.
+// The scan drives from the server's ranked matches inside the window
+// (idx_matches_ranked_created, migration 000007) and joins out to these seats, so it
+// is bounded by the last day's ranked traffic, not by how long these players have been
+// playing. The pair counting happens in Go, which is cheap at these volumes. Callers
+// must hold lockPairing, or two concurrent finalizes sharing a seat both read an
+// undamped count.
 func repeatedPairCountLast24h(tx *gorm.DB, userIDs []uuid.UUID) (int, error) {
 	var matchIDs []uint
-	if err := tx.Model(&db.MatchParticipant{}).
-		Joins("JOIN matches ON matches.id = match_participants.match_id").
-		Where(`match_participants.user_id IN ? AND matches.ranked
-			AND matches.deleted_at IS NULL AND matches.created_at > ?`,
-			uuidStrings(userIDs), time.Now().Add(-24*time.Hour)).
-		Distinct().
-		Pluck("match_participants.match_id", &matchIDs).Error; err != nil {
+	if err := recentRankedMatches(tx, userIDs, time.Now().Add(-24*time.Hour)).
+		Pluck("matches.id", &matchIDs).Error; err != nil {
 		return 0, fmt.Errorf("query recent pairings: %w", err)
 	}
 	if len(matchIDs) == 0 {
@@ -403,6 +401,17 @@ func repeatedPairCountLast24h(tx *gorm.DB, userIDs []uuid.UUID) (int, error) {
 		}
 	}
 	return worstPairCount(seats), nil
+}
+
+// recentRankedMatches is the ranked, non-deleted matches since the cutoff that any of
+// userIDs sat in. The model's default scope supplies deleted_at IS NULL, which with
+// ranked is exactly the partial index's predicate.
+func recentRankedMatches(tx *gorm.DB, userIDs []uuid.UUID, since time.Time) *gorm.DB {
+	return tx.Model(&db.Match{}).
+		Joins("JOIN match_participants ON match_participants.match_id = matches.id").
+		Where("matches.ranked AND matches.created_at > ? AND match_participants.user_id IN ?",
+			since, uuidStrings(userIDs)).
+		Distinct()
 }
 
 // worstPairCount is the highest co-occurrence count over every pair in seats.
