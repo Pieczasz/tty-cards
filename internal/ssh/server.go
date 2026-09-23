@@ -51,12 +51,6 @@ const (
 	connIdleTimeout   = 30 * time.Minute
 	maxTerminalWidth  = 2000
 	maxTerminalHeight = 600
-	// Registration gets its own, far tighter budget than authentication. The auth
-	// limiter is sized so an ssh-agent offering every key it holds still gets in;
-	// minting an account is nothing like that, and each one is a permanent users row
-	// plus a session slot, so a stranger must not be able to do it in a loop.
-	registrationLimit  = 5
-	registrationWindow = time.Hour
 	// maxSessionsPerConnection bounds concurrent session channels on one connection.
 	// Every channel loads the user with three preloads against a small connection
 	// pool, so an unbounded client could exhaust the database from a single TCP
@@ -235,7 +229,11 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 		tracker = NewSessionTracker(deps.Config.MaxConnections)
 	}
 	rateLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
-	registerLimiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
+	// Registration gets its own, far tighter budget than authentication. The auth
+	// limiter is sized so an ssh-agent offering every key it holds still gets in;
+	// minting an account is nothing like that, and each one is a permanent users row
+	// plus a session slot, so a stranger must not be able to do it in a loop.
+	registerLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RegistrationLimit, deps.Config.RegistrationWindow)
 
 	// No wish.WithAddress: cmd/server builds the listener itself (LimitListener, and
 	// PROXY protocol in front of it) and calls Serve on it, so an address here is

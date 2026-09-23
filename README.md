@@ -141,7 +141,11 @@ go test -run='^$' -bench=. -benchmem ./internal/tui/views/game/poker/
 
 `make loadtest` drives N concurrent SSH sessions at a **running** server and
 prints connect / first-frame latency percentiles. It asserts nothing; it is a
-measurement tool. Point it at your own server, never a public one.
+measurement tool. Point it at your own server, never a public one. Every session
+registers a fresh account, and the server allows only `REGISTRATION_LIMIT` (5) new
+accounts per network per `REGISTRATION_WINDOW` (1h), so start the server under test
+with `REGISTRATION_LIMIT=10000`, and give each run on the same database a new
+`PREFIX`.
 
 ## Layout
 
@@ -176,13 +180,15 @@ Full list with comments in [`.env.example`](.env.example).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ENV` | `development` | `production` requires `DB_PASSWORD` |
+| `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD` |
 | `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969` |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
+| `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
 | `MAX_CONNECTIONS` | `1000` | concurrent TCP connections |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
 | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW_MS` | `5` / `1000` | SSH **auth attempts** per client network |
-| `DB_*` | see `.env.example` | Postgres; `DB_SSLMODE` is `require` in production |
+| `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network; raise for `make loadtest` |
+| `DB_*` | see `.env.example` | Postgres; in production `DB_SSLMODE` defaults to `require` and must be `require`, `verify-ca` or `verify-full` unless the host is internal or `ALLOW_INSECURE_DB=true` |
 | `DB_MAX_OPEN_CONNS` | `25` | pool size, independent of the SSH cap |
 | `API_PORT` | `6970` | stats API; reached only through nginx `/api/` |
 | `API_REQUESTS_PER_MINUTE` | `120` | per client network |

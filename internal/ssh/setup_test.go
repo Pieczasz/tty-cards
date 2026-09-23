@@ -322,7 +322,7 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 			before := tt.tracker.Count()
 
 			deps := newSessionDeps(tt.repo)
-			limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
+			limiter := ratelimit.NewSlidingWindowLimiter(5, time.Hour)
 			model, opts := sessionModel(deps, tt.tracker, limiter)(tt.session)
 
 			assert.Nil(t, model, "a refused session must not be handed to bubbletea")
@@ -366,7 +366,7 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 
 	tracker := NewSessionTracker(0)
 	deps := newSessionDeps(stubUserRepo{user: user})
-	limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
+	limiter := ratelimit.NewSlidingWindowLimiter(5, time.Hour)
 
 	model, _ := sessionModel(deps, tracker, limiter)(s)
 	require.NotNil(t, model)
@@ -391,7 +391,7 @@ func TestSessionProgram_RefusedSessionGetsNoProgram(t *testing.T) {
 
 	deps := newSessionDeps(stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
 	program := sessionProgram(deps, NewSessionTracker(0),
-		ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow))
+		ratelimit.NewSlidingWindowLimiter(5, time.Hour))
 
 	assert.Nil(t, program(s), "a refused session must not get a bubbletea program")
 }

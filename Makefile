@@ -34,7 +34,9 @@ clean:
 
 # Concurrent-SSH-session load test against an already-running server. Every run
 # registers fresh accounts, so PREFIX must change between runs on the same
-# database or registration fails with "username taken".
+# database or registration fails with "username taken". The server allows 5 new
+# accounts per network per hour by default, so start the one under test with e.g.
+# REGISTRATION_LIMIT=10000 (and PROXY_PROTOCOL=false when ADDR skips nginx).
 # Override any flag: make loadtest SESSIONS=500 PREFIX=r2 HOLD=60s
 loadtest:
 	go run ./cmd/loadtest -addr $(or $(ADDR),127.0.0.1:6969) -sessions $(or $(SESSIONS),200) \
