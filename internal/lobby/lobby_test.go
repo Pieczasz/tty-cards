@@ -117,7 +117,7 @@ func TestLobby_ToggleReady(t *testing.T) {
 	cardGame := "MockGame"
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame(cardGame))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	registry := game.NewRegistry()
 	mockRules := new(MockRules)
@@ -192,7 +192,7 @@ func TestLobby_BasicGetters(t *testing.T) {
 	assert.Equal(t, 4, l.MaxPlayers())
 	assert.True(t, l.IsPrivate())
 
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2))))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2)))))
 	assert.Len(t, l.Guests(), 1)
 }
 
@@ -206,7 +206,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	cardGame := "MockGame"
 	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame(cardGame), WithRanked(true))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	registry := game.NewRegistry()
 	mockRules := new(MockRules)
@@ -270,7 +270,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	cardGame := "MockGame"
 	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame(cardGame), WithRanked(false))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	registry := game.NewRegistry()
 	mockRules := new(MockRules)
@@ -314,8 +314,8 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 
 	l, err := m.New(leader, WithMaxPlayers(3), WithCardGame("Mock"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest3))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest3)))
 
 	registry := game.NewRegistry()
 	mockRules := new(MockRules)
@@ -349,9 +349,9 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	leader3 := mockPlayer("p5", testutil.UID(5))
 	l3, err := m.New(leader3, WithCardGame("Mock2"))
 	require.NoError(t, err)
-	_ = m.JoinLobbyByCode(l3.Code(), guest) // guest is already in lobby l, so this join is expected to fail.
+	_ = joinErr(m.JoinLobbyByCode(l3.Code(), guest)) // guest is already in lobby l, so this join is expected to fail.
 	guest4 := mockPlayer("p6", testutil.UID(6))
-	require.NoError(t, m.JoinLobbyByCode(l3.Code(), guest4))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l3.Code(), guest4)))
 	require.NoError(t, l3.ToggleReady(leader3, registry))
 	require.NoError(t, l3.ToggleReady(guest4, registry)) // Starts game!
 
@@ -424,7 +424,7 @@ func TestLobby_ChangesAreBroadcast(t *testing.T) {
 		ch, err := l.Subscribe("p1")
 		require.NoError(t, err)
 
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), mockPlayer("p2", testutil.UID(2))))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer("p2", testutil.UID(2)))))
 
 		assert.Equal(t, []string{EventPlayersUpdated}, drainEventTypes(ch))
 	})
@@ -433,7 +433,7 @@ func TestLobby_ChangesAreBroadcast(t *testing.T) {
 		t.Parallel()
 		m, l, _ := newTestLobby(t, 4)
 		guest := mockPlayer("p2", testutil.UID(2))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 		ch, err := l.Subscribe("p1")
 		require.NoError(t, err)
@@ -512,7 +512,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 			t.Parallel()
 			m, l, _ := newTestLobby(t, 9)
 			for i := range tt.guests {
-				require.NoError(t, m.JoinLobbyByCode(l.Code(), mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(10+i)))))
+				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(10+i))))))
 			}
 
 			err := l.SetMaxPlayers(l.Leader(), tt.limit, tt.rulesMin, tt.rulesMax)
@@ -533,7 +533,7 @@ func TestLobby_LeavingUnsubscribesThePlayer(t *testing.T) {
 	t.Parallel()
 	m, l, _ := newTestLobby(t, 4)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	guestCh, err := l.Subscribe(guest.ID)
 	require.NoError(t, err)
@@ -584,7 +584,7 @@ func TestLobby_ToggleReadyAfterAFinishedGame(t *testing.T) {
 	t.Parallel()
 	m, l, registry := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	require.NoError(t, l.ToggleReady(l.Leader(), registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -612,7 +612,7 @@ func TestLobby_StartsWithExactlyMaxPlayers(t *testing.T) {
 	m, l, registry := newTestLobby(t, 3)
 	guests := []*game.Player{mockPlayer("p2", testutil.UID(2)), mockPlayer("p3", testutil.UID(3))}
 	for _, g := range guests {
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
 
 	require.NoError(t, l.ToggleReady(l.Leader(), registry))
@@ -773,7 +773,7 @@ func TestLobby_FinishedGameReopensTheTableForSettings(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -804,7 +804,7 @@ func TestLobby_InheritedLeaderCanChangeSettingsAfterTheGameEnds(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	original := l.Leader()
 	inheritor := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), inheritor))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), inheritor)))
 
 	require.NoError(t, l.ToggleReady(original, registry))
 	require.NoError(t, l.ToggleReady(inheritor, registry))
@@ -828,7 +828,7 @@ func TestLobby_ReleaseFinishedGameIsANoOpOtherwise(t *testing.T) {
 	t.Parallel()
 	m, l, registry := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	require.NotPanics(t, l.releaseFinishedGame)
 	assert.True(t, isWaiting(l), "a lobby that never started is left alone")

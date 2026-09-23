@@ -17,6 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// joinErr keeps the join-and-assert call sites one line: they only care whether the
+// join was refused.
+func joinErr(_ *lobby.Lobby, err error) error { return err }
+
 type finalizedMatch struct {
 	gameName string
 	userIDs  []uuid.UUID

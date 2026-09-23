@@ -21,7 +21,7 @@ func TestLobby_EveryPlayerGetsAFeedAfterTheTableGrows(t *testing.T) {
 	ids := []string{leader.ID}
 	for i := 1; i < 10; i++ {
 		guest := mockPlayer(fmt.Sprintf("guest%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 		ids = append(ids, guest.ID)
 	}
 	require.Equal(t, 10, l.CurrentPlayers())

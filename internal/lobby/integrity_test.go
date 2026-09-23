@@ -11,6 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// joinErr keeps the many join-and-assert call sites one line: they only care whether
+// the join was refused.
+func joinErr(_ *Lobby, err error) error { return err }
+
 func isWaiting(l *Lobby) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -34,7 +38,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 			m, l, registry := newTestLobby(t, 4)
 			leader := l.Leader()
 			guest := mockPlayer("p2", testutil.UID(2))
-			require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 			require.NoError(t, l.ToggleReady(guest, registry))
 
 			ch, err := l.Subscribe("watcher")
@@ -69,7 +73,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 			c := mockPlayer("p3", testutil.UID(3))
 			holdout := mockPlayer("p4", testutil.UID(4))
 			for _, p := range []*game.Player{b, c, holdout} {
-				require.NoError(t, m.JoinLobbyByCode(l.Code(), p))
+				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), p)))
 			}
 			for _, p := range []*game.Player{leader, b, c} {
 				require.NoError(t, l.ToggleReady(p, registry))
@@ -90,8 +94,8 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 		leader := l.Leader()
 		b := mockPlayer("p2", testutil.UID(2))
 		c := mockPlayer("p3", testutil.UID(3))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), b))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), c))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), b)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), c)))
 		require.NoError(t, l.ToggleReady(b, registry))
 
 		m.LeaveLobby(leader)
@@ -130,7 +134,7 @@ func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
 	t.Parallel()
 	m, l, _ := newTestLobby(t, 4)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	m.mu.Lock()
 	m.grace.arm(guest.ID, time.Hour, func() {})

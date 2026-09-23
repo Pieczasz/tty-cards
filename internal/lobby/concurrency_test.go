@@ -81,7 +81,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		go func(g *guestRef) {
 			defer wg.Done()
 			<-start // release all goroutines together to maximise contention
-			err := m.JoinLobbyByCode(l.Code(), g.p)
+			err := joinErr(m.JoinLobbyByCode(l.Code(), g.p))
 			switch {
 			case err == nil:
 				g.joined = true
@@ -140,7 +140,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	all := []*game.Player{leader}
 	for i := 1; i < players; i++ {
 		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 		all = append(all, g)
 	}
 	require.Equal(t, players, l.CurrentPlayers())
@@ -207,7 +207,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				joinErr = m.JoinLobbyByCode(code, joiner)
+				_, joinErr = m.JoinLobbyByCode(code, joiner)
 			}()
 			go func() {
 				defer wg.Done()
@@ -259,7 +259,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	roster := []*game.Player{leader}
 	for i := 1; i < members; i++ {
 		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 		roster = append(roster, g)
 	}
 
@@ -501,7 +501,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			require.NoError(t, err)
 			elsewhere, err := m.New(other, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
-			require.NoError(t, m.JoinLobbyByCode(table.Code(), target))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
 
 			var (
 				wg   sync.WaitGroup
@@ -510,7 +510,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			wg.Add(3)
 			go func() { defer wg.Done(); <-gate; _ = m.Kick(host, target) }()
 			go func() { defer wg.Done(); <-gate; m.LeaveLobby(target) }()
-			go func() { defer wg.Done(); <-gate; _ = m.JoinLobbyByCode(elsewhere.Code(), target) }()
+			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(elsewhere.Code(), target)) }()
 			close(gate)
 			wg.Wait()
 

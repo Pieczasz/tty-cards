@@ -173,16 +173,18 @@ func (m *Manager) New(leader *game.Player, opts ...Option) (*Lobby, error) {
 	return lobby, nil
 }
 
-func (m *Manager) JoinLobbyByCode(code string, p *game.Player) error {
+// JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
+// does not look the code up a second time - by when the table may be gone.
+func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
 	ctx := m.shutdownCtx()
 	if !ValidLobbyCode(code) {
 		observability.LobbyJoin(ctx, "invalid_code")
-		return errors.New("invalid lobby code")
+		return nil, errors.New("invalid lobby code")
 	}
 	if m.joinLimiter != nil && !m.joinLimiter.Allow("join:"+p.ID) {
 		observability.LobbyJoin(ctx, "rate_limited")
 		observability.RateLimitReject(ctx, "lobby_join")
-		return errors.New("too many join attempts, please try again later")
+		return nil, errors.New("too many join attempts, please try again later")
 	}
 
 	m.mu.Lock()
@@ -190,22 +192,22 @@ func (m *Manager) JoinLobbyByCode(code string, p *game.Player) error {
 
 	if m.playerInLobbyLocked(p) {
 		observability.LobbyJoin(ctx, "already_in_lobby")
-		return errors.New("player is already in a lobby")
+		return nil, errors.New("player is already in a lobby")
 	}
 
 	lobby, exists := m.lobbies[code]
 	if !exists {
 		observability.LobbyJoin(ctx, "not_found")
-		return errors.New("lobby not found")
+		return nil, errors.New("lobby not found")
 	}
 
 	if err := lobby.addGuest(p); err != nil {
 		observability.LobbyJoin(ctx, "refused")
-		return err
+		return nil, err
 	}
 	m.playerLobby[p.ID] = lobby
 	observability.LobbyJoin(ctx, "ok")
-	return nil
+	return lobby, nil
 }
 
 func (m *Manager) FindLobbyByPlayer(p *game.Player) *Lobby {

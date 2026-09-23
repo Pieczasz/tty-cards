@@ -48,7 +48,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.Error(t, l.SetMaxPlayers(guests[0], 9, 2, 9), "only the leader may change settings")
 
 	for _, g := range guests {
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g), "guest %s should join", g.ID)
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)), "guest %s should join", g.ID)
 	}
 	require.Equal(t, 4, l.CurrentPlayers())
 	assert.Contains(t, browseCodes(manager, leader), l.Code(), "a public waiting lobby is listed")
@@ -114,8 +114,8 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	assert.True(t, l.IsReady(leader), "the ready flag still toggles")
 	assert.Nil(t, l.ActiveGame(), "one ready player cannot start a two-player game")
 
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob")))
-	assert.Error(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(3), "carol")),
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob"))))
+	assert.Error(t, joinErr(manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(3), "carol"))),
 		"a full lobby rejects further joins")
 }
 
@@ -128,7 +128,7 @@ func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 
 	l, err := manager.New(leader, lobby.WithCardGame(pokerGame), lobby.WithMaxPlayers(4))
 	require.NoError(t, err)
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
 
 	manager.LeaveLobby(leader)
 	assert.Equal(t, guest, l.Leader(), "the remaining guest takes over")

@@ -31,7 +31,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 
 	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	registry := game.NewRegistry()
 	rules := new(MockRules)
@@ -189,7 +189,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -218,7 +218,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	guest := mockPlayer("p2", testutil.UID(2))
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	observer, err := l.Subscribe("observer")
 	require.NoError(t, err)
@@ -313,7 +313,7 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 	require.Equal(t, InGame, l.state)
@@ -337,7 +337,7 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -357,7 +357,7 @@ func TestResumePlayer_AfterExpireClaimReturnsNil(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -381,7 +381,7 @@ func TestResumePlayer_TakeoverWithoutPendingLeave(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -393,7 +393,7 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 
 	m, l, _ := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.Equal(t, Waiting, l.state)
 
 	m.DisconnectPlayer(guest)
@@ -409,7 +409,7 @@ func startedGame(t *testing.T) (*Manager, *Lobby, *game.Player, *game.Player) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 	require.NotNil(t, l.ActiveGame(), "the game did not start")
@@ -524,7 +524,7 @@ func TestResumePlayer_DropsAStaleIndexEntry(t *testing.T) {
 	t.Parallel()
 	m, l, _ := newTestLobby(t, 3)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	l.mu.Lock()
 	l.guests = nil

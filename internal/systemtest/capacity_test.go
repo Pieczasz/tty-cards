@@ -75,7 +75,7 @@ func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, id
 	guests := make([]*game.Player, 0, n-1)
 	for i := 1; i < n; i++ {
 		g := benchPlayer(idx, i)
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
 		guests = append(guests, g)
 	}
 

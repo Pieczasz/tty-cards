@@ -85,7 +85,7 @@ func TestBrowseLobbies_Filters(t *testing.T) {
 	poker := openTable(t, m, "poker", testutil.UID(1), "Poker", 1500, WithRanked(true))
 	eights := openTable(t, m, "eights", testutil.UID(2), "CrazyEights", 1500)
 	full := openTable(t, m, "full", testutil.UID(3), "Poker", 1500, WithMaxPlayers(2))
-	require.NoError(t, m.JoinLobbyByCode(full.Code(), mockPlayer("filler", testutil.UID(4))))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(full.Code(), mockPlayer("filler", testutil.UID(4)))))
 
 	tests := []struct {
 		name   string
@@ -136,7 +136,7 @@ func TestBrowseLobbies_RowCarriesWhatTheListShows(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	l := openTable(t, m, "leader", testutil.UID(1), "Poker", 1800, WithRanked(true), WithMaxPlayers(4))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2))))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2)))))
 
 	entries := m.BrowseLobbies(nil, BrowseFilter{})
 

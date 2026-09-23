@@ -48,18 +48,18 @@ func TestManager_JoinLobbyByCode(t *testing.T) {
 	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("TestGame"))
 	require.NoError(t, err)
 
-	err = m.JoinLobbyByCode(l.Code(), guest1)
+	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
 	require.NoError(t, err)
 	assert.True(t, l.HasPlayer(guest1))
 	assert.Equal(t, 2, l.CurrentPlayers())
 
-	err = m.JoinLobbyByCode(l.Code(), guest2)
+	err = joinErr(m.JoinLobbyByCode(l.Code(), guest2))
 	require.ErrorContains(t, err, "this lobby is full")
 
-	err = m.JoinLobbyByCode("FAKE12XX", guest2)
+	err = joinErr(m.JoinLobbyByCode("FAKE12XX", guest2))
 	require.ErrorContains(t, err, "lobby not found")
 
-	err = m.JoinLobbyByCode(l.Code(), guest1)
+	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
 	require.ErrorContains(t, err, "player is already in a lobby")
 }
 
@@ -71,8 +71,8 @@ func TestManager_LeaveLobby(t *testing.T) {
 	guest2 := mockPlayer("g2", testutil.UID(3))
 
 	l, _ := m.New(leader, WithMaxPlayers(3), WithCardGame("TestGame"))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest1))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest1)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest2)))
 
 	m.LeaveLobby(guest1)
 	assert.False(t, l.HasPlayer(guest1))
@@ -169,7 +169,7 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	cardGame := "MockGame"
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame(cardGame))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	registry := game.NewRegistry()
 	mockRules := new(MockRules)
@@ -184,7 +184,7 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	require.NoError(t, l.ToggleReady(guest, registry))
 	assert.Equal(t, InGame, l.state)
 
-	err = m.JoinLobbyByCode(l.Code(), late)
+	err = joinErr(m.JoinLobbyByCode(l.Code(), late))
 	require.ErrorContains(t, err, "not accepting players")
 }
 
@@ -198,8 +198,8 @@ func TestManager_Kick(t *testing.T) {
 
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest2)))
 
 	require.ErrorContains(t, m.Kick(guest, leader), "only the leader")
 	require.ErrorContains(t, m.Kick(intruder, guest), "host is not in a lobby")
@@ -222,7 +222,7 @@ func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
 	require.NoError(t, err)
 
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), joiner))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), joiner)))
 	m.LeaveLobby(joiner)
 
 	other := mockPlayer("other", testutil.UID(3))
@@ -230,9 +230,9 @@ func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second attempt still under limit.
-	require.ErrorContains(t, m.JoinLobbyByCode("ZZZZZZZZ", joiner), "lobby not found")
+	require.ErrorContains(t, joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner)), "lobby not found")
 	// Third attempt exceeds limit.
-	err = m.JoinLobbyByCode("ZZZZZZZZ", joiner)
+	err = joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner))
 	require.ErrorContains(t, err, "too many join attempts")
 }
 
@@ -331,7 +331,7 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 		require.NoError(t, err)
 
 		joiner := &game.Player{ID: "joiner", UserID: testutil.UID(2)}
-		err = m.JoinLobbyByCode(code, joiner)
+		err = joinErr(m.JoinLobbyByCode(code, joiner))
 
 		if code == l.Code() {
 			require.NoError(t, err, "the real code must work")
@@ -454,7 +454,7 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 
 	l, err := m.New(leader, WithPrivate(false), WithMaxPlayers(2), WithCardGame("Mock"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
 
 	registry := game.NewRegistry()
@@ -507,7 +507,7 @@ func TestManager_RemoveLobbyClosesSubscribers(t *testing.T) {
 
 	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	ch, err := l.Subscribe(leader.ID)
 	require.NoError(t, err)
@@ -581,7 +581,7 @@ func TestLobby_IsLeader(t *testing.T) {
 	m, l, _ := newTestLobby(t, 3)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	assert.True(t, l.IsLeader(leader))
 	assert.False(t, l.IsLeader(guest))

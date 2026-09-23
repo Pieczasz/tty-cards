@@ -1,7 +1,6 @@
 package lobby
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -237,16 +236,12 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	if code == "" {
 		return m, nil
 	}
-	if err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global)); err != nil {
+	joined, err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global))
+	if err != nil {
 		m.err = err
 		// The table may have filled or started while the list was on screen, so show
 		// the player what is actually joinable now instead of a stale row.
 		m.refresh()
-		return m, nil
-	}
-	joined, err := m.global.LobbyManager.FindLobbyByCode(code)
-	if err != nil || joined == nil {
-		m.err = errors.New("joined lobby but failed to open it")
 		return m, nil
 	}
 	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: joined} }
