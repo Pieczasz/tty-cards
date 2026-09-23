@@ -13,7 +13,7 @@ import (
 func TestTrickWinner_HighestOfLedSuit(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.LedSuit = deck.Clubs
 	extra.TrickLeader = 0
 	extra.TrickCards = map[string]deck.Card{
@@ -22,9 +22,8 @@ func TestTrickWinner_HighestOfLedSuit(t *testing.T) {
 		"p3": {Rank: deck.King, Suit: deck.Clubs},
 		"p4": {Rank: deck.Two, Suit: deck.Clubs},
 	}
-	id, seat := trickWinner(state, extra)
-	assert.Equal(t, "p3", id)
-	assert.Equal(t, 2, seat)
+	assert.Equal(t, 2, trickWinner(state, extra), "p3's king is the highest club")
+
 }
 
 func TestTrickPoints(t *testing.T) {
@@ -67,20 +66,19 @@ func TestPassRecipient(t *testing.T) {
 
 func TestMatch_PassDirectionCycles(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TargetScore = DefaultTargetScore
 
 	want := []PassDirection{PassLeft, PassRight, PassAcross, PassNone, PassLeft}
 	dealer := 0
 	for hand := range want {
-		require.NoError(t, rules.beginHand(state, extra, dealer))
+		require.NoError(t, beginHand(state, extra, dealer))
 		assert.Equal(t, want[hand], extra.PassDirection, "hand %d", hand+1)
 		if want[hand] == PassNone {
-			assert.Equal(t, StageTrickPlay, extra.Stage)
+			assert.Equal(t, PhaseTrickPlay, extra.Phase)
 		} else {
-			assert.Equal(t, StagePassing, extra.Stage)
+			assert.Equal(t, PhasePassing, extra.Phase)
 		}
 		dealer = (dealer + 1) % playerCount
 	}
@@ -90,7 +88,7 @@ func TestMatch_ShootTheMoon_AndTargetEnd(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.HandPoints["p1"] = penaltyPointsTotal
 	scoreHand(extra, state.Players)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
@@ -99,7 +97,7 @@ func TestMatch_ShootTheMoon_AndTargetEnd(t *testing.T) {
 	extra.TargetScore = 26
 	assert.True(t, game.AnyScoreAtLeast(extra.CumulativeScores, extra.TargetScore))
 
-	extra.Stage = StageHandOver
+	extra.Phase = PhaseHandOver
 	extra.MatchComplete = true
 	assert.True(t, rules.CheckWinCondition(state))
 }
@@ -138,14 +136,14 @@ func TestMatch_DealerRotatesOneSeatPerHand(t *testing.T) {
 	state.CurrentTurn = 1
 	require.NoError(t, rules.OnGameStart(state))
 
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	require.Equal(t, 1, extra.DealerIndex, "the opening dealer is whoever is on turn")
 
 	for hand := 2; hand <= 5; hand++ {
 		// Finish the hand outright so afterPlay picks the next dealer.
 		extra.TricksPlayed = cardsPerHand - 1
 		extra.TrickCards = map[string]deck.Card{}
-		extra.Stage = StageTrickPlay
+		extra.Phase = PhaseTrickPlay
 		for i, p := range state.Players {
 			state.CurrentTurn = i
 			card := deck.Card{Rank: deck.Rank(i + 2), Suit: deck.Clubs}

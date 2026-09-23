@@ -27,14 +27,13 @@ func TestView_HandOverShowsScores(t *testing.T) {
 			Width:  80,
 			Height: 24,
 		},
-		Base:         gameview.BaseState{Phase: game.Playing},
-		stage:        logic.StageHandOver,
-		handComplete: true,
-		handNumber:   2,
-		seatOrder:    []string{"1", "2", "3", "4"},
-		seatNames: map[string]string{
-			"1": "alice", "2": "bob", "3": "carol", "4": "dave",
-		},
+		Base: gameview.BaseState{Phase: game.Playing, Seats: []game.PlayerSnapshot{
+			{ID: "1", Username: "alice"}, {ID: "2", Username: "bob"},
+			{ID: "3", Username: "carol"}, {ID: "4", Username: "dave"},
+		}},
+		phase:            logic.PhaseHandOver,
+		handComplete:     true,
+		handNumber:       2,
 		handPoints:       map[string]int{"1": 5, "2": 8, "3": 3, "4": 10},
 		cumulativeScores: map[string]int{"1": 25, "2": 8, "3": 18, "4": 17},
 	}
@@ -145,7 +144,6 @@ func TestView_TheWholeTrickIsVisibleAtEverySize(t *testing.T) {
 					Hand: []deck.Card{{Rank: deck.Two, Suit: deck.Clubs}},
 				},
 				trickCards: trick,
-				seatNames:  map[string]string{},
 			}
 
 			out := stripANSI(m.View().Content)
@@ -198,14 +196,12 @@ func fourHanded(width, height int) *Model {
 			CurrentPlayerID: "1",
 			TurnRemaining:   11 * time.Second,
 		},
-		stage:            logic.StageTrickPlay,
+		phase:            logic.PhaseTrickPlay,
 		trickCards:       map[string]deck.Card{"2": {Rank: deck.Queen, Suit: deck.Spades}},
 		handPoints:       map[string]int{"1": 0, "2": 13, "3": 0, "4": 0},
 		cumulativeScores: map[string]int{"1": 12, "2": 40, "3": 7, "4": 0},
 		handNumber:       4,
 		passDirection:    logic.PassLeft,
-		seatOrder:        []string{"1", "2", "3", "4"},
-		seatNames:        map[string]string{"1": "alice", "2": "bob", "3": "carol", "4": "dave"},
 		passSelected:     map[deck.Card]struct{}{},
 	}
 }
@@ -218,10 +214,10 @@ func TestView_EveryScreenFitsTheTerminal(t *testing.T) {
 	screens := map[string]func(*Model){
 		"trick play": func(*Model) {},
 		"the pass phase": func(m *Model) {
-			m.stage = logic.StagePassing
+			m.phase = logic.PhasePassing
 			m.passSelected = map[deck.Card]struct{}{m.Base.Hand[0]: {}, m.Base.Hand[3]: {}}
 		},
-		"the hand summary": func(m *Model) { m.stage = logic.StageHandOver; m.handComplete = true },
+		"the hand summary": func(m *Model) { m.phase = logic.PhaseHandOver; m.handComplete = true },
 		"the match over": func(m *Model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
@@ -261,7 +257,7 @@ func TestKeyHints_FollowTheStage(t *testing.T) {
 	m := fourHanded(100, 40)
 	assert.Equal(t, keyHintsPlay, m.keyHints())
 
-	m.stage = logic.StagePassing
+	m.phase = logic.PhasePassing
 	assert.Equal(t, keyHintsPass, m.keyHints())
 }
 
@@ -273,7 +269,7 @@ func TestRenderPassDirection_ShowsOnlyDuringThePass(t *testing.T) {
 	m := fourHanded(100, 40)
 	assert.Empty(t, m.renderPassDirection(), "trick play has no pass direction")
 
-	m.stage = logic.StagePassing
+	m.phase = logic.PhasePassing
 	assert.Contains(t, m.renderPassDirection(), "Pass: ")
 }
 
@@ -298,7 +294,7 @@ func TestRenderHandOver_ShowsEverySeatsHandAndTotal(t *testing.T) {
 	t.Parallel()
 
 	m := fourHanded(120, 50)
-	m.stage = logic.StageHandOver
+	m.phase = logic.PhaseHandOver
 	m.handComplete = true
 
 	out := m.View().Content

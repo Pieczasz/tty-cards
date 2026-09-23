@@ -50,7 +50,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSpace() (tea.Model, tea.Cmd) {
-	if m.stage != logic.StagePassing || !m.Base.MyTurn {
+	if m.phase != logic.PhasePassing || !m.Base.MyTurn {
 		return m, nil
 	}
 	card, ok := m.SelectedCard()
@@ -69,7 +69,7 @@ func (m *Model) handleSpace() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.stage == logic.StageHandOver && !m.matchComplete {
+	if m.phase == logic.PhaseHandOver && !m.matchComplete {
 		if m.Base.MyTurn {
 			return m.submit(logic.ActionNextHand{})
 		}
@@ -80,7 +80,7 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.stage == logic.StagePassing {
+	if m.phase == logic.PhasePassing {
 		return m.submitPass()
 	}
 

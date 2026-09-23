@@ -1,6 +1,7 @@
 package hearts
 
 import (
+	"cmp"
 	"log/slog"
 	"slices"
 
@@ -20,14 +21,14 @@ func findTwoOfClubs(state *game.State) int {
 func passRecipient(from int, dir PassDirection, n int) int {
 	switch dir {
 	case PassLeft:
-		return (from + 1) % n
+		return game.SeatAt(from+1, n)
 	case PassRight:
-		return (from - 1 + n) % n
+		return game.SeatAt(from-1, n)
 	case PassAcross:
-		return (from + 2) % n
-	default:
-		return from
+		return game.SeatAt(from+2, n)
+	case PassNone:
 	}
+	return from
 }
 
 func applyAllPasses(state *game.State, extra *State) {
@@ -39,14 +40,13 @@ func applyAllPasses(state *game.State, extra *State) {
 }
 
 func nextUnpassedSeat(state *game.State, extra *State, from int) int {
-	n := len(state.Players)
-	for step := 1; step <= n; step++ {
-		seat := (from + step) % n
-		if !extra.Passed[state.Players[seat].ID] {
-			return seat
-		}
+	seat := game.NextSeat(from, len(state.Players), func(seat int) bool {
+		return !extra.passed(state.Players[seat].ID)
+	})
+	if seat < 0 {
+		return from
 	}
-	return from
+	return seat
 }
 
 func handHasSuit(hand []deck.Card, suit deck.Suit) bool {
@@ -66,7 +66,9 @@ func hasNonPenaltyCard(hand []deck.Card) bool {
 	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !isPenaltyCard(c) })
 }
 
-func trickWinner(state *game.State, extra *State) (string, int) {
+// trickWinner is the seat that takes the trick on the table: the highest card of the
+// suit led.
+func trickWinner(state *game.State, extra *State) int {
 	bestValue := -1
 	winnerSeat := extra.TrickLeader
 	for seat, p := range state.Players {
@@ -79,7 +81,7 @@ func trickWinner(state *game.State, extra *State) (string, int) {
 			winnerSeat = seat
 		}
 	}
-	return state.Players[winnerSeat].ID, winnerSeat
+	return winnerSeat
 }
 
 func trickPoints(cards map[string]deck.Card) int {
@@ -89,7 +91,7 @@ func trickPoints(cards map[string]deck.Card) int {
 			pts++
 		}
 		if c == queenOfSpades {
-			pts += 13
+			pts += queenOfSpadesPoints
 		}
 	}
 	return pts
@@ -135,11 +137,9 @@ func threeMostDangerous(hand []deck.Card) []deck.Card {
 	}
 	sorted := slices.Clone(hand)
 	slices.SortFunc(sorted, func(a, b deck.Card) int {
-		if d := passDanger(b) - passDanger(a); d != 0 {
-			return d
-		}
-		return int(a.Suit) - int(b.Suit)
+		return cmp.Or(cmp.Compare(passDanger(b), passDanger(a)), cmp.Compare(a.Suit, b.Suit))
 	})
+
 	return sorted[:cardsToPass]
 }
 

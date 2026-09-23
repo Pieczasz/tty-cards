@@ -1,3 +1,5 @@
+// Package hearts is the Hearts table view: the four seats around the trick, the pass
+// picker and the between-hands scores.
 package hearts
 
 import (
@@ -22,7 +24,7 @@ type Model struct {
 	// the view, and positions saved across that point to cards nobody picked.
 	passSelected map[deck.Card]struct{}
 
-	stage            logic.Stage
+	phase            logic.Phase
 	heartsBroken     bool
 	trickCards       map[string]deck.Card
 	handPoints       map[string]int
@@ -32,8 +34,6 @@ type Model struct {
 	handComplete     bool
 	matchComplete    bool
 	lastTrickWinner  string
-	seatOrder        []string // player IDs clockwise from engine seat 0
-	seatNames        map[string]string
 }
 
 // New creates a Hearts TUI view bound to the session player.
@@ -46,7 +46,6 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 		trickCards:       map[string]deck.Card{},
 		handPoints:       map[string]int{},
 		cumulativeScores: map[string]int{},
-		seatNames:        map[string]string{},
 	}
 	m.syncState()
 	return m
@@ -55,7 +54,7 @@ func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 func (m *Model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
-			m.stage = s.Stage
+			m.phase = s.Phase
 			m.heartsBroken = s.HeartsBroken
 			m.trickCards = maps.Clone(s.TrickCards)
 			m.handPoints = maps.Clone(s.HandPoints)
@@ -67,16 +66,14 @@ func (m *Model) syncState() {
 			m.lastTrickWinner = s.LastTrickWinner
 		}
 	})
-	m.seatOrder = m.Base.SeatOrder()
-	m.seatNames = m.Base.SeatNames()
-
 	m.prunePassSelection()
 }
 
 // prunePassSelection drops staged cards that are no longer in the hand, and clears the
 // staging outright once the pass is over.
 func (m *Model) prunePassSelection() {
-	if m.stage != logic.StagePassing {
+	if m.phase != logic.PhasePassing {
+
 		m.passSelected = map[deck.Card]struct{}{}
 		return
 	}

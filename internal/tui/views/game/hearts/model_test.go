@@ -53,11 +53,10 @@ func TestSyncState_LoadsHeartsExtra(t *testing.T) {
 	_, m := startedTable(t)
 
 	assert.Equal(t, 1, m.handNumber)
-	assert.Contains(t, []logic.Stage{logic.StagePassing, logic.StageTrickPlay}, m.stage)
-	assert.Len(t, m.seatOrder, 4)
-	assert.Equal(t, "alice", m.seatNames[testutil.SeatID(1)])
+	assert.Contains(t, []logic.Phase{logic.PhasePassing, logic.PhaseTrickPlay}, m.phase)
+	assert.Len(t, m.Base.SeatOrder(), 4)
+	assert.Equal(t, "alice", m.Base.SeatNames()[testutil.SeatID(1)])
 	assert.False(t, m.heartsBroken)
-	assert.Equal(t, logic.DefaultTargetScore, 100)
 }
 
 func TestClose_ReleasesEngineSubscription(t *testing.T) {
@@ -83,7 +82,7 @@ func TestPassSelection_FollowsTheCardsNotThePositions(t *testing.T) {
 	m := &Model{
 		Base:         gameview.BaseState{Hand: slices.Clone(hand), MyTurn: true},
 		passSelected: map[deck.Card]struct{}{},
-		stage:        logic.StagePassing,
+		phase:        logic.PhasePassing,
 	}
 
 	m.Selected = 1
@@ -103,7 +102,7 @@ func TestPassSelection_FollowsTheCardsNotThePositions(t *testing.T) {
 	assert.Equal(t, map[deck.Card]struct{}{hand[2]: {}}, m.passSelected)
 
 	// And the staging goes entirely once the pass is over.
-	m.stage = logic.StageTrickPlay
+	m.phase = logic.PhaseTrickPlay
 	m.prunePassSelection()
 	assert.Empty(t, m.passSelected)
 }
@@ -159,7 +158,7 @@ func TestSyncState_CopiesTheMapsItKeepsFromTheEngine(t *testing.T) {
 func TestHandleSpace_StagesAtMostThreeCards(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
-	m.stage = logic.StagePassing
+	m.phase = logic.PhasePassing
 	m.Base.MyTurn = true
 	require.GreaterOrEqual(t, len(m.Base.Hand), 5)
 
@@ -179,16 +178,16 @@ func TestHandleSpace_IsInertOutsideThePassPhase(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
-		stage  logic.Stage
+		phase  logic.Phase
 		myTurn bool
 	}{
-		{name: "during trick play", stage: logic.StageTrickPlay, myTurn: true},
-		{name: "off turn", stage: logic.StagePassing, myTurn: false},
+		{name: "during trick play", phase: logic.PhaseTrickPlay, myTurn: true},
+		{name: "off turn", phase: logic.PhasePassing, myTurn: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, m := startedTable(t)
-			m.stage, m.Base.MyTurn, m.Selected = tc.stage, tc.myTurn, 0
+			m.phase, m.Base.MyTurn, m.Selected = tc.phase, tc.myTurn, 0
 
 			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 			assert.Empty(t, m.passSelected)
@@ -201,7 +200,7 @@ func TestHandleSpace_IsInertOutsideThePassPhase(t *testing.T) {
 func TestSubmitPass_RefusesAnythingButThreeCards(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
-	m.stage = logic.StagePassing
+	m.phase = logic.PhasePassing
 	m.Base.MyTurn = true
 	m.Selected = 0
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -226,7 +225,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 	t.Run("between hands only the seat on turn deals", func(t *testing.T) {
 		t.Parallel()
 		_, m := startedTable(t)
-		m.stage = logic.StageHandOver
+		m.phase = logic.PhaseHandOver
 		m.Base.MyTurn = false
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -237,7 +236,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 	t.Run("off turn nothing is played", func(t *testing.T) {
 		t.Parallel()
 		_, m := startedTable(t)
-		m.stage = logic.StageTrickPlay
+		m.phase = logic.PhaseTrickPlay
 		m.Base.MyTurn = false
 
 		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
