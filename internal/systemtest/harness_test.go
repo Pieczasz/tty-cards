@@ -119,9 +119,8 @@ func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
 			if event.Type != lobby.EventGameStarted {
 				continue
 			}
-			engine, ok := event.Payload.(*game.Engine)
-			require.True(t, ok, "GAME_STARTED payload must carry the engine")
-			return engine
+			require.NotNil(t, event.Engine, "GAME_STARTED must carry the engine")
+			return event.Engine
 		case <-deadline:
 			t.Fatal("timed out waiting for the game to start")
 		}

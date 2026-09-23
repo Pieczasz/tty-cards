@@ -24,7 +24,7 @@ func openPublicTable(t *testing.T, m *lobby.Manager, id string, dbID uuid.UUID, 
 	t.Helper()
 	leader := &game.Player{ID: id, UserID: dbID, Name: id}
 	opts = append([]lobby.Option{lobby.WithPrivate(false), lobby.WithCardGame(gameName)}, opts...)
-	l, err := m.New(leader, opts...)
+	l, err := m.CreateLobby(leader, opts...)
 	require.NoError(t, err)
 	return l
 }

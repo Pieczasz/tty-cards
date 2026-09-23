@@ -28,7 +28,7 @@ func BenchmarkJoinView_Render(b *testing.B) {
 	m := lobby.NewManager(context.Background(), nil)
 	for i := range 20 {
 		leader := &game.Player{ID: fmt.Sprintf("h%d", i), UserID: testutil.UID(byte(i + 1)), Name: fmt.Sprintf("h%d", i)}
-		_, err := m.New(leader, lobby.WithPrivate(false), lobby.WithCardGame(testGameName))
+		_, err := m.CreateLobby(leader, lobby.WithPrivate(false), lobby.WithCardGame(testGameName))
 		require.NoError(b, err)
 	}
 	view, ok := NewJoin(benchGlobal(m)).(*joinModel)
@@ -44,7 +44,7 @@ func BenchmarkJoinView_Render(b *testing.B) {
 func BenchmarkLobbyView_Render(b *testing.B) {
 	manager := lobby.NewManager(context.Background(), nil)
 	leader := &game.Player{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"}
-	l, err := manager.New(leader, lobby.WithMaxPlayers(4), lobby.WithPrivate(false),
+	l, err := manager.CreateLobby(leader, lobby.WithMaxPlayers(4), lobby.WithPrivate(false),
 		lobby.WithCardGame(testGameName))
 	require.NoError(b, err)
 	for i := 2; i <= 4; i++ {

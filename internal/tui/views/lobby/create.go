@@ -128,7 +128,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	l, err := m.global.LobbyManager.New(views.SessionPlayer(m.global),
+	l, err := m.global.LobbyManager.CreateLobby(views.SessionPlayer(m.global),
 		lobby.WithCardGame(name),
 		lobby.WithMaxPlayers(m.maxPlayers),
 		lobby.WithPrivate(m.isPrivate),

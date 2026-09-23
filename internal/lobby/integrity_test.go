@@ -18,7 +18,7 @@ func joinErr(_ *Lobby, err error) error { return err }
 func isWaiting(l *Lobby) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.state == Waiting
+	return l.state == waiting
 }
 
 // A guest readied up for the table they saw. Once the leader changes what the table
@@ -49,7 +49,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 			assert.Contains(t, drainEventTypes(ch), EventPlayersUpdated, "the rosters were not told")
 
 			require.NoError(t, l.ToggleReady(leader, registry))
-			assert.Equal(t, Waiting, l.state, "the leader started a match the guest never readied for")
+			assert.Equal(t, waiting, l.state, "the leader started a match the guest never readied for")
 		})
 	}
 }
@@ -84,7 +84,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 			for _, p := range []*game.Player{leader, b, c} {
 				assert.False(t, l.IsReady(p), "%s is still ready after the roster changed", p.ID)
 			}
-			assert.Equal(t, Waiting, l.state)
+			assert.Equal(t, waiting, l.state)
 		})
 	}
 
@@ -111,14 +111,14 @@ func TestRemoveLobby_KeepsANewerLobbysMapping(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	p := mockPlayer("p1", testutil.UID(1))
-	old, err := m.New(p, WithCardGame("Mock"))
+	old, err := m.CreateLobby(p, WithCardGame("Mock"))
 	require.NoError(t, err)
 
 	// The window inside LeaveLobby: the entry is gone, RemoveLobby has not run yet.
 	m.mu.Lock()
 	delete(m.playerLobby, p.ID)
 	m.mu.Unlock()
-	fresh, err := m.New(p, WithCardGame("Mock"))
+	fresh, err := m.CreateLobby(p, WithCardGame("Mock"))
 	require.NoError(t, err)
 
 	m.RemoveLobby(old.Code())

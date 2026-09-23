@@ -29,7 +29,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	leader := mockPlayer("leader", testutil.UID(1))
 	guest := mockPlayer("guest", testutil.UID(2))
 
-	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
@@ -192,9 +192,9 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
-	require.Equal(t, InGame, l.state)
+	require.Equal(t, inGame, l.state)
 
-	require.ErrorContains(t, m.Kick(leader, guest), "cannot kick during a game")
+	require.ErrorIs(t, m.Kick(leader, guest), errKickInGame)
 	assert.True(t, l.HasPlayer(guest), "the target is still at the table")
 	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "and still indexed to it")
 
@@ -215,7 +215,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	m := newTestManager(t, nil)
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
-	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
@@ -226,7 +226,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	require.NoError(t, l.ToggleReady(leader, game.NewRegistry()))
 	require.Error(t, l.ToggleReady(guest, game.NewRegistry()))
 
-	assert.Equal(t, []string{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
+	assert.Equal(t, []EventType{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
 		"the second flip was committed without telling anyone")
 	assert.True(t, l.IsReady(guest), "and it really was committed")
 }
@@ -315,7 +315,7 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
-	require.Equal(t, InGame, l.state)
+	require.Equal(t, inGame, l.state)
 
 	m.DisconnectPlayer(guest)
 
@@ -393,7 +393,7 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 	m, l, _ := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	require.Equal(t, Waiting, l.state)
+	require.Equal(t, waiting, l.state)
 
 	m.DisconnectPlayer(guest)
 
@@ -573,7 +573,8 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 			engine := game.NewEngine(&noStandingsRules{}, nil, deck.StandardDeck())
 			t.Cleanup(engine.Close)
 
-			m.finalizeFinishedGame(tt.req, engine, tt.reason, m.registerFinalizer())
+			require.True(t, m.registerFinalizer())
+			m.finalizeFinishedGame(tt.req, engine, tt.reason)
 
 			assert.True(t, logged.contains(tt.wantLog), "the drop was silent: %s", logged.String())
 			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -588,9 +589,10 @@ type noStandingsRules struct{ stubRules }
 
 func (noStandingsRules) Standings(*game.State) []*game.Player { return nil }
 
-// The label is a metric attribute: a reason falling through to "unknown" hides a whole
-// class of endings from the dashboard.
-func TestEndReasonLabel_NamesEveryReason(t *testing.T) {
+// The finish metric is labelled with EndReason.String(). These are the labels the
+// dashboards already group by, so a rename there splits every series in two, and a
+// reason falling through to "unknown" hides a whole class of endings.
+func TestFinalize_EndReasonMetricLabelsAreStable(t *testing.T) {
 	t.Parallel()
 	for reason, want := range map[game.EndReason]string{
 		game.EndReasonWin:         "win",
@@ -600,7 +602,7 @@ func TestEndReasonLabel_NamesEveryReason(t *testing.T) {
 		game.EndReasonInterrupted: "interrupted",
 		game.EndReasonUnknown:     "unknown",
 	} {
-		assert.Equal(t, want, endReasonLabel(reason))
+		assert.Equal(t, want, reason.String())
 	}
 }
 
@@ -627,7 +629,7 @@ func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
 	require.Eventually(t, func() bool {
 		l.mu.RLock()
 		defer l.mu.RUnlock()
-		return l.state == Waiting
+		return l.state == waiting
 	}, 2*time.Second, time.Millisecond)
 
 	assert.False(t, m.WaitForFinalizers(50*time.Millisecond),
@@ -696,9 +698,10 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
 
+			require.True(t, m.registerFinalizer())
 			m.finalizeFinishedGame(finalizeRequest{
 				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
-			}, engine, game.EndReasonInterrupted, m.registerFinalizer())
+			}, engine, game.EndReasonInterrupted)
 
 			repo.AssertExpectations(t)
 			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)

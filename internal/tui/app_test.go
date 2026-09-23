@@ -90,7 +90,7 @@ func TestModel_ASeatedPlayerIsBouncedBackToTheirLobby(t *testing.T) {
 			t.Parallel()
 			r, manager, user := sessionModel(t)
 
-			l, err := manager.New(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.All[0].Name))
+			l, err := manager.CreateLobby(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.All[0].Name))
 			require.NoError(t, err)
 			t.Cleanup(func() { manager.LeaveLobby(internallobby.NewPlayer(user)) })
 
@@ -143,7 +143,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	host := internallobby.NewPlayer(user)
-	l, err := manager.New(host,
+	l, err := manager.CreateLobby(host,
 		internallobby.WithCardGame(catalog.All[0].Name),
 		internallobby.WithMaxPlayers(2),
 	)

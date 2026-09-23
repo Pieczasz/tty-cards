@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"cmp"
 	"maps"
 	"slices"
 	"strings"
@@ -10,10 +11,12 @@ import (
 )
 
 const (
-	DefaultBrowseLimit = 20
-	MaxBrowseLimit     = 200
+	defaultBrowseLimit = 20
+	// MaxBrowseLimit is the most entries one BrowseLobbies call returns.
+	MaxBrowseLimit = 200
 )
 
+// BrowseMode filters the browse by whether a table is ranked.
 type BrowseMode uint8
 
 const (
@@ -22,18 +25,22 @@ const (
 	BrowseCasual
 )
 
+// BrowseEntry is one open public table as the browse screen lists it.
 type BrowseEntry struct {
 	Code       string
 	GameName   string
 	Players    int
 	MaxPlayers int
 	Ranked     bool
-	AvgElo     uint32
-	EloDelta   int
+	// AvgElo is the table's average rating in its game, unrated seats at the start.
+	AvgElo uint32
+	// EloDelta is how far AvgElo is from the browsing player's own rating.
+	EloDelta int
 }
 
-func (e BrowseEntry) HasRoom() bool { return e.Players < e.MaxPlayers }
+func (e BrowseEntry) hasRoom() bool { return e.Players < e.MaxPlayers }
 
+// BrowseFilter narrows BrowseLobbies. The zero value lists every open public table.
 type BrowseFilter struct {
 	GameName     string // empty means any
 	Mode         BrowseMode
@@ -45,7 +52,7 @@ func (f BrowseFilter) matches(e BrowseEntry) bool {
 	if f.GameName != "" && e.GameName != f.GameName {
 		return false
 	}
-	if f.OnlyWithRoom && !e.HasRoom() {
+	if f.OnlyWithRoom && !e.hasRoom() {
 		return false
 	}
 	switch f.Mode {
@@ -58,17 +65,20 @@ func (f BrowseFilter) matches(e BrowseEntry) bool {
 	return true
 }
 
+// BrowseLobbies lists the public waiting tables matching f, closest in rating to p
+// first. A nil p is matched at the starting rating.
 func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 	if m == nil {
 		return nil
 	}
-	lobbies := m.getCachedPublicLobbies()
+	lobbies := m.publicLobbies()
 	var ratings map[string]uint32
 	if p != nil {
 		ratings = p.Ratings
 	}
 
-	entries := make([]BrowseEntry, 0, min(len(lobbies), f.limit()))
+	limit := f.limit()
+	entries := make([]BrowseEntry, 0, min(len(lobbies), limit))
 	for _, l := range lobbies {
 		entry, open := l.browseEntry()
 		if !open || !f.matches(entry) {
@@ -80,21 +90,14 @@ func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 	}
 
 	slices.SortFunc(entries, func(a, b BrowseEntry) int {
-		if a.EloDelta != b.EloDelta {
-			return a.EloDelta - b.EloDelta
-		}
-		return strings.Compare(a.Code, b.Code)
+		return cmp.Or(cmp.Compare(a.EloDelta, b.EloDelta), strings.Compare(a.Code, b.Code))
 	})
-
-	if len(entries) > f.limit() {
-		entries = entries[:f.limit()]
-	}
-	return entries
+	return entries[:min(len(entries), limit)]
 }
 
 func (f BrowseFilter) limit() int {
 	if f.Limit <= 0 {
-		return DefaultBrowseLimit
+		return defaultBrowseLimit
 	}
 	return min(f.Limit, MaxBrowseLimit)
 }
@@ -106,7 +109,7 @@ func (l *Lobby) browseEntry() (BrowseEntry, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	if l.options.isPrivate || l.state != Waiting {
+	if !l.onOfferLocked() {
 		return BrowseEntry{}, false
 	}
 	return BrowseEntry{
@@ -119,22 +122,23 @@ func (l *Lobby) browseEntry() (BrowseEntry, bool) {
 	}, true
 }
 
+// onOfferLocked is whether the table belongs in a browse. Caller holds l.mu.
+func (l *Lobby) onOfferLocked() bool {
+	return !l.options.isPrivate && l.state == waiting
+}
+
+// GameNames is the sorted set of games the public waiting tables play.
 func (m *Manager) GameNames() []string {
 	if m == nil {
 		return nil
 	}
 	seen := map[string]struct{}{}
-	for _, l := range m.getCachedPublicLobbies() {
+	for _, l := range m.publicLobbies() {
 		if name := l.GameName(); name != "" {
 			seen[name] = struct{}{}
 		}
 	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // publicLobbyCacheTTL is what keeps a browse off every lobby's own lock. The window
@@ -145,17 +149,15 @@ const publicLobbyCacheTTL = 2 * time.Second
 // change which tables are on offer, so a new or closed table shows up immediately
 // rather than a cache window later.
 func (m *Manager) invalidatePublicCache() {
-	if m != nil {
-		m.cacheDirty.Store(true)
-	}
+	m.cacheDirty.Store(true)
 }
 
-// getCachedPublicLobbies serves the cache under a read lock and, on a miss, copies
+// publicLobbies serves the cache under a read lock and, on a miss, copies
 // the lobby set and releases m.mu before touching any l.mu - the same shape as
 // Stats. Two simultaneous misses both rescan and the later write wins, so the stored
 // list can hold a table that has since gone private or started; browseEntry
 // re-checks each one, which is what keeps that out of the browse.
-func (m *Manager) getCachedPublicLobbies() []*Lobby {
+func (m *Manager) publicLobbies() []*Lobby {
 	m.mu.RLock()
 	if !m.cacheDirty.Load() && time.Since(m.cacheLastUpdated) < publicLobbyCacheTTL {
 		lobbies := slices.Clone(m.cachedPublicLobbies)
@@ -163,7 +165,7 @@ func (m *Manager) getCachedPublicLobbies() []*Lobby {
 		return lobbies
 	}
 	// Cleared inside the same lock hold that snapshots the lobby set, and before it.
-	// New and RemoveLobby set the flag while holding m.mu exclusively, so an
+	// CreateLobby and RemoveLobby set the flag while holding m.mu exclusively, so an
 	// invalidation either happened before this point - and its lobby is in the
 	// snapshot - or lands after, and survives into the next browse. Clearing it after
 	// the snapshot instead left a window where a table set the flag, this cleared it,
@@ -175,7 +177,7 @@ func (m *Manager) getCachedPublicLobbies() []*Lobby {
 	publicLobbies := make([]*Lobby, 0, len(all))
 	for _, l := range all {
 		l.mu.RLock()
-		if !l.options.isPrivate && l.state == Waiting {
+		if l.onOfferLocked() {
 			publicLobbies = append(publicLobbies, l)
 		}
 		l.mu.RUnlock()
@@ -186,6 +188,5 @@ func (m *Manager) getCachedPublicLobbies() []*Lobby {
 	m.cacheLastUpdated = time.Now()
 	m.mu.Unlock()
 
-	lobbies := slices.Clone(publicLobbies)
-	return lobbies
+	return slices.Clone(publicLobbies)
 }

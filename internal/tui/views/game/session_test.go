@@ -303,7 +303,7 @@ func seatedSession(t *testing.T) (*lobby.Manager, *game.Player, Session) {
 	_, s := startedSession(t)
 	manager := lobby.NewManager(context.Background(), nil)
 	alice := lobby.NewPlayer(s.Global.User)
-	_, err := manager.New(alice, lobby.WithCardGame("Crazy Eights"))
+	_, err := manager.CreateLobby(alice, lobby.WithCardGame("Crazy Eights"))
 	require.NoError(t, err)
 	s.Global.LobbyManager = manager
 	s.Global.Theme = styles.NewTheme(true)

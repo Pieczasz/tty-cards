@@ -44,7 +44,7 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	leaderUser := testUser(1, "alice")
 	leader := lobby.NewPlayer(leaderUser)
 
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame(testGameName),
 		lobby.WithMaxPlayers(4),
 		lobby.WithPrivate(false),
@@ -223,7 +223,7 @@ func TestHandleLobbyEvent_UnknownGameKeepsListening(t *testing.T) {
 	engine := game.NewEngine(&crazyeight.Rules{},
 		[]*game.Player{{ID: "1"}, {ID: "2"}}, nil)
 
-	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Payload: engine, src: m.lobbyChan})
+	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Engine: engine, src: m.lobbyChan})
 	require.NotNil(t, cmd, "listener must stay armed")
 	assert.NotNil(t, m.lobbyChan, "subscription is retained")
 }
@@ -447,7 +447,7 @@ func TestHandleLobbyEvent_GameStartedRoutesToTheGameView(t *testing.T) {
 	m, _ := leaderView(t)
 	engine := game.NewEngine(&crazyeight.Rules{}, []*game.Player{{ID: "1"}, {ID: "2"}}, nil)
 
-	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Payload: engine, src: m.lobbyChan})
+	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Engine: engine, src: m.lobbyChan})
 
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
@@ -457,29 +457,17 @@ func TestHandleLobbyEvent_GameStartedRoutesToTheGameView(t *testing.T) {
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
 }
 
-// A malformed payload is a server bug, not a reason to eject the player: the listener
+// A start with no engine is a server bug, not a reason to eject the player: the listener
 // has to stay armed or this view goes deaf while still holding a subscriber slot.
-func TestHandleLobbyEvent_BadGameStartedPayloadKeepsListening(t *testing.T) {
+func TestHandleLobbyEvent_GameStartedWithoutAnEngineKeepsListening(t *testing.T) {
 	t.Parallel()
+	m, _ := leaderView(t)
+	t.Cleanup(m.Close)
 
-	payloads := map[string]any{
-		"nothing at all": nil,
-		"the wrong type": "not an engine",
-		"a typed nil":    (*game.Engine)(nil),
-	}
+	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, src: m.lobbyChan})
 
-	for name, payload := range payloads {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			m, _ := leaderView(t)
-			t.Cleanup(m.Close)
-
-			_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Payload: payload, src: m.lobbyChan})
-
-			require.NotNil(t, cmd, "listener must stay armed")
-			assert.NotNil(t, m.lobbyChan, "and the subscription is retained")
-		})
-	}
+	require.NotNil(t, cmd, "listener must stay armed")
+	assert.NotNil(t, m.lobbyChan, "and the subscription is retained")
 }
 
 // Settings the leader changed have to land on the guests' screens, and the cursor has
@@ -487,8 +475,8 @@ func TestHandleLobbyEvent_BadGameStartedPayloadKeepsListening(t *testing.T) {
 func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 	t.Parallel()
 
-	for _, evType := range []string{lobby.EventSettingsUpdated, lobby.EventPlayersUpdated} {
-		t.Run(evType, func(t *testing.T) {
+	for _, evType := range []lobby.EventType{lobby.EventSettingsUpdated, lobby.EventPlayersUpdated} {
+		t.Run(evType.String(), func(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)

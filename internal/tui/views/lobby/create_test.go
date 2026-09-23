@@ -326,7 +326,7 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	manager := lobby.NewManager(t.Context(), nil)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
-	_, err := manager.New(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
+	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit

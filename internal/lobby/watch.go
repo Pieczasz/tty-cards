@@ -22,10 +22,7 @@ import (
 // have reopened and been reconfigured, and the result would be written under the new
 // ranked flag, the new game, and the next hand's start time.
 func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
-	if l.manager == nil {
-		return
-	}
-	ch, err := engine.Broadcaster().Subscribe()
+	ch, err := engine.Subscribe()
 	if err != nil {
 		observability.SubscribeFailure(l.manager.shutdownCtx(), "game")
 		slog.ErrorContext(l.manager.shutdownCtx(),
@@ -40,16 +37,16 @@ func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
 		startedAt: l.startedAt,
 	}
 	go func() {
-		defer engine.Broadcaster().Unsubscribe(ch)
-		l.handleBroadcasterEvents(ch, engine, req)
+		defer engine.Unsubscribe(ch)
+		l.handleGameEvents(ch, engine, req)
 	}()
 }
 
-func (l *Lobby) handleBroadcasterEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
+func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
 	ctx := l.manager.shutdownCtx()
 	gameName := req.game.Name
 	defer func() {
-		if n := engine.Broadcaster().Dropped(); n > 0 {
+		if n := engine.Dropped(); n > 0 {
 			observability.BroadcastDropped(ctx, "game", n)
 		}
 	}()
@@ -88,11 +85,16 @@ func (l *Lobby) handleBroadcasterEvents(ch <-chan game.Event, engine *game.Engin
 // 15s write does not pin InGame while the TUI is already back in the lobby; but it
 // waits on m.mu in releaseHeldSeats, and a shutdown that began inside that wait would
 // have refused the registration and dropped the match.
+//
+// The registration is taken before anything else: every statement between observing
+// the end and that call is a window for shutdown to begin, and a refusal then drops a
+// finished match with nothing left for WaitForFinalizers to wait on.
 func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
-	if l.manager == nil {
-		return
-	}
 	registered := l.manager.registerFinalizer()
 	l.releaseFinishedGame()
-	l.manager.finalizeFinishedGame(req, engine, reason, registered)
+	if !registered {
+		l.manager.dropFinishedMatch(req)
+		return
+	}
+	l.manager.finalizeFinishedGame(req, engine, reason)
 }

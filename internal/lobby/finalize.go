@@ -2,7 +2,6 @@ package lobby
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -22,32 +21,29 @@ type finalizeRequest struct {
 	startedAt time.Time
 }
 
-// finalizeFinishedGame persists the result of a game that just ended. registered is
-// the caller's registerFinalizer result, taken before anything else: every statement
-// between observing the end and that call is a window for shutdown to begin, and a
-// refusal then drops a finished match with nothing left for WaitForFinalizers to
-// wait on. A true registration is released here on every path.
-func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason, registered bool) {
-	if m == nil {
+// dropFinishedMatch is the finalize for a match shutdown refused to register: nothing
+// is written, so it has to be said.
+func (m *Manager) dropFinishedMatch(req finalizeRequest) {
+	if m.matchRepo == nil {
 		return
 	}
-	if registered {
-		defer m.finalizing.Done()
-	}
+	ctx := m.shutdownCtx()
+	slog.ErrorContext(ctx, "finished match dropped; shutdown stopped new finalizers",
+		"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked)
+	observability.MatchFinalize(ctx, "dropped", req.isRanked)
+}
+
+// finalizeFinishedGame persists the result of a game that just ended. The caller has
+// already registered it with registerFinalizer, which this releases.
+func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason) {
+	defer m.finalizing.Done()
 	if m.matchRepo == nil {
 		return
 	}
 	parentCtx := m.shutdownCtx()
 
-	if !registered {
-		slog.ErrorContext(parentCtx, "finished match dropped; shutdown stopped new finalizers",
-			"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked)
-		observability.MatchFinalize(parentCtx, "dropped", req.isRanked)
-		return
-	}
-
 	if !req.startedAt.IsZero() {
-		observability.GameFinished(parentCtx, req.game.Name, req.isRanked, endReasonLabel(reason), time.Since(req.startedAt))
+		observability.GameFinished(parentCtx, req.game.Name, req.isRanked, reason.String(), time.Since(req.startedAt))
 	}
 	if req.game.Slug == "" {
 		// Every other bail-out says so; this one used to drop a finished match in
@@ -59,41 +55,38 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(parentCtx, rankedFinalizeTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, finalizeTimeout)
 	defer cancel()
 	m.persistFinishedMatch(ctx, engine, reason, req)
 }
 
-// unratedReason says why a ranked match is being recorded without moving Elo. Only the
-// three reasons persistFinishedMatch strips the rating for reach it.
-func unratedReason(reason game.EndReason) string {
-	switch reason {
-	case game.EndReasonRulesError:
+// unratedReason is why a ranked match ending for reason is recorded without moving
+// Elo, or "" when it is rated.
+//
+// A match the deploy interrupted has no honest winner: SSH teardown order, not play,
+// decided who was left holding cards. Rules errors are the same class - half-applied
+// state must not move the ladder. So is a table every seat left: standings are then
+// reverse leave order, so rating it pays the last to quit.
+func unratedReason(reason game.EndReason, shuttingDown bool) string {
+	switch {
+	case reason == game.EndReasonRulesError:
 		return "rules error ended the match; recording without Elo"
-	case game.EndReasonAbandoned:
+	case reason == game.EndReasonAbandoned:
 		return "every seat left the match; recording without Elo"
-	case game.EndReasonWin, game.EndReasonForfeit, game.EndReasonInterrupted, game.EndReasonUnknown:
+	case shuttingDown:
+		return "server is shutting down; recording the ranked match without Elo"
 	}
-	return "server is shutting down; recording the ranked match without Elo"
+	return ""
 }
 
-func endReasonLabel(reason game.EndReason) string {
-	switch reason {
-	case game.EndReasonWin:
-		return "win"
-	case game.EndReasonRulesError:
-		return "rules_error"
-	case game.EndReasonForfeit:
-		return "forfeit"
-	case game.EndReasonAbandoned:
-		return "abandoned"
-	case game.EndReasonInterrupted:
-		return "interrupted"
-	case game.EndReasonUnknown:
-		return "unknown"
-	default:
-		return "unknown"
-	}
+// matchResult is what a finished engine leaves to be written.
+type matchResult struct {
+	ref     db.GameRef
+	userIDs []uuid.UUID
+	places  []int
+	// leavers is set for an interrupted match only: the seats that are charged.
+	leavers     []uuid.UUID
+	interrupted bool
 }
 
 func (m *Manager) persistFinishedMatch(
@@ -109,7 +102,8 @@ func (m *Manager) persistFinishedMatch(
 		return
 	}
 
-	userIDs := make([]uuid.UUID, 0, len(standings))
+	res := matchResult{ref: req.game, places: places, interrupted: reason == game.EndReasonInterrupted}
+	res.userIDs = make([]uuid.UUID, 0, len(standings))
 	for i, p := range standings {
 		if p == nil || p.UserID == uuid.Nil() {
 			slog.ErrorContext(ctx, "standing player has no database user; match not recorded",
@@ -117,23 +111,22 @@ func (m *Manager) persistFinishedMatch(
 			observability.MatchFinalize(ctx, "dropped", req.isRanked)
 			return
 		}
-		userIDs = append(userIDs, p.UserID)
+		res.userIDs = append(res.userIDs, p.UserID)
+	}
+	if res.interrupted {
+		res.leavers = leaverIDs(engine)
 	}
 
-	// A match the deploy interrupted has no honest winner: SSH teardown order, not
-	// play, decided who was left holding cards. Rules errors are the same class -
-	// half-applied state must not move the ladder. So is a table every seat left:
-	// standings are then reverse leave order, so rating it pays the last to quit.
 	// An interrupted match stays rated, but only against its leavers: see
 	// recordFinishedMatch.
-	rated := req.isRanked && !m.isShuttingDown() &&
-		reason != game.EndReasonRulesError && reason != game.EndReasonAbandoned
-	if req.isRanked && !rated {
-		slog.WarnContext(ctx, unratedReason(reason), "lobby", req.lobbyCode, "game", req.game.Slug)
+	rated := req.isRanked
+	if why := unratedReason(reason, m.isShuttingDown()); rated && why != "" {
+		rated = false
+		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
 	}
 
-	if err := m.recordFinishedMatch(ctx, engine, reason, req.game, userIDs, places, rated); err != nil {
-		slog.ErrorContext(ctx, "failed to record finished match",
+	if err := m.recordFinishedMatch(ctx, res, rated); err != nil {
+		slog.ErrorContext(ctx, "record finished match",
 			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated)
 		observability.MatchFinalize(ctx, "error", req.isRanked)
 		return
@@ -144,25 +137,19 @@ func (m *Manager) persistFinishedMatch(
 // recordFinishedMatch picks the write. An interrupted match (decision D-1) is rated
 // only against its leavers: the seats still playing did not finish, so nothing moves
 // for them, but quitting a losing match must not be free.
-func (m *Manager) recordFinishedMatch(
-	ctx context.Context, engine *game.Engine, reason game.EndReason,
-	ref db.GameRef, userIDs []uuid.UUID, places []int, isRanked bool,
-) error {
+//
+// The repository's error already names the write, so it is returned as it is.
+//
+//nolint:wrapcheck // wrapping it again logged "finalize ranked match: finalize ranked match"
+func (m *Manager) recordFinishedMatch(ctx context.Context, res matchResult, rated bool) error {
 	switch {
-	case !isRanked:
-		if err := m.matchRepo.RecordCasualMatch(ctx, ref, userIDs); err != nil {
-			return fmt.Errorf("record casual match: %w", err)
-		}
-	case reason == game.EndReasonInterrupted:
-		if err := m.matchRepo.FinalizeInterruptedMatch(ctx, ref, userIDs, places, leaverIDs(engine)); err != nil {
-			return fmt.Errorf("finalize interrupted match: %w", err)
-		}
+	case !rated:
+		return m.matchRepo.RecordCasualMatch(ctx, res.ref, res.userIDs)
+	case res.interrupted:
+		return m.matchRepo.FinalizeInterruptedMatch(ctx, res.ref, res.userIDs, res.places, res.leavers)
 	default:
-		if err := m.matchRepo.FinalizeRankedMatch(ctx, ref, userIDs, places); err != nil {
-			return fmt.Errorf("finalize ranked match: %w", err)
-		}
+		return m.matchRepo.FinalizeRankedMatch(ctx, res.ref, res.userIDs, res.places)
 	}
-	return nil
 }
 
 // leaverIDs is who left the finished engine's table. LeftPlayers is engine state, so it
@@ -201,10 +188,7 @@ func (m *Manager) BeginShutdown() {
 	}
 	m.shuttingDown.Store(true)
 	m.mu.Lock()
-	held := make([]*game.Player, 0, len(m.grace.pending))
-	for id := range m.grace.pending {
-		held = append(held, &game.Player{ID: id})
-	}
+	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
 	// LeaveLobby stops the timer under m.mu before touching the roster.
 	for _, p := range held {
@@ -213,7 +197,7 @@ func (m *Manager) BeginShutdown() {
 }
 
 func (m *Manager) isShuttingDown() bool {
-	return m != nil && m.shuttingDown.Load()
+	return m.shuttingDown.Load()
 }
 
 // WaitForFinalizers stops accepting finished-match writes, then blocks until all

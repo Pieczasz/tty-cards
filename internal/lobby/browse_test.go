@@ -20,7 +20,7 @@ func openTable(t *testing.T, m *Manager, id string, dbID uuid.UUID, gameName str
 		leader.Ratings = map[string]uint32{gameName: rating}
 	}
 	opts = append([]Option{WithPrivate(false), WithCardGame(gameName)}, opts...)
-	l, err := m.New(leader, opts...)
+	l, err := m.CreateLobby(leader, opts...)
 	require.NoError(t, err)
 	return l
 }
@@ -47,7 +47,7 @@ func TestBrowseLobbies_CapsToTheClosestTables(t *testing.T) {
 
 	entries := m.BrowseLobbies(browser, BrowseFilter{})
 
-	require.Len(t, entries, DefaultBrowseLimit, "the list is capped")
+	require.Len(t, entries, defaultBrowseLimit, "the list is capped")
 	assert.LessOrEqual(t, entries[0].EloDelta, entries[len(entries)-1].EloDelta,
 		"closest rating first")
 	for _, e := range entries {
@@ -147,15 +147,15 @@ func TestBrowseLobbies_RowCarriesWhatTheListShows(t *testing.T) {
 	assert.Equal(t, 2, entry.Players)
 	assert.Equal(t, 4, entry.MaxPlayers)
 	assert.True(t, entry.Ranked)
-	assert.True(t, entry.HasRoom())
+	assert.True(t, entry.hasRoom())
 	assert.Equal(t, (1800+elo.ToUint32(elo.DefaultRating))/2, entry.AvgElo)
 }
 
 func TestBrowseEntry_HasRoom(t *testing.T) {
 	t.Parallel()
-	assert.True(t, BrowseEntry{Players: 1, MaxPlayers: 2}.HasRoom())
-	assert.False(t, BrowseEntry{Players: 2, MaxPlayers: 2}.HasRoom(), "a full table has no seat")
-	assert.False(t, BrowseEntry{Players: 3, MaxPlayers: 2}.HasRoom())
+	assert.True(t, BrowseEntry{Players: 1, MaxPlayers: 2}.hasRoom())
+	assert.False(t, BrowseEntry{Players: 2, MaxPlayers: 2}.hasRoom(), "a full table has no seat")
+	assert.False(t, BrowseEntry{Players: 3, MaxPlayers: 2}.hasRoom())
 }
 
 func TestBrowseLobbies_UnratedPlayerIsMatchedAtTheStartingRating(t *testing.T) {
@@ -193,7 +193,7 @@ func TestManager_GameNames(t *testing.T) {
 	openTable(t, m, "c", testutil.UID(3), "Poker", 1500)
 
 	private := mockPlayer("private", testutil.UID(4))
-	_, err := m.New(private, WithPrivate(true), WithCardGame("Hidden"))
+	_, err := m.CreateLobby(private, WithPrivate(true), WithCardGame("Hidden"))
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"CrazyEights", "Poker"}, m.GameNames(),
@@ -229,7 +229,7 @@ func TestBrowseLobbies_RechecksACachedTable(t *testing.T) {
 
 	flips := map[string]func(l *Lobby){
 		"went private": func(l *Lobby) { l.options.isPrivate = true },
-		"started":      func(l *Lobby) { l.state = InGame },
+		"started":      func(l *Lobby) { l.state = inGame },
 	}
 	for name, flip := range flips {
 		t.Run(name, func(t *testing.T) {

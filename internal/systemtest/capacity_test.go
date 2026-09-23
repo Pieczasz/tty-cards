@@ -64,7 +64,7 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, idx, n int) *lobby.Lobby {
 	t.Helper()
 	leader := benchPlayer(idx, 0)
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame("Poker"),
 		lobby.WithMaxPlayers(9),
 		lobby.WithPrivate(false),

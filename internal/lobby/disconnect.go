@@ -7,21 +7,21 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
-// disconnectGrace holds mid-game seats after a dropped session. Caller must hold
+// graceTimers holds mid-game seats after a dropped session. Caller must hold
 // Manager.mu around every method: the maps are not independently locked.
-type disconnectGrace struct {
+type graceTimers struct {
 	pending  map[string]*time.Timer
 	expiring map[string]struct{}
 }
 
-func newDisconnectGrace() disconnectGrace {
-	return disconnectGrace{
+func newGraceTimers() graceTimers {
+	return graceTimers{
 		pending:  make(map[string]*time.Timer),
 		expiring: make(map[string]struct{}),
 	}
 }
 
-func (d *disconnectGrace) clear(id string) {
+func (d *graceTimers) clear(id string) {
 	if t, ok := d.pending[id]; ok {
 		t.Stop()
 		delete(d.pending, id)
@@ -29,7 +29,7 @@ func (d *disconnectGrace) clear(id string) {
 	delete(d.expiring, id)
 }
 
-func (d *disconnectGrace) arm(id string, wait time.Duration, fire func()) {
+func (d *graceTimers) arm(id string, wait time.Duration, fire func()) {
 	if t, ok := d.pending[id]; ok {
 		t.Stop()
 	}
@@ -38,7 +38,7 @@ func (d *disconnectGrace) arm(id string, wait time.Duration, fire func()) {
 
 // beginExpire moves a pending leave into the expiring set. False if there was
 // nothing to expire (already resumed or cleared).
-func (d *disconnectGrace) beginExpire(id string) bool {
+func (d *graceTimers) beginExpire(id string) bool {
 	if _, ok := d.pending[id]; !ok {
 		return false
 	}
@@ -49,7 +49,7 @@ func (d *disconnectGrace) beginExpire(id string) bool {
 
 // tryCancel stops a pending leave for reconnect. blocked means expire already
 // owns the seat (or the timer callback is in flight).
-func (d *disconnectGrace) tryCancel(id string) (cancelled, blocked bool) {
+func (d *graceTimers) tryCancel(id string) (cancelled, blocked bool) {
 	if _, ok := d.expiring[id]; ok {
 		return false, true
 	}
@@ -65,7 +65,7 @@ func (d *disconnectGrace) tryCancel(id string) (cancelled, blocked bool) {
 }
 
 // DisconnectPlayer is what a dropped session calls instead of LeaveLobby: a seat
-// in a running game is kept for DisconnectGrace so the player can reconnect, while
+// in a running game is kept for disconnectGrace so the player can reconnect, while
 // a seat in a waiting lobby is given up immediately (nothing is lost by leaving).
 // During shutdown the grace is skipped so the drain still forfeits cleanly.
 func (m *Manager) DisconnectPlayer(p *game.Player) {
@@ -89,22 +89,22 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		return
 	}
 	l.mu.Lock()
-	inGame := l.state == InGame
-	if inGame {
+	playing := l.state == inGame
+	if playing {
 		// The session is gone, so its event channels must close now - but the seat
 		// stays, and the engine's turn clock plays for it until they return.
 		l.unsubscribePlayerLocked(p.ID)
 	}
 	l.mu.Unlock()
-	if !inGame {
+	if !playing {
 		m.mu.Unlock()
 		m.LeaveLobby(p)
 		return
 	}
-	m.grace.arm(p.ID, DisconnectGrace, func() { m.expireLeave(p) })
+	m.grace.arm(p.ID, disconnectGrace, func() { m.expireLeave(p) })
 	m.mu.Unlock()
-	slog.Info("session dropped mid-game, holding the seat",
-		"player_id", p.ID, "grace", DisconnectGrace.String())
+	slog.InfoContext(m.shutdownCtx(), "session dropped mid-game, holding the seat",
+		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
 // expireLeave is the grace timer's body, separate so tests can drive the expiry
@@ -116,7 +116,7 @@ func (m *Manager) expireLeave(p *game.Player) {
 		return
 	}
 	m.mu.Unlock()
-	slog.Info("disconnect grace expired, giving up the seat", "player_id", p.ID)
+	slog.InfoContext(m.shutdownCtx(), "disconnect grace expired, giving up the seat", "player_id", p.ID)
 	m.LeaveLobby(p)
 }
 
@@ -135,9 +135,9 @@ func (m *Manager) ResumePlayer(p *game.Player) *Lobby {
 	if cancelled, blocked := m.grace.tryCancel(p.ID); blocked {
 		return nil
 	} else if cancelled {
-		slog.Info("player reconnected inside the grace window", "player_id", p.ID)
+		slog.InfoContext(m.shutdownCtx(), "player reconnected inside the grace window", "player_id", p.ID)
 	}
-	// Same re-validation FindLobbyByPlayer and New do: a stale index entry would
+	// Same re-validation FindLobbyByPlayer and CreateLobby do: a stale index entry would
 	// route the reconnect into a lobby whose roster no longer holds them.
 	if !m.playerInLobbyLocked(p) {
 		return nil
@@ -149,22 +149,26 @@ func (m *Manager) ResumePlayer(p *game.Player) *Lobby {
 // The hold only makes sense mid-hand: once the game is over the lobby is Waiting, and
 // DisconnectPlayer gives a Waiting seat up at once. Leaving it armed keeps the player
 // out of every other table - and this one unable to reach all-ready - until the timer
-// fires, up to DisconnectGrace later.
+// fires, up to disconnectGrace later.
 func (m *Manager) releaseHeldSeats(l *Lobby) {
-	if m == nil || l == nil {
-		return
-	}
 	m.mu.Lock()
-	held := make([]*game.Player, 0, len(m.grace.pending))
-	for id := range m.grace.pending {
-		if m.playerLobby[id] == l {
-			held = append(held, &game.Player{ID: id})
-		}
-	}
+	held := m.heldSeatsLocked(l)
 	m.mu.Unlock()
 	// expireLeave, not LeaveLobby: it claims the grace the way the timer would, so a
 	// ResumePlayer racing it is refused rather than resuming a seat already gone.
 	for _, p := range held {
 		m.expireLeave(p)
 	}
+}
+
+// heldSeatsLocked is every seat held for a reconnect at l, or anywhere when l is nil.
+// Caller holds m.mu.
+func (m *Manager) heldSeatsLocked(l *Lobby) []*game.Player {
+	held := make([]*game.Player, 0, len(m.grace.pending))
+	for id := range m.grace.pending {
+		if l == nil || m.playerLobby[id] == l {
+			held = append(held, &game.Player{ID: id})
+		}
+	}
+	return held
 }

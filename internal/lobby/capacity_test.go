@@ -13,7 +13,7 @@ func TestLobby_EveryPlayerGetsAFeedAfterTheTableGrows(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("Uno"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Uno"))
 	require.NoError(t, err)
 
 	require.NoError(t, l.SetMaxPlayers(leader, 10, 2, 10))

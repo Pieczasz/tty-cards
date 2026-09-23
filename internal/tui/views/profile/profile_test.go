@@ -708,7 +708,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil)
-	_, err := manager.New(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.All[0].Name))
+	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.All[0].Name))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 

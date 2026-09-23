@@ -30,7 +30,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	leader := newPlayer(testutil.UID(1), "alice")
 	guests := []*game.Player{newPlayer(testutil.UID(2), "bob"), newPlayer(testutil.UID(3), "carol"), newPlayer(testutil.UID(4), "dave")}
 
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame(pokerGame),
 		lobby.WithMaxPlayers(2),
 		lobby.WithPrivate(true),
@@ -103,7 +103,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	registry := realRegistry(t)
 
 	leader := newPlayer(testutil.UID(1), "alice")
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame(pokerGame),
 		lobby.WithMaxPlayers(2),
 	)
@@ -126,7 +126,7 @@ func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 	leader := newPlayer(testutil.UID(1), "alice")
 	guest := newPlayer(testutil.UID(2), "bob")
 
-	l, err := manager.New(leader, lobby.WithCardGame(pokerGame), lobby.WithMaxPlayers(4))
+	l, err := manager.CreateLobby(leader, lobby.WithCardGame(pokerGame), lobby.WithMaxPlayers(4))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
 

@@ -1,8 +1,8 @@
 package lobby
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,7 +60,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
 	require.NoError(t, err)
 
 	guests := make([]*guestRef, joiners)
@@ -86,7 +86,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 			case err == nil:
 				g.joined = true
 				successes.Add(1)
-			case strings.Contains(err.Error(), "full"):
+			case errors.Is(err, ErrLobbyFull):
 				fullErrs.Add(1)
 			default:
 				otherErrs.Add(1)
@@ -134,7 +134,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(players), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(players), WithCardGame("TestGame"))
 	require.NoError(t, err)
 
 	all := []*game.Player{leader}
@@ -165,7 +165,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	// Lobby must be gone from the manager entirely.
 	_, err = m.FindLobbyByCode(l.Code())
-	require.ErrorContains(t, err, "lobby not found", "empty lobby must be removed")
+	require.ErrorIs(t, err, ErrLobbyNotFound, "empty lobby must be removed")
 
 	// No ghost membership: the manager's playerLobby map is the authoritative
 	// membership index, and no player may still resolve to a lobby through it.
@@ -192,7 +192,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			unlimitedJoins(m)
 
 			leader := mockPlayer(fmt.Sprintf("leader-%d", i), testutil.UID(uint64(2*i+1)))
-			l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
+			l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
 			code := l.Code()
 
@@ -253,7 +253,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(members), WithCardGame("NeverStarts"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(members), WithCardGame("NeverStarts"))
 	require.NoError(t, err)
 
 	roster := []*game.Player{leader}
@@ -318,7 +318,7 @@ func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int)
 	// than emptying it - so the state, not the slice, is what says whether a seat
 	// exists. The manager's index is the authoritative membership record either way.
 	l.mu.RLock()
-	seated := l.state != Closed && l.hasPlayerLocked(p)
+	seated := l.state != closed && l.hasPlayerLocked(p)
 	l.mu.RUnlock()
 
 	assert.False(t, pending, "iter %d: a grace timer is still armed after both paths settled", iter)
@@ -496,9 +496,9 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			target := mockPlayer("target", testutil.UID(2))
 			other := mockPlayer("other", testutil.UID(3))
 
-			table, err := m.New(host, WithMaxPlayers(4), WithCardGame("TestGame"))
+			table, err := m.CreateLobby(host, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
-			elsewhere, err := m.New(other, WithMaxPlayers(4), WithCardGame("TestGame"))
+			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
 			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
 
@@ -554,7 +554,7 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range tables {
-			_, err := m.New(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
+			_, err := m.CreateLobby(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
 				WithPrivate(false), WithCardGame("TestGame"))
 			assert.NoError(t, err)
 		}

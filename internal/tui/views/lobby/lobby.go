@@ -309,9 +309,9 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 		cmd := m.goHome()
 		return m, cmd
 	case lobby.EventGameStarted:
-		engine, ok := msg.Payload.(*game.Engine)
-		if !ok || engine == nil {
-			slog.Error("GAME_STARTED payload was not a game engine")
+		engine := msg.Engine
+		if engine == nil {
+			slog.Error("GAME_STARTED carried no game engine")
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
 		mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName())

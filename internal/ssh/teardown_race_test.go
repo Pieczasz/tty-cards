@@ -19,7 +19,7 @@ import (
 func startedTable(t *testing.T, manager *lobby.Manager, host, guest *game.Player) *lobby.Lobby {
 	t.Helper()
 	registry := catalog.NewRegistry()
-	table, err := manager.New(host, lobby.WithCardGame(catalog.All[0].Name), lobby.WithMaxPlayers(2))
+	table, err := manager.CreateLobby(host, lobby.WithCardGame(catalog.All[0].Name), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
 	_, err = manager.JoinLobbyByCode(table.Code(), guest)
 	require.NoError(t, err)
