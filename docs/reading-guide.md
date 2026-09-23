@@ -92,9 +92,9 @@ then `internal/broadcaster/broadcaster_test.go` `TestBroadcaster_LatestWins` and
 
 ## 2. The engine core
 
-**Files, in this order.** `internal/game/action.go` (60), `rules.go` (71),
-`player.go` (44), `state.go` (49), `engine.go` (543) top to bottom,
-`turnclock.go` (170), `bound.go` (81), `shed.go` (111), `registry.go` (59).
+**Files, in this order.** `internal/game/action.go` (65), `rules.go` (71),
+`player.go` (44), `state.go` (53), `engine.go` (562) top to bottom,
+`turnclock.go` (219), `bound.go` (71), `shed.go` (130), `registry.go` (59).
 
 **Understand.**
 
@@ -122,6 +122,13 @@ finishes the game as `EndReasonRulesError` with state possibly half-applied, so
 `[0, len(Players))` with a modulo, because a leave handler can compute an index
 against the pre-removal seat count.
 
+*A turn that carries on keeps its clock.* `armTurnTimerLocked` keeps the running
+deadline when the seat on turn and the turn length are unchanged - gin's draw then
+discard, a re-armed auto-play, somebody else leaving - floored at
+`minTurnRemaining` (10 s), and `resolveTurnTimeout` charges one miss per seat-turn
+(`turnMissCharged`), not per expiry
+([`decisions.md` #38](decisions.md#38-the-turn-clock-keeps-a-seats-deadline-while-its-turn-carries-on)).
+
 *`turnSeq` is the fence.* `stopTurnTimerLocked` increments it, and
 `armTurnTimerLocked` calls `stopTurnTimerLocked` first - so every cursor change
 invalidates timers already in flight. An auto-play carries the generation it was
@@ -138,17 +145,23 @@ dodge removal by spamming rejected actions forever.
 without arming. There is nothing safe to play for an absent player, so they get
 no clock rather than a silent removal.
 
-*A rules panic on the timer ends one table.* `onTurnTimeout` runs on a
-`time.AfterFunc` goroutine with nothing above it to recover, so
-`recoverRulesPanic` is a direct `defer` there: it logs the stack and finishes the
-game as `EndReasonRulesError` rather than taking the process down with every
-other table on it.
+*A rules panic ends one table.* `onTurnTimeout` runs on a `time.AfterFunc`
+goroutine with nothing above it to recover, so `recoverRulesPanic` is a direct
+`defer` there; `SubmitAction` has its own direct deferred `recover`. Both end the
+game through `finishAfterPanicLocked` as `EndReasonRulesError` - without asking the
+rules for standings, since a second panic inside a recover would take the process
+down with every other table on it.
 
 *`BoundEngine` is a façade, not a capability.* `Bind(engine, playerID)` submits
 only as that player and `Frame` returns only that player's hand, the snapshot and
-the clock in one lock hold. But `Engine()` still hands back whole-table state -
-rendering a card table means rendering every seat. The value is that the default
-path is the safe one, so reaching past it is a visible detour.
+the clock in one lock hold. But `Frame`'s callback hands over the live,
+unredacted `*State` - rendering a card table means rendering every seat. There is
+no `Engine()` accessor; the value is that the default path is the safe one, and
+what reaches the screen is the view's job.
+
+*Seats are copies.* `NewEngine` copies each `*Player` with `Cards` cleared, so two
+engines never share a seat, and `Start` has no rollback: the lobby builds a new
+engine per attempt.
 
 **Invariant to check.** Nothing inside a `Rules` method can reach the `Engine`.
 Grep the five rules packages for `*game.Engine` and find nothing.
@@ -164,7 +177,7 @@ Grep the five rules packages for `*game.Engine` and find nothing.
 
 ## 3. One game vertically: Crazy Eights
 
-**Files.** `internal/game/crazyeight/rules.go` (191), `state.go` (14). Read them
+**Files.** `internal/game/crazyeight/rules.go` (166), `state.go` (14). Read them
 against the interface you just read, method by method.
 
 **Understand.** This is the smallest complete implementation of `Rules`. Match
@@ -172,11 +185,13 @@ rank or `CurrentSuit`; an eight is wild and carries the suit choice **inside**
 `ActionPlayCard`, so one action makes one state change and there is no
 half-applied "wild played, suit not yet named". `ActionDrawCard` is always legal,
 so an exhausted board cannot soft-lock the turn loop. The win check and the
-standings both come from `internal/game/shed.go`, shared with Uno.
+standings both come from `internal/game/shed.go`, shared with Uno, and so do the
+play check (`ValidateShedPlay`) and the draw (`DrawWithReshuffle`).
 
 **Invariant to check.** `TimeoutAction` returns something this package's own
 `ValidateAction` accepts. If it does not, the turn re-arms and the seat is taken
-on the *next* expiry instead - the clock stops being a clock.
+with only the 10-second floor and each refused expiry still costs a miss - the
+seat goes early and the clock stops being a clock.
 
 **Test.** `internal/game/crazyeight/rules_test.go`
 `TestSoak_TimeoutActionIsAlwaysLegal` - a `rapid`-driven soak that plays random
@@ -193,14 +208,14 @@ Same shape each time. Read the rules package, then its view package later (step
 
 | Game | Rules | Lines | What is new |
 |---|---|---|---|
-| Uno | `internal/game/uno/` | 302 + 49 + 35 | Skip, Reverse and the draw cards set `OverrideNextTurn` explicitly, so a reversed table honours `Direction` rather than the engine's +1 |
-| Hearts | `internal/game/hearts/` | 367 + 150 + 120 | A pass phase with its own clock (`TurnDurationHandler`), trick resolution, shooting the moon, `game.AnyScoreAtLeast` for the match target |
-| Gin Rummy | `internal/game/ginrummy/` | 484 + 255 + 103 + 76 | A search problem; see below |
-| Poker | `internal/game/poker/` | 775 + 416 + 238 + 87 | Money; see below |
+| Uno | `internal/game/uno/` | 287 + 49 + 35 | Skip, Reverse and the draw cards set `OverrideNextTurn` explicitly, so a reversed table honours `Direction` rather than the engine's +1 |
+| Hearts | `internal/game/hearts/` | 365 + 167 + 122 | A pass phase with its own clock (`TurnDurationHandler`), trick resolution, shooting the moon, `game.AnyScoreAtLeast` for the match target, and a leave that ends the match as `EndReasonInterrupted` (`State.Interrupted`) |
+| Gin Rummy | `internal/game/ginrummy/` | 495 + 255 + 106 + 76 | A search problem; see below |
+| Poker | `internal/game/poker/` | 293 + 239 + 211 + 71 + 430 + 238 + 91 (`rules`, `hand`, `betting`, `leave`, `streets`, `evaluator`, `state`) | Money; see below |
 
 ### Poker - the place where a bug is a payout
 
-Read `streets.go` before `rules.go`. Three functions carry the argument:
+Read `streets.go` before `betting.go`. Four functions carry the argument:
 
 - **`refundUncalled`** - the slice of the biggest bet nobody matched leaves the
   pot *before* side pots are cut. Only the single largest contributor can have
@@ -209,10 +224,19 @@ Read `streets.go` before `rules.go`. Three functions carry the argument:
 - **`buildSidePots`** and its `orphan` accumulator - dead money from folded
   players rides forward and joins the last live layer, rather than vanishing when
   a layer has no eligible player.
-- **`validateRaiseTo`** (`rules.go`) with `largestCallableBet` - a raise past
+- **`awardUncontested`** - a fold-out pays like a showdown: `refundUncalled`, then
+  everything else, folders' dead money included, to the winner
+  ([`decisions.md` #40](decisions.md#40-fold-out-dead-money-goes-to-the-winner)).
+- **`validateRaiseTo`** (`betting.go`) with `largestCallableBet` - a raise past
   what any opponent can call is **refused**, not staged and handed back at
   showdown. `checkBettingReopened` refuses a raise from a player facing the
-  uncalled part of a sub-minimum all-in.
+  uncalled part of a sub-minimum all-in, unless the short all-ins since they last
+  acted (`LastBetLevel`) add up to a full raise
+  ([#41](decisions.md#41-short-all-ins-that-add-up-to-a-full-raise-reopen-the-betting)).
+  `RaiseBounds` is the one legal band, and the view builds its prompt from it.
+
+After an action or a leave, `resolveAfterChange` moves the hand on, and a street
+that cannot be dealt unwinds through `settleOrUnwind` on either path.
 
 `checkChipConservation` is the tripwire, not the enforcement: by the time it
 fires the hand is closed out, so the value is the log line.
@@ -245,21 +269,23 @@ search's contract on a hand nobody designed.
 ## 5. Rating and persistence
 
 **Files, in this order.** `internal/elo/elo.go` (157); then `internal/db` -
-`repository.go` (38, the interfaces), `games.go` (24, `GameRef`), `users.go`
-(97), `matches.go` (25), `uuid_sql.go` (67), `errors.go` (17), `gorm.go` (44);
+`repository.go` (47, the interfaces), `games.go` (24, `GameRef`), `users.go`
+(97), `matches.go` (25), `uuid_sql.go` (69), `errors.go` (17), `gorm.go` (44);
 then `internal/db/migrations/*.sql` **in number order**; then
-`internal/repository/match.go` (442) and `user.go` (331).
+`internal/repository/match.go` (581) and `user.go` (382).
 
 **Understand.**
 
 *`internal/db` defines the contract, `internal/repository` implements it.*
-Nothing outside `cmd/server` (the composition root) and `internal/ssh` (for the
-error sentinels) may import `internal/repository`. That rule is enforced by
+Nothing outside `cmd/server` (the composition root) may import
+`internal/repository`; the error sentinels callers compare against live in
+`internal/db/errors.go`. That rule is enforced by
 `depguard` in `.golangci.yml`, not by memory.
 
 *Identity is the slug.* `db.GameRef{Slug, Name}` carries both halves together:
-`Slug` is what a rating hangs off (`games.slug`, upserted `ON CONFLICT (slug)`),
-`Name` is a display column refreshed on every write. Migration `000005_game_slug`
+`Slug` is what a rating hangs off (`games.slug`, read first and upserted
+`ON CONFLICT (slug)` only on a miss, a rename or a soft-deleted row), `Name` is a
+display column refreshed whenever it differs. Migration `000005_game_slug`
 exists because renaming a game used to create a second `games` row and orphan
 every ranking on the first.
 
@@ -276,11 +302,15 @@ either a chosen name of at most 16 characters or exactly
 
 *Read `updateRankingsTx` top to bottom*, then `DeleteAccount` /
 `eraseUserLocked`. The order inside the ranked transaction matters: seat advisory
-locks first (sorted, so two overlapping tables cannot deadlock), revive
-soft-deleted ranking rows, `SELECT … FOR UPDATE`, then the maths.
+locks first (sorted by folded key and deduplicated, so two overlapping tables
+cannot deadlock), drop the seats erased meanwhile (`unerasedSeats`), revive
+soft-deleted ranking rows and seed only the rows about to be written,
+`SELECT … FOR UPDATE`, then the maths. An interrupted match
+(`FinalizeInterruptedMatch`) writes only the leavers' rows, and only downwards.
+Erasure takes the same per-seat lock.
 
 **Invariant to check.** Every Elo write happens inside one transaction that holds
-a `pg_advisory_xact_lock` per seat, taken in user-id order.
+a two-int4 `pg_advisory_xact_lock` per seat, taken in folded-key order.
 
 **Test.** `internal/repository/user_test.go`
 `TestUserRepository_BestPlayers_FiltersBySlugAfterRename` for slug identity, and
@@ -292,9 +322,10 @@ until it is pinned `NOT NULL`.
 
 ## 6. The lobby
 
-**Files, in this order.** `internal/lobby/manager.go` (648), `disconnect.go`
-(60), `lobby.go` (645) - specifically `startGameLocked` and `watchGameLocked` -
-`finalize.go` (148), `browse.go` (142), `player.go` (27).
+**Files, in this order.** `internal/lobby/manager.go` (399), `disconnect.go`
+(170), `lobby.go` (575) - specifically `startGameLocked` - `watch.go` (98) for
+`watchGameLocked` and `requestFinalize`, `finalize.go` (255), `browse.go` (191),
+`player.go` (27).
 
 **Understand.**
 
@@ -312,7 +343,11 @@ also `releaseHeldSeats` when the hand ends (a still-armed hold keeps the player
 out of every other table and this one unable to reach all-ready) and
 `BeginShutdown` (they are not coming back to a process that is exiting).
 
-*Lock order is manager (`m.mu`) then lobby (`l.mu`), never inverted.* The browse
+*A ready is consent to the table as it was.* A settings change or any roster
+removal clears every ready flag; a join does not.
+
+*Lock order is manager (`m.mu`) then lobby (`l.mu`), never inverted* - below the
+ssh layer's `SessionTracker.mu`, which comes first. The browse
 cache uses an `atomic.Bool` dirty flag specifically so a `Lobby` can mark it while
 holding its own lock without reaching for the manager's.
 
@@ -331,11 +366,11 @@ Then `internal/lobby/finalize_test.go`
 
 ## 7. The terminal UI
 
-**Files, in this order.** `internal/tui/router/router.go` (209),
-`internal/tui/app.go` (93), `internal/tui/views/common.go` (124),
-`internal/tui/styles/common.go` (243) - `layoutHeights` above all -
-`internal/tui/views/game/session.go` (205), `layout.go` (404), `state.go` (78),
-`frame.go` (104), then `internal/tui/views/game/poker/model.go` (233) for
+**Files, in this order.** `internal/tui/router/router.go` (221),
+`internal/tui/app.go` (97), `internal/tui/views/common.go` (124),
+`internal/tui/styles/common.go` (241) - `layoutHeights` above all -
+`internal/tui/views/game/session.go` (288), `layout.go` (402), `state.go` (78),
+`frame.go` (104), then `internal/tui/views/game/poker/model.go` (220) for
 `buildSeats`. Skim the rest: `views/home`, `views/lobby`, `views/leaderboard`,
 `views/profile`, `styles/theme.go`, `components/card.go`.
 
@@ -356,13 +391,17 @@ promise and the render cannot drift. Every screen is tested at
 `{MinWidth, MinHeight}` = 64x20, plus 80x24 and 120x50.
 
 *`gameview.Session` is the view baseline.* It owns the engine binding,
-`NewSession`'s subscribe, the whole `Update` loop (`HandleFrame`), the hand
-cursor, `IdleRemoved`, `Leave` and `Close`. A new game writes its rules rendering
+`NewSession`'s subscribe, the whole `Update` loop (`HandleFrame`), the clock tick
+(`ClockTick`), the last rejected move (`ActionErr`), the hand cursor,
+`IdleRemoved`, the forfeit prompt (`HandleLeaveKey` / `LeaveConfirmScreen`: esc
+mid-game asks first), `IdleExempt` (a live table is spared the router's idle quit),
+`Leave` and `Close`. Every feed message carries the channel that delivered it
+(`EventMsg.Source`, `ClockTickMsg.Source`), and a view drops one armed by another. A new game writes its rules rendering
 and nothing else. Read per-game state through `Sync`'s callback and **copy**
 anything you keep - the `*State` you get is live and unredacted.
 
-*`buildSeats` is the one redaction point.* Poker reaches past `BoundEngine` to
-whole-table state because a showdown needs every seat, and so redaction becomes
+*`buildSeats` is the one redaction point.* Poker reads whole-table state through
+`Sync`'s callback because a showdown needs every seat, and so redaction becomes
 the view's named, testable job.
 
 **Invariant to check.** Nothing kept after `Sync` returns aliases engine state
@@ -377,22 +416,24 @@ the view's named, testable job.
 
 ## 8. The SSH server
 
-**Files.** `internal/ssh/auth.go` (81) first, then `internal/ssh/server.go` (646)
-in this order: `SessionTracker` -> `SetupServer` -> `sessionLifecycle` ->
-`sessionModel` -> `releaseSession` -> `recoverSession` / `reportingModel`.
+**Files.** `internal/ssh/auth.go` (86) first, then `internal/ssh/tracker.go` (113)
+for `SessionTracker`, then `internal/ssh/server.go` (599) in this order:
+`SetupServer` -> `limitSessionChannels` -> `sessionLifecycle` -> `sessionModel` ->
+`releaseSession` -> `recoverSession` / `reportingModel`.
 
 **Understand.**
 
 *Identity is the key fingerprint.* Any public key is accepted;
 `AuthenticateSession` turns it into `SHA256:…` and `LoadOrRegisterUser` resolves
 it. The SSH login name becomes the username on first connect only.
-`allowRegister` is consulted **only** on the `user == nil` branch, so a returning
-player never spends the registration budget.
+`allowRegister` is consulted **only** on the `user == nil` branch, after
+`db.ValidateUsername`, so neither a returning player nor a typo spends the
+registration budget (`REGISTRATION_LIMIT` / `REGISTRATION_WINDOW`).
 
-*Refusal is uninformative on purpose.* `mapRegisterError` folds
-`db.ErrUsernameTaken` and `db.ErrInvalidUsername` into one `ErrNameUnavailable`,
-because a distinguishable message turns the login banner into a "does this
-account exist" oracle.
+*"Taken" is uninformative on purpose.* `mapRegisterError` folds
+`db.ErrUsernameTaken` into `ErrNameUnavailable`, because a distinguishable message
+turns the login banner into a "does this account exist" oracle. An invalid name is
+a fixed rule, not a fact about other accounts, so the player is told why.
 
 *Middleware runs last-first.* The slice in `wish.WithMiddleware` executes in
 reverse, so `sessionLifecycle` is listed **last** to be outermost.
@@ -400,37 +441,44 @@ reverse, so `sessionLifecycle` is listed **last** to be outermost.
 second layer - and it must stay a **direct** `defer`, because a `recover()`
 inside a function called *by* a deferred function returns nil.
 
-*Per-session state lives in a session-keyed map*, never on `s.Context()`, which
-is per-**connection** and shared by every channel.
+*Per-session state lives in a per-server `sessionRegistry`*, never on
+`s.Context()`, which is per-**connection** and shared by every channel. The
+per-connection channel cap lives in the `session` channel handler and refuses
+before `Accept`.
 
 *A second session displaces the first* and closes its connection, outside the
 tracker lock - a wedged peer must not hold every other account's `Connect` behind
-it. Only the owning generation may free the slot and the seat (`Owns` /
-`Release`).
+it. Only the owning generation may free the slot and the seat.
 
-**Invariant to check.** `releaseSession` gives up the lobby seat *before* the
-tracker slot, so a reconnect cannot land between the two and find a free slot but
-a seat already gone.
+**Invariant to check.** `releaseSession` gives up the lobby seat and the tracker
+slot as one step under the tracker lock (`ReleaseWith`), and `tui.ResumeSeat` runs
+only once `Connect` has handed the session its slot, so a reconnect can neither
+land between the two nor have a refused session cancel its grace timer.
 
 **Test.** `internal/ssh/lifecycle_test.go`
 `TestReleaseSession_GivesUpTheSeatBeforeTheSlot`,
-`TestSessionState_IsPerChannelNotPerConnection` and
-`TestSessionTracker_ConnectClosesTheDisplacedSession`.
+`TestSessionState_IsPerChannelNotPerConnection`,
+`TestSessionTracker_ReleaseWithHoldsOffTheReconnect` and
+`TestSessionTracker_ConnectClosesTheDisplacedSession`; then
+`internal/ssh/teardown_race_test.go` and `channel_test.go`.
 
 ---
 
 ## 9. The edges
 
-**Files.** `internal/httpapi/httpapi.go` (298), `internal/ratelimit/limiter.go`
+**Files.** `internal/httpapi/httpapi.go` (312), `internal/ratelimit/limiter.go`
 (107) + `netkey.go` (21), `internal/observability/otel.go` (160) +
-`metrics.go` (172), `internal/config/config.go` (267).
+`metrics.go` (172), `internal/config/config.go` (324).
 
 **Understand.** The stats API is read-only, unauthenticated, and returns nothing
 the in-game leaderboard does not already show any visitor - that is what makes it
 safe. `API_TRUST_PROXY` defaults to **false**; a directly exposed listener that
 trusts `X-Forwarded-For` can be evaded by forging it, so the unsafe direction has
-to be chosen explicitly. Both limiters key on `ratelimit.NetKey`, which collapses
-IPv6 to its /64, because one customer is routinely handed 2^64 addresses.
+to be chosen explicitly, and with `PROXY_TRUSTED_CIDRS` set the header is
+believed only from the proxy's networks. The API makes no spans. Both limiters key
+on `ratelimit.NetKey`, which collapses IPv6 to its /64, because one customer is
+routinely handed 2^64 addresses. `config.Load` refuses an unknown `ENV` and, in
+production, a `DB_SSLMODE` that can fall back to plaintext.
 
 **Invariant to check.** No metric attribute carries personal data.
 
@@ -559,19 +607,20 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | Question | Start here |
 |---|---|
 | How does a key become a user? | `ssh/auth.go`, `repository/user.go` |
-| Second SSH session for the same account? | `SessionTracker.Connect` - it displaces |
+| Second SSH session for the same account? | `ssh/tracker.go` `SessionTracker.Connect` - it displaces |
 | Mid-game wifi drop? | `lobby/disconnect.go`, `DisconnectPlayer`, `ResumePlayer` |
 | Who writes Elo? | `lobby/finalize.go` -> `repository/match.go` |
-| Why did Elo not move? | shutdown / `EndReasonRulesError` / `EndReasonAbandoned` / pairing damp / provisional |
+| Why did Elo not move? | shutdown / `EndReasonRulesError` / `EndReasonAbandoned` / `EndReasonInterrupted` (only leavers move) / pairing damp / provisional |
 | Soft-deleted ranking broke finalize? | `seedRankingRows` revive |
 | How is a game registered? | `catalog/catalog.go` `All` |
-| Turn auto-play / idle kick? | `game/turnclock.go` |
+| Turn auto-play / idle kick? | `game/turnclock.go` (`armTurnTimerLocked`, `resolveTurnTimeout`) |
+| Why did esc not leave the table? | `views/game/session.go` `HandleLeaveKey` - mid-game it asks first |
 | TUI reading engine state? | `gameview.Session.Sync` -> `BoundEngine.Frame` |
 | Where is state redacted for the screen? | `views/game/poker/model.go` `buildSeats` |
 | Browse list sorting? | `lobby/browse.go` |
-| Lock order? | manager -> lobby -> engine; `State` has no lock |
+| Lock order? | tracker -> manager -> lobby -> engine; `State` has no lock |
 | Rate limiting on IPv6? | `ratelimit/netkey.go`; fail-closed in `ssh.netKeyFor` |
-| Why can I not register? | `registrationLimit` in `ssh/server.go`; `mapRegisterError` |
+| Why can I not register? | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` (`config/config.go`), `ssh.allowRegistration`; `db.ValidateUsername`; `mapRegisterError` |
 | Add a migration? | `make migrate-create`, files under `db/migrations/` |
 | Why is the game row keyed on a slug? | `db/games.go` `GameRef`, migration `000005` |
 | Why are account ids UUIDs? | `db/users.go`, `db/uuid_sql.go`, migration `000001` |
