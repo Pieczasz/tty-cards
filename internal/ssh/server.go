@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 // ctxKey namespaces ssh.Context values to avoid collision with other middleware.
@@ -61,6 +62,8 @@ const (
 	// pool, so an unbounded client could exhaust the database from a single TCP
 	// connection. Two allows the reconnect overlap a real client produces.
 	maxSessionsPerConnection = 2
+	maxEnvRequests           = 32
+	maxEnvBytes              = 8 << 10
 )
 
 // sessionState is per-channel session state. It cannot live on the ssh.Context: that
@@ -240,6 +243,9 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 		return nil, fmt.Errorf("error while setting up wish ssh server: %w", err)
 	}
 	server.HandshakeTimeout = handshakeTimeout
+	server.ChannelHandlers = map[string]ssh.ChannelHandler{
+		"session": limitSessionChannels(ssh.DefaultSessionHandler),
+	}
 
 	return server, nil
 }
@@ -464,44 +470,71 @@ func clampWindowSize(_ tea.Model, msg tea.Msg) tea.Msg {
 	return msg
 }
 
-// acquireChannelSlot claims one of the connection's session slots. The counter is
-// stored on the connection-scoped Context, whose own lock makes the first-writer
-// race harmless.
-func acquireChannelSlot(s ssh.Session) bool {
-	ctx := s.Context()
-	ctx.Lock()
-	counter, ok := ctx.Value(ctxKeyChannelCount).(*atomic.Int32)
-	if !ok {
-		counter = new(atomic.Int32)
-		ctx.SetValue(ctxKeyChannelCount, counter)
-	}
-	ctx.Unlock()
+// limitSessionChannels enforces the per-connection channel cap where the channel is
+// opened, before Accept. Counted in the middleware it bound nothing: a channel that
+// never asks for a shell never reaches it, yet holds its request goroutine and
+// buffers for as long as the client likes. The counter lives on the connection-scoped
+// Context, whose own lock makes the first-writer race harmless.
+func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
+	return func(srv *ssh.Server, conn *gossh.ServerConn, newChan gossh.NewChannel, ctx ssh.Context) {
+		ctx.Lock()
+		counter, ok := ctx.Value(ctxKeyChannelCount).(*atomic.Int32)
+		if !ok {
+			counter = new(atomic.Int32)
+			ctx.SetValue(ctxKeyChannelCount, counter)
+		}
+		ctx.Unlock()
 
-	if counter.Add(1) > maxSessionsPerConnection {
-		counter.Add(-1)
-		return false
+		if counter.Add(1) > maxSessionsPerConnection {
+			counter.Add(-1)
+			observability.SSHSession(ctx, "rejected_channel_limit")
+			slog.WarnContext(ctx, "too many session channels on one connection",
+				"remote_addr", conn.RemoteAddr().String(), "limit", maxSessionsPerConnection)
+			_ = newChan.Reject(gossh.ResourceShortage, "too many sessions open on this connection")
+			return
+		}
+		// The session handler returns once the channel's request stream closes, which
+		// is the channel going away.
+		defer counter.Add(-1)
+		next(srv, conn, envCappedChannel{NewChannel: newChan}, ctx)
 	}
-	return true
 }
 
-func releaseChannelSlot(s ssh.Session) {
-	if counter, ok := s.Context().Value(ctxKeyChannelCount).(*atomic.Int32); ok {
-		counter.Add(-1)
+// envCappedChannel refuses env requests past a count and byte budget. charm ssh keeps
+// every accepted one for the session's life, so an unbounded stream is unbounded
+// memory. A small budget rather than none: bubbletea reads TERM and colour hints
+// from the environment.
+type envCappedChannel struct {
+	gossh.NewChannel
+}
+
+func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
+	ch, reqs, err := c.NewChannel.Accept()
+	if err != nil {
+		return ch, reqs, fmt.Errorf("accept session channel: %w", err)
 	}
+	out := make(chan *gossh.Request)
+	go func() {
+		defer close(out)
+		count, size := 0, 0
+		for req := range reqs {
+			if req.Type == "env" {
+				count++
+				size += len(req.Payload)
+				if count > maxEnvRequests || size > maxEnvBytes {
+					_ = req.Reply(false, nil)
+					continue
+				}
+			}
+			out <- req
+		}
+	}()
+	return ch, out, nil
 }
 
 func sessionLifecycle(deps ServerDependencies, tracker *SessionTracker) wish.Middleware {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
-			if !acquireChannelSlot(s) {
-				observability.SSHSession(s.Context(), "rejected_channel_limit")
-				slog.WarnContext(s.Context(), "too many session channels on one connection",
-					"remote_addr", s.RemoteAddr().String(), "limit", maxSessionsPerConnection)
-				wish.Fatalf(s, "Too many sessions open on this connection.\n")
-				return
-			}
-			defer releaseChannelSlot(s)
-
 			st := startSession(s)
 			defer finishSession(s, st)
 			defer recoverSession(s)

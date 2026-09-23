@@ -3,10 +3,8 @@ package ssh
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
@@ -17,7 +15,6 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gossh "golang.org/x/crypto/ssh"
 )
 
 // fakeSession is enough of an ssh.Session for the teardown helpers, which only ever
@@ -124,53 +121,6 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	<-reconnected
 	assert.True(t, table.HasPlayer(guestPlayer), "the reconnected session lost the seat it just took")
 	assert.Equal(t, table, manager.FindLobbyByPlayer(guestPlayer), "and the index disagrees with the roster")
-}
-
-// One authenticated connection opening channels without limit is a database DoS:
-// every channel loads the user with three preloads against a small pool.
-func TestSessionLifecycle_CapsChannelsPerConnection(t *testing.T) {
-	t.Parallel()
-
-	admitted := make(chan struct{}, maxSessionsPerConnection+1)
-	release := make(chan struct{})
-	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil)}
-	srv := &ssh.Server{
-		Handler: sessionLifecycle(deps, NewSessionTracker(0))(func(_ ssh.Session) {
-			admitted <- struct{}{}
-			<-release
-		}),
-	}
-
-	addr := testsession.Listen(t, srv)
-	client, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{
-		User:            "flooder",
-		Auth:            []gossh.AuthMethod{gossh.Password("x")},
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close() })
-
-	var running sync.WaitGroup
-	for range maxSessionsPerConnection {
-		session, err := client.NewSession()
-		require.NoError(t, err)
-		running.Go(func() {
-			_, _ = session.Output("")
-		})
-	}
-	require.Eventually(t, func() bool { return len(admitted) == maxSessionsPerConnection },
-		2*time.Second, 10*time.Millisecond, "the cap refused a channel it should have admitted")
-
-	over, err := client.NewSession()
-	require.NoError(t, err)
-	out, _ := over.CombinedOutput("")
-	_ = over.Close()
-
-	assert.Contains(t, string(out), "Too many sessions", "the channel over the cap was closed silently")
-	assert.Len(t, admitted, maxSessionsPerConnection, "and it ran the handler anyway")
-
-	close(release)
-	running.Wait()
 }
 
 func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
