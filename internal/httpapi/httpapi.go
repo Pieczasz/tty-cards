@@ -91,7 +91,7 @@ type leaderboardEntry struct {
 }
 
 func Handler(deps Deps) http.Handler {
-	limiter := ratelimit.NewSlidingWindowLimiter(deps.RequestsPerMinute, time.Minute)
+	limiter := ratelimit.New(deps.RequestsPerMinute, time.Minute)
 	clientAddr := clientIPFunc(deps.TrustedProxy, deps.TrustedProxyNetworks)
 
 	mux := http.NewServeMux()
@@ -276,7 +276,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 }
 
 func withRateLimit(
-	limiter *ratelimit.SlidingWindowLimiter,
+	limiter *ratelimit.SlidingWindow,
 	clientAddr func(*http.Request) string,
 	next http.Handler,
 ) http.Handler {

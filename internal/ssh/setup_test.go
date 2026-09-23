@@ -161,7 +161,7 @@ func TestRateLimitAuth(t *testing.T) {
 			t.Parallel()
 			nextCalls := 0
 			handler := rateLimitAuth(
-				ratelimit.NewSlidingWindowLimiter(3, time.Minute),
+				ratelimit.New(3, time.Minute),
 				func(ssh.Context, ssh.PublicKey) bool { nextCalls++; return true },
 			)
 
@@ -181,7 +181,7 @@ func TestRateLimitAuth_CollapsesIPv6ToItsPrefix(t *testing.T) {
 	t.Parallel()
 
 	handler := rateLimitAuth(
-		ratelimit.NewSlidingWindowLimiter(1, time.Minute),
+		ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true },
 	)
 
@@ -195,7 +195,7 @@ func TestAllowRegistration(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		limiter  *ratelimit.SlidingWindowLimiter
+		limiter  *ratelimit.SlidingWindow
 		addr     net.Addr
 		attempts int
 		want     bool
@@ -203,17 +203,17 @@ func TestAllowRegistration(t *testing.T) {
 		{name: "no limiter configured", limiter: nil, addr: stubAddr{"10.0.0.1:1"}, attempts: 1, want: true},
 		{
 			name:    "inside the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"10.0.0.2:1"}, attempts: 2, want: true,
 		},
 		{
 			name:    "over the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"10.0.0.3:1"}, attempts: 3, want: false,
 		},
 		{
 			name:    "an unkeyable address fails closed",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"not-an-address"}, attempts: 1, want: false,
 		},
 	}
@@ -336,7 +336,7 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 
 			deps := newSessionDeps(tt.repo)
 			deps.Tracker = tt.tracker
-			limiter := ratelimit.NewSlidingWindowLimiter(5, time.Hour)
+			limiter := ratelimit.New(5, time.Hour)
 			model, opts := sessionModel(deps, reg, limiter)(tt.session)
 
 			assert.Nil(t, model, "a refused session must not be handed to bubbletea")
@@ -380,7 +380,7 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 
 	tracker := NewSessionTracker(0)
 	deps := newSessionDeps(stubUserRepo{user: user})
-	limiter := ratelimit.NewSlidingWindowLimiter(5, time.Hour)
+	limiter := ratelimit.New(5, time.Hour)
 
 	deps.Tracker = tracker
 	model, _ := sessionModel(deps, reg, limiter)(s)
@@ -407,7 +407,7 @@ func TestSessionProgram_RefusedSessionGetsNoProgram(t *testing.T) {
 	deps := newSessionDeps(stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
 	deps.Tracker = NewSessionTracker(0)
 	program := sessionProgram(deps, reg,
-		ratelimit.NewSlidingWindowLimiter(5, time.Hour))
+		ratelimit.New(5, time.Hour))
 
 	assert.Nil(t, program(s), "a refused session must not get a bubbletea program")
 }

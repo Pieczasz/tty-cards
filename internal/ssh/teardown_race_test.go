@@ -58,7 +58,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		fresh := &stubSession{addr: stubAddr{"10.0.0.1:2"}, pubKey: testPublicKey(t)}
 		freshState := &sessionState{traceCtx: context.Background()}
 		reg.store(fresh, freshState)
-		newModel := sessionModel(deps, reg, ratelimit.NewSlidingWindowLimiter(100, 1))
+		newModel := sessionModel(deps, reg, ratelimit.New(100, 1))
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})
@@ -98,7 +98,7 @@ func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	reg := &sessionRegistry{}
 	reg.store(s, &sessionState{traceCtx: context.Background()})
 
-	model, _ := sessionModel(deps, reg, ratelimit.NewSlidingWindowLimiter(100, 1))(s)
+	model, _ := sessionModel(deps, reg, ratelimit.New(100, 1))(s)
 	require.Nil(t, model, "the full server admitted the session")
 
 	// BeginShutdown gives up every seat still on a grace timer.

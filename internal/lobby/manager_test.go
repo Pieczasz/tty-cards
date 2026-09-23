@@ -214,7 +214,7 @@ func TestManager_Kick(t *testing.T) {
 func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	m.joinLimiter = ratelimit.NewSlidingWindowLimiter(2, time.Minute)
+	m.joinLimiter = ratelimit.New(2, time.Minute)
 
 	leader := mockPlayer("leader", testutil.UID(1))
 	joiner := mockPlayer("joiner", testutil.UID(2))

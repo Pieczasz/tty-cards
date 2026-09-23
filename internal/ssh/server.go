@@ -125,12 +125,12 @@ func SetupServer(deps ServerDependencies) (*ssh.Server, error) {
 	}
 
 	reg := &sessionRegistry{}
-	rateLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
+	rateLimiter := ratelimit.New(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
 	// Registration gets its own, far tighter budget than authentication. The auth
 	// limiter is sized so an ssh-agent offering every key it holds still gets in;
 	// minting an account is nothing like that, and each one is a permanent users row
 	// plus a session slot, so a stranger must not be able to do it in a loop.
-	registerLimiter := ratelimit.NewSlidingWindowLimiter(deps.Config.RegistrationLimit, deps.Config.RegistrationWindow)
+	registerLimiter := ratelimit.New(deps.Config.RegistrationLimit, deps.Config.RegistrationWindow)
 
 	// No wish.WithAddress: cmd/server builds the listener itself (LimitListener, and
 	// PROXY protocol in front of it) and calls Serve on it, so an address here is
@@ -192,7 +192,7 @@ func netKeyFor(addr net.Addr) (string, bool) {
 	return ratelimit.NetKey(host), true
 }
 
-func rateLimitAuth(limiter *ratelimit.SlidingWindowLimiter, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
+func rateLimitAuth(limiter *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
 	return func(ctx ssh.Context, key ssh.PublicKey) bool {
 		host, ok := netKeyFor(ctx.RemoteAddr())
 		if !ok {
@@ -232,7 +232,7 @@ func (reg *sessionRegistry) failSessionf(s ssh.Session, outcome string, err erro
 }
 
 func sessionModel(
-	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindowLimiter,
+	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindow,
 ) func(ssh.Session) (tea.Model, []tea.ProgramOption) {
 	return func(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 		traceCtx := reg.sessionTraceContext(s)
@@ -366,7 +366,7 @@ func boundedPty() ssh.Option {
 }
 
 func sessionProgram(
-	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindowLimiter,
+	deps ServerDependencies, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindow,
 ) bm.ProgramHandler {
 	newModel := sessionModel(deps, reg, registerLimiter)
 	return func(s ssh.Session) *tea.Program {
@@ -570,7 +570,7 @@ func (reg *sessionRegistry) releaseSession(s ssh.Session, deps ServerDependencie
 // address that cannot be keyed is refused: registration is the one path where
 // admitting an unmeterable client is worse than turning a real player away.
 func allowRegistration(
-	ctx context.Context, limiter *ratelimit.SlidingWindowLimiter, s ssh.Session,
+	ctx context.Context, limiter *ratelimit.SlidingWindow, s ssh.Session,
 ) bool {
 	if limiter == nil {
 		return true

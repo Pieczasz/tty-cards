@@ -19,7 +19,7 @@ import (
 // unlimitedJoins swaps the per-player join rate limiter for one that never
 // throttles, so a fan-out of concurrent joins is not masked by rate limiting.
 func unlimitedJoins(m *Manager) {
-	m.joinLimiter = ratelimit.NewSlidingWindowLimiter(1_000_000, time.Hour)
+	m.joinLimiter = ratelimit.New(1_000_000, time.Hour)
 }
 
 // runWithTimeout runs fn in a goroutine and fails the test loudly if it does not

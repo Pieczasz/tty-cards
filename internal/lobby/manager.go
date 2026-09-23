@@ -50,7 +50,7 @@ type Manager struct {
 	cacheDirty  atomic.Bool
 	matchRepo   db.MatchRepository
 	appCtx      context.Context
-	joinLimiter *ratelimit.SlidingWindowLimiter
+	joinLimiter *ratelimit.SlidingWindow
 	// finalizerMu makes accepting a finished-match write and stopping new writes
 	// atomic with respect to shutdown. WaitGroup alone permits Add after Wait
 	// observes zero.
@@ -85,7 +85,7 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository) *Manager {
 		grace:       newDisconnectGrace(),
 		matchRepo:   matchRepo,
 		appCtx:      ctx,
-		joinLimiter: ratelimit.NewSlidingWindowLimiter(joinRateLimitCount, joinRateLimitWindow),
+		joinLimiter: ratelimit.New(joinRateLimitCount, joinRateLimitWindow),
 	}
 }
 

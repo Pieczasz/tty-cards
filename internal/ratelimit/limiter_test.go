@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/ratelimit"
@@ -13,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSlidingWindowLimiter_Allow(t *testing.T) {
+func TestSlidingWindow_Allow(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -45,7 +46,7 @@ func TestSlidingWindowLimiter_Allow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			limiter := ratelimit.NewSlidingWindowLimiter(tt.limit, tt.window)
+			limiter := ratelimit.New(tt.limit, tt.window)
 
 			var last bool
 			for range tt.requests {
@@ -57,9 +58,9 @@ func TestSlidingWindowLimiter_Allow(t *testing.T) {
 	}
 }
 
-func TestSlidingWindowLimiter_IndependentIPs(t *testing.T) {
+func TestSlidingWindow_IndependentIPs(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(1, time.Second)
+	limiter := ratelimit.New(1, time.Second)
 
 	require.True(t, limiter.Allow("10.0.0.1"))
 	require.False(t, limiter.Allow("10.0.0.1"))
@@ -67,23 +68,25 @@ func TestSlidingWindowLimiter_IndependentIPs(t *testing.T) {
 	assert.Equal(t, 2, limiter.Size())
 }
 
-func TestSlidingWindowLimiter_WindowExpiryEvicts(t *testing.T) {
+func TestSlidingWindow_WindowExpiryEvicts(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(1, 20*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		const window = 20 * time.Millisecond
+		limiter := ratelimit.New(1, window)
 
-	require.True(t, limiter.Allow("1.1.1.1"))
-	require.False(t, limiter.Allow("1.1.1.1"))
-	assert.Equal(t, 1, limiter.Size())
+		require.True(t, limiter.Allow("1.1.1.1"))
+		require.False(t, limiter.Allow("1.1.1.1"))
+		assert.Equal(t, 1, limiter.Size())
 
-	require.Eventually(t, func() bool {
-		return limiter.Allow("1.1.1.1")
-	}, 200*time.Millisecond, 5*time.Millisecond)
-	assert.Equal(t, 1, limiter.Size())
+		time.Sleep(window)
+		require.True(t, limiter.Allow("1.1.1.1"), "a call exactly one window old no longer counts")
+		assert.Equal(t, 1, limiter.Size())
+	})
 }
 
-func TestSlidingWindowLimiter_MaxKeys(t *testing.T) {
+func TestSlidingWindow_MaxKeys(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(1, time.Minute).WithMaxKeys(2)
+	limiter := ratelimit.New(1, time.Minute).WithMaxKeys(2)
 
 	require.True(t, limiter.Allow("a"))
 	require.True(t, limiter.Allow("b"))
@@ -91,9 +94,9 @@ func TestSlidingWindowLimiter_MaxKeys(t *testing.T) {
 	assert.LessOrEqual(t, limiter.Size(), 2, "and the table stays bounded")
 }
 
-func TestSlidingWindowLimiter_EvictionKeepsTheTableBounded(t *testing.T) {
+func TestSlidingWindow_EvictionKeepsTheTableBounded(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(1, time.Minute).WithMaxKeys(64)
+	limiter := ratelimit.New(1, time.Minute).WithMaxKeys(64)
 
 	for i := range 1_000 {
 		require.True(t, limiter.Allow(strconv.Itoa(i)), "every first request is within budget")
@@ -104,7 +107,7 @@ func TestSlidingWindowLimiter_EvictionKeepsTheTableBounded(t *testing.T) {
 func BenchmarkAllow(b *testing.B) {
 	for _, keys := range []int{1, 64, 10_000} {
 		b.Run(fmt.Sprintf("keys=%d", keys), func(b *testing.B) {
-			l := ratelimit.NewSlidingWindowLimiter(1_000_000, time.Minute)
+			l := ratelimit.New(1_000_000, time.Minute)
 			ids := make([]string, keys)
 			for i := range keys {
 				ids[i] = strconv.Itoa(i)
@@ -119,37 +122,39 @@ func BenchmarkAllow(b *testing.B) {
 	}
 }
 
-func TestSlidingWindowLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
+func TestSlidingWindow_NonPositiveMaxKeysIsIgnored(t *testing.T) {
 	t.Parallel()
 
 	for _, n := range []int{0, -1} {
-		limiter := ratelimit.NewSlidingWindowLimiter(1, time.Minute).WithMaxKeys(n)
+		limiter := ratelimit.New(1, time.Minute).WithMaxKeys(n)
 
 		assert.Truef(t, limiter.Allow("1.1.1.1"), "WithMaxKeys(%d) must keep the default cap", n)
 	}
 }
 
-func TestSlidingWindowLimiter_SweepsExpiredKeysPeriodically(t *testing.T) {
+func TestSlidingWindow_SweepsExpiredKeysPeriodically(t *testing.T) {
 	t.Parallel()
-	const window = 20 * time.Millisecond
-	limiter := ratelimit.NewSlidingWindowLimiter(1, window)
+	synctest.Test(t, func(t *testing.T) {
+		const window = 20 * time.Millisecond
+		limiter := ratelimit.New(1, window)
 
-	for i := range 63 {
-		require.True(t, limiter.Allow(strconv.Itoa(i)))
-	}
-	require.Equal(t, 63, limiter.Size(), "nothing is swept before the sweep is due")
+		for i := range 63 {
+			require.True(t, limiter.Allow(strconv.Itoa(i)))
+		}
+		require.Equal(t, 63, limiter.Size(), "nothing is swept before the sweep is due")
 
-	time.Sleep(4 * window)
-	require.True(t, limiter.Allow("late"), "the 64th call is the one that sweeps")
+		time.Sleep(4 * window)
+		require.True(t, limiter.Allow("late"), "the 64th call is the one that sweeps")
 
-	assert.Equal(t, 1, limiter.Size(), "every caller that has gone quiet is dropped")
+		assert.Equal(t, 1, limiter.Size(), "every caller that has gone quiet is dropped")
+	})
 }
 
 // The limiter is shared by every ssh connection and every api request, so Allow and
 // Size are called from unrelated goroutines all the time.
-func TestSlidingWindowLimiter_ConcurrentAllowAndSize(t *testing.T) {
+func TestSlidingWindow_ConcurrentAllowAndSize(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(50, time.Second).WithMaxKeys(8)
+	limiter := ratelimit.New(50, time.Second).WithMaxKeys(8)
 
 	var wg sync.WaitGroup
 	for worker := range 8 {
@@ -175,9 +180,9 @@ func TestSlidingWindowLimiter_ConcurrentAllowAndSize(t *testing.T) {
 
 // Fail open, and deliberately: refusing new keys once the table is full would let
 // whoever filled it lock everybody else out.
-func TestSlidingWindowLimiter_FullTableStillAdmitsNewKeys(t *testing.T) {
+func TestSlidingWindow_FullTableStillAdmitsNewKeys(t *testing.T) {
 	t.Parallel()
-	limiter := ratelimit.NewSlidingWindowLimiter(1, time.Hour).WithMaxKeys(4)
+	limiter := ratelimit.New(1, time.Hour).WithMaxKeys(4)
 	for i := range 4 {
 		require.True(t, limiter.Allow(fmt.Sprintf("filler-%d", i)))
 	}
@@ -193,7 +198,7 @@ func TestSlidingWindowLimiter_FullTableStillAdmitsNewKeys(t *testing.T) {
 func BenchmarkAllow_NewKeyAtCapacity(b *testing.B) {
 	for _, keys := range []int{1_000, 10_000} {
 		b.Run(fmt.Sprintf("maxKeys=%d", keys), func(b *testing.B) {
-			l := ratelimit.NewSlidingWindowLimiter(120, time.Minute).WithMaxKeys(keys)
+			l := ratelimit.New(120, time.Minute).WithMaxKeys(keys)
 			for i := range keys {
 				l.Allow(strconv.Itoa(i))
 			}
@@ -206,32 +211,30 @@ func BenchmarkAllow_NewKeyAtCapacity(b *testing.B) {
 	}
 }
 
-// Admitting a new key into a full table must cost about the same whether the table
-// holds ten keys or ten thousand, because that path is exactly what an attacker with
-// a /48 to spend drives, and it runs under the limiter's only mutex.
+// Admitting a new key into a full table must cost the same whether the table holds
+// ten keys or ten thousand, because that path is exactly what an attacker with a /48
+// to spend drives, and it runs under the limiter's only mutex.
 //
-// A wall-clock budget rather than a unit assertion, because "does not walk the table"
-// has no other observable shape. The margin is deliberately enormous: the walking
-// implementation this replaced measured ~400us per call at 10k keys, so this loop
-// took it ~8s without -race and far longer with it, against ~0.5s here.
-func TestSlidingWindowLimiter_NewKeyAtCapacityDoesNotWalkTheTable(t *testing.T) {
+// Counted rather than timed: the walking implementation this replaced looked at every
+// key on every eviction, and a wall-clock ceiling on that flaked under a loaded -race
+// run. One key looked at per eviction is the whole contract.
+func TestSlidingWindow_NewKeyAtCapacityDoesNotWalkTheTable(t *testing.T) {
 	t.Parallel()
 	const maxKeys = 10_000
 	const fresh = 20_000
 
-	limiter := ratelimit.NewSlidingWindowLimiter(120, time.Minute).WithMaxKeys(maxKeys)
+	limiter := ratelimit.New(120, time.Minute).WithMaxKeys(maxKeys)
 	for i := range maxKeys {
 		require.True(t, limiter.Allow(strconv.Itoa(i)))
 	}
 	require.Equal(t, maxKeys, limiter.Size())
+	require.Zero(t, limiter.EvictVisits(), "filling the table evicts nothing")
 
-	start := time.Now()
 	for i := range fresh {
 		limiter.Allow("flood-" + strconv.Itoa(i))
 	}
-	elapsed := time.Since(start)
 
-	assert.Less(t, elapsed, 5*time.Second,
-		"%d new keys against a full table took %s: eviction is scanning the table again", fresh, elapsed)
+	assert.Equal(t, uint64(fresh), limiter.EvictVisits(),
+		"%d new keys against a full table: eviction must look at one key each, not scan the table", fresh)
 	assert.LessOrEqual(t, limiter.Size(), maxKeys, "and the table is still bounded")
 }
