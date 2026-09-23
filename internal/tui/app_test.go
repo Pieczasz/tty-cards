@@ -43,10 +43,7 @@ func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.Use
 
 	manager := internallobby.NewManager(context.Background(), nil)
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
+	registry := catalog.NewRegistry()
 
 	r := Model(ModelDependencies{
 		SessionCtx:   context.Background(),
@@ -142,10 +139,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	t.Parallel()
 
 	manager := internallobby.NewManager(context.Background(), nil)
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
+	registry := catalog.NewRegistry()
 
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	host := internallobby.NewPlayer(user)
@@ -227,7 +221,7 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 		t.Run(e.Slug, func(t *testing.T) {
 			t.Parallel()
 
-			rules := e.Rules()
+			rules := e.Factory()
 			players := make([]*game.Player, 0, rules.MinPlayers())
 			for i := range rules.MinPlayers() {
 				players = append(players, &game.Player{

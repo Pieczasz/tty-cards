@@ -265,10 +265,9 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	// Rules requiring far more players than present: an all-ready roster fails to
 	// start, so the lobby stays in Waiting and the ready map keeps churning.
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 	mockRules.On("MinPlayers").Return(members + 100)
-	registerGame(registry, "NeverStarts", mockRules)
+	registry := gameRegistry("NeverStarts", mockRules)
 
 	var (
 		start = make(chan struct{})

@@ -19,10 +19,7 @@ import (
 // which is the only state in which a dropped session keeps its seat on a grace timer.
 func startedTable(t *testing.T, manager *lobby.Manager, host, guest *game.Player) *lobby.Lobby {
 	t.Helper()
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
+	registry := catalog.NewRegistry()
 	table, err := manager.New(host, lobby.WithCardGame(catalog.All[0].Name), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
 	_, err = manager.JoinLobbyByCode(table.Code(), guest)

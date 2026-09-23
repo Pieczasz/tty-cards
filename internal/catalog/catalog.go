@@ -20,15 +20,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// Entry pairs a game's Module with the view that renders it, so neither can be
+// declared without the other.
 type Entry struct {
-	Name  string
-	Slug  string
-	Rules func() game.Rules
-	View  func(router.GlobalContext, *game.Engine) tea.Model
+	game.Module
+	View func(router.GlobalContext, *game.Engine) tea.Model
 }
 
-func (e Entry) Module() game.Module {
-	return game.Module{Name: e.Name, Slug: e.Slug, Factory: e.Rules}
+// NewRegistry is the registry of every game in All, in catalog order.
+func NewRegistry() *game.Registry {
+	mods := make([]game.Module, 0, len(All))
+	for _, e := range All {
+		mods = append(mods, e.Module)
+	}
+	return game.NewRegistry(mods...)
 }
 
 // All is the single point of game registration: every entry carries both the
@@ -36,33 +41,43 @@ func (e Entry) Module() game.Module {
 // field or duplicate slug. A new game ships by adding one entry here.
 var All = []Entry{
 	{
-		Name:  "Crazy Eights",
-		Slug:  "crazy_eights",
-		Rules: func() game.Rules { return &crazyeightrules.Rules{} },
-		View:  crazyeightview.New,
+		Module: game.Module{
+			Name:    "Crazy Eights",
+			Slug:    "crazy_eights",
+			Factory: func() game.Rules { return &crazyeightrules.Rules{} },
+		},
+		View: crazyeightview.New,
 	},
 	{
-		Name:  "Poker",
-		Slug:  "poker",
-		Rules: func() game.Rules { return &pokerrules.Rules{} },
-		View:  pokerview.New,
+		Module: game.Module{
+			Name:    "Poker",
+			Slug:    "poker",
+			Factory: func() game.Rules { return &pokerrules.Rules{} },
+		},
+		View: pokerview.New,
 	},
 	{
-		Name:  "Uno",
-		Slug:  "uno",
-		Rules: func() game.Rules { return &unorules.Rules{} },
-		View:  unoview.New,
+		Module: game.Module{
+			Name:    "Uno",
+			Slug:    "uno",
+			Factory: func() game.Rules { return &unorules.Rules{} },
+		},
+		View: unoview.New,
 	},
 	{
-		Name:  "Hearts",
-		Slug:  "hearts",
-		Rules: func() game.Rules { return &heartsrules.Rules{} },
-		View:  heartsview.New,
+		Module: game.Module{
+			Name:    "Hearts",
+			Slug:    "hearts",
+			Factory: func() game.Rules { return &heartsrules.Rules{} },
+		},
+		View: heartsview.New,
 	},
 	{
-		Name:  "Gin Rummy",
-		Slug:  "gin_rummy",
-		Rules: func() game.Rules { return &ginrummyrules.Rules{} },
-		View:  ginrummyview.New,
+		Module: game.Module{
+			Name:    "Gin Rummy",
+			Slug:    "gin_rummy",
+			Factory: func() game.Rules { return &ginrummyrules.Rules{} },
+		},
+		View: ginrummyview.New,
 	},
 }

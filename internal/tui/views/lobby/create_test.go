@@ -22,16 +22,16 @@ import (
 // between them exercises the clamp.
 func bothGamesRegistry(t *testing.T) *game.Registry {
 	t.Helper()
-	r := game.NewRegistry()
-	r.RegisterModule(game.Module{
-		Name: "Poker", Slug: "poker",
-		Factory: func() game.Rules { return &poker.Rules{} },
-	})
-	r.RegisterModule(game.Module{
-		Name: "Crazy Eights", Slug: "crazy_eights",
-		Factory: func() game.Rules { return &crazyeight.Rules{} },
-	})
-	return r
+	return game.NewRegistry(
+		game.Module{
+			Name: "Poker", Slug: "poker",
+			Factory: func() game.Rules { return &poker.Rules{} },
+		},
+		game.Module{
+			Name: "Crazy Eights", Slug: "crazy_eights",
+			Factory: func() game.Rules { return &crazyeight.Rules{} },
+		},
+	)
 }
 
 func newCreateModel(t *testing.T) *createModel {
@@ -79,8 +79,7 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 // table set to three seats is a lobby its rules can never start.
 func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
 	t.Parallel()
-	r := game.NewRegistry()
-	r.RegisterModule(game.Module{
+	r := game.NewRegistry(game.Module{
 		Name: "Hearts", Slug: "hearts",
 		Factory: func() game.Rules { return &hearts.Rules{} },
 	})

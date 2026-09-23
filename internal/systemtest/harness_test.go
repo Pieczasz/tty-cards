@@ -99,10 +99,7 @@ func (r *rankedFinalizeRecorder) calls() []finalizedMatch {
 
 func realRegistry(t *testing.T) *game.Registry {
 	t.Helper()
-	registry := game.NewRegistry()
-	for _, entry := range catalog.All {
-		registry.RegisterModule(entry.Module())
-	}
+	registry := catalog.NewRegistry()
 	return registry
 }
 

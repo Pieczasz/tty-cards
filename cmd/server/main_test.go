@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/config"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -217,20 +216,6 @@ func TestWaitForFinalizers_ReturnsWhenThereIsNothingToWaitFor(t *testing.T) {
 
 	assert.Less(t, time.Since(start), finalizeDrainTimeout,
 		"an idle manager must not spend a drain window")
-}
-
-// buildRegistry is the seam between the catalog and the engine: a game missing here
-// is a game nobody can start, and the catalog is the only place it is declared.
-func TestBuildRegistry_HasEveryCatalogGame(t *testing.T) {
-	t.Parallel()
-	registry := buildRegistry()
-
-	require.NotEmpty(t, catalog.All)
-	for _, e := range catalog.All {
-		rules, err := registry.Create(e.Name)
-		require.NoErrorf(t, err, "%q is in the catalog but not in the registry", e.Name)
-		assert.NotNil(t, rules)
-	}
 }
 
 // installLogging replaces the process default, so it runs alone.

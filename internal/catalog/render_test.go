@@ -43,7 +43,7 @@ func TestGameViews_RenderInsideTheTerminal(t *testing.T) {
 	handSizes := []int{7, 13, 25}
 
 	for _, entry := range All {
-		rules := entry.Rules()
+		rules := entry.Factory()
 		for seats := rules.MinPlayers(); seats <= min(rules.MaxPlayers(), 6); seats++ {
 			for _, size := range sizes {
 				for _, handSize := range handSizes {
@@ -78,7 +78,7 @@ func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 		t.Run(entry.Slug, func(t *testing.T) {
 			t.Parallel()
 
-			rules := entry.Rules()
+			rules := entry.Factory()
 			engine, m := seatedEngineAndView(t, entry, rules.MinPlayers(), 120, 40)
 
 			hero := heroHand(t, engine, testutil.SeatID(1))
@@ -147,7 +147,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 			Name: fmt.Sprintf("player%d", i+1),
 		})
 	}
-	rules := entry.Rules()
+	rules := entry.Factory()
 	engine := game.NewEngine(rules, players, deck.StandardDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)

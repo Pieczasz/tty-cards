@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// registerGame registers rules under a display name. These tests only ever look
-// games up by name, so the slug just has to be present and distinct.
-func registerGame(r *game.Registry, name string, rules game.Rules) {
-	r.RegisterModule(game.Module{
+// gameRegistry is a registry of rules under one display name. These tests only ever
+// look games up by name, so the slug just has to be present and distinct.
+func gameRegistry(name string, rules game.Rules) *game.Registry {
+	return game.NewRegistry(game.Module{
 		Name:    name,
 		Slug:    strings.ToLower(name),
 		Factory: func() game.Rules { return rules },
@@ -120,7 +120,6 @@ func TestLobby_ToggleReady(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 
 	mockRules.On("MinPlayers").Return(2)
@@ -129,7 +128,7 @@ func TestLobby_ToggleReady(t *testing.T) {
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 
-	registerGame(registry, "MockGame", mockRules)
+	registry := gameRegistry("MockGame", mockRules)
 
 	err = l.ToggleReady(leader, registry)
 	require.NoError(t, err)
@@ -209,7 +208,6 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 
 	mockRules.On("MinPlayers").Return(2)
@@ -220,7 +218,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true) // Immediate win to end game
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
 
-	registerGame(registry, "MockGame", mockRules)
+	registry := gameRegistry("MockGame", mockRules)
 
 	done := make(chan struct{})
 	mockRepo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}, mock.Anything).
@@ -273,7 +271,6 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 	mockRules.On("MinPlayers").Return(2)
 	mockRules.On("MaxPlayers").Return(4)
@@ -282,7 +279,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
-	registerGame(registry, "MockGame", mockRules)
+	registry := gameRegistry("MockGame", mockRules)
 
 	done := make(chan struct{})
 	mockRepo.On("RecordCasualMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).
@@ -318,13 +315,12 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest3)))
 
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 
 	// mockRules limits max players to 2, but lobby has 3!
 	mockRules.On("MinPlayers").Return(2)
 	mockRules.On("MaxPlayers").Return(2)
-	registerGame(registry, "Mock", mockRules)
+	registry := gameRegistry("Mock", mockRules)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -345,7 +341,7 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	mockRules2.On("InitialDeck").Return(deck.StandardDeck())
 	mockRules2.On("InitialDealCount").Return(5)
 	mockRules2.On("OnGameStart", mock.Anything).Return(nil)
-	registerGame(registry, "Mock2", mockRules2)
+	registry = gameRegistry("Mock2", mockRules2)
 
 	leader3 := mockPlayer("p5", testutil.UID(5))
 	l3, err := m.New(leader3, WithCardGame("Mock2"))
@@ -379,7 +375,6 @@ func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby, *game.Registr
 	l, err := m.New(leader, WithMaxPlayers(maxPlayers), WithCardGame("Mock"))
 	require.NoError(t, err)
 
-	registry := game.NewRegistry()
 	rules := new(MockRules)
 	rules.On("MinPlayers").Return(2).Maybe()
 	rules.On("MaxPlayers").Return(maxPlayers).Maybe()
@@ -388,7 +383,7 @@ func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby, *game.Registr
 	rules.On("OnGameStart", mock.Anything).Return(nil).Maybe()
 	rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	rules.On("Standings", mock.Anything).Return([]*game.Player{}).Maybe()
-	registerGame(registry, "Mock", rules)
+	registry := gameRegistry("Mock", rules)
 
 	return m, l, registry
 }
@@ -865,8 +860,7 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	l, err := m.New(leader, WithCardGame("Mock"), WithRanked(true))
 	require.NoError(t, err)
 
-	registry := game.NewRegistry()
-	registerGame(registry, "Mock", stubRules{})
+	registry := gameRegistry("Mock", stubRules{})
 	require.NoError(t, l.ToggleReady(leader, registry))
 
 	l.mu.RLock()

@@ -33,7 +33,6 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	registry := game.NewRegistry()
 	rules := new(MockRules)
 	rules.On("MinPlayers").Return(2).Maybe()
 	rules.On("MaxPlayers").Return(4).Maybe()
@@ -42,7 +41,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	rules.On("OnGameStart", mock.Anything).Return(nil).Maybe()
 	rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	rules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest}).Maybe()
-	registerGame(registry, "MockGame", rules)
+	registry := gameRegistry("MockGame", rules)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))

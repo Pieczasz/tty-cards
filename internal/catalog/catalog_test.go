@@ -21,7 +21,7 @@ func TestAll_EntriesComplete(t *testing.T) {
 	for _, e := range All {
 		require.NotEmpty(t, e.Name, "entry with slug %q has no name", e.Slug)
 		require.NotEmpty(t, e.Slug, "entry %q has no slug", e.Name)
-		require.NotNil(t, e.Rules, "entry %q has no rules factory", e.Name)
+		require.NotNil(t, e.Factory, "entry %q has no rules factory", e.Name)
 		require.NotNil(t, e.View, "entry %q has no TUI view", e.Name)
 
 		assert.False(t, names[e.Name], "duplicate name %q", e.Name)
@@ -29,21 +29,29 @@ func TestAll_EntriesComplete(t *testing.T) {
 		names[e.Name] = true
 		slugs[e.Slug] = true
 
-		assert.NotNil(t, e.Rules(), "rules factory for %q returned nil", e.Name)
-		_, scores := e.Rules().(game.StandingScorer)
+		assert.NotNil(t, e.Factory(), "rules factory for %q returned nil", e.Name)
+		_, scores := e.Factory().(game.StandingScorer)
 		assert.True(t, scores, "%q must implement StandingScorer so equal scores share a place", e.Name)
 	}
 }
 
-func TestEntry_Module(t *testing.T) {
+// NewRegistry is the seam between the catalog and the engine: a game missing from it
+// is a game nobody can start, and the catalog is the only place it is declared.
+func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	t.Parallel()
+	registry := NewRegistry()
+
+	names := make([]string, 0, len(All))
 	for _, e := range All {
-		m := e.Module()
-		assert.Equal(t, e.Name, m.Name)
-		assert.Equal(t, e.Slug, m.Slug)
-		require.NotNil(t, m.Factory)
-		assert.NotNil(t, m.Factory())
+		names = append(names, e.Name)
+		mod, ok := registry.Module(e.Name)
+		require.Truef(t, ok, "%q is in the catalog but not in the registry", e.Name)
+		assert.Equal(t, e.Slug, mod.Slug)
+		rules, err := registry.Create(e.Name)
+		require.NoError(t, err)
+		assert.NotNil(t, rules)
 	}
+	assert.Equal(t, names, registry.GameNames(), "the lobby menu keeps catalog order")
 }
 
 // Module.Name is persisted as games.name and is the registry key the lobby looks a

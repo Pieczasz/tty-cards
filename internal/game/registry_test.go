@@ -7,85 +7,71 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegistry(t *testing.T) {
+func fakeModule(name, slug string) Module {
+	return Module{Name: name, Slug: slug, Factory: func() Rules { return &MockRules{} }}
+}
+
+func TestRegistry_CreateBuildsADeclaredGame(t *testing.T) {
 	t.Parallel()
-	r := NewRegistry()
-
-	_, err := r.Create("NotExists")
-	require.Error(t, err)
-
-	r.RegisterModule(Module{
-		Name:    "FakeGame",
-		Slug:    "fakegame",
-		Factory: func() Rules { return &MockRules{} },
-	})
-
-	names := r.GameNames()
-	assert.Len(t, names, 1)
-	assert.Equal(t, "FakeGame", names[0])
+	r := NewRegistry(fakeModule("FakeGame", "fakegame"))
 
 	rules, err := r.Create("FakeGame")
 	require.NoError(t, err)
 	assert.NotNil(t, rules)
-
-	mod, ok := r.Module("FakeGame")
-	require.True(t, ok)
-	assert.Equal(t, "fakegame", mod.Slug)
-
-	_, ok = r.Module("NotExists")
-	assert.False(t, ok)
 }
 
-func TestRegistry_RegisterModule(t *testing.T) {
+// The error names the game, so a log line says which lobby option points nowhere.
+func TestRegistry_CreateNamesAnUnknownGame(t *testing.T) {
 	t.Parallel()
-	r := NewRegistry()
-	r.RegisterModule(Module{
-		Name:    "Crazy Eights",
-		Slug:    "crazy_eights",
-		Factory: func() Rules { return &MockRules{} },
-	})
+	_, err := NewRegistry(fakeModule("FakeGame", "fakegame")).Create("NotExists")
+	require.ErrorContains(t, err, `"NotExists"`)
+}
 
-	assert.Equal(t, []string{"Crazy Eights"}, r.GameNames())
+func TestRegistry_ModuleLooksUpByDisplayName(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry(fakeModule("Crazy Eights", "crazy_eights"))
 
 	mod, ok := r.Module("Crazy Eights")
 	require.True(t, ok)
 	assert.Equal(t, "crazy_eights", mod.Slug)
+
+	_, ok = r.Module("crazy_eights")
+	assert.False(t, ok, "the slug is not the registry key")
+}
+
+func TestRegistry_GameNamesKeepDeclarationOrder(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry(fakeModule("Poker", "poker"), fakeModule("Hearts", "hearts"), fakeModule("Uno", "uno"))
+
+	names := r.GameNames()
+	require.Equal(t, []string{"Poker", "Hearts", "Uno"}, names)
+
+	names[0] = "mutated"
+	assert.Equal(t, "Poker", r.GameNames()[0], "callers get a copy")
 }
 
 // A half-declared module is a wiring bug, and a registry that accepted one would fail
 // later as a missing route or a nil factory panic at the moment somebody starts a
-// table. catalog_test.go leans on this being loud.
-func TestRegistry_RegisterModuleRejectsAHalfDeclaredGame(t *testing.T) {
+// table. catalog_test.go leans on this being loud. A name declared twice is the same
+// bug: GameNames drives the menu, and one of the two would be unreachable.
+func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {
 	t.Parallel()
 
 	factory := func() Rules { return &MockRules{} }
 	tests := []struct {
-		name   string
-		module Module
+		name string
+		mods []Module
 	}{
-		{name: "no display name", module: Module{Slug: "s", Factory: factory}},
-		{name: "no slug", module: Module{Name: "N", Factory: factory}},
-		{name: "no factory", module: Module{Name: "N", Slug: "s"}},
+		{name: "no display name", mods: []Module{{Slug: "s", Factory: factory}}},
+		{name: "no slug", mods: []Module{{Name: "N", Factory: factory}}},
+		{name: "no factory", mods: []Module{{Name: "N", Slug: "s"}}},
+		{name: "a name declared twice", mods: []Module{fakeModule("Poker", "old"), fakeModule("Poker", "new")}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Panics(t, func() { NewRegistry().RegisterModule(tt.module) })
+			assert.Panics(t, func() { NewRegistry(tt.mods...) })
 		})
 	}
-}
-
-// Re-registering a name replaces the module without listing it twice: GameNames drives
-// the menu, and a duplicate row is a game the player can pick and never reach.
-func TestRegistry_ReRegisterKeepsOneEntry(t *testing.T) {
-	t.Parallel()
-	r := NewRegistry()
-	r.RegisterModule(Module{Name: "Poker", Slug: "old", Factory: func() Rules { return &MockRules{} }})
-	r.RegisterModule(Module{Name: "Poker", Slug: "new", Factory: func() Rules { return &MockRules{} }})
-
-	assert.Equal(t, []string{"Poker"}, r.GameNames())
-	mod, ok := r.Module("Poker")
-	require.True(t, ok)
-	assert.Equal(t, "new", mod.Slug)
 }

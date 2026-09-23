@@ -30,13 +30,11 @@ func testUser(id uint64, name string) *db.User {
 }
 
 func testRegistry() *game.Registry {
-	r := game.NewRegistry()
-	r.RegisterModule(game.Module{
+	return game.NewRegistry(game.Module{
 		Name:    testGameName,
 		Slug:    "crazy_eights",
 		Factory: func() game.Rules { return &crazyeight.Rules{} },
 	})
-	return r
 }
 
 // leaderView returns the lobby view as seen by the lobby's leader.

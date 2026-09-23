@@ -16,7 +16,6 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/config"
 	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/httpapi"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/observability"
@@ -228,23 +227,13 @@ func newSSHServer(
 		Config:         cfg,
 		UserRepository: userRepo,
 		LobbyManager:   lobbyManager,
-		GameRegistry:   buildRegistry(),
+		GameRegistry:   catalog.NewRegistry(),
 		Tracker:        tracker,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("setup ssh server: %w", err)
 	}
 	return server, tracker, nil
-}
-
-// buildRegistry turns the catalog into the registry. catalog.All is the only place a
-// game is declared, so this cannot drift from what the TUI routes to.
-func buildRegistry() *game.Registry {
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
-	return registry
 }
 
 func startStatsAPI(
