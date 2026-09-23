@@ -3,6 +3,7 @@ package ssh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -17,11 +18,11 @@ var (
 	ErrRegistrationFailed = errors.New("registration failed")
 	// ErrTooManyRegistrations refuses a *new* account, never a returning player.
 	ErrTooManyRegistrations = errors.New("too many new accounts from your network; please try again later")
-	// ErrNameUnavailable is the single answer an unauthenticated client gets for a
-	// name it cannot have. Taken and invalid are deliberately indistinguishable: the
-	// caller is a stranger at this point, and echoing db.ErrUsernameTaken turned the
-	// login banner into a "does this account exist" oracle over every username. The
-	// distinct sentinels stay - LoadOrRegisterUser logs the real cause.
+	// ErrNameUnavailable is what an unauthenticated client gets for a name that is
+	// taken. Echoing db.ErrUsernameTaken turned the login banner into a "does this
+	// account exist" oracle over every username. An invalid name is not folded into
+	// it: that is a fixed rule, not a fact about other accounts, so the player is told
+	// why. LoadOrRegisterUser logs the real cause either way.
 	ErrNameUnavailable = errors.New("could not register that name; try another with ssh -l <name>")
 )
 
@@ -48,6 +49,10 @@ func LoadOrRegisterUser(
 	}
 
 	if user == nil {
+		// Before the budget: a typo must not spend one of a network's registrations.
+		if err := db.ValidateUsername(sshUsername); err != nil {
+			return nil, fmt.Errorf("%w: %w; try another with ssh -l <name>", db.ErrInvalidUsername, err)
+		}
 		if allowRegister != nil && !allowRegister() {
 			slog.WarnContext(ctx, "refused new account registration: network over its budget")
 			return nil, ErrTooManyRegistrations
@@ -69,7 +74,7 @@ func LoadOrRegisterUser(
 
 func mapRegisterError(err error) error {
 	switch {
-	case errors.Is(err, db.ErrUsernameTaken), errors.Is(err, db.ErrInvalidUsername):
+	case errors.Is(err, db.ErrUsernameTaken):
 		return ErrNameUnavailable
 	case errors.Is(err, db.ErrKeyAlreadyRegistered):
 		// Not an oracle: the key is the caller's own, so this tells them nothing they

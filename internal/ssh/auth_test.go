@@ -3,7 +3,6 @@ package ssh_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -105,10 +104,10 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	assert.ErrorIs(t, err, ssh.ErrRegistrationFailed)
 }
 
-// The caller here is unauthenticated, so "that name is taken" and "that name is not
-// allowed" have to read identically: distinguishing them lets anyone enumerate which
-// usernames exist, one connection at a time. A key already registered is the caller's
-// own key and tells them nothing new, so it still comes back as itself.
+// The caller here is unauthenticated, so "that name is taken" must not be told apart
+// from any other refusal: it would let anyone enumerate which usernames exist. A key
+// already registered is the caller's own key and tells them nothing new, so it still
+// comes back as itself.
 func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	t.Parallel()
 
@@ -120,14 +119,6 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	}{
 		{
 			name: "a taken username", cause: db.ErrUsernameTaken,
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
-		},
-		{
-			name: "an invalid username", cause: db.ErrInvalidUsername,
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
-		},
-		{
-			name: "a wrapped invalid username", cause: fmt.Errorf("%w: must be 3-16 characters", db.ErrInvalidUsername),
 			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
 		},
 		{
@@ -151,12 +142,43 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 
 			require.ErrorIs(t, err, tt.want)
 			require.ErrorContains(t, err, tt.wantText)
-			if errors.Is(tt.cause, db.ErrUsernameTaken) || errors.Is(tt.cause, db.ErrInvalidUsername) {
-				require.NotErrorIs(t, err, db.ErrUsernameTaken, "the client can tell taken from invalid")
-				require.NotErrorIs(t, err, db.ErrInvalidUsername, "the client can tell taken from invalid")
-				assert.NotContains(t, err.Error(), "must be 3-16 characters",
-					"the wrapped cause is for the log, not for the client")
+			if errors.Is(tt.cause, db.ErrUsernameTaken) {
+				require.NotErrorIs(t, err, db.ErrUsernameTaken, "the client can tell a taken name apart")
 			}
+		})
+	}
+}
+
+// Whether a name is allowed is a fixed rule, not a fact about other accounts, so it
+// is no oracle: the player gets the reason. And it is checked before the registration
+// budget is spent, or five typos lock a network out of signing up for an hour.
+func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		wantText string
+	}{
+		{name: "too long", username: "averyveryverylongname", wantText: "cannot exceed 16 characters"},
+		{name: "bad characters", username: "no-dashes", wantText: "English letters, numbers, and underscores"},
+		{name: "reserved prefix", username: "deleted_x", wantText: "reserved"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := new(MockUserRepository)
+			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
+
+			asked := 0
+			_, err := ssh.LoadOrRegisterUser(context.Background(), repo, tt.username, "fp",
+				func() bool { asked++; return true })
+
+			require.ErrorIs(t, err, db.ErrInvalidUsername)
+			require.ErrorContains(t, err, tt.wantText)
+			assert.Zero(t, asked, "an invalid name spent the registration budget")
+			repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
 		})
 	}
 }
