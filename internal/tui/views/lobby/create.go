@@ -101,8 +101,8 @@ func (m *createModel) adjustSetting(delta int) {
 	case createCursorMode:
 		m.isRanked = !m.isRanked
 	case createCursorPlayers:
-		if next := m.maxPlayers + delta; next >= 2 && next <= m.gameMaxPlayers() {
-			m.maxPlayers = next
+		if minP, maxP := m.gamePlayerBounds(); m.maxPlayers+delta >= minP && m.maxPlayers+delta <= maxP {
+			m.maxPlayers += delta
 		}
 	case createCursorSubmit:
 		// The submitted row has no left/right adjustment.
@@ -141,20 +141,18 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: l} }
 }
 
-func (m *createModel) gameMaxPlayers() int {
+// gamePlayerBounds is the selected game's seat range, or 2..8 for one the registry
+// cannot build.
+func (m *createModel) gamePlayerBounds() (minP, maxP int) {
 	rules, err := m.global.GameRegistry.Create(m.selectedGame())
 	if err != nil {
-		return 8
+		return 2, 8
 	}
-	return rules.MaxPlayers()
+	return rules.MinPlayers(), rules.MaxPlayers()
 }
 
 func (m *createModel) clampMaxPlayers() {
-	maxP := m.gameMaxPlayers()
-	minP := 2
-	if rules, err := m.global.GameRegistry.Create(m.selectedGame()); err == nil {
-		minP = rules.MinPlayers()
-	}
+	minP, maxP := m.gamePlayerBounds()
 	// minP is applied last so it wins if a game's bounds ever cross.
 	m.maxPlayers = max(min(m.maxPlayers, maxP), minP)
 }

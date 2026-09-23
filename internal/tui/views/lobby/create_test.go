@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/game/crazyeight"
+	"github.com/Pieczasz/terminal-card/internal/game/hearts"
 	"github.com/Pieczasz/terminal-card/internal/game/poker"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
@@ -72,6 +73,26 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 	m.gameIndex = crazyIdx
 	m.clampMaxPlayers()
 	assert.Equal(t, 6, m.maxPlayers, "crazy eights caps at six, so the setting must come down")
+}
+
+// Stepping the setting down stops at the game's own minimum, not at two: a Hearts
+// table set to three seats is a lobby its rules can never start.
+func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
+	t.Parallel()
+	r := game.NewRegistry()
+	r.RegisterModule(game.Module{
+		Name: "Hearts", Slug: "hearts",
+		Factory: func() game.Rules { return &hearts.Rules{} },
+	})
+	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), GameRegistry: r}).(*createModel)
+	require.True(t, ok)
+	m.cursor = createCursorPlayers
+
+	for range 3 {
+		m.adjustSetting(-1)
+	}
+
+	assert.Equal(t, 4, m.maxPlayers, "hearts cannot go below four")
 }
 
 // The clamp must also raise a too-small setting to the game's minimum.
@@ -199,7 +220,8 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				assert.Equal(t, m.gameMaxPlayers(), m.maxPlayers)
+				_, maxP := m.gamePlayerBounds()
+				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
 		{
@@ -337,7 +359,9 @@ func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
 	m := newCreateModel(t)
 	m.global.GameRegistry = game.NewRegistry()
 
-	assert.Equal(t, 8, m.gameMaxPlayers())
+	minP, maxP := m.gamePlayerBounds()
+	assert.Equal(t, 2, minP)
+	assert.Equal(t, 8, maxP)
 }
 
 // Anything that is not a keystroke reaches this form too - a resize has to land on the
