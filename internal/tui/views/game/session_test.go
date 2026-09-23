@@ -10,6 +10,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -403,17 +404,17 @@ func TestSession_HandleLeaveKey(t *testing.T) {
 // The prompt takes the whole screen, so it has to fit every supported size.
 func TestSession_LeaveConfirmScreenFits(t *testing.T) {
 	t.Parallel()
-	for _, size := range [][2]int{{styles.MinWidth, styles.MinHeight}, {80, 24}, {120, 50}} {
+	for _, size := range tuitest.FitSizes {
 		_, _, s := seatedSession(t)
-		s.Global.Width, s.Global.Height = size[0], size[1]
+		s.Global.Width, s.Global.Height = size.Width, size.Height
 		s.HandleLeaveKey("esc")
 
 		out, ok := s.LeaveConfirmScreen()
 
 		require.True(t, ok)
 		assert.Contains(t, out, "forfeit")
-		assert.LessOrEqual(t, lg.Height(out), size[1], "%dx%d", size[0], size[1])
-		assert.LessOrEqual(t, lg.Width(out), size[0], "%dx%d", size[0], size[1])
+		assert.LessOrEqual(t, lg.Height(out), size.Height, "%dx%d", size.Width, size.Height)
+		assert.LessOrEqual(t, lg.Width(out), size.Width, "%dx%d", size.Width, size.Height)
 	}
 }
 

@@ -133,18 +133,11 @@ func TestView_FitsTheTerminal(t *testing.T) {
 		})
 	}
 
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			global := router.GlobalContext{
-				Theme: styles.NewTheme(true), Width: size.w, Height: size.h,
+				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
 				// The delete confirmation names the account it would anonymise, so the
 				// widest id is what the line has to fit.
 				User: &db.User{ID: testutil.UID(99), Username: "alice"},
@@ -175,8 +168,8 @@ func TestView_FitsTheTerminal(t *testing.T) {
 
 			for name, state := range states {
 				out := state.View().Content
-				assert.LessOrEqual(t, lg.Height(out), size.h, "%s is taller than the terminal", name)
-				assert.LessOrEqual(t, lg.Width(out), size.w, "%s is wider than the terminal", name)
+				assert.LessOrEqual(t, lg.Height(out), size.Height, "%s is taller than the terminal", name)
+				assert.LessOrEqual(t, lg.Width(out), size.Width, "%s is wider than the terminal", name)
 			}
 		})
 	}

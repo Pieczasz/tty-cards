@@ -384,25 +384,18 @@ func TestCreate_UpdateIgnoresWhatIsNotAKey(t *testing.T) {
 // support - with the error line showing, which is the tallest it ever gets.
 func TestCreateView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{name: "the declared minimum", w: styles.MinWidth, h: styles.MinHeight},
-		{name: "a stock terminal", w: 80, h: 24},
-		{name: "a tall terminal", w: 120, h: 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
 			m.global.Theme = styles.NewTheme(true)
-			m.global.Width, m.global.Height = size.w, size.h
+			m.global.Width, m.global.Height = size.Width, size.Height
 			m.err = errors.New("no games are available right now")
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game/crazyeight"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
@@ -174,11 +175,7 @@ func TestRenderHeroBand_DropsEmptyRowsAndAppendsTheError(t *testing.T) {
 func TestRenderWaitingScreen_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for _, tc := range []struct {
 			name  string
 			phase game.Phase
@@ -187,13 +184,13 @@ func TestRenderWaitingScreen_FitsTheTerminal(t *testing.T) {
 			{name: "waiting", phase: game.Waiting, want: "Waiting for game to start"},
 			{name: "finished", phase: game.Finished, want: "Game Over"},
 		} {
-			t.Run(fmt.Sprintf("%dx%d_%s", size.w, size.h, tc.name), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%dx%d_%s", size.Width, size.Height, tc.name), func(t *testing.T) {
 				t.Parallel()
-				out := RenderWaitingScreen(testContext(size.w, size.h), tc.phase, "alice")
+				out := RenderWaitingScreen(testContext(size.Width, size.Height), tc.phase, "alice")
 
 				assert.Contains(t, out, tc.want)
-				assert.LessOrEqual(t, lg.Width(out), size.w)
-				assert.LessOrEqual(t, lg.Height(out), size.h)
+				assert.LessOrEqual(t, lg.Width(out), size.Width)
+				assert.LessOrEqual(t, lg.Height(out), size.Height)
 			})
 		}
 	}

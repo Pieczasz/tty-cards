@@ -3,9 +3,8 @@ package game
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 
@@ -94,45 +93,37 @@ func TestAttachTurnClock(t *testing.T) {
 }
 
 // The tick rate follows the reading: a display in whole seconds does not need ten frames a
-// second, and one in tenths cannot be driven at one.
+// second, and one in tenths cannot be driven at one. The tenth-second tick is also the
+// most expensive thing a table can do - every client re-rendering ten times a second
+// costs the server thousands of allocations a frame - so only the player on turn pays it.
 func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 	t.Parallel()
 
-	// The command is a timer, so what it returns cannot be inspected without waiting
-	// it out. A tenths-rate tick lands well inside a second; a whole-second one does
-	// not land at all in that window.
-	fast := make(chan tea.Msg, 1)
-	go func() { fast <- clockTickFrom(nil, 2*time.Second, true)() }()
-	select {
-	case <-fast:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("a countdown in tenths must tick faster than twice a second")
+	tests := []struct {
+		name      string
+		remaining time.Duration
+		onTurn    bool
+		want      time.Duration
+	}{
+		{name: "the last seconds of your own turn tick in tenths", remaining: 2 * time.Second, onTurn: true, want: tenthTickInterval},
+		{name: "whole seconds tick once a second", remaining: 30 * time.Second, onTurn: true, want: time.Second},
+		{name: "somebody else's last seconds tick once a second", remaining: 2 * time.Second, want: time.Second},
 	}
-
-	slow := make(chan tea.Msg, 1)
-	go func() { slow <- clockTickFrom(nil, 30*time.Second, true)() }()
-	select {
-	case <-slow:
-		t.Fatal("a countdown in whole seconds must not tick ten times a second")
-	case <-time.After(300 * time.Millisecond):
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Inside the bubble the clock only moves when the tick is all that is left
+			// to wait on, so the time a tick takes is exactly its interval.
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				msg := clockTickFrom(nil, tt.remaining, tt.onTurn)()
+				assert.IsType(t, ClockTickMsg{}, msg)
+				assert.Equal(t, tt.want, time.Since(start))
+			})
+		})
 	}
 }
 
 func testTheme() styles.Theme {
 	return styles.NewTheme(true)
-}
-
-// The tenth-second tick is the most expensive thing a table can do: every client
-// re-rendering ten times a second costs the server thousands of allocations a frame.
-func TestClockTickFor_OnlyThePlayerOnTurnTicksInTenths(t *testing.T) {
-	t.Parallel()
-
-	watching := make(chan tea.Msg, 1)
-	go func() { watching <- clockTickFrom(nil, 2*time.Second, false)() }()
-
-	select {
-	case <-watching:
-		t.Fatal("a session watching somebody else's clock must not tick ten times a second")
-	case <-time.After(300 * time.Millisecond):
-	}
 }

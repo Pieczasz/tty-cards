@@ -83,25 +83,18 @@ func TestHome_Init(t *testing.T) {
 func TestHome_View_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := New(router.GlobalContext{
 				User:  &db.User{ID: testutil.UID(1), Username: "alice"},
-				Theme: styles.NewTheme(true), Width: size.w, Height: size.h,
+				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
 			})
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
 }

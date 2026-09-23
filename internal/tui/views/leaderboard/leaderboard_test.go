@@ -151,26 +151,19 @@ func TestNeedsFetch_CapsAtMax(t *testing.T) {
 // TooSmall reports 80x24 as perfectly fine, so nothing anywhere caught it.
 func TestView_FitsTheTerminalAtEverySupportedSize(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := &model{
-				global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: size.w, Height: size.h},
+				global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height},
 				rankings: rankings(maxLeaderboardPlayers),
 				filters:  []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},
 			}
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "the board is taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "the board is wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "the board is taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "the board is wider than the terminal")
 		})
 	}
 }
@@ -485,26 +478,19 @@ func TestView_FitsTheTerminalInEveryContentState(t *testing.T) {
 		"an error": func(m *model) *model { m.err = errors.New("query failed"); return m },
 	}
 
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for stateName, apply := range states {
-			t.Run(size.name+"/"+stateName, func(t *testing.T) {
+			t.Run(size.Name+"/"+stateName, func(t *testing.T) {
 				t.Parallel()
 				m := apply(&model{
-					global:  router.GlobalContext{Theme: styles.NewTheme(true), Width: size.w, Height: size.h},
+					global:  router.GlobalContext{Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height},
 					filters: []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},
 				})
 
 				out := m.View().Content
 
-				assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-				assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+				assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+				assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 			})
 		}
 	}

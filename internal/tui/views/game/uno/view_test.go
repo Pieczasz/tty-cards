@@ -11,6 +11,7 @@ import (
 	logic "github.com/Pieczasz/terminal-card/internal/game/uno"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	lg "charm.land/lipgloss/v2"
@@ -72,26 +73,22 @@ func viewAt(width, height int, opponents ...string) *model {
 func TestView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for _, opponents := range [][]string{
 			{"bob"},
 			{"bob", "carol", "dave"},
 			{"bob", "carol", "dave", "erin", "frank", "grace"},
 		} {
-			name := fmt.Sprintf("%dx%d_with_%d_opponents", size.w, size.h, len(opponents))
+			name := fmt.Sprintf("%dx%d_with_%d_opponents", size.Width, size.Height, len(opponents))
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				m := viewAt(size.w, size.h, opponents...)
+				m := viewAt(size.Width, size.Height, opponents...)
 
 				for _, picking := range []bool{false, true} {
 					m.color.Open = picking
 					out := m.View().Content
-					assert.LessOrEqual(t, lg.Width(out), size.w, "picker=%v overran the width", picking)
-					assert.LessOrEqual(t, lg.Height(out), size.h, "picker=%v overran the height", picking)
+					assert.LessOrEqual(t, lg.Width(out), size.Width, "picker=%v overran the width", picking)
+					assert.LessOrEqual(t, lg.Height(out), size.Height, "picker=%v overran the height", picking)
 				}
 			})
 		}

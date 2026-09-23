@@ -251,10 +251,6 @@ func TestUpdate_WithoutALobbyNavigatesHomeOnce(t *testing.T) {
 	}
 }
 
-// managerOf is the manager behind the view: tearing a lobby down is a server-side
-// call the view itself never makes.
-func managerOf(_ *testing.T, m *model) *lobby.Manager { return m.global.LobbyManager }
-
 // addGuest seats another player in the lobby a view is already looking at, which is
 // what turns on the rows, the cursor range and the kick key the leader-only tests need.
 func addGuest(t *testing.T, m *model, l *lobby.Lobby, id uint64, name string) *game.Player {
@@ -558,7 +554,8 @@ func TestHandleKey_EnterKicksTheSelectedGuest(t *testing.T) {
 		m, l := leaderView(t)
 		addGuest(t, m, l, 2, "bob")
 		m.cursor = cursorFirstGuest
-		managerOf(t, m).RemoveLobby(l.Code())
+		// Tearing a lobby down is a server-side call the view itself never makes.
+		m.global.LobbyManager.RemoveLobby(l.Code())
 
 		assert.NotPanics(t, func() { press(m, "enter") })
 	})
@@ -690,7 +687,7 @@ func TestNew_ReportsASubscriptionFailure(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 	m.Close()
-	managerOf(t, m).RemoveLobby(l.Code())
+	m.global.LobbyManager.RemoveLobby(l.Code())
 
 	broken, ok := New(m.global, l).(*model)
 	require.True(t, ok)
@@ -753,20 +750,8 @@ func TestRenderForm_StacksWhenTheColumnsDoNotFit(t *testing.T) {
 // support, with the roster full rather than the one-player case that always fits.
 func TestLobbyView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-		// overflows marks the one size where this view is known to spill: View hands
-		// its content callback the row budget and the lobby form ignores it, so six
-		// guests plus an error line run past a 64x20 terminal and the terminal wraps
-		// the overflow. Reported rather than fixed here; the width bound still holds.
-		overflows bool
-	}{
-		{name: "the declared minimum", w: styles.MinWidth, h: styles.MinHeight},
-		{name: "a stock terminal", w: 80, h: 24},
-		{name: "a tall terminal", w: 120, h: 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
@@ -775,15 +760,13 @@ func TestLobbyView_FitsTheTerminal(t *testing.T) {
 				addGuest(t, m, l, uint64(i), fmt.Sprintf("player-number-%d", i))
 			}
 			m.global.Theme = styles.NewTheme(true)
-			m.global.Width, m.global.Height = size.w, size.h
+			m.global.Width, m.global.Height = size.Width, size.Height
 			m.actionErr = errors.New("live updates unavailable, rejoin the lobby")
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
-			if !size.overflows {
-				assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			}
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
 		})
 	}
 }

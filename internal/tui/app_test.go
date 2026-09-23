@@ -8,7 +8,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	internallobby "github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -150,6 +150,8 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 		internallobby.WithMaxPlayers(2),
 	)
 	require.NoError(t, err)
+	// Closing the table closes its engine, which is what ends the lobby's watcher.
+	t.Cleanup(func() { manager.RemoveLobby(l.Code()) })
 
 	guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
 	_, err = manager.JoinLobbyByCode(l.Code(), guest)
@@ -191,24 +193,20 @@ func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 		router.RouteLobbyJoin,
 	}
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for _, route := range routes {
-			t.Run(fmt.Sprintf("%dx%d_%s", size.w, size.h, route), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%dx%d_%s", size.Width, size.Height, route), func(t *testing.T) {
 				t.Parallel()
 				r, _, _ := sessionModel(t)
-				r.Global.Width, r.Global.Height = size.w, size.h
+				r.Global.Width, r.Global.Height = size.Width, size.Height
 
 				r.Goto(route, nil)
 				t.Cleanup(r.Close)
 
 				out := r.View().Content
 				assert.NotEmpty(t, out)
-				assert.LessOrEqual(t, lg.Width(out), size.w)
-				assert.LessOrEqual(t, lg.Height(out), size.h)
+				assert.LessOrEqual(t, lg.Width(out), size.Width)
+				assert.LessOrEqual(t, lg.Height(out), size.Height)
 			})
 		}
 	}

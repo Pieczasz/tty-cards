@@ -8,7 +8,6 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	"uuid"
@@ -300,25 +299,18 @@ func manyTables(n int) []lobby.BrowseEntry {
 // terminal, and the frame handed the overflow to the terminal to wrap.
 func TestJoin_ViewFitsTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := newJoinModel(t, lobby.NewManager(t.Context(), nil))
-			m.global.Width, m.global.Height = size.w, size.h
+			m.global.Width, m.global.Height = size.Width, size.Height
 			m.entries = manyTables(30)
 			m.cursor = 25 // deep in the list, so the window has to scroll
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 			assert.Contains(t, tuitest.StripANSI(out), ">Poker", "the cursor row is on screen")
 			assert.Contains(t, tuitest.StripANSI(out), "1525", "and it is the 26th table, not the first screenful")
 		})
