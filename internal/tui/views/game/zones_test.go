@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -80,7 +81,7 @@ func TestRenderOpponentEdges_ShowsEverySeat(t *testing.T) {
 
 			left, right := RenderOpponentSides(theme, base, 40, false)
 			top := RenderOpponentTop(theme, base, 200, false)
-			rendered := stripANSI(strings.Join([]string{top, left, right}, "\n"))
+			rendered := tuitest.StripANSI(strings.Join([]string{top, left, right}, "\n"))
 
 			for _, o := range base.Opponents {
 				assert.Containsf(t, rendered, o.Username, "%s is not on the table", o.Username)
@@ -111,22 +112,6 @@ func TestRenderOpponentEdges_MarksTheSeatOnTurn(t *testing.T) {
 
 	require.NotEqual(t, turnLeft, otherLeft,
 		"the highlight has to follow the player ID, not the name they share")
-}
-
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && (r == 'm' || r == 'K' || r == 'H'):
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }
 
 // The side stacks used to emit one row per card with no bound, so an Uno hand of
@@ -177,7 +162,7 @@ func TestRenderOpponentSeat_FallsBackToNamesWhenTheArtCannotFit(t *testing.T) {
 	}}
 
 	left, _ := RenderOpponentSides(theme, base, 4, false)
-	rendered := stripANSI(left)
+	rendered := tuitest.StripANSI(left)
 	assert.Contains(t, rendered, "player0")
 	assert.Contains(t, rendered, "[5 cards]")
 	assert.NotContains(t, rendered, "░", "no half-drawn card backs")

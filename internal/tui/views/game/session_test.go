@@ -1,7 +1,6 @@
 package game
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -183,7 +182,7 @@ func TestSession_UnsubscribeIsIdempotent(t *testing.T) {
 	t.Parallel()
 	var s Session
 	assert.NotPanics(t, func() {
-		s.Unsubscribe()
+		s.unsubscribe()
 		s.Close()
 	})
 }
@@ -261,7 +260,7 @@ func TestSession_UnsubscribeReleasesTheEngineSlot(t *testing.T) {
 	engine, s := startedSession(t)
 	require.Equal(t, 1, engine.Broadcaster().Len())
 
-	s.Unsubscribe()
+	s.unsubscribe()
 
 	assert.Zero(t, engine.Broadcaster().Len())
 	assert.Nil(t, s.Events)
@@ -301,7 +300,7 @@ func TestSession_Leave(t *testing.T) {
 func seatedSession(t *testing.T) (*lobby.Manager, *game.Player, Session) {
 	t.Helper()
 	_, s := startedSession(t)
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(t.Context(), nil)
 	alice := lobby.NewPlayer(s.Global.User)
 	_, err := manager.CreateLobby(alice, lobby.WithCardGame("Crazy Eights"))
 	require.NoError(t, err)

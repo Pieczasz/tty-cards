@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -145,7 +146,7 @@ func TestRenderFan_OnlyTheTopCardClosesItsEdge(t *testing.T) {
 		{Rank: deck.Three, Suit: deck.Hearts},
 	}
 
-	flat := stripANSI(RenderFan(theme, hand, -1, overlapWidth))
+	flat := tuitest.StripANSI(RenderFan(theme, hand, -1, overlapWidth))
 	assert.Equal(t, 1, strings.Count(flat, "╮"), "only the rightmost card closes")
 	wantWidth := 0
 	for i := range hand {
@@ -153,7 +154,7 @@ func TestRenderFan_OnlyTheTopCardClosesItsEdge(t *testing.T) {
 	}
 	assert.Equal(t, wantWidth, lg.Width(flat), "the fan is as wide as it claims")
 
-	picked := stripANSI(RenderFan(theme, hand, 1, overlapWidth))
+	picked := tuitest.StripANSI(RenderFan(theme, hand, 1, overlapWidth))
 	assert.Equal(t, 2, strings.Count(picked, "╮"), "the picked card closes over its neighbour")
 
 	assert.Empty(t, RenderFan(theme, nil, -1, overlapWidth), "no cards, nothing to draw")
@@ -176,20 +177,4 @@ func TestRankLabels_CoversAllDeckRanks(t *testing.T) {
 		assert.Falsef(t, dup, "ranks %d and %d both render as %q", prev, rank, label)
 		seen[label] = rank
 	}
-}
-
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && r == 'm':
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }

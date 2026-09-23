@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -150,7 +151,7 @@ func TestRouter_IdleQuit(t *testing.T) {
 
 			r.lastActivity = time.Now().Add(-tt.idleFor)
 			if tt.keyPress {
-				r.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+				r.Update(tuitest.Key("a"))
 			}
 
 			_, cmd := r.Update(tickMsg(time.Now()))

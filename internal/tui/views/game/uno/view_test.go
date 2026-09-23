@@ -44,9 +44,9 @@ func seatsOf(names ...string) []game.PlayerSnapshot {
 	return seats
 }
 
-func viewAt(width, height int, opponents ...string) *Model {
+func viewAt(width, height int, opponents ...string) *model {
 	opps := seatsOf(opponents...)
-	return &Model{
+	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Base: gameview.BaseState{
 			Phase:           game.Playing,
@@ -62,6 +62,7 @@ func viewAt(width, height int, opponents ...string) *Model {
 		},
 		currentColor: logic.ColorRed,
 		direction:    1,
+		color:        colorPicker,
 	}
 }
 
@@ -87,7 +88,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				m := viewAt(size.w, size.h, opponents...)
 
 				for _, picking := range []bool{false, true} {
-					m.pickingColor = picking
+					m.color.Open = picking
 					out := m.View().Content
 					assert.LessOrEqual(t, lg.Width(out), size.w, "picker=%v overran the width", picking)
 					assert.LessOrEqual(t, lg.Height(out), size.h, "picker=%v overran the height", picking)
@@ -141,7 +142,7 @@ func TestRenderHandColorRow_DropsTheSelectionBehindThePicker(t *testing.T) {
 	m.Selected = 4
 	handWidth, handRows := gameview.HandWidth(120), gameview.HandRows(50)
 
-	m.pickingColor = true
+	m.color.Open = true
 	withPicker := m.renderHandColorRow(handWidth, handRows)
 	unselected := gameview.RenderHand(m.Global.Theme, m.Base.Hand, -1, true, handWidth, handRows)
 
@@ -216,12 +217,12 @@ func TestRenderColorPicker_OffersEveryColour(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 50, "bob")
-	assert.Empty(t, m.renderColorPicker(), "closed, the picker draws nothing")
+	assert.Empty(t, m.color.Render(m.Global.Theme), "closed, the picker draws nothing")
 
-	m.pickingColor = true
-	out := m.renderColorPicker()
-	for _, c := range colorChoices {
-		assert.Contains(t, out, c.label)
+	m.color.Open = true
+	out := m.color.Render(m.Global.Theme)
+	for _, c := range colorPicker.Choices {
+		assert.Contains(t, out, c.Label)
 	}
 	assert.Contains(t, out, "Pick a color")
 }

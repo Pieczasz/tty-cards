@@ -1,3 +1,4 @@
+// Package crazyeight is the Crazy Eights table view.
 package crazyeight
 
 import (
@@ -10,25 +11,34 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-type Model struct {
+type model struct {
 	gameview.Session
 
-	// Crazy Eights specific
 	currentSuit deck.Suit
-	pickingSuit bool
-	suitCursor  int
+	suit        gameview.ChoicePicker
+}
+
+// suitPicker is the picker an eight opens, closed. Each model takes its own copy.
+var suitPicker = gameview.ChoicePicker{
+	Title: "Pick a suit:",
+	Choices: []gameview.Choice{
+		{Label: "♠ Spades", Suit: deck.Spades},
+		{Label: "♥︎ Hearts", Suit: deck.Hearts},
+		{Label: "♦ Diamonds", Suit: deck.Diamonds},
+		{Label: "♣ Clubs", Suit: deck.Clubs},
+	},
 }
 
 // New creates a new Crazy Eights TUI view bound to the session player.
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
 	session, _ := gameview.NewSession(global, engine, "crazy eights")
-	m := &Model{Session: session}
+	m := &model{Session: session, suit: suitPicker}
 	m.syncState()
 	return m
 }
 
-func (m *Model) syncState() {
+func (m *model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
 			m.currentSuit = s.CurrentSuit
@@ -38,10 +48,6 @@ func (m *Model) syncState() {
 	// lost to the clock takes it down rather than leaving it over the table with
 	// nothing left to confirm.
 	if !m.Base.MyTurn {
-		m.pickingSuit = false
+		m.suit.Open = false
 	}
-}
-
-func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), m.ClockTick())
 }

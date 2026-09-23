@@ -11,6 +11,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -135,7 +136,7 @@ func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
 	require.NotPanics(t, func() { m.View() }, "an empty form still has to render")
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.handleKey(keyMsg("enter"))
+	_, cmd := m.handleKey(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "there is nothing to create, so nowhere to navigate")
 	assert.ErrorIs(t, m.err, errNoGames)
 }
@@ -168,7 +169,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
-			_, cmd := m.Update(keyMsg(tt.key))
+			_, cmd := m.Update(tuitest.Key(tt.key))
 			assert.Equal(t, tt.want, routeOf(t, cmd))
 		})
 	}
@@ -270,7 +271,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			m := newCreateModel(t)
 			m.cursor = tt.cursor
 			for _, key := range tt.keys {
-				m.Update(keyMsg(key))
+				m.Update(tuitest.Key(key))
 			}
 			tt.check(t, m)
 		})
@@ -283,12 +284,12 @@ func TestCreate_CursorStaysInBounds(t *testing.T) {
 	m := newCreateModel(t)
 
 	for range 10 {
-		m.Update(keyMsg("j"))
+		m.Update(tuitest.Key("j"))
 	}
 	assert.Equal(t, createCursorSubmit, m.cursor)
 
 	for range 10 {
-		m.Update(keyMsg("k"))
+		m.Update(tuitest.Key("k"))
 	}
 	assert.Equal(t, createCursorGame, m.cursor)
 }
@@ -304,7 +305,7 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	m.isRanked = true
 	m.cursor = createCursorSubmit
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
@@ -330,7 +331,7 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd, "nothing was created, so there is nowhere to navigate")
 	require.Error(t, m.err)
@@ -345,7 +346,7 @@ func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
 	m.cursor = createCursorVisibility
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd)
 	assert.NoError(t, m.err)

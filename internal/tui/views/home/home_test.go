@@ -6,6 +6,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -36,7 +37,7 @@ func TestHome_Update_Navigation(t *testing.T) {
 			// this tree has since moved to pointer receivers.
 			m := New(router.GlobalContext{})
 
-			_, cmd := m.Update(tea.KeyPressMsg{Code: rune(tt.key[0]), Text: tt.key})
+			_, cmd := m.Update(tuitest.Key(tt.key))
 
 			require.NotNil(t, cmd, "%q must navigate", tt.key)
 			msg, ok := cmd().(router.ChangeViewMsg)
@@ -52,7 +53,7 @@ func TestHome_Update_QuitsOnQ(t *testing.T) {
 	t.Parallel()
 	m := New(router.GlobalContext{})
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.Update(tuitest.Key("q"))
 
 	require.NotNil(t, cmd)
 	_, isChange := cmd().(router.ChangeViewMsg)
@@ -63,7 +64,7 @@ func TestHome_Update_IgnoresUnboundKeys(t *testing.T) {
 	t.Parallel()
 	m := New(router.GlobalContext{})
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	_, cmd := m.Update(tuitest.Key("z"))
 
 	assert.Nil(t, cmd, "an unbound key does nothing")
 }

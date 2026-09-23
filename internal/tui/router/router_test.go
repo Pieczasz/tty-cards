@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 )
 
 type MockModel struct {
@@ -42,7 +44,7 @@ func TestRouter_UpdatePropagation(t *testing.T) {
 
 	r.Goto("mock", nil)
 
-	keyMsg := tea.KeyPressMsg{Code: rune("a"[0]), Text: "a"}
+	keyMsg := tuitest.Key("a")
 	newModel, _ := r.Update(keyMsg)
 
 	assert.Equal(t, keyMsg, newModel.(*Router).active.(MockModel).handledMsg)

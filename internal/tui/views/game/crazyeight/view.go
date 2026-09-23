@@ -1,7 +1,8 @@
 package crazyeight
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"slices"
+
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
@@ -10,21 +11,7 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
-const keyHints = gameview.HandKeyHints
-
-// suitChoices is the picker: the label and the suit it stands for are one entry, so
-// the cell under the cursor cannot mean a different suit from the one on screen.
-var suitChoices = []struct {
-	label string
-	suit  deck.Suit
-}{
-	{"♠ Spades", deck.Spades},
-	{"♥︎ Hearts", deck.Hearts},
-	{"♦ Diamonds", deck.Diamonds},
-	{"♣ Clubs", deck.Clubs},
-}
-
-func (m *Model) View() tea.View {
+func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
@@ -37,15 +24,13 @@ func (m *Model) View() tea.View {
 	minimalSeats := gameview.IsCompact(m.Global.Width, m.Global.Height)
 	top := gameview.RenderOpponentTop(m.Global.Theme, m.Base, m.Global.Width, minimalSeats)
 
-	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), keyHints,
+	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), gameview.HandKeyHints,
 		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
 }
 
-func (m *Model) renderMiddleLayer(height int, minimalSeats bool) string {
-	var centerStack string
-	if m.pickingSuit {
-		centerStack = m.renderSuitPicker()
-	} else {
+func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
+	centerStack := m.suit.Render(m.Global.Theme)
+	if !m.suit.Open {
 		centerStack = m.renderCenterTable()
 	}
 
@@ -55,54 +40,26 @@ func (m *Model) renderMiddleLayer(height int, minimalSeats bool) string {
 		left, lg.NewStyle().MarginTop(1).Render(centerStack), right)
 }
 
-func (m *Model) renderCenterTable() string {
+func (m *model) renderCenterTable() string {
 	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
-	currentSuitView := m.renderCurrentSuitIndicator()
-	return lg.JoinVertical(lg.Center, discardView, currentSuitView)
+	return lg.JoinVertical(lg.Center, discardView, m.renderCurrentSuitIndicator())
 }
 
-func (m *Model) renderCurrentSuitIndicator() string {
-	suitStr := ""
-	switch m.currentSuit {
-	case deck.Spades:
-		suitStr = "♠ Spades"
-	case deck.Hearts:
-		suitStr = "♥︎ Hearts"
-	case deck.Diamonds:
-		suitStr = "♦ Diamonds"
-	case deck.Clubs:
-		suitStr = "♣ Clubs"
-	case deck.NoSuit:
-		suitStr = ""
-	}
-
-	if suitStr == "" {
+// renderCurrentSuitIndicator names the suit to follow the way the picker does, so the
+// suit a player picked reads back the same on the table.
+func (m *model) renderCurrentSuitIndicator() string {
+	i := slices.IndexFunc(suitPicker.Choices, func(c gameview.Choice) bool { return c.Suit == m.currentSuit })
+	if i < 0 {
 		return ""
 	}
-
 	return m.Global.Theme.Muted.Render("Current Suit: ") +
-		lg.NewStyle().Bold(true).Foreground(m.Global.Theme.Text).Render(suitStr)
+		lg.NewStyle().Bold(true).Foreground(m.Global.Theme.Text).Render(suitPicker.Choices[i].Label)
 }
 
-func (m *Model) renderPlayerSection() string {
+func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
-	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.pickingSuit,
+	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.suit.Open,
 		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
 
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
-}
-
-func (m *Model) renderSuitPicker() string {
-	if !m.pickingSuit {
-		return ""
-	}
-	labels := make([]string, 0, len(suitChoices))
-	for _, c := range suitChoices {
-		labels = append(labels, c.label)
-	}
-	return components.GridPicker{
-		Title:  "Pick a suit:",
-		Labels: labels,
-		Cursor: m.suitCursor,
-	}.Render(m.Global.Theme)
 }

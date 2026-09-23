@@ -35,9 +35,9 @@ func seatsOf(names ...string) []game.PlayerSnapshot {
 	return seats
 }
 
-func viewAt(width, height int, opponents ...string) *Model {
+func viewAt(width, height int, opponents ...string) *model {
 	opps := seatsOf(opponents...)
-	return &Model{
+	return &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height},
 		Base: gameview.BaseState{
 			Phase:           game.Playing,
@@ -52,6 +52,7 @@ func viewAt(width, height int, opponents ...string) *Model {
 			TurnRemaining:   12 * time.Second,
 		},
 		currentSuit: deck.Hearts,
+		suit:        suitPicker,
 	}
 }
 
@@ -78,7 +79,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				m := viewAt(size.w, size.h, opponents...)
 
 				for _, picking := range []bool{false, true} {
-					m.pickingSuit = picking
+					m.suit.Open = picking
 					out := m.View().Content
 					assert.LessOrEqual(t, lg.Width(out), size.w, "picker=%v overran the width", picking)
 					assert.LessOrEqual(t, lg.Height(out), size.h, "picker=%v overran the height", picking)
@@ -163,13 +164,13 @@ func TestRenderSuitPicker_OffersEverySuit(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 40, "bob")
-	assert.Empty(t, m.renderSuitPicker(), "closed, the picker draws nothing")
+	assert.Empty(t, m.suit.Render(m.Global.Theme), "closed, the picker draws nothing")
 
-	m.pickingSuit = true
-	m.suitCursor = 2
-	out := m.renderSuitPicker()
-	for _, c := range suitChoices {
-		assert.Contains(t, out, c.label)
+	m.suit.Open = true
+	m.suit.Cursor = 2
+	out := m.suit.Render(m.Global.Theme)
+	for _, c := range suitPicker.Choices {
+		assert.Contains(t, out, c.Label)
 	}
 	assert.Contains(t, out, "Pick a suit")
 }

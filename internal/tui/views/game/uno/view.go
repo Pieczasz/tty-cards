@@ -15,23 +15,7 @@ import (
 	lg "charm.land/lipgloss/v2"
 )
 
-const keyHints = gameview.HandKeyHints
-
-// colorChoices is the picker: the label, the colour it plays and the tone it is drawn
-// in are one entry, so the cell under the cursor cannot mean a different colour from
-// the one on screen.
-var colorChoices = []struct {
-	label string
-	color deck.Suit
-	tone  func(styles.Theme) color.Color
-}{
-	{"♥ Red", logic.ColorRed, func(t styles.Theme) color.Color { return t.UnoRed }},
-	{"♦ Yellow", logic.ColorYellow, func(t styles.Theme) color.Color { return t.UnoYellow }},
-	{"♣ Green", logic.ColorGreen, func(t styles.Theme) color.Color { return t.UnoGreen }},
-	{"♠ Blue", logic.ColorBlue, func(t styles.Theme) color.Color { return t.UnoBlue }},
-}
-
-func (m *Model) View() tea.View {
+func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
@@ -44,15 +28,13 @@ func (m *Model) View() tea.View {
 	minimalSeats := gameview.IsCompact(m.Global.Width, m.Global.Height)
 	top := gameview.RenderOpponentTop(m.Global.Theme, m.Base, m.Global.Width, minimalSeats)
 
-	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), keyHints,
+	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), gameview.HandKeyHints,
 		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
 }
 
-func (m *Model) renderMiddleLayer(height int, minimalSeats bool) string {
-	var centerStack string
-	if m.pickingColor {
-		centerStack = m.renderColorPicker()
-	} else {
+func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
+	centerStack := m.color.Render(m.Global.Theme)
+	if !m.color.Open {
 		centerStack = m.renderCenterTable()
 	}
 
@@ -62,7 +44,7 @@ func (m *Model) renderMiddleLayer(height int, minimalSeats bool) string {
 		left, lg.NewStyle().MarginTop(1).Render(centerStack), right)
 }
 
-func (m *Model) renderCenterTable() string {
+func (m *model) renderCenterTable() string {
 	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
 	return lg.JoinVertical(lg.Center,
 		discardView,
@@ -71,7 +53,7 @@ func (m *Model) renderCenterTable() string {
 	)
 }
 
-func (m *Model) renderCurrentColorIndicator() string {
+func (m *model) renderCurrentColorIndicator() string {
 	label, fg := colorLabel(m.Global.Theme, m.currentColor)
 	if label == "" {
 		return ""
@@ -80,7 +62,7 @@ func (m *Model) renderCurrentColorIndicator() string {
 		lg.NewStyle().Bold(true).Foreground(fg).Render(label)
 }
 
-func (m *Model) renderDirectionIndicator() string {
+func (m *model) renderDirectionIndicator() string {
 	dir := "⟳ Clockwise"
 	if m.direction < 0 {
 		dir = "⟲ Counterclockwise"
@@ -103,11 +85,11 @@ func colorLabel(t styles.Theme, s deck.Suit) (string, color.Color) {
 	}
 }
 
-func (m *Model) renderPlayerSection() string {
+func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayer, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth, handRows := gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height)
 	colorRow := m.renderHandColorRow(handWidth, handRows)
-	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.pickingColor,
+	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, m.color.Open,
 		handWidth, handRows)
 
 	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, colorRow, handView)
@@ -119,7 +101,7 @@ func (m *Model) renderPlayerSection() string {
 // the strip the hand falls back to on a short or narrow terminal has no card columns
 // to sit over, and a row drawn anyway lines up with nothing. Height decides that as
 // much as width - 24-row terminals are the common case, not an edge one.
-func (m *Model) renderHandColorRow(maxWidth, maxRows int) string {
+func (m *model) renderHandColorRow(maxWidth, maxRows int) string {
 	hand := m.Base.Hand
 	n := len(hand)
 	if !gameview.FansHand(n, maxWidth, maxRows) {
@@ -127,7 +109,7 @@ func (m *Model) renderHandColorRow(maxWidth, maxRows int) string {
 	}
 	tuck := components.FanTuck(n, maxWidth)
 	selected := m.Selected
-	if m.pickingColor {
+	if m.color.Open {
 		selected = -1
 	}
 	parts := make([]string, 0, n)
@@ -156,22 +138,4 @@ func colorGlyph(t styles.Theme, c deck.Card) (string, color.Color) {
 	default:
 		return "·", t.TextMuted
 	}
-}
-
-func (m *Model) renderColorPicker() string {
-	if !m.pickingColor {
-		return ""
-	}
-	labels := make([]string, 0, len(colorChoices))
-	tones := make([]color.Color, 0, len(colorChoices))
-	for _, c := range colorChoices {
-		labels = append(labels, c.label)
-		tones = append(tones, c.tone(m.Global.Theme))
-	}
-	return components.GridPicker{
-		Title:  "Pick a color:",
-		Labels: labels,
-		Colors: tones,
-		Cursor: m.colorCursor,
-	}.Render(m.Global.Theme)
 }

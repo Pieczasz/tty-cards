@@ -7,6 +7,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -51,7 +52,7 @@ func TestRenderMiniCard_NamesTheCard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, stripANSI(RenderMiniCard(theme, tt.card)))
+			assert.Equal(t, tt.want, tuitest.StripANSI(RenderMiniCard(theme, tt.card)))
 		})
 	}
 }
@@ -62,8 +63,8 @@ func TestMiniCardBack_IsNotAnEmptySlot(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	assert.Equal(t, "[???]", stripANSI(MiniCardBack(theme)))
-	assert.Equal(t, "[   ]", stripANSI(MiniCardSlot(theme)))
+	assert.Equal(t, "[???]", tuitest.StripANSI(MiniCardBack(theme)))
+	assert.Equal(t, "[   ]", tuitest.StripANSI(MiniCardSlot(theme)))
 }
 
 // The uno view paints a colour glyph per slot above the fan by summing CardSlotWidth,
@@ -139,7 +140,7 @@ func TestRenderFanMulti_ClosesEveryStagedCard(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	hand := testHand(7)
-	flat := stripANSI(RenderFanMulti(theme, hand, map[int]struct{}{1: {}, 3: {}}, overlapWidth))
+	flat := tuitest.StripANSI(RenderFanMulti(theme, hand, map[int]struct{}{1: {}, 3: {}}, overlapWidth))
 	assert.Equal(t, 3, strings.Count(flat, "╮"), "two staged cards plus the rightmost one")
 
 	assert.Empty(t, RenderFanMulti(theme, nil, nil, overlapWidth), "no cards, nothing to draw")
@@ -163,7 +164,7 @@ func TestRenderStrip_MarksStagedCardsApartFromTheCursor(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	hand := testHand(4)
-	out := stripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0))
 
 	assert.Contains(t, out, "*", "a staged card is starred")
 	assert.Contains(t, out, ">", "the cursor is an arrow")
@@ -180,7 +181,7 @@ func TestRenderStrip_AlwaysFitsAtLeastOneCard(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	out := stripANSI(RenderStrip(theme, testHand(3), nil, 0, 1))
+	out := tuitest.StripANSI(RenderStrip(theme, testHand(3), nil, 0, 1))
 	assert.Len(t, strings.Split(out, "\n"), 3, "one card per row when nothing else fits")
 }
 
@@ -200,7 +201,7 @@ func TestTable_PadsShortPagesToAFixedHeight(t *testing.T) {
 			for i := range rowCount {
 				rows = append(rows, tbl.Cells(fmt.Sprintf("p%d", i), "1500"))
 			}
-			lines := strings.Split(stripANSI(tbl.Render(theme, rows)), "\n")
+			lines := strings.Split(tuitest.StripANSI(tbl.Render(theme, rows)), "\n")
 			require.Len(t, lines, 2+tbl.PadTo, "header, rule and a fixed number of data rows")
 			for i, line := range lines {
 				assert.Equalf(t, tbl.Width(), lg.Width(line), "row %d is a different width", i)
@@ -213,7 +214,7 @@ func TestTable_PadsShortPagesToAFixedHeight(t *testing.T) {
 	for i := range 9 {
 		over = append(over, tbl.Cells(fmt.Sprintf("p%d", i)))
 	}
-	assert.Len(t, strings.Split(stripANSI(tbl.Render(theme, over)), "\n"), 2+9,
+	assert.Len(t, strings.Split(tuitest.StripANSI(tbl.Render(theme, over)), "\n"), 2+9,
 		"more rows than PadTo are all shown")
 }
 
@@ -224,7 +225,7 @@ func TestTable_HeaderIsTitlesAndARule(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	tbl := Table{Cols: []Column{{Title: "Game", Width: 8}, {Title: "Mode", Width: 6}}, Lead: "> "}
-	lines := strings.Split(stripANSI(tbl.Header(theme)), "\n")
+	lines := strings.Split(tuitest.StripANSI(tbl.Header(theme)), "\n")
 
 	require.Len(t, lines, 2)
 	assert.Equal(t, "> Game     | Mode  ", lines[0], "titles are padded into their own columns")

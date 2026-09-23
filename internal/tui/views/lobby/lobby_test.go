@@ -1,7 +1,6 @@
 package lobby
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -14,6 +13,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -40,7 +40,7 @@ func testRegistry() *game.Registry {
 // leaderView returns the lobby view as seen by the lobby's leader.
 func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	t.Helper()
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(t.Context(), nil)
 	leaderUser := testUser(1, "alice")
 	leader := lobby.NewPlayer(leaderUser)
 
@@ -63,28 +63,8 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	return m, l
 }
 
-// keyMsg builds the message Bubble Tea would deliver for a keystroke. Named keys
-// need their own Code and carry no Text; building one from key[0] would turn "esc"
-// into the letter 'e'.
-func keyMsg(key string) tea.KeyPressMsg {
-	switch key {
-	case "esc":
-		return tea.KeyPressMsg{Code: tea.KeyEscape}
-	case "enter":
-		return tea.KeyPressMsg{Code: tea.KeyEnter}
-	case "backspace":
-		return tea.KeyPressMsg{Code: tea.KeyBackspace}
-	case "space":
-		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
-	case "ctrl+c":
-		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
-	default:
-		return tea.KeyPressMsg{Code: rune(key[0]), Text: key}
-	}
-}
-
 func press(m *model, key string) (tea.Model, tea.Cmd) {
-	return m.Update(keyMsg(key))
+	return m.Update(tuitest.Key(key))
 }
 
 // routeOf runs a returned command and reports the route it navigates to.
@@ -264,7 +244,7 @@ func TestUpdate_WithoutALobbyNavigatesHomeOnce(t *testing.T) {
 
 	for _, next := range []tea.Msg{
 		tea.WindowSizeMsg{Width: 100, Height: 30},
-		tea.KeyPressMsg{Code: rune("j"[0]), Text: "j"},
+		tuitest.Key("j"),
 	} {
 		_, cmd = m.Update(next)
 		assert.Nil(t, cmd, "the navigation is asked for once, not on every message")

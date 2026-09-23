@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -41,12 +40,12 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.User) {
 	t.Helper()
 
-	manager := internallobby.NewManager(context.Background(), nil)
+	manager := internallobby.NewManager(t.Context(), nil)
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	registry := catalog.NewRegistry()
 
 	r := Model(ModelDependencies{
-		SessionCtx:   context.Background(),
+		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
 		GameRegistry: registry,
@@ -141,7 +140,7 @@ func TestModel_AWrongContextFallsBackToHome(t *testing.T) {
 func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	t.Parallel()
 
-	manager := internallobby.NewManager(context.Background(), nil)
+	manager := internallobby.NewManager(t.Context(), nil)
 	registry := catalog.NewRegistry()
 
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
@@ -163,7 +162,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	manager.DisconnectPlayer(host)
 
 	r := Model(ModelDependencies{
-		SessionCtx:   context.Background(),
+		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
 		GameRegistry: registry,

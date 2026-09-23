@@ -1,7 +1,6 @@
 package uno
 
 import (
-	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	logic "github.com/Pieczasz/terminal-card/internal/game/uno"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	"uuid"
@@ -24,7 +24,7 @@ import (
 
 func TestUpdate_Navigation(t *testing.T) {
 	t.Parallel()
-	m := Model{
+	m := model{
 		Base: gameview.BaseState{
 			Hand: []deck.Card{
 				{Rank: deck.Two, Suit: logic.ColorRed},
@@ -33,31 +33,32 @@ func TestUpdate_Navigation(t *testing.T) {
 			},
 		}}
 
-	msg := tea.KeyPressMsg{Code: rune("l"[0]), Text: "l"}
+	msg := tuitest.Key("l")
 	newM, _ := m.Update(msg)
-	assert.Equal(t, 1, newM.(*Model).Selected)
+	assert.Equal(t, 1, newM.(*model).Selected)
 
-	msg = tea.KeyPressMsg{Code: rune("h"[0]), Text: "h"}
+	msg = tuitest.Key("h")
 	newM, _ = newM.Update(msg)
-	assert.Equal(t, 0, newM.(*Model).Selected)
+	assert.Equal(t, 0, newM.(*model).Selected)
 }
 
 func TestUpdate_ColorPicking(t *testing.T) {
 	t.Parallel()
-	m := Model{pickingColor: true, colorCursor: 0}
+	m := model{color: colorPicker}
+	m.color.Show()
 
-	msg := tea.KeyPressMsg{Code: rune("l"[0]), Text: "l"}
+	msg := tuitest.Key("l")
 	newM, _ := m.Update(msg)
-	assert.Equal(t, 1, newM.(*Model).colorCursor)
+	assert.Equal(t, 1, newM.(*model).color.Cursor)
 
-	msg = tea.KeyPressMsg{Code: rune("j"[0]), Text: "j"}
+	msg = tuitest.Key("j")
 	newM, _ = newM.Update(msg)
-	assert.Equal(t, 3, newM.(*Model).colorCursor)
+	assert.Equal(t, 3, newM.(*model).color.Cursor)
 }
 
 // tableOnTurn seats the view as whichever player the engine put on turn, so the
 // test does not depend on where the deal landed.
-func tableOnTurn(t *testing.T) (*game.Engine, *Model) {
+func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	players := []*game.Player{
 		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
@@ -75,9 +76,9 @@ func tableOnTurn(t *testing.T) (*game.Engine, *Model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         &db.User{ID: id, Username: "hero"},
-		LobbyManager: lobby.NewManager(context.Background(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil),
 	}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m
@@ -90,23 +91,23 @@ func TestSyncState_ClosesTheColourPickerWhenTheTurnIsLost(t *testing.T) {
 	t.Parallel()
 	engine, m := tableOnTurn(t)
 
-	m.pickingColor = true
-	m.colorCursor = 2
+	m.color.Open = true
+	m.color.Cursor = 2
 	require.NoError(t, engine.SubmitAction(m.Bound.PlayerID(), logic.ActionDrawCard{}))
 	m.syncState()
 
 	require.False(t, m.Base.MyTurn, "drawing passes the turn on")
-	assert.False(t, m.pickingColor, "the picker cannot outlive the turn it belongs to")
+	assert.False(t, m.color.Open, "the picker cannot outlive the turn it belongs to")
 }
 
 func TestSyncState_KeepsTheColourPickerWhileTheTurnIsStillYours(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
 
-	m.pickingColor = true
+	m.color.Open = true
 	m.syncState()
 
-	assert.True(t, m.pickingColor, "a refresh mid-turn must not close the picker")
+	assert.True(t, m.color.Open, "a refresh mid-turn must not close the picker")
 }
 
 func TestClose_ReleasesEngineSubscription(t *testing.T) {
@@ -121,7 +122,7 @@ func TestClose_ReleasesEngineSubscription(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(t, ok)
 	require.Equal(t, 1, engine.Broadcaster().Len())
 
@@ -167,7 +168,7 @@ func TestRenderHandColorRow_FollowsTheHandItSitsOver(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			m := &Model{
+			m := &model{
 				Global: router.GlobalContext{Width: tt.width, Height: tt.height},
 				Base:   gameview.BaseState{Hand: hand},
 			}
@@ -197,17 +198,17 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 func TestHandleEscape_CancelsThePickerBeforeLeavingTheTable(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
-	m.pickingColor = true
+	m.color.Open = true
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "the first esc only closes the picker")
-	assert.False(t, m.pickingColor)
+	assert.False(t, m.color.Open)
 
-	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd = m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "the second esc asks before forfeiting")
 	assert.Contains(t, m.View().Content, "forfeit")
 
-	_, cmd = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	_, cmd = m.Update(tuitest.Key("y"))
 	assert.NotNil(t, cmd, "y leaves the table")
 }
 
@@ -221,17 +222,17 @@ func TestHandleEnter_AWildOpensThePickerAndTheNextEnterCommits(t *testing.T) {
 			t.Parallel()
 			// No engine: the submit is refused for want of a seat, which is the
 			// rejection path without depending on where a real deal landed the wilds.
-			m := &Model{}
+			m := &model{color: colorPicker}
 			m.Base.MyTurn = true
 			m.Base.Hand = []deck.Card{{Rank: rank}}
 
-			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			require.True(t, m.pickingColor, "a wild asks which colour it becomes")
-			require.Equal(t, 0, m.colorCursor, "the picker opens on the first colour")
+			_, _ = m.Update(tuitest.Key("enter"))
+			require.True(t, m.color.Open, "a wild asks which colour it becomes")
+			require.Equal(t, 0, m.color.Cursor, "the picker opens on the first colour")
 
-			m.colorCursor = 3
-			_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			assert.False(t, m.pickingColor, "committing closes the picker whatever the engine says")
+			m.color.Cursor = 3
+			_, _ = m.Update(tuitest.Key("enter"))
+			assert.False(t, m.color.Open, "committing closes the picker whatever the engine says")
 			// A rejected move has to surface a message rather than fail silently.
 			assert.Error(t, m.ActionErr)
 		})
@@ -244,8 +245,8 @@ func TestHandleEnter_AnOrdinaryCardIsPlayedStraightAway(t *testing.T) {
 	m.Base.Hand = []deck.Card{{Rank: logic.Zero, Suit: logic.ColorRed}}
 	m.Selected = 0
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	assert.False(t, m.pickingColor, "only a wild opens the picker")
+	_, _ = m.Update(tuitest.Key("enter"))
+	assert.False(t, m.color.Open, "only a wild opens the picker")
 }
 
 func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
@@ -253,7 +254,7 @@ func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
 	engine, m := tableOnTurn(t)
 
 	before := engine.Snapshot().DeckSize
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	_, _ = m.Update(tuitest.Key("d"))
 	require.NoError(t, m.ActionErr)
 	require.Less(t, engine.Snapshot().DeckSize, before, "drawing takes a card off the stock")
 
@@ -261,7 +262,7 @@ func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
 	require.False(t, m.Base.MyTurn, "drawing passes the turn on")
 
 	after := engine.Snapshot().DeckSize
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	_, _ = m.Update(tuitest.Key("d"))
 	assert.Equal(t, after, engine.Snapshot().DeckSize, "d off-turn must not reach the engine")
 }
 
@@ -269,35 +270,35 @@ func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
 // the digit would silently retarget the card being played.
 func TestSelectDigit_IsIgnoredWhileThePickerIsOpen(t *testing.T) {
 	t.Parallel()
-	m := &Model{}
+	m := &model{color: colorPicker}
 	m.Base.Hand = make([]deck.Card, 5)
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
+	_, _ = m.Update(tuitest.Key("3"))
 	require.Equal(t, 3, m.Selected)
 
-	m.pickingColor = true
-	_, _ = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	m.color.Open = true
+	_, _ = m.Update(tuitest.Key("1"))
 	assert.Equal(t, 3, m.Selected, "the hand cursor is frozen behind the picker")
 }
 
 // GridStep clamps the picker's cursor, but the submit path checks again: a cursor out
 // of range must be dropped rather than index past the colour table.
-func TestSubmitColorPick_IgnoresACursorOutOfRange(t *testing.T) {
+func TestHandleEnter_IgnoresAColorCursorOutOfRange(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
-	m.pickingColor = true
-	m.colorCursor = len(colorChoices)
+	m.color.Open = true
+	m.color.Cursor = len(colorPicker.Choices)
 
-	_, _ = m.submitColorPick(deck.Card{Rank: logic.Wild})
-	assert.True(t, m.pickingColor, "nothing was committed, so the picker stays open")
+	m.handleEnter()
+	assert.True(t, m.color.Open, "nothing was committed, so the picker stays open")
 }
 
 // Once the game is over enter is the way out, not another move.
 func TestHandleEnter_LeavesAFinishedGame(t *testing.T) {
 	t.Parallel()
-	m := &Model{}
+	m := &model{color: colorPicker}
 	m.Base.Phase = game.Finished
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd := m.Update(tuitest.Key("enter"))
 	assert.NotNil(t, cmd)
 }

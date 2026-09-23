@@ -29,10 +29,10 @@ type BaseState struct {
 	TurnRemaining time.Duration
 }
 
-// SyncBaseState builds a redacted view via BoundEngine (own hand only), handing the
+// syncBaseState builds a redacted view via BoundEngine (own hand only), handing the
 // live *State to fn in the same lock hold. Identity comes from bound.PlayerID,
 // the authenticated session's player, never from a display name.
-func SyncBaseState(bound *game.BoundEngine, fn func(*game.State)) BaseState {
+func syncBaseState(bound *game.BoundEngine, fn func(*game.State)) BaseState {
 	var base BaseState
 	if bound == nil {
 		return base

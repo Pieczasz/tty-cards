@@ -1,34 +1,49 @@
+// Package uno is the Uno table view.
 package uno
 
 import (
+	"image/color"
+
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	logic "github.com/Pieczasz/terminal-card/internal/game/uno"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 	gameview "github.com/Pieczasz/terminal-card/internal/tui/views/game"
 
 	tea "charm.land/bubbletea/v2"
 )
 
-type Model struct {
+type model struct {
 	gameview.Session
 
 	currentColor deck.Suit
 	direction    int8
-	pickingColor bool
-	colorCursor  int
+	color        gameview.ChoicePicker
+}
+
+// colorPicker is the picker a wild opens, closed. Each model takes its own copy. Every
+// cell is drawn in the colour it plays.
+var colorPicker = gameview.ChoicePicker{
+	Title: "Pick a color:",
+	Choices: []gameview.Choice{
+		{Label: "♥ Red", Suit: logic.ColorRed, Tone: func(t styles.Theme) color.Color { return t.UnoRed }},
+		{Label: "♦ Yellow", Suit: logic.ColorYellow, Tone: func(t styles.Theme) color.Color { return t.UnoYellow }},
+		{Label: "♣ Green", Suit: logic.ColorGreen, Tone: func(t styles.Theme) color.Color { return t.UnoGreen }},
+		{Label: "♠ Blue", Suit: logic.ColorBlue, Tone: func(t styles.Theme) color.Color { return t.UnoBlue }},
+	},
 }
 
 // New creates a Uno TUI view bound to the session player.
 func New(global router.GlobalContext, engine *game.Engine) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
 	session, _ := gameview.NewSession(global, engine, "uno")
-	m := &Model{Session: session, direction: 1}
+	m := &model{Session: session, direction: 1, color: colorPicker}
 	m.syncState()
 	return m
 }
 
-func (m *Model) syncState() {
+func (m *model) syncState() {
 	m.Sync(func(state *game.State) {
 		if s, ok := state.Extra.(*logic.State); ok {
 			m.currentColor = s.CurrentColor
@@ -39,10 +54,6 @@ func (m *Model) syncState() {
 	// lost to the clock takes it down rather than leaving it over the table with
 	// nothing left to confirm.
 	if !m.Base.MyTurn {
-		m.pickingColor = false
+		m.color.Open = false
 	}
-}
-
-func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.Listen(), m.ClockTick())
 }

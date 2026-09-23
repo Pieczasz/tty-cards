@@ -1,7 +1,6 @@
 package lobby
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -25,7 +24,7 @@ func benchGlobal(m *lobby.Manager) router.GlobalContext {
 // The browser re-renders every two seconds for every player sitting on it, so this is
 // a per-second cost across the whole server rather than a per-keypress one.
 func BenchmarkJoinView_Render(b *testing.B) {
-	m := lobby.NewManager(context.Background(), nil)
+	m := lobby.NewManager(b.Context(), nil)
 	for i := range 20 {
 		leader := &game.Player{ID: fmt.Sprintf("h%d", i), UserID: testutil.UID(byte(i + 1)), Name: fmt.Sprintf("h%d", i)}
 		_, err := m.CreateLobby(leader, lobby.WithPrivate(false), lobby.WithCardGame(testGameName))
@@ -42,7 +41,7 @@ func BenchmarkJoinView_Render(b *testing.B) {
 
 // The in-lobby view redraws on every roster and settings event.
 func BenchmarkLobbyView_Render(b *testing.B) {
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(b.Context(), nil)
 	leader := &game.Player{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"}
 	l, err := manager.CreateLobby(leader, lobby.WithMaxPlayers(4), lobby.WithPrivate(false),
 		lobby.WithCardGame(testGameName))
@@ -66,7 +65,7 @@ func BenchmarkLobbyView_Render(b *testing.B) {
 }
 
 func BenchmarkCreateView_Render(b *testing.B) {
-	view, ok := NewCreate(benchGlobal(lobby.NewManager(context.Background(), nil))).(*createModel)
+	view, ok := NewCreate(benchGlobal(lobby.NewManager(b.Context(), nil))).(*createModel)
 	require.True(b, ok)
 
 	b.ReportAllocs()

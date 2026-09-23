@@ -11,6 +11,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
@@ -34,7 +35,7 @@ func TestGlobalActionsAllRoute(t *testing.T) {
 			t.Parallel()
 			if key == "ctrl+c" {
 				// Quit is handled by HandleCommonMsg, not by the route table.
-				handled, cmd := views.HandleCommonMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, &router.GlobalContext{})
+				handled, cmd := views.HandleCommonMsg(tuitest.Key("ctrl+c"), &router.GlobalContext{})
 				assert.True(t, handled, "ctrl+c must be handled")
 				assert.NotNil(t, cmd, "ctrl+c must produce the quit command")
 				return
@@ -207,7 +208,7 @@ func TestHandleCommonMsg(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{}
 
-		handled, cmd := views.HandleCommonMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, &g)
+		handled, cmd := views.HandleCommonMsg(tuitest.Key("ctrl+c"), &g)
 
 		assert.True(t, handled)
 		require.NotNil(t, cmd)
@@ -220,8 +221,9 @@ func TestHandleCommonMsg(t *testing.T) {
 		g := router.GlobalContext{}
 
 		for _, key := range []tea.KeyPressMsg{
-			{Code: 'g', Text: "g"},
-			{Code: tea.KeyEnter},
+			tuitest.Key("g"),
+			tuitest.Key("enter"),
+			// A bare c, without the ctrl modifier.
 			{Code: 'c'},
 		} {
 			handled, cmd := views.HandleCommonMsg(key, &g)

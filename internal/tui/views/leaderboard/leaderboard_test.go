@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
-	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -126,7 +125,7 @@ func TestRenderRankings_DrawsExactlyOnePage(t *testing.T) {
 	m := board(t, rows+5)
 	m.page = 0
 
-	out := stripANSI(m.renderRankings(80))
+	out := tuitest.StripANSI(m.renderRankings(80))
 	assert.Contains(t, out, "player01")
 	assert.Contains(t, out, fmt.Sprintf("player%02d", rows))
 	assert.NotContains(t, out, fmt.Sprintf("player%02d", rows+1),
@@ -134,7 +133,7 @@ func TestRenderRankings_DrawsExactlyOnePage(t *testing.T) {
 	assert.Contains(t, out, "page 1/")
 
 	m.page = 1
-	out = stripANSI(m.renderRankings(80))
+	out = tuitest.StripANSI(m.renderRankings(80))
 	assert.Contains(t, out, fmt.Sprintf("player%02d", rows+1))
 	assert.NotContains(t, out, "player01")
 	assert.Contains(t, out, "page 2/")
@@ -145,22 +144,6 @@ func TestNeedsFetch_CapsAtMax(t *testing.T) {
 	m := board(t, maxLeaderboardPlayers)
 	assert.Equal(t, 0, m.needsFetch(maxLeaderboardPlayers/maxRowsPerPage),
 		"a full window does not ask the repository again")
-}
-
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && (r == 'm' || r == 'K' || r == 'H'):
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }
 
 // The board is a full-screen view, so it has to fit the screen. It used to force
@@ -284,7 +267,7 @@ func TestUpdate_DiscardsAResponseForAFilterAlreadyCycledPast(t *testing.T) {
 	}
 
 	press := func(m model) model {
-		next, _ := m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+		next, _ := m.Update(tuitest.Key("g"))
 		return next.(model)
 	}
 	m = press(m) // Poker
@@ -393,7 +376,7 @@ func TestUpdate_Keys(t *testing.T) {
 			// Two full pages held, so a forward page turn resolves without a fetch.
 			m := board(t, boardRows(t)*2)
 
-			next, _ := m.Update(keyPress(tt.key))
+			next, _ := m.Update(tuitest.Key(tt.key))
 			nm := next.(model)
 
 			assert.Equal(t, tt.wantFilter, nm.filterIndex)
@@ -419,7 +402,7 @@ func TestUpdate_NavigationKeysStillNavigate(t *testing.T) {
 		t.Run(tt.key, func(t *testing.T) {
 			t.Parallel()
 			m := board(t, 0)
-			next, cmd := m.Update(keyPress(tt.key))
+			next, cmd := m.Update(tuitest.Key(tt.key))
 
 			assert.Equal(t, 0, next.(model).filterIndex)
 			require.NotNil(t, cmd)
@@ -434,7 +417,7 @@ func TestUpdate_UnboundKeyDoesNothing(t *testing.T) {
 	t.Parallel()
 	m := board(t, boardRows(t))
 
-	next, cmd := m.Update(keyPress("z"))
+	next, cmd := m.Update(tuitest.Key("z"))
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, m.page, next.(model).page)
@@ -538,9 +521,9 @@ func TestRenderPlayerRow_HighlightsTheViewer(t *testing.T) {
 	mine := m.renderPlayerRow(tbl, 1, m.rankings[1])
 	theirs := m.renderPlayerRow(tbl, 0, m.rankings[0])
 
-	assert.NotEqual(t, stripANSI(mine), mine, "the viewer's own row is styled")
-	assert.Equal(t, stripANSI(theirs), theirs, "another player's row is plain")
-	assert.Contains(t, stripANSI(mine), "player02")
+	assert.NotEqual(t, tuitest.StripANSI(mine), mine, "the viewer's own row is styled")
+	assert.Equal(t, tuitest.StripANSI(theirs), theirs, "another player's row is plain")
+	assert.Contains(t, tuitest.StripANSI(mine), "player02")
 }
 
 // A filter change used to ask for a screenful and judge the answer against a full
@@ -567,23 +550,4 @@ func TestCycleFilter_StillPagesAt80x24(t *testing.T) {
 
 	next, _ = nm.goPage(1)
 	assert.Equal(t, 1, next.(model).page, "the second page has to be reachable")
-}
-
-func keyPress(key string) tea.KeyPressMsg {
-	switch key {
-	case "left":
-		return tea.KeyPressMsg{Code: tea.KeyLeft}
-	case "right":
-		return tea.KeyPressMsg{Code: tea.KeyRight}
-	case "up":
-		return tea.KeyPressMsg{Code: tea.KeyUp}
-	case "down":
-		return tea.KeyPressMsg{Code: tea.KeyDown}
-	case "pgup":
-		return tea.KeyPressMsg{Code: tea.KeyPgUp}
-	case "pgdown":
-		return tea.KeyPressMsg{Code: tea.KeyPgDown}
-	default:
-		return tea.KeyPressMsg{Code: rune(key[0]), Text: key}
-	}
 }

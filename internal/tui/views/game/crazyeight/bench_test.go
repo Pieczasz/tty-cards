@@ -17,7 +17,7 @@ import (
 
 // benchTable seats n players and returns the first player's view. Rendering is the
 // per-frame cost every client pays, so it is the number that decides table capacity.
-func benchTable(b *testing.B, n int) *Model {
+func benchTable(b *testing.B, n int) *model {
 	b.Helper()
 	players := make([]*game.Player, 0, n)
 	for i := range n {
@@ -33,7 +33,7 @@ func benchTable(b *testing.B, n int) *Model {
 		User:  &db.User{ID: testutil.UID(1), Username: "p1"},
 		Width: 120, Height: 40, Theme: styles.NewTheme(true),
 	}
-	m, ok := New(global, engine).(*Model)
+	m, ok := New(global, engine).(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m

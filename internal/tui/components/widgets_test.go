@@ -7,6 +7,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -62,7 +63,7 @@ func TestFanTuck_NeverHidesTheSuit(t *testing.T) {
 
 	theme := styles.NewTheme(true)
 	ace := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
-	fan := stripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, -1, minTuckWidth))
+	fan := tuitest.StripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, -1, minTuckWidth))
 	assert.Equal(t, 3, strings.Count(fan, "♠"), "every card in the fan shows its suit")
 }
 
@@ -77,7 +78,7 @@ func TestRenderStrip_NamesEveryCardAndWrapsToWidth(t *testing.T) {
 		{Rank: deck.Ace, Suit: deck.Spades},
 		{Rank: deck.King, Suit: deck.Clubs},
 	}
-	out := stripANSI(RenderStrip(theme, hand, nil, 1, 8))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, nil, 1, 8))
 
 	assert.Contains(t, out, "10")
 	assert.Contains(t, out, "A")
@@ -125,7 +126,7 @@ func TestGridPicker_RendersEveryChoiceAndMarksTheCursor(t *testing.T) {
 	out := p.Render(theme)
 
 	for _, label := range p.Labels {
-		assert.Contains(t, stripANSI(out), label)
+		assert.Contains(t, tuitest.StripANSI(out), label)
 	}
 	// Moving the cursor has to change what is drawn, or the highlight is not there.
 	p.Cursor = 0
@@ -150,7 +151,7 @@ func TestTable_RowsAreAllTheSameWidth(t *testing.T) {
 		tbl.Cells("a name far too long to fit", "42"),
 	})
 
-	lines := strings.Split(stripANSI(out), "\n")
+	lines := strings.Split(tuitest.StripANSI(out), "\n")
 	require.Len(t, lines, 1+1+4, "header, rule, and PadTo data rows")
 	for i, line := range lines {
 		assert.Equalf(t, tbl.Width(), lg.Width(line), "row %d is a different width", i)

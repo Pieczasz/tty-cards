@@ -1,3 +1,5 @@
+// Package game is the baseline every table view embeds (Session) and the layout they
+// share: the three-band frame, the seat zones, the hero's hand and the turn clock.
 package game
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/observability"
+	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
@@ -25,7 +28,8 @@ type EventMsg struct {
 }
 
 // Session is the plumbing every game view repeats: the engine binding, the event
-// subscription, the cached base state and the hand cursor.
+// subscription, the cached base state, the hand cursor, the forfeit prompt and Init.
+// A view embeds it and adds its own rules rendering.
 //
 // An embedding view must call Close on navigation (router.Closer): skipping it parks a
 // listener goroutine and burns a subscriber slot on the engine.
@@ -70,6 +74,13 @@ func NewSession(global router.GlobalContext, engine *game.Engine, gameName strin
 	return s, nil
 }
 
+// Init arms the event listener and the turn clock, which is all a table view's Init
+// has to do.
+func (s *Session) Init() tea.Cmd {
+	return tea.Batch(s.Listen(), s.ClockTick())
+}
+
+// Listen delivers the next engine event as an EventMsg tagged with this session's feed.
 func (s *Session) Listen() tea.Cmd {
 	ch := s.Events
 	return views.ListenOn(ch, func(ev game.Event) tea.Msg { return EventMsg{Event: ev, Source: ch} })
@@ -91,9 +102,9 @@ func (s *Session) IdleRemoved(ev game.Event) bool {
 // reads the live *State in the same lock hold; it is not redacted for this player, so
 // anything derived from it that reaches the screen has to be filtered by the caller.
 func (s *Session) Sync(fn func(*game.State)) {
-	s.Base = SyncBaseState(s.Bound, fn)
+	s.Base = syncBaseState(s.Bound, fn)
 	if s.Selected >= len(s.Base.Hand) {
-		s.Selected = max(len(s.Base.Hand)-1, 0)
+		s.MoveCursor(0)
 	}
 }
 
@@ -174,6 +185,7 @@ func (s *Session) Submit(action game.Action) error {
 	return s.ActionErr
 }
 
+// SelectedCard is the card under the hand cursor, if the hand has one there.
 func (s *Session) SelectedCard() (deck.Card, bool) {
 	if s.Selected < 0 || s.Selected >= len(s.Base.Hand) {
 		return deck.Card{}, false
@@ -183,7 +195,7 @@ func (s *Session) SelectedCard() (deck.Card, bool) {
 
 // MoveCursor steps the hand cursor, stopping at either end.
 func (s *Session) MoveCursor(delta int) {
-	s.Selected = min(max(s.Selected+delta, 0), max(len(s.Base.Hand)-1, 0))
+	s.Selected = components.StepCursor(s.Selected, delta, len(s.Base.Hand)-1)
 }
 
 // SelectDigit moves the cursor to the card a number key names, so only the first ten
@@ -197,8 +209,8 @@ func (s *Session) SelectDigit(key string) {
 	}
 }
 
-// Unsubscribe releases the engine subscription. Safe to call more than once.
-func (s *Session) Unsubscribe() {
+// unsubscribe releases the engine subscription. Safe to call more than once.
+func (s *Session) unsubscribe() {
 	if s.Bound != nil && s.Events != nil {
 		s.Bound.Unsubscribe(s.Events)
 		s.Events = nil
@@ -207,7 +219,7 @@ func (s *Session) Unsubscribe() {
 
 // Close implements router.Closer.
 func (s *Session) Close() {
-	s.Unsubscribe()
+	s.unsubscribe()
 }
 
 // IdleExempt implements router.IdleExempt. A seat watching other players act is not
@@ -273,7 +285,7 @@ func (s *Session) Leave() tea.Cmd {
 	if p != nil && !finished {
 		s.Global.LobbyManager.LeaveLobby(p)
 	}
-	s.Unsubscribe()
+	s.unsubscribe()
 
 	if p == nil || !finished {
 		return router.Navigate(router.RouteHome, nil)
