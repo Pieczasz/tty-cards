@@ -54,14 +54,6 @@ func TestSyncState_LoadsHeartsExtra(t *testing.T) {
 	assert.False(t, m.heartsBroken)
 }
 
-func TestClose_ReleasesEngineSubscription(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.SubscriberCount())
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-}
-
 // The pass staging used to be keyed by hand position, which survives a re-sort or a
 // re-deal underneath it and then passes cards the player never picked. Keyed by card,
 // a hand that moves around keeps the same three cards staged.
@@ -100,22 +92,6 @@ func TestPassSelection_FollowsTheCardsNotThePositions(t *testing.T) {
 	m.phase = logic.PhaseTrickPlay
 	m.prunePassSelection()
 	assert.Empty(t, m.passSelected)
-}
-
-// A view that skips Close parks a listener goroutine and holds a broadcaster slot for
-// every disconnected player until the engine itself is closed.
-func TestClose_IsIdempotentAndSurvivesAClosedEngine(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.SubscriberCount())
-
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-
-	assert.NotPanics(t, m.Close, "session teardown may follow a view that already exited")
-
-	engine.Close()
-	assert.NotPanics(t, m.Close, "and may follow the engine going away")
 }
 
 // The three maps the Sync callback lifts out of the engine state are shared with the

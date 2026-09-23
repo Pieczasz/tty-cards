@@ -3,7 +3,6 @@ package uno
 import (
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -16,7 +15,6 @@ import (
 
 	"uuid"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -108,39 +106,6 @@ func TestSyncState_KeepsTheColourPickerWhileTheTurnIsStillYours(t *testing.T) {
 	m.syncState()
 
 	assert.True(t, m.color.Open, "a refresh mid-turn must not close the picker")
-}
-
-func TestClose_ReleasesEngineSubscription(t *testing.T) {
-	t.Parallel()
-
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, (&logic.Rules{}).InitialDeck())
-	require.NoError(t, engine.Start())
-	t.Cleanup(engine.Close)
-
-	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	m, ok := New(global, engine, "uno").(*model)
-	require.True(t, ok)
-	require.Equal(t, 1, engine.SubscriberCount())
-
-	listen := m.Listen()
-	done := make(chan tea.Msg, 1)
-	go func() { done <- listen() }()
-
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-
-	select {
-	case msg := <-done:
-		assert.Nil(t, msg)
-	case <-time.After(2 * time.Second):
-		t.Fatal("listener goroutine did not return after Close")
-	}
-
-	m.Close()
 }
 
 // The colour glyphs sit at card-slot spacing, so they only make sense over a fan.

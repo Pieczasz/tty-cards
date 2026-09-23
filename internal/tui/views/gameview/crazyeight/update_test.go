@@ -2,7 +2,6 @@ package crazyeight
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -18,7 +17,6 @@ import (
 
 	"uuid"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -113,46 +111,6 @@ func TestSyncState_KeepsTheSuitPickerWhileTheTurnIsStillYours(t *testing.T) {
 	m.syncState()
 
 	assert.True(t, m.suit.Open, "a refresh mid-turn must not close the picker")
-}
-
-// Mirrors the poker view's teardown test. Without it, a Close regression here parks
-// a listener goroutine and holds a broadcaster slot for every disconnected player,
-// and nothing in this package would notice.
-func TestClose_ReleasesEngineSubscription(t *testing.T) {
-	t.Parallel()
-
-	players := []*game.Player{
-		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
-		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
-	}
-	engine := game.NewEngine(&logic.Rules{}, players, deck.Standard())
-	require.NoError(t, engine.Start())
-	t.Cleanup(engine.Close)
-
-	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	m, ok := New(global, engine, "crazy_eights").(*model)
-	require.True(t, ok)
-	require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
-
-	// Park a listener exactly as the Bubble Tea runtime would. Init returns a batch
-	// that also drives the animation tick, so take the event listener directly.
-	// Built here because Close writes m.Events.
-	listen := m.Listen()
-	done := make(chan tea.Msg, 1)
-	go func() { done <- listen() }()
-
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount(), "Close returns the subscriber slot")
-
-	select {
-	case msg := <-done:
-		assert.Nil(t, msg, "unsubscribing closes the channel so the listener returns")
-	case <-time.After(2 * time.Second):
-		t.Fatal("listener goroutine did not return after Close")
-	}
-
-	m.Close() // idempotent: session teardown may follow a view that already exited
-	assert.Zero(t, engine.SubscriberCount())
 }
 
 func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {

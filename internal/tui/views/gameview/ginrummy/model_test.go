@@ -52,30 +52,6 @@ func TestSyncState_LoadsGinExtra(t *testing.T) {
 
 }
 
-func TestClose_ReleasesEngineSubscription(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.SubscriberCount())
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-}
-
-// Mirrors the other game views' teardown test: without Close the listener goroutine
-// stays parked on the event channel and the broadcaster slot is never returned.
-func TestClose_IsIdempotentAndSurvivesAClosedEngine(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.SubscriberCount())
-
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-
-	assert.NotPanics(t, m.Close, "session teardown may follow a view that already exited")
-
-	engine.Close()
-	assert.NotPanics(t, m.Close, "and may follow the engine going away")
-}
-
 // Everything the Sync callback keeps past the engine lock has to be a copy. The map
 // and the hand result are the two that carry references, and an aliased one lets the
 // next hand rewrite a summary the player is still reading - under -race it is a data

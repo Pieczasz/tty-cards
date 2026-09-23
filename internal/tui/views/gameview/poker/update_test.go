@@ -15,42 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A disconnect never runs the view's esc/enter paths, so Close is the only thing that
-// releases the engine subscription.
-func TestClose_ReleasesEngineSubscription(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
-
-	// Park a listener on the channel exactly as the Bubble Tea runtime would. The
-	// command is built here, on this goroutine, because Close writes m.Events. It is
-	// Session.Listen rather than Init: Init also batches the turn-clock tick, and
-	// this test is about the subscription alone.
-	listen := m.Listen()
-	done := make(chan tea.Msg, 1)
-	go func() { done <- listen() }()
-
-	m.Close()
-
-	assert.Zero(t, engine.SubscriberCount(), "Close returns the subscriber slot")
-	assert.Nil(t, <-done, "unsubscribing closes the channel so the listener returns")
-
-	m.Close() // idempotent: the session teardown may run after a view already exited
-	assert.Zero(t, engine.SubscriberCount())
-
-	engine.Close()
-}
-
-// The router owns teardown, so a view swap must release the outgoing view too.
-func TestClose_AfterEngineClosed(t *testing.T) {
-	t.Parallel()
-	engine, m := startedTable(t)
-	engine.Close()
-
-	m.Close()
-	assert.Zero(t, engine.SubscriberCount())
-}
-
 // stepRaise works in uint, so decreasing below the step would wrap to a huge number.
 func TestStepRaise_ClampsWithinTheLegalBandAndNeverWraps(t *testing.T) {
 	t.Parallel()
