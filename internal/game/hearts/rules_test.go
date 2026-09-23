@@ -280,47 +280,36 @@ func TestRules_AfterAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
 	assert.Equal(t, 2, *state.OverrideNextTurn, "the trick winner leads the next one")
 }
 
-func TestThreeLowestCards(t *testing.T) {
+// Passing the lowest cards kept the Q♠ and the high spades that catch it, which is the
+// worst pass there is. An absent player sheds the danger instead.
+func TestThreeMostDangerous(t *testing.T) {
 	t.Parallel()
+	qs := deck.Card{Rank: deck.Queen, Suit: deck.Spades}
+	as := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
+	ks := deck.Card{Rank: deck.King, Suit: deck.Spades}
+	ah := deck.Card{Rank: deck.Ace, Suit: deck.Hearts}
+	th := deck.Card{Rank: deck.Ten, Suit: deck.Hearts}
+	ac := deck.Card{Rank: deck.Ace, Suit: deck.Clubs}
+	kd := deck.Card{Rank: deck.King, Suit: deck.Diamonds}
+	kc := deck.Card{Rank: deck.King, Suit: deck.Clubs}
+	low := deck.Card{Rank: deck.Two, Suit: deck.Clubs}
 
-	t.Run("picks the three lowest by rank", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{
-			{Rank: deck.King, Suit: deck.Spades},
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Ace, Suit: deck.Clubs},
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Ten, Suit: deck.Clubs},
-			{Rank: deck.Four, Suit: deck.Spades},
-		}
-		got := threeLowestCards(hand)
-		assert.Equal(t, []deck.Card{
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Four, Suit: deck.Spades},
-		}, got, "ace is high in Hearts, so it is never among the lowest")
-	})
-
-	t.Run("same-rank cards break the tie on suit", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Two, Suit: deck.Clubs},
-			{Rank: deck.King, Suit: deck.Spades},
-			{Rank: deck.Two, Suit: deck.Diamonds},
-		}
-		assert.Equal(t, []deck.Card{
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Two, Suit: deck.Clubs},
-			{Rank: deck.Three, Suit: deck.Hearts},
-		}, threeLowestCards(hand), "equal ranks order by suit, so the pass is deterministic")
-	})
-
-	t.Run("a short hand passes whatever it has", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{{Rank: deck.King, Suit: deck.Spades}, {Rank: deck.Two, Suit: deck.Clubs}}
-		assert.Equal(t, hand, threeLowestCards(hand))
-	})
+	tests := []struct {
+		name string
+		hand []deck.Card
+		want []deck.Card
+	}{
+		{name: "the queen and her catchers first", hand: []deck.Card{low, ah, ks, ac, qs, as}, want: []deck.Card{qs, as, ks}},
+		{name: "then the highest hearts", hand: []deck.Card{th, low, ac, ah, ks}, want: []deck.Card{ks, ah, th}},
+		{name: "then the highest cards, ties on suit", hand: []deck.Card{low, kc, ac, kd}, want: []deck.Card{ac, kd, kc}},
+		{name: "a short hand passes whatever it has", hand: []deck.Card{low, ks}, want: []deck.Card{low, ks}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, threeMostDangerous(tt.hand))
+		})
+	}
 }
 
 func TestRules_CheckWinCondition_AndStandings(t *testing.T) {
@@ -479,7 +468,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 		engine.WithState(func(s *game.State) {
 			for _, p := range s.Players {
 				if p.ID == id {
-					cards = threeLowestCards(p.Cards)
+					cards = threeMostDangerous(p.Cards)
 					break
 				}
 			}

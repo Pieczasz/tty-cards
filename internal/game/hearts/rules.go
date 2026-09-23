@@ -309,7 +309,7 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 		return ActionNextHand{}
 	case StagePassing:
 		p := state.Players[state.CurrentTurn]
-		return ActionPassCards{Cards: threeLowestCards(p.Cards)}
+		return ActionPassCards{Cards: threeMostDangerous(p.Cards)}
 	case StageTrickPlay:
 		p := state.Players[state.CurrentTurn]
 		if card, ok := firstLegalCard(extra, p); ok {

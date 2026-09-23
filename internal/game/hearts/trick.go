@@ -126,18 +126,35 @@ func scoreHand(extra *State, players []*game.Player) {
 		"totals", extra.CumulativeScores)
 }
 
-func threeLowestCards(hand []deck.Card) []deck.Card {
+// threeMostDangerous is the absent player's pass: the Q♠, then the A♠ and K♠ that
+// catch her, then the highest hearts, then the highest of the rest. Passing the lowest
+// cards instead kept every card that takes points.
+func threeMostDangerous(hand []deck.Card) []deck.Card {
 	if len(hand) <= cardsToPass {
 		return slices.Clone(hand)
 	}
 	sorted := slices.Clone(hand)
 	slices.SortFunc(sorted, func(a, b deck.Card) int {
-		if d := deck.RankValue(a.Rank) - deck.RankValue(b.Rank); d != 0 {
+		if d := passDanger(b) - passDanger(a); d != 0 {
 			return d
 		}
 		return int(a.Suit) - int(b.Suit)
 	})
 	return sorted[:cardsToPass]
+}
+
+func passDanger(c deck.Card) int {
+	const spadeTier, heartTier = 100, 50
+	switch {
+	case c == queenOfSpades:
+		return spadeTier + 2
+	case c.Suit == deck.Spades && (c.Rank == deck.Ace || c.Rank == deck.King):
+		return spadeTier + deck.RankValue(c.Rank) - deck.RankValue(deck.King)
+	case c.Suit == deck.Hearts:
+		return heartTier + deck.RankValue(c.Rank)
+	default:
+		return deck.RankValue(c.Rank)
+	}
 }
 
 func firstLegalCard(extra *State, p *game.Player) (deck.Card, bool) {
