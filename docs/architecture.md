@@ -42,7 +42,7 @@ work exists is per-session UI scheduling:
 
 | Timer | Interval | Where |
 |---|---|---|
-| Turn countdown (adaptive) | 1 s, or **100 ms** under 6 s remaining, on your own turn only | `internal/tui/views/game/layout.go` `clockTickFrom` |
+| Turn countdown (adaptive) | 1 s, or **100 ms** under 6 s remaining, on your own turn only | `internal/tui/views/gameview/layout.go` `clockTickFrom` |
 | Lobby-browser refresh | 2 s | `internal/tui/views/lobby/join.go` |
 | Router idle watchdog | 10 s poll, quits after 5 min idle (never at a live table) | `internal/tui/router/router.go` |
 | Engine turn clock | 30 s one-shot, re-armed | `internal/game/turnclock.go` |
@@ -89,7 +89,10 @@ The comment above `proxy.ports` in `compose.yaml` states the reason: publishing
 `6969` lets a client forge the PROXY header, and publishing `6970` lets it forge
 `X-Forwarded-For`, which `API_TRUST_PROXY=true` tells the backend to believe.
 A bare local `ssh` client sends no PROXY header, so local development needs
-`PROXY_PROTOCOL=false` (see `scripts/dev-session.sh`).
+`PROXY_PROTOCOL=false` (see `scripts/dev-session.sh`) - spelled as
+`strconv.ParseBool` reads it, since a boolean the server cannot parse fails the boot
+rather than falling back to a default
+([`decisions.md` #53](decisions.md#53-boolean-environment-values-are-parsed-strictly)).
 
 **Three compose networks.** `edge` holds nginx and the backend only, with
 `enable_ipv6: true` and fixed subnets `172.29.69.0/24` and
@@ -117,7 +120,7 @@ new address is picked up without restarting the proxy.
 | PROXY header | honored only from `PROXY_TRUSTED_CIDRS` (compose: the `edge` subnets) | `proxyListener`, `cmd/server/main.go` |
 | listener | `2 x MAX_CONNECTIONS` (2000) | `netutil.LimitListener`, `cmd/server/main.go` |
 | account slots | `MAX_CONNECTIONS` (1000), with a message | `ssh.SessionTracker` |
-| auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW_MS` (5 / 1 s) per network | `ssh.rateLimitAuth` |
+| auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` (5 / 1s, a Go duration - [#52](decisions.md#52-rate_limit_window-is-a-duration-and-the-old-name-fails-the-boot)) per network | `ssh.rateLimitAuth` over a `ratelimit.SlidingWindow` |
 | **registration** | **`REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` (5 / 1h) per network, new accounts only** | `ssh.allowRegistration` |
 | stats API | `API_REQUESTS_PER_MINUTE` (120) per network | `httpapi.withRateLimit` |
 | channels | 2 session channels / SSH connection, refused before `Accept`; 32 `env` requests / 8 KiB per channel | `ssh.limitSessionChannels`, `envCappedChannel` |
@@ -156,17 +159,27 @@ Order matters so deferred teardown runs correctly (LIFO):
 
 1. `installLogging()` - **first**, before config, so a config failure is a
    structured record rather than a default-handler line
-2. `config.Load()` -> validated `*config.Config`
-3. `observability.SetupOTel` (defer shutdown)
-4. `db.Connect` (defer close)
+2. `config.Load()` -> validated `*config.Config`. It reports every invalid
+   variable at once (`errors.Join`), not just the first
+3. `observability.Setup` (defer shutdown)
+4. `repository.Connect(cfg.DSN(), repository.Pool{...})` (defer close)
 5. Repositories -> `lobby.NewManager(ctx, matchRepo)`
-6. `defer waitForFinalizers(lobbyManager)` - registered **after** the DB-close
+6. `defer waitForFinalizers(ctx, lobbyManager)` - registered **after** the DB-close
    defer, so LIFO drains match writes before closing the handle they write
    through
-7. `game.Registry` from `catalog.All`
-8. `ssh.NewSessionTracker` -> `ssh.SetupServer` -> `serve(...)`. The one tracker is
-   shared with the stats API; `SetupServer` refuses to start without it
-   (`ErrNoTracker`), because a second one counted nobody online
+7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose
+   `GameRegistry` is `catalog.NewRegistry()` - `game.NewRegistry` over
+   `catalog.All`, which panics on a module declared twice or half-declared. The
+   one tracker is shared with the stats API; `NewServer` refuses to start without
+   it (`ErrNoTracker`), because a second one counted nobody online
+8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
+   tracker's own count - then `httpapi.NewServer`, which refuses a missing
+   dependency (`ErrMissingDeps`), then `serve(...)`
+
+Both listen addresses are built with `net.JoinHostPort`, so an IPv6 literal
+`SERVER_HOST` binds. A failure before OTel is up is printed once as `fatal:` on
+stderr; every later one is logged once, by a deferred `slog` record that runs
+before the telemetry flush.
 
 `serve` stacks `tcp -> LimitListener -> proxyproto.Listener`, runs `Serve` in a
 goroutine, and blocks on a signal, an accept error or an API error. Every exit
@@ -191,10 +204,10 @@ wish.WithMiddleware(
 )
 ```
 
-`reg` is a `sessionRegistry` that `SetupServer` makes per server, so two servers in
+`reg` is a `sessionRegistry` that `NewServer` makes per server, so two servers in
 one process (every test that starts one) cannot see each other's sessions.
 
-**Channels are capped where they are opened.** `SetupServer` replaces the
+**Channels are capped where they are opened.** `NewServer` replaces the
 `session` channel handler with `limitSessionChannels(ssh.DefaultSessionHandler)`: a
 per-connection counter on the connection-scoped `ssh.Context` rejects a third
 session channel with `ResourceShortage` **before** `Accept`. Counting in the
@@ -208,10 +221,11 @@ logging middleware, which writes through the charm logger and so never reaches
 the OTLP handler.
 
 1. **Auth.** Any public key is accepted; identity is
-   `cryptossh.FingerprintSHA256` -> `SHA256:<fingerprint>`. The rate limiter runs
+   `cryptossh.FingerprintSHA256` -> `SHA256:<fingerprint>`, which
+   `SessionFingerprint(s)` reads back from the session. The rate limiter runs
    in the public-key callback, before a session exists.
 2. **`LoadOrRegisterUser`.** First connection claims the SSH login name as the
-   username. It takes an `allowRegister func() bool` and consults it **only** on
+   username. It needs only a `db.Authenticator`, and takes an `allowRegister func() bool` and consults it **only** on
    the `user == nil` branch, so a returning player never spends the registration
    budget - and only after `db.ValidateUsername` has passed, so a typo does not
    spend it either.
@@ -258,13 +272,17 @@ nothing panics *out of* bubbletea, which owns the screen, so the primary path is
 Both record the panic as a metric and leave the lobby cleanly.
 
 `boundedPty` refuses a PTY wider than 2000 or taller than 600, and
-`clampWindowSize` clamps later resizes.
+`filterSessionMsg` (a `tea.WithFilter`) clamps later resizes to the same bounds. It
+also answers a suspend as if already resumed: a `SuspendMsg` would send `SIGTSTP` to
+the server's own process group and stop every player's session.
 
 ### 3.3 TUI - `internal/tui`
 
-`tui.Model` builds a `router.Router` with a `GlobalContext`:
+`tui.New(tui.Deps{...})` builds a `router.Router` with a `GlobalContext`:
 
-- `User`, `UserRepository`
+- `User`, and the two slices of the user repository the views call: `Profiles`
+  (the profile screen) and `Leaderboard`
+  ([`decisions.md` #50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface))
 - `LobbyManager *lobby.Manager` - the whole manager. The old `lobby.SessionAPI`
   interface is **gone**: it had one implementation and one consumer, so it bought
   nothing and had to be edited every time a view needed a method
@@ -274,17 +292,19 @@ Both record the panic as a metric and leave the lobby cleanly.
 There is **no `MatchRepository` on the TUI**. Persistence is owned by
 `lobby.Manager` after a game ends, and absence is the boundary.
 
-Navigation is a message, not a call: a view returns a `router.ChangeViewMsg` and
-the router performs the swap in `Goto`, closing the outgoing view if it
-implements `router.Closer`.
+Navigation is a message, not a call: a view returns `router.Navigate(route, ctx)`,
+a command carrying a `router.ChangeViewMsg`, and the router performs the swap in
+`Goto`, closing the outgoing view if it implements `router.Closer`. Routes are a
+typed `router.Route`, and every factory is a `router.ViewFactory`.
 
 Initial route: `tui.ResumeSeat` -> `Manager.ResumePlayer` -> a mid-game reconnect
 lands back at the table (through the lobby view, which routes onward into a running
-game); otherwise home. The ssh layer calls `ResumeSeat` separately from `tui.Model`,
+game); otherwise home. The ssh layer calls `ResumeSeat` separately from `tui.New`,
 once the session owns its tracker slot (§3.2).
 
 Game routes come from `catalog.All` via `router.GameRoute(slug)` ->
-`"game_<slug>"`. `internal/game` knows nothing about routes.
+`"game_<slug>"`, and each entry's `View(global, engine, slug)` is handed that same
+slug. `internal/game` knows nothing about routes.
 
 **A seated player cannot navigate away from their table.** `RouteHome`,
 `RouteLobbyCreate`, `RouteLobbyJoin`, `RouteProfile` and `RouteLeaderboard` are all
@@ -326,7 +346,7 @@ both the renderer and the budget query call it:
   20 rows that is 2 lines, which makes `RenderFigureASCII(text, maxW, maxH)` fall
   back to plain text and hand the rows back to content.
 
-`BoxWidth`/`BoxHeight` clamp at both ends (`maxBoxWidth` 120, `maxBoxHeight` 40)
+`boxWidth`/`boxHeight` clamp at both ends (`maxBoxWidth` 120, `maxBoxHeight` 40)
 because `Global.Width` is 0 until the first `WindowSizeMsg`. `TooSmall` returns
 **false** for a zero dimension: unknown is not small, and answering true there
 would flash the resize prompt on every connection.
@@ -363,7 +383,7 @@ browser's select. Both now match `"space"`, with a comment saying so.
 
 `x` on the Profile screen asks for confirmation; typing `DELETE` in full performs
 it. Refused while the player is seated at a table. The view calls
-`db.UserRepository.DeleteAccount(ctx, userID)` and then ends the session -
+`db.Profiles.DeleteAccount(ctx, userID)` and then ends the session -
 nothing can authenticate as that account afterwards. See §6.6.
 
 ### 3.4 Lobby - `internal/lobby`
@@ -374,18 +394,21 @@ dirty flag):
 
 | From | To | Trigger |
 |---|---|---|
-| `Waiting` | `InGame` | `ToggleReady` with everyone ready -> `startGameLocked` |
-| `InGame` | `Waiting` | `releaseFinishedGameLocked`, once the engine `IsFinished()` |
-| any | `Closed` | `detachPlayerLocked`: the leader leaves and there are no guests |
+| `waiting` | `inGame` | `ToggleReady` with everyone ready -> `startGameLocked` |
+| `inGame` | `waiting` | `releaseFinishedGameLocked`, once the engine `IsFinished()` |
+| any | `closed` | `detachPlayerLocked`: the leader leaves and there are no guests |
 
-`Closed` is terminal - `Subscribe`, `addGuest` and `Kick` all refuse.
+`closed` is terminal - `Subscribe`, `addGuest` and `Kick` all refuse. The refusals a
+caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
+`ErrLobbyFull`, `ErrGameInProgress`, `ErrNotLeader` and the rest), compared with
+`errors.Is`.
 
-- `Manager.New(leader, opts...)` generates an 8-character code from
+- `Manager.CreateLobby(leader, opts...)` generates an 8-character code from
   `[A-Z0-9]` using `crypto/rand`, retried up to 10 times against collisions.
   Defaults: `maxPlayers` 4, private, casual. `WithCardGame(name)` takes the
   **display name**, which is the `game.Registry` key; the persisted identity is
   the slug, resolved at game start (§6.1).
-- `BrowseLobbies(player, BrowseFilter)` lists public `Waiting` tables, sorted by
+- `BrowseLobbies(player, BrowseFilter)` lists public `waiting` tables, sorted by
   absolute Elo distance from the player (an unrated player is matched at 1500),
   ties broken by code so the list cannot reshuffle under a cursor. Default limit
   20, hard cap 200. Backed by a 2-second cache of lobby pointers; `browseEntry`
@@ -395,13 +418,13 @@ dirty flag):
   code space is guessable-adjacent. It returns the `*Lobby` it joined, so the
   caller never looks the code up a second time - by when the table may be gone.
   `FuzzJoinLobbyByCode` fuzzes it.
-- `Kick` is refused while `InGame`, and the comment says why: a leader who can
+- `Kick` is refused while `inGame`, and the comment says why: a leader who can
   kick mid-hand can farm Elo by dropping whoever is winning and letting the
   engine finish the match without them. It also clears the target's disconnect
   grace, which would otherwise later take the player out of whatever table they
   moved on to.
 - **A ready is consent to the table as it was.** A settings change
-  (`withLeaderSettings`: broadcasts `SETTINGS_UPDATED` then `PLAYERS_UPDATED`) and
+  (`withLeaderSettings`: broadcasts `EventSettingsUpdated` then `EventPlayersUpdated`) and
   any roster removal - a guest leaving or kicked, or the leader leaving and a guest
   promoted - clear every ready flag. A join does not.
 - `RemoveLobby` unmaps only the `playerLobby` entries still pointing at the removed
@@ -411,7 +434,7 @@ dirty flag):
 **Starting a game.** `startGameLocked` -> `registry.Create(name)` ->
 `game.NewEngine(rules, players, rules.InitialDeck())` -> `engine.Start()` ->
 `l.startedAt = time.Now()` -> `watchGameLocked(engine, db.GameRef{...})` ->
-`setStateLocked(InGame)` -> broadcast `EventGameStarted` carrying the `*game.Engine`.
+`setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the `*game.Engine`.
 The leader is always seat 0.
 
 **The finalize snapshot is taken when the game starts, not when it ends.**
@@ -427,19 +450,22 @@ on the roster while the engine no longer holds it - a table that can never reach
 all-ready again. `finalizeFinishedGame` already no-ops without a repository.
 
 **On `EventGameEnded` the lobby registers, reopens, then persists.**
-`handleBroadcasterEvents` (`watch.go`) calls `requestFinalize`, which takes
+`handleGameEvents` (`watch.go`) calls `requestFinalize`, which takes
 `registerFinalizer()`, then `releaseFinishedGame()`, then
-`finalizeFinishedGame(...)`: a 15-second write must not pin the table `InGame`
-while the TUI is already back in the lobby ready-ing the next hand, and the
+`finalizeFinishedGame(...)` - or `dropFinishedMatch`, which logs and counts the
+loss, when shutdown refused the registration. The reopen comes before the write
+because a 15-second write must not pin the table `inGame` while the TUI is already back in the lobby ready-ing the next hand, and the
 registration comes first because the reopen waits on `m.mu` in `releaseHeldSeats`,
 and a shutdown that began inside that wait would otherwise refuse it and drop the
 match. If the feed closes
 without ever delivering `EventGameEnded` - the broadcaster is latest-wins and can
 drop it - the loop falls through to `engine.IsFinished()` and does the same thing
-with `EndReasonUnknown`.
+with `EndReasonUnknown`. The same loop counts `EventTurnTimedOut` and
+`EventPlayerIdle` under the game's slug, the `game_type` label every game metric
+carries ([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)).
 
-**Mid-game disconnect.** `DisconnectPlayer` arms **`DisconnectGrace` (90 s)** via
-`disconnectGrace` (`disconnect.go`: `pending` timers -> `expiring` claim ->
+**Mid-game disconnect.** `DisconnectPlayer` arms **`disconnectGrace` (90 s)** in
+`m.grace`, a `graceTimers` (`disconnect.go`: `pending` timers -> `expiring` claim ->
 `LeaveLobby`). `ResumePlayer` cancels a pending leave, or returns the seat on a
 takeover with no pending leave. Waiting-lobby seats and any seat during shutdown
 still leave immediately. `expireLeave` moves `pending` -> `expiring` under the
@@ -448,7 +474,7 @@ manager lock so a reconnect cannot resume a seat about to vanish.
 **The hold is released at two more points:**
 
 - `releaseHeldSeats` (`disconnect.go`), called from `Lobby.releaseFinishedGame` - the hold only
-  makes sense mid-hand. Once the table is `Waiting` again, a still-armed timer
+  makes sense mid-hand. Once the table is `waiting` again, a still-armed timer
   keeps the player out of every other table, and this one unable to reach
   all-ready, for up to 90 s. It claims the grace the way the timer would, so a
   racing `ResumePlayer` is refused rather than resuming a seat already gone.
@@ -463,8 +489,9 @@ key -> view.Update -> BoundEngine.Submit(action)
                          |
                          v
                  Engine.SubmitAction (e.mu held)
-                   ValidateAction -> ApplyAction -> AfterAction
-                   CheckWinCondition / applyNextTurnLocked
+                   checkTurnLocked:    on turn? ValidateAction
+                   applyActionLocked:  ApplyAction -> AfterAction
+                                       CheckWinCondition / advanceTurnLocked
                    broadcast Event*
 ```
 
@@ -480,10 +507,12 @@ taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
 1. `registerFinalizer` **first**, in `requestFinalize` before the table reopens -
    every statement between observing the end and that call is a window for
    shutdown to begin, and a refusal then drops a finished match with nothing for
-   `WaitForFinalizers` to wait on. `finalizeFinishedGame` takes the result
-2. `GameFinished` metric, then a 15-second timeout context
-3. `StandingsWithPlaces` (ties share a place where the rules implement
-   `StandingScorer`)
+   `WaitForFinalizers` to wait on. A refused registration goes to
+   `dropFinishedMatch` instead; `finalizeFinishedGame` takes the result
+2. `GameFinished` metric (labelled with the slug and `EndReason.String()`), then a
+   15-second timeout context
+3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (ties share
+   a place where the rules implement `StandingScorer`)
 4. The rating gate (§6.4)
 5. `recordFinishedMatch`: `RecordCasualMatch` for an unrated match,
    `FinalizeInterruptedMatch` for a ranked `EndReasonInterrupted`, otherwise
@@ -518,13 +547,26 @@ engine's.
 Per-game state lives in `State.Extra` (`*crazyeight.State`, `*poker.State`,
 `*uno.State`, `*hearts.State`, `*ginrummy.State`).
 
-`game.AnyScoreAtLeast` is the shared match-target check for Hearts and Gin Rummy;
-`internal/game/shed.go` holds what Crazy Eights and Uno share - among it
-`ValidateShedPlay` (a card in play to match, and the played card in the hand of the
-seat on turn, with the game's own match rule passed in) and `DrawWithReshuffle` (off
-the stock, refilled from under the card in play; `false` is a forced pass).
-`ReshuffleDiscardIntoStock` returns nothing: the error it used to return was
-unreachable.
+The rules name who acts next through `State.SetTurn(seat)` (on turn now, and kept
+there once the action settles) or `State.OverrideTurn(seat)` (the seat the engine
+hands the turn to), never by writing `CurrentTurn` and `OverrideNextTurn` by hand.
+`game.SeatAt` and `game.NextSeat` are the one seat wrap-around, and
+`game.ValidateNextHand` the one "deal the next hand" check, so the three multi-hand
+games refuse it in the same words; `game.ErrUnknownAction` and `game.ErrHandOver`
+are the refusals every rules set shares (`rules.go`, `turn.go`).
+
+`game.AnyScoreAtLeast` is the shared match-target check for Hearts and Gin Rummy.
+Package `internal/game/shed` holds what Crazy Eights and Uno share, as game-family
+rules beside the games rather than in the engine: `shed.State` (embedded in both
+games' `Extra`, carrying the deadlock `Passes` count), `shed.ValidatePlay` (a card in
+play to match, and the played card in the hand of the seat on turn, with the game's
+own match rule passed in), `shed.DrawInto` (off the stock, refilled from under the
+card in play; `false` is a forced pass), `shed.OpenDiscard`, `shed.Leave`,
+`shed.HandEmptyOrAllPassed` and `shed.Standings`/`shed.Score`. The reshuffle itself
+is unexported and returns nothing: the error it used to return was unreachable.
+Both games prove the shared contract once, through `gametest.RunShed` and
+`gametest.SoakTimeoutIsAlwaysLegal` (`internal/game/gametest`, imported only by
+tests).
 
 `NewEngine` seats **copies** of the players it is given, with `Cards` cleared, so
 a finished engine's viewers and the next engine never share a hand. `Start` has no
@@ -532,24 +574,32 @@ rollback: a failed start leaves that engine unusable, and the lobby builds a new
 engine per attempt. The first seat to act is `math/rand/v2` - it is public the
 moment the table opens, so it is no secret worth `crypto/rand`.
 
-### 4.2 Turn cursor and clock - `applyNextTurnLocked`
+### 4.2 Turn cursor and clock - `advanceTurnLocked` / `settleTurnLocked`
 
 ```go
-switch {
-case e.state.OverrideNextTurn != nil:
-    e.state.CurrentTurn = *e.state.OverrideNextTurn
-    e.state.OverrideNextTurn = nil
-case advance:
-    e.state.CurrentTurn++
+// after an accepted action
+func (e *Engine) advanceTurnLocked() {
+    if e.state.OverrideNextTurn == nil {
+        e.state.CurrentTurn++
+    }
+    e.settleTurnLocked()
 }
-e.clampTurnLocked()
-e.armTurnTimerLocked()
+
+// after Start, a leave, or through advanceTurnLocked
+func (e *Engine) settleTurnLocked() {
+    if e.state.OverrideNextTurn != nil {
+        e.state.CurrentTurn = *e.state.OverrideNextTurn
+        e.state.OverrideNextTurn = nil
+    }
+    e.clampTurnLocked()
+    e.armTurnTimerLocked()
+}
 ```
 
-`OverrideNextTurn` wins and is cleared; otherwise advance if asked; otherwise the
-cursor stays where it is. `clampTurnLocked` then forces it into
-`[0, len(Players))` with a modulo, because a leave handler can compute an index
-against the pre-removal seat count.
+`OverrideNextTurn` wins and is cleared; otherwise an accepted action advances;
+otherwise (`Start`, a leave) the cursor stays where it is. `clampTurnLocked` then
+forces it into `[0, len(Players))` with `game.SeatAt`, because a leave handler can
+compute an index against the pre-removal seat count.
 
 The clock is `DefaultTurnTimeout` 30 s, `MaxMissedTurns` 3 (`turnclock.go`). **No
 `TurnTimeoutHandler` means no clock at all**: there is nothing safe to play for an
@@ -581,15 +631,21 @@ last armed for. The same seat with the same length is the same turn carrying on 
 gin's draw then discard, a re-armed auto-play, somebody else leaving - and keeps
 its running deadline, floored at `minTurnRemaining` (10 s, or the whole timeout if
 that is shorter). A different seat or a different length is a fresh turn at full
-length. A miss is charged **once per seat-turn** (`turnMissCharged`, reset only on
+length. A miss is charged **once per seat-turn** (`clock.missCharged`, reset only on
 a fresh turn), not per expiry, so gin's draw-then-discard costs one miss, not two.
 Uno's heads-up skip and reverse and a hearts trick winner leading again keep the
 clock running rather than earning a fresh 30 s.
 
-`turnSeq` fences stale timers: `stopTurnTimerLocked` increments it and
-`armTurnTimerLocked` calls that first, so every cursor change invalidates timers
-already in flight, and an auto-play carries the generation it was computed for.
-Only **accepted** actions clear a player's miss count - a move the rules reject
+The clock's fields are one `turnClock` value on the engine (`clock`), guarded by
+`Engine.mu` like the rest. `clock.seq` fences stale timers
+([`decisions.md` #4](decisions.md#4-clockseq-a-generation-counter-fences-the-turn-clock)):
+`stopTurnTimerLocked` increments it and `armTurnTimerLocked` calls that first, so
+every cursor change invalidates timers already in flight, and an auto-play carries
+the generation it was computed for. `resolveTurnTimeout` decides what an expiry
+means as a `timeoutOutcome` - `timeoutIgnored` (a stale timer or a finished table),
+`timeoutAutoPlay` or `timeoutTakeSeat` - and `onTurnTimeout` acts on it once the
+lock is dropped. Only **accepted** actions clear a player's miss count
+(`clock.missed`) - a move the rules reject
 does not, or spamming garbage would dodge removal forever.
 
 `EventTurnTimedOut` is broadcast **inside** `resolveTurnTimeout`'s lock hold, on
@@ -597,11 +653,14 @@ the same hold that charged the miss. Outside it, a player whose action lands in
 the gap gets the miss refunded while the "timed out" they disproved still ships.
 
 `OverrideNextTurn` also keeps a last-seat-standing hand open (a poker heads-up
-all-in leave still contests the pot) - `removePlayerLocked` checks for it before
-declaring a forfeit.
+all-in leave still contests the pot) - `settleAfterLeaveLocked` checks for it
+before declaring a forfeit.
 
-`stopTurnTimerLocked` runs from `finishGameLocked`, the last-player-standing path
-and `Close`. The engine's `closed` flag is what stops a concurrently-resolved
+Every way a table ends goes through `endGameLocked(winner, reason)`: `Finished`, the
+clock stopped, the winner recorded and `EventGameEnded` broadcast, in one place.
+`finishGameLocked` asks the rules for the winner first; `settleAfterLeaveLocked`
+(abandoned, forfeit) and the panic path do not. `stopTurnTimerLocked` also runs from
+`Close`. The engine's `closed` flag is what stops a concurrently-resolved
 timeout re-arming a timer on a closed engine.
 
 **A rules panic ends one table, not the process.** `onTurnTimeout` runs on a
@@ -611,14 +670,13 @@ is a direct `defer` on that goroutine and re-takes `e.mu` (the locked helpers
 release it in their own defers as the panic unwinds); `SubmitAction` has its own
 direct deferred `recover`, which runs before its unlock. Both call
 `endOnRulesPanicLocked`, which logs the panic with a stack and, on a live engine,
-`finishAfterPanicLocked`: `Phase = Finished`, clock stopped,
-`EventGameEnded{Reason: EndReasonRulesError}`. It deliberately does **not** call
+calls `endGameLocked(nil, EndReasonRulesError)`. It deliberately does **not** call
 `Rules.Standings` - the state a hook panicked on cannot be trusted to rank anyone,
 and a second panic inside a recover would take the process down - and it does not
 check for `Playing`, because a panic inside `finishGameLocked`'s own `Standings`
 call has already set `Finished` without announcing it. On the player path the
-panic comes back to the view as an error. `StandingsWithPlaces` recovers too and
-returns `nil, nil`, so finalize has nothing to write. This table ends unrated, and
+panic comes back to the view as an error. `Engine.Standings` recovers too and
+returns nil, so finalize has nothing to write. This table ends unrated, and
 the rest keep playing.
 
 ### 4.3 BoundEngine
@@ -626,7 +684,10 @@ the rest keep playing.
 `Bind(engine, playerID)` is the default safe path: `Submit` acts as self,
 `Frame` is one coherent read whose hand is yours, and `Subscribe`/`Unsubscribe`
 join the feed without handing out the broadcaster (a view holding it could
-`Broadcast` or `Close` the table's feed). It is **not** a capability boundary:
+`Broadcast` or `Close` the table's feed). The engine itself does not hand it out
+either: there is no `Engine.Broadcaster()`, and the feed is reached only through
+`Subscribe`, `Unsubscribe`, `Dropped` and `SubscriberCount`
+([`decisions.md` #51](decisions.md#51-the-engine-hands-out-subscriptions-not-its-broadcaster)). It is **not** a capability boundary:
 `Frame`'s callback hands the view the live, unredacted `*State`, and a poker table
 reads every seat from it. There is no `Engine()` escape hatch; what the view shows
 from that state is the view's stated job (`buildSeats`, which has its own test
@@ -635,22 +696,32 @@ file).
 ### 4.4 Session / view baseline
 
 Every game view embeds `gameview.Session`
-(`internal/tui/views/game/session.go`): binding, `NewSession`'s subscribe,
-`HandleFrame` (the whole `Update` loop; it drops an `EventMsg` or `ClockTickMsg`
-stamped with another session's feed), `ClockTick` (the countdown a view's `Init`
-starts), the hand cursor (`MoveCursor`, `SelectDigit`, `SelectedCard`),
+(`internal/tui/views/gameview/session.go`): binding, `NewSession(global, engine,
+slug)`'s subscribe - the slug is the catalog's, and the `game_type` label on the
+view's metrics
+([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) -
+`Init` (the event listener and the turn-clock countdown, through the unexported
+`clockTick`; a view has no `Init` of its own), `HandleFrame` (the whole `Update`
+loop; it drops an `EventMsg` or `ClockTickMsg` stamped with another session's feed),
+the hand cursor (`MoveCursor`, `SelectDigit`, `SelectedCard`),
 `IdleRemoved`, `ActionErr` (the last rejected move - `Submit` keeps it and the hero
 band renders it), `HandleLeaveKey` / `LeaveConfirmScreen` (the forfeit prompt,
 §3.3), `IdleExempt`, `Leave` and `Close` (which is what satisfies
 `router.Closer`). The shared layout frame - `RenderBands`, the compact
-breakpoints, the width-budgeted hand renderers - lives in
-`internal/tui/views/game`. A new game implements its own rules rendering and
+breakpoints, one width-budgeted `RenderHand` (a staged-card set makes it a
+multi-select) - lives in `internal/tui/views/gameview`, beside `ChoicePicker` (the
+suit or colour picker crazy eights and uno share) and the between-hands screen:
+hearts, gin rummy and poker all render their result through
+`RenderHandOver(global, HandOver{...})`, with `MatchOverTitle` and `LobbyHint`, so
+the three cannot drift apart. A new game implements its own rules rendering and
 nothing else.
 
 Read per-game state through the `extra` callback of `Session.Sync`; read seat
 order, display names and stock size through `BaseState` (`Seats`, `SeatOrder()`,
 `SeatNames()`, `DeckSize`) rather than re-deriving them from the live `*State`.
-`PlayerSnapshot.Username` already falls back to the player id.
+`BaseState.Opponents` is hero-relative: the hero dropped, clockwise from the hero's
+left, so the seat that acts next comes first - the order `SplitZones` lays the table
+out in. `PlayerSnapshot.Name` already falls back to the player id.
 
 Anything a view keeps after releasing the engine lock must be **copied, not
 aliased** (`maps.Clone`, `HandResult.Clone`).
@@ -697,7 +768,7 @@ Three places in the code state the rule: the comment on `Manager.cacheDirty`, th
 doc on `Manager.LeaveLobby`, and the doc on `Lobby.releaseFinishedGameLocked`.
 The browse cache uses an `atomic.Bool` dirty flag **specifically** so a lobby can
 mark it while holding its own lock without reaching for the manager's.
-`Manager.Stats` and `getCachedPublicLobbies` both copy the lobby slice under
+`Manager.Stats` and `publicLobbies` both copy the lobby slice under
 `m.mu` and release it before taking any `l.mu`.
 
 ### 4.7 Shared deck helpers - `internal/deck`
@@ -721,33 +792,35 @@ saying why it was unreachable.
 
 ### 4.8 Events
 
-`game.Event` is deliberately thin - `Type`, `PlayerID`, and `Reason` (which
+`game.Event` (`event.go`) is deliberately thin - `Type`, `PlayerID`, and `Reason` (which
 qualifies `EventGameEnded` and is zero on everything else). The reasons are
 `EndReasonWin`, `EndReasonRulesError`, `EndReasonForfeit` (last player standing),
 `EndReasonAbandoned` (every seat left) and `EndReasonInterrupted` (one seat's leave
 ended the match for everyone: hearts sets `State.Interrupted` in `OnPlayerLeave`,
-and `removePlayerLocked` reports it in place of a win). It is a **cue to
-re-read a snapshot**, never the state itself.
+and `settleAfterLeaveLocked` reports it in place of a win). `EventType` and
+`EndReason` both have a `String()` beside their constants, the stable label logs and
+metrics carry. An event is a **cue to re-read a snapshot**, never the state itself.
 
 | `EventType` | Emitted by | Consumer behaviour |
 |---|---|---|
 | `EventGameStarted` | `Engine.Start` | views begin rendering the table |
-| `EventActionApplied` | `submitActionLocked`, after `AfterAction` | re-sync |
-| `EventTurnAdvanced` | `submitActionLocked`, `removePlayerLocked` | re-sync |
+| `EventActionApplied` | `applyActionLocked`, after `AfterAction` | re-sync |
+| `EventTurnAdvanced` | `applyActionLocked`, `settleAfterLeaveLocked` | re-sync |
 | `EventTurnTimedOut` | `resolveTurnTimeout` | re-sync; a safe move was played |
 | `EventPlayerLeft` | `removePlayerLocked` | re-sync |
 | `EventPlayerIdle` | `removeIfStillIdle` | **the named player's own view quits its program**, which ends the SSH session through the ordinary `releaseSession` path |
-| `EventGameEnded` | `finishGameLocked`, `removePlayerLocked`, `finishAfterPanicLocked` | views show the result; the lobby's watcher persists it |
+| `EventGameEnded` | `endGameLocked`, reached from `finishGameLocked`, `settleAfterLeaveLocked` and `endOnRulesPanicLocked` | views show the result; the lobby's watcher persists it |
 | `EventUnknown` | - | zero value, never sent |
 
 `game.StateSnapshot` is the redaction boundary: hand *sizes*, never hand
-contents. It carries both `CurrentPlayer` (a display name) and `CurrentPlayerID`,
-because two players can share a name and whose turn it is must never be decided
+contents. It carries both `CurrentPlayerName` (a display name, like `WinnerName`)
+and `CurrentPlayerID`, because two players can share a name and whose turn it is must never be decided
 from the former. A player's own cards come only from `BoundEngine.Frame`, which
 clones the cards of the bound `playerID` and nobody else.
 
-`lobby.Event` is `{Type string; Payload any}`; the payload is used by exactly one
-type, `EventGameStarted`, which carries the `*game.Engine`.
+`lobby.Event` is `{Type EventType; Engine *game.Engine}`, and `Engine` is set on
+`EventGameStarted` only. `lobby.EventType` starts at one, so the zero value is no
+event (a departure with nothing to announce), and has a `String()` of its own.
 
 ---
 
@@ -765,13 +838,14 @@ layers. Read the comments on each of these; they state the failure mode.
 | An unplayable street unwinds on every path - a betting action or a leave | `settleOrUnwind`, reached through `resolveAfterChange` | `streets.go`, `betting.go` |
 | A raise past what any opponent can call is refused, not staged | `largestCallableBet` / `validateRaiseTo` | `betting.go` |
 | The one legal raise band; the view builds its prompt from it | `RaiseBounds` | `betting.go` |
-| A player facing a sub-minimum all-in may only call or fold, unless the short all-ins since they acted add up to a full raise ([#41](decisions.md#41-short-all-ins-that-add-up-to-a-full-raise-reopen-the-betting)) | `checkBettingReopened` (`LastBetLevel`) | `betting.go` |
+| A player facing a sub-minimum all-in may only call or fold, unless the short all-ins since they acted add up to a full raise ([#41](decisions.md#41-short-all-ins-that-add-up-to-a-full-raise-reopen-the-betting)) | `checkBettingReopened` (`Seat.LastBetLevel`) | `betting.go` |
 | A blind too short to post keeps the full bring-in | `beginHand` | `hand.go` |
 | The tripwire: stacks + pool must equal the hand's starting total | `checkChipConservation` | `hand.go` |
+| A player's stack and their part in the hand are one `Seat` in `State.Seats`, kept after a leave: an all-in leaver still contests the pot and every leaver is ranked on the chips they walked away with | `Seat` | `state.go` |
 
 `checkChipConservation` **logs**; it does not panic or refuse. By the time it
 fires the hand is already closed out, so the value is the log line, not a
-recovery. It also checks `MainPool != 0` separately, because `chipsInPlay` counts
+recovery. It also checks `Pool != 0` separately, because `chipsInPlay` counts
 the pool - a hand that ends without paying a pot out would otherwise balance, and
 the next `resetForHand` would quietly zero the stranded chips.
 
@@ -791,6 +865,20 @@ Interfaces in `internal/db`; GORM implementations in `internal/repository`.
 Nothing outside `cmd/server` (the composition root) may import the implementation
 package, and `depguard` enforces it. The sentinels callers compare against live in
 `internal/db/errors.go`.
+
+The account side is three consumer-sized interfaces, and `db.UserRepository` is
+only their union, for the composition root that builds the one implementation
+([`decisions.md` #50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface)):
+
+| Interface | Methods | Consumer |
+|---|---|---|
+| `db.Authenticator` | `LoadUserByFingerprint`, `RegisterUserWithKey`, `UpdateUserActivity` | `internal/ssh` (`Deps.Auth`, `LoadOrRegisterUser`) |
+| `db.Profiles` | `UserProfile`, `UserMatchHistory`, `DeleteAccount` | the profile screen, through `GlobalContext.Profiles` |
+| `db.Leaderboard` | `BestPlayers` | the leaderboard screen, and the stats API (`httpapi.Deps.Users`) |
+| `db.MatchRepository` | `RecordCasualMatch`, `FinalizeRankedMatch`, `FinalizeInterruptedMatch` | `lobby.Manager` only |
+
+`repository.Connect(dsn, repository.Pool{MaxOpenConns, Verbose})` opens the pool;
+`Verbose` (every SQL statement logged) is set only for `ENV=development`.
 
 ### 6.1 Game identity is the slug
 
@@ -890,8 +978,22 @@ survive.
 `persistFinishedMatch` and `recordFinishedMatch` (`internal/lobby/finalize.go`):
 
 ```go
-rated := req.isRanked && !m.isShuttingDown() &&
-    reason != game.EndReasonRulesError && reason != game.EndReasonAbandoned
+func unratedReason(reason game.EndReason, shuttingDown bool) string {
+    switch {
+    case reason == game.EndReasonRulesError:
+        return "rules error ended the match; recording without Elo"
+    case reason == game.EndReasonAbandoned:
+        return "every seat left the match; recording without Elo"
+    case shuttingDown:
+        return "server is shutting down; recording the ranked match without Elo"
+    }
+    return ""
+}
+
+rated := req.isRanked
+if why := unratedReason(reason, m.isShuttingDown()); rated && why != "" {
+    rated = false // and why is logged
+}
 ```
 
 Three ways a ranked match is written without Elo, and the comment gives one
@@ -899,13 +1001,13 @@ reason for each: a deploy decided who was left holding cards, not play; a
 half-applied rules error must not move the ladder; and an **abandoned** table -
 every seat left - has standings that are reverse leave order, so rating it pays
 the last to quit. `EndReasonForfeit` (last player standing) **is** rated, and so
-is `EndReasonUnknown`. `unratedReason` logs which of the three it was, and
-`endReasonLabel` gives the metric its label. An abandoned match with no standings
+is `EndReasonUnknown`. `unratedReason` names which of the three it was for the log,
+and `EndReason.String()` gives the metric its label. An abandoned match with no standings
 writes nothing at all.
 
 An unrated ranked match goes through `RecordCasualMatch`, so it is history with
 `matches.ranked = false` and - because the increment lives only in
-`updateRankingsTx` - **no `matches_played` increment either**.
+`writeRanking` - **no `matches_played` increment either**.
 
 **An interrupted match is rated only against its leavers**
 ([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
@@ -928,7 +1030,8 @@ place, because splitting them mints Elo between two people who both quit.
 
 ### 6.5 Ranked finalize - one transaction
 
-`FinalizeRankedMatch` -> `updateRankingsTx` (`internal/repository/match.go`):
+`FinalizeRankedMatch` -> `finalizeRanked` -> `updateRankings`
+(`internal/repository/match.go`), then `recordMatch` in the same transaction:
 
 1. **`lockPairing`** - an advisory lock **per seat**. Not per exact participant
    set: the cap below is per *pair*, and two different sets can share one. Ranking
@@ -955,11 +1058,14 @@ place, because splitting them mints Elo between two people who both quit.
    `ON CONFLICT DO NOTHING` locks nothing in the common case where the row already
    exists. Without the fixed order two overlapping finalizes lock in opposite
    orders and Postgres aborts one.
-5. **The provisional rule and the pairing damp**, then `elo.Calculate`.
-6. **Write** the match, the participants, the places and the deltas.
+5. **The pairing damp** (`isDamped`) and **the provisional rule**, inside
+   `calculateNewElos` -> `elo.Calculate`.
+6. **Write** each seat's rating (`applyRatings` -> `writeRanking`, which also bumps
+   `matches_played`), then the match, the participants, the places and the deltas
+   (`recordMatch`).
 
 **Elo itself.** `internal/elo/elo.go` is pure: `DefaultRating` 1500, `MinRating`
-100, `MaxRating` 4000, `KFactor` 32, expected score base 10 over 400. `Calculate`
+100, `MaxRating` 4000, the unexported `kFactor` 32, expected score base 10 over 400. `Calculate`
 takes a slice sorted first place to last and scores each player against their
 **immediate neighbours only**. `capTransfer` trims each transfer so neither side
 crosses the bounds, which keeps the clamping itself conservative. Ratings are
@@ -994,7 +1100,7 @@ what still lets a provisional account graduate.
 **Casual.** `RecordCasualMatch` - history only, no Elo, game row created on first
 sight.
 
-**Leaderboard reads.** `BestPlayers(ctx, limit, gameSlug)` is a cache keyed by
+**Leaderboard reads.** `BestPlayers(ctx, gameSlug, limit)` is a cache keyed by
 game slug (empty = all games), 5-minute TTL, fetching `bestPlayersCacheSize` (200)
 rows and slicing. A `limit` above 200 bypasses the cache entirely, which is also
 why the HTTP endpoint caps there. Concurrent misses share one query through a
@@ -1007,7 +1113,7 @@ before the erasure committed re-caches the erased name for the whole TTL.
 
 ### 6.6 Erasure - `DeleteAccount`
 
-`db.UserRepository.DeleteAccount(ctx, userID)`, implemented by `eraseUserLocked`
+`db.Profiles.DeleteAccount(ctx, userID)`, implemented by `eraseUser`
 (`internal/repository/user.go`), one transaction:
 
 - It takes the **same per-seat advisory lock** a ranked finalize holds
@@ -1041,15 +1147,17 @@ after.
 ## 7. Catalog - single registration point
 
 `internal/catalog/catalog.go` `All` is the only place a game is declared. Each
-entry carries the rules factory **and** the TUI view constructor. `cmd/server`
-builds the registry; `internal/tui/app.go` registers the routes. A missing field
-or duplicate slug fails `catalog_test.go`. Copying an entry and changing only the
+entry embeds a `game.Module` (`Name`, `Slug`, `Factory`) **and** carries the TUI
+view constructor, `View(global, engine, slug)`. `cmd/server` builds the registry
+with `catalog.NewRegistry()`; `internal/tui/app.go` registers the routes. A missing
+field or duplicate slug fails `catalog_test.go`, and `game.NewRegistry` panics on
+either at boot. Copying an entry and changing only the
 rules still compiles, so keep the pair in lockstep by hand.
 
 | Field | Consumer |
 |---|---|
 | `Module.Name` | registry key, lobby option, `db.Game.Name` (display) |
-| `Slug` | TUI route `game_<slug>`, **and `games.slug`, the persisted identity** |
+| `Slug` | TUI route `game_<slug>`, **`games.slug`, the persisted identity**, and the `game_type` label on every game metric, lobby and view alike ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
 
 ---
 
@@ -1059,9 +1167,13 @@ rules still compiles, so keep the pair in lockstep by hand.
 |---|---|---|
 | `cmd/server` | composition root, drain | game rules |
 | `internal/ssh` | transport, auth, session generations | match writes |
-| `internal/tui` | presentation | `MatchRepository` |
+| `internal/tui` | presentation; `tui.New` builds a session's router | `MatchRepository` |
+| `internal/tui/views/gameview` | the game-view baseline: `Session`, the layout frame, `ChoicePicker`, the hand-over screen; one subpackage per game | rules decisions |
+| `internal/tui/tuitest` | test helpers the TUI suites share (`Key`, `StripANSI`, `FitSizes`) | production imports |
 | `internal/lobby` | tables, grace, finalize orchestration | card rules |
 | `internal/game` | engine + rules | db, tui, routes, lobby |
+| `internal/game/shed` | what the shedding games (crazy eights, uno) share | engine internals |
+| `internal/game/gametest` | the shared rules suites (`RunShed`, `SoakTimeoutIsAlwaysLegal`) | production imports |
 | `internal/db` | models + repository **interfaces** + auth sentinels | GORM queries |
 | `internal/repository` | GORM implementations | SSH / TUI |
 | `internal/catalog` | the game list | runtime state |
@@ -1072,8 +1184,11 @@ rules still compiles, so keep the pair in lockstep by hand.
 
 The two rules that matter are lint rules, not conventions -
 `.golangci.yml` `depguard`: nothing but `cmd/server` and `internal/repository`
-may import `internal/repository`, and `internal/game/**` may import neither
-`internal/db`, `internal/tui` nor `internal/lobby`.
+may import `internal/repository`, and `internal/game/**` (`game-is-pure`, tests and
+`gametest` exempt) may import only from an allow-list - the standard library,
+`internal/deck`, `internal/broadcaster`, `internal/game/**` and `uuid` - so a new
+dependency is a decision rather than a default
+([`decisions.md` #54](decisions.md#54-the-game-packages-import-from-an-allow-list)).
 
 Seat identity inside `internal/game` is the scalars on `game.Player` (`UserID`,
 `Name`, `Ratings`), never a `*db.User`. `lobby.NewPlayer` is the only place a
@@ -1084,11 +1199,12 @@ Lobby file split:
 
 | File | Role |
 |---|---|
-| `manager.go` | maps, new / join / leave / kick, `RemoveLobby`, `Stats` |
-| `lobby.go` | roster, settings, ready, start |
-| `watch.go` | the engine watcher -> `requestFinalize` (register, reopen, persist) |
-| `finalize.go` | persist finished matches, the rating gate, the finalizer registry, `BeginShutdown`, `WaitForFinalizers` |
-| `disconnect.go` | the mid-game grace state machine, `ResumePlayer`, `releaseHeldSeats` |
+| `manager.go` | maps, `CreateLobby` / join / leave / kick, `RemoveLobby`, `Stats`, `disconnectGrace` |
+| `lobby.go` | roster, settings, ready, start, `Event` / `EventType`, `departure` |
+| `errors.go` | the sentinels a caller tells apart with `errors.Is` |
+| `watch.go` | the engine watcher (`handleGameEvents`) -> `requestFinalize` (register, reopen, persist) |
+| `finalize.go` | persist finished matches, the rating gate (`unratedReason`), `dropFinishedMatch`, the finalizer registry, `BeginShutdown`, `WaitForFinalizers` |
+| `disconnect.go` | the mid-game grace state machine (`graceTimers`), `ResumePlayer`, `releaseHeldSeats` |
 | `browse.go` | public list and its cache, Elo-distance sort, `GameNames` |
 | `player.go` | `db.User` -> `game.Player` |
 
@@ -1112,8 +1228,11 @@ because a cached health answer is a lie about a later moment.
 Deliberately narrow: no writes, no auth, no per-user data, nothing the TUI
 leaderboard does not already show any visitor. That is what makes it safe
 unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
-`lobby.Manager.Stats`, and `SetupServer` requires the tracker the two share
-(`ErrNoTracker`). `Deps.AllowOrigin` and `Deps.RequestsPerMinute` are required too:
+`lobby.Manager.Stats`, and `ssh.NewServer` requires the tracker the two share
+(`ErrNoTracker`). `httpapi.NewServer(addr, Deps)` builds the `*http.Server` and
+refuses to start with `Sessions`, `Lobbies` or `Users` missing (`ErrMissingDeps`):
+a nil counter or repository would otherwise serve zeros or an empty leaderboard
+forever. `Deps.AllowOrigin` and `Deps.RequestsPerMinute` are required too:
 `config.Load` owns the defaults and validates them, so a second copy in the package
 could only drift from it.
 
@@ -1307,16 +1426,18 @@ matter more than any single query result, because channel receives and
 
 **There is no static path from `BoundEngine.Submit` to `finalizeFinishedGame`.**
 The engine broadcasts `EventGameEnded`; a different goroutine
-(`handleBroadcasterEvents`) picks it up.
+(`handleGameEvents`) picks it up.
 
 ```
-Lobby.startGameLocked -> watchGameLocked -> handleBroadcasterEvents
-  -> releaseFinishedGame        (reopen first)
-  -> requestFinalize -> Manager.finalizeFinishedGame
-      -> registerFinalizer / shutdownCtx
-      -> persistFinishedMatch -> Engine.StandingsWithPlaces
-                              -> rating gate
-                              -> recordFinishedMatch -> MatchRepository
+Lobby.startGameLocked -> watchGameLocked -> handleGameEvents
+  -> requestFinalize
+      -> registerFinalizer          (first)
+      -> releaseFinishedGame        (reopen before the write)
+      -> Manager.dropFinishedMatch  (registration refused)
+      -> OR Manager.finalizeFinishedGame
+          -> persistFinishedMatch -> Engine.Standings
+                                  -> rating gate (unratedReason)
+                                  -> recordFinishedMatch -> MatchRepository
 ```
 
 **Generation fencing and grace fencing are two different mechanisms that must
@@ -1327,8 +1448,8 @@ side. A reconnect race is what happens when they disagree.
 releaseSession
   -> SessionTracker.ReleaseWith (owning generation only, under t.mu)
   -> Manager.DisconnectPlayer
-      -> disconnectGrace.arm (mid-game)
-      -> OR LeaveLobby / expireLeave -> Lobby.notifyEngineAndBroadcast
+      -> m.grace.arm (mid-game, disconnectGrace)
+      -> OR LeaveLobby / expireLeave -> departure.notify
           -> Engine.RemovePlayer -> Manager.RemoveLobby (empty table)
 ```
 
