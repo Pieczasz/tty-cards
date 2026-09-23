@@ -103,6 +103,9 @@ linters:
           - gosec
 
   settings:
+    usetesting:
+      context-background: true
+      context-todo: true
     depguard:
       rules:
         repository-only-from-root:

@@ -139,8 +139,8 @@ func PostgresDSN(t *testing.T) string {
 	requireContainer(t, err)
 
 	t.Cleanup(func() {
-		// Not t.Context(): it is already cancelled by the time cleanups run.
-		if err := postgresContainer.Terminate(context.Background()); err != nil {
+		// t.Context() is already cancelled by the time cleanups run.
+		if err := postgresContainer.Terminate(context.WithoutCancel(t.Context())); err != nil {
 			t.Errorf("terminate container: %v", err)
 		}
 	})
