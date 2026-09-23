@@ -104,10 +104,92 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 	return e
 }
 
-// SubscriberCount is how many feeds Subscribe has open, which is how a test proves a
-// view gave its slot back. The broadcaster itself stays private.
-func (e *Engine) SubscriberCount() int {
-	return e.broadcaster.Len()
+// Start deals and opens the table. A failed start leaves the engine half-dealt and
+// unusable: the lobby builds a new engine per attempt, and the seats are the engine's
+// own copies, so nothing outside it sees the partial deal.
+func (e *Engine) Start() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.closed {
+		return errClosed
+	}
+	if e.state.Phase != Waiting {
+		return errors.New("game already started")
+	}
+	if len(e.state.Players) == 0 {
+		return errors.New("cannot start game with no players")
+	}
+
+	e.state.Deck.Shuffle()
+
+	hands := make([][]deck.Card, len(e.state.Players))
+	for playerIdx := range e.state.Players {
+		cards, ok := e.state.Deck.DrawN(e.state.Rules.InitialDealCount())
+		if !ok {
+			return errors.New("insufficient number of cards to deal for all players")
+		}
+		hands[playerIdx] = cards
+	}
+
+	for playerIdx, hand := range hands {
+		e.state.Players[playerIdx].Cards = hand
+	}
+	e.state.Phase = Playing
+	// math/rand: who acts first is public the moment the table opens, so it is no
+	// secret worth crypto/rand, and there is no error to handle.
+	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret, see above
+
+	if err := e.state.Rules.OnGameStart(e.state); err != nil {
+		return fmt.Errorf("set up game: %w", err)
+	}
+	e.settleTurnLocked()
+	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
+	return nil
+}
+
+// SubmitAction applies action for playerID, who must be on turn. Acting for yourself
+// clears your missed-turn count.
+//
+// A rules panic ends the table as a rules error and comes back as an error rather than
+// unwinding into the session, whose recover would leave the table running on
+// half-applied state. The recover is a direct defer and runs before the unlock, so the
+// lock is still held.
+func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			e.endOnRulesPanicLocked(r)
+			err = errors.New("the game hit an internal error and has ended")
+		}
+	}()
+	current, err := e.checkTurnLocked(playerID, action)
+	if err != nil {
+		return err
+	}
+	// Cleared only on a move the rules accept: clearing on any keypress would let a
+	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
+	delete(e.clock.missed, playerID)
+	return e.applyActionLocked(current, action)
+}
+
+// RemovePlayer takes playerID's seat, running the rules' PlayerLeaveHandler, and ends
+// the table when the leave decides it. An unknown seat or a finished table is a no-op.
+func (e *Engine) RemovePlayer(playerID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removePlayerLocked(playerID)
+}
+
+// Close stops the turn clock and releases the broadcaster. Safe to call repeatedly; the
+// closed flag stops a concurrently-resolved timeout re-arming a timer afterwards.
+func (e *Engine) Close() {
+	e.mu.Lock()
+	e.closed = true
+	e.stopTurnTimerLocked()
+	e.mu.Unlock()
+	e.broadcaster.Close()
 }
 
 // Subscribe joins the table's event feed without handing out the broadcaster, which
@@ -130,13 +212,10 @@ func (e *Engine) Dropped() int64 {
 	return e.broadcaster.Dropped()
 }
 
-// WithState runs fn with the engine lock held. fn must not call back into the engine:
-// every Engine method takes the same lock, so it would deadlock. A test seam: nothing
-// in production calls it, and views read through Frame.
-func (e *Engine) WithState(fn func(state *State)) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	fn(e.state)
+// SubscriberCount is how many feeds Subscribe has open, which is how a test proves a
+// view gave its slot back. The broadcaster itself stays private.
+func (e *Engine) SubscriberCount() int {
+	return e.broadcaster.Len()
 }
 
 // Snapshot is the table's public state at this moment.
@@ -144,36 +223,6 @@ func (e *Engine) Snapshot() StateSnapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.snapshotLocked()
-}
-
-func (e *Engine) snapshotLocked() StateSnapshot {
-	state := e.state
-	var snap StateSnapshot
-	snap.Phase = state.Phase
-	if state.Deck != nil {
-		snap.DeckSize = state.Deck.Size()
-	}
-	if state.Discard != nil {
-		if top, ok := state.Discard.Peek(); ok {
-			snap.TopDiscard = top
-		}
-	}
-	if state.Winner != nil {
-		snap.WinnerName = state.Winner.DisplayName()
-	}
-	if current := e.currentPlayerLocked(); current != nil {
-		snap.CurrentPlayerName = current.DisplayName()
-		snap.CurrentPlayerID = current.ID
-	}
-	snap.Players = make([]PlayerSnapshot, 0, len(state.Players))
-	for _, p := range state.Players {
-		snap.Players = append(snap.Players, PlayerSnapshot{
-			ID:       p.ID,
-			Name:     p.DisplayName(),
-			HandSize: len(p.Cards),
-		})
-	}
-	return snap
 }
 
 // Frame reads everything a view renders in one lock hold. fn may be nil; it receives
@@ -253,123 +302,13 @@ func (e *Engine) Standings() (standings []Standing) {
 	return standings
 }
 
-func (e *Engine) placesLocked(standings []*Player) []int {
-	// standingsLocked appends LeftPlayers after the seats the rules placed, so a
-	// leaver's StandingScore was measured against a state they are no longer in -
-	// tying it with a seated player turns a rage-quit into a rated draw. They rank
-	// strictly below everyone still at the table. Two leavers with the same score
-	// still share a place: splitting them mints Elo between people who both quit.
-	left := make(map[string]bool, len(e.state.LeftPlayers))
-	for _, p := range e.state.LeftPlayers {
-		left[p.ID] = true
-	}
-
-	scorer, ok := e.state.Rules.(StandingScorer)
-	tied := func(a, b *Player) bool {
-		return ok && a != nil && b != nil && left[a.ID] == left[b.ID] &&
-			scorer.StandingScore(e.state, a) == scorer.StandingScore(e.state, b)
-	}
-
-	places := make([]int, len(standings))
-	for i, p := range standings {
-		places[i] = i + 1
-		if i > 0 && tied(p, standings[i-1]) {
-			places[i] = places[i-1]
-		}
-	}
-	return places
-}
-
-func (e *Engine) standingsLocked() []*Player {
-	standings := e.state.Rules.Standings(e.state)
-
-	// State.Players holds no nils (Start deals into every seat, so one would panic
-	// there first), but Standings is the rules' own slice and may.
-	placed := make(map[string]bool, len(standings))
-	for _, p := range standings {
-		if p != nil {
-			placed[p.ID] = true
-		}
-	}
-
-	out := make([]*Player, 0, len(standings)+len(e.state.LeftPlayers))
-	out = append(out, standings...)
-	for _, p := range slices.Backward(e.state.LeftPlayers) {
-		if !placed[p.ID] {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// Start deals and opens the table. A failed start leaves the engine half-dealt and
-// unusable: the lobby builds a new engine per attempt, and the seats are the engine's
-// own copies, so nothing outside it sees the partial deal.
-func (e *Engine) Start() error {
+// WithState runs fn with the engine lock held. fn must not call back into the engine:
+// every Engine method takes the same lock, so it would deadlock. A test seam: nothing
+// in production calls it, and views read through Frame.
+func (e *Engine) WithState(fn func(state *State)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	if e.closed {
-		return errClosed
-	}
-	if e.state.Phase != Waiting {
-		return errors.New("game already started")
-	}
-	if len(e.state.Players) == 0 {
-		return errors.New("cannot start game with no players")
-	}
-
-	e.state.Deck.Shuffle()
-
-	hands := make([][]deck.Card, len(e.state.Players))
-	for playerIdx := range e.state.Players {
-		cards, ok := e.state.Deck.DrawN(e.state.Rules.InitialDealCount())
-		if !ok {
-			return errors.New("insufficient number of cards to deal for all players")
-		}
-		hands[playerIdx] = cards
-	}
-
-	for playerIdx, hand := range hands {
-		e.state.Players[playerIdx].Cards = hand
-	}
-	e.state.Phase = Playing
-	// math/rand: who acts first is public the moment the table opens, so it is no
-	// secret worth crypto/rand, and there is no error to handle.
-	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret, see above
-
-	if err := e.state.Rules.OnGameStart(e.state); err != nil {
-		return fmt.Errorf("set up game: %w", err)
-	}
-	e.settleTurnLocked()
-	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
-	return nil
-}
-
-// SubmitAction applies action for playerID, who must be on turn. Acting for yourself
-// clears your missed-turn count.
-//
-// A rules panic ends the table as a rules error and comes back as an error rather than
-// unwinding into the session, whose recover would leave the table running on
-// half-applied state. The recover is a direct defer and runs before the unlock, so the
-// lock is still held.
-func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	defer func() {
-		if r := recover(); r != nil {
-			e.endOnRulesPanicLocked(r)
-			err = errors.New("the game hit an internal error and has ended")
-		}
-	}()
-	current, err := e.checkTurnLocked(playerID, action)
-	if err != nil {
-		return err
-	}
-	// Cleared only on a move the rules accept: clearing on any keypress would let a
-	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
-	delete(e.clock.missed, playerID)
-	return e.applyActionLocked(current, action)
+	fn(e.state)
 }
 
 // submitTimedOutAction plays a move resolveTurnTimeout computed for turn generation
@@ -492,14 +431,6 @@ func (e *Engine) endGameLocked(winner *Player, reason EndReason) {
 	})
 }
 
-// RemovePlayer takes playerID's seat, running the rules' PlayerLeaveHandler, and ends
-// the table when the leave decides it. An unknown seat or a finished table is a no-op.
-func (e *Engine) RemovePlayer(playerID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.removePlayerLocked(playerID)
-}
-
 // removePlayerLocked is the body of RemovePlayer. Caller must hold e.mu.
 func (e *Engine) removePlayerLocked(playerID string) {
 	if e.state.Phase == Finished {
@@ -566,14 +497,83 @@ func (e *Engine) settleAfterLeaveLocked() {
 	}
 }
 
-// Close stops the turn clock and releases the broadcaster. Safe to call repeatedly; the
-// closed flag stops a concurrently-resolved timeout re-arming a timer afterwards.
-func (e *Engine) Close() {
-	e.mu.Lock()
-	e.closed = true
-	e.stopTurnTimerLocked()
-	e.mu.Unlock()
-	e.broadcaster.Close()
+func (e *Engine) snapshotLocked() StateSnapshot {
+	state := e.state
+	var snap StateSnapshot
+	snap.Phase = state.Phase
+	if state.Deck != nil {
+		snap.DeckSize = state.Deck.Size()
+	}
+	if state.Discard != nil {
+		if top, ok := state.Discard.Peek(); ok {
+			snap.TopDiscard = top
+		}
+	}
+	if state.Winner != nil {
+		snap.WinnerName = state.Winner.DisplayName()
+	}
+	if current := e.currentPlayerLocked(); current != nil {
+		snap.CurrentPlayerName = current.DisplayName()
+		snap.CurrentPlayerID = current.ID
+	}
+	snap.Players = make([]PlayerSnapshot, 0, len(state.Players))
+	for _, p := range state.Players {
+		snap.Players = append(snap.Players, PlayerSnapshot{
+			ID:       p.ID,
+			Name:     p.DisplayName(),
+			HandSize: len(p.Cards),
+		})
+	}
+	return snap
+}
+
+func (e *Engine) standingsLocked() []*Player {
+	standings := e.state.Rules.Standings(e.state)
+
+	// State.Players holds no nils (Start deals into every seat, so one would panic
+	// there first), but Standings is the rules' own slice and may.
+	placed := make(map[string]bool, len(standings))
+	for _, p := range standings {
+		if p != nil {
+			placed[p.ID] = true
+		}
+	}
+
+	out := make([]*Player, 0, len(standings)+len(e.state.LeftPlayers))
+	out = append(out, standings...)
+	for _, p := range slices.Backward(e.state.LeftPlayers) {
+		if !placed[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (e *Engine) placesLocked(standings []*Player) []int {
+	// standingsLocked appends LeftPlayers after the seats the rules placed, so a
+	// leaver's StandingScore was measured against a state they are no longer in -
+	// tying it with a seated player turns a rage-quit into a rated draw. They rank
+	// strictly below everyone still at the table. Two leavers with the same score
+	// still share a place: splitting them mints Elo between people who both quit.
+	left := make(map[string]bool, len(e.state.LeftPlayers))
+	for _, p := range e.state.LeftPlayers {
+		left[p.ID] = true
+	}
+
+	scorer, ok := e.state.Rules.(StandingScorer)
+	tied := func(a, b *Player) bool {
+		return ok && a != nil && b != nil && left[a.ID] == left[b.ID] &&
+			scorer.StandingScore(e.state, a) == scorer.StandingScore(e.state, b)
+	}
+
+	places := make([]int, len(standings))
+	for i, p := range standings {
+		places[i] = i + 1
+		if i > 0 && tied(p, standings[i-1]) {
+			places[i] = places[i-1]
+		}
+	}
+	return places
 }
 
 // currentPlayerLocked is the seat State.CurrentTurn points at, or nil. Caller holds e.mu.
