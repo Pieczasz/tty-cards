@@ -1,1 +1,9 @@
-LOADING
+From b147a77a4fa8bfddc9b14225ee5304a1e86aeccb Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:38:14 +0000
+Subject: [PATCH 1/5] feat: detect adjacent Kafka build-then-produce (TAR-100)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SEE_FULL_CONTENT_IN_PAYLOAD_FILE
