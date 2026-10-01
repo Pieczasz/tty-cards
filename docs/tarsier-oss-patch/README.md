@@ -1,15 +1,7 @@
-# TAR-73 + TAR-100 patch (split)
+# Tarsier OSS patch handoff (TAR-73 / TAR-100)
 
-Concatenate parts in order, then:
+Concatenate `TAR-73-100.part1.patch.txt`, `TAR-73-100.part2.patch.txt`, and `TAR-73-100.part3.patch.txt` **in order** for the full patch.
 
-```bash
-cat TAR-73-100.part*.patch.txt > TAR-73-100-combined.patch
-cd /path/to/tarsier-dev/tarsier
-git checkout -b cursor/tar-73-100-oss-demo-8703
-git am < /path/to/TAR-73-100-combined.patch
-# or: git apply && git commit
-```
+The authoritative combined copy is also on Linear **TAR-73** as attachment `TAR-73-100-combined.patch`.
 
-Verified `git apply --check` clean on main `002ce3b`.
-
-Also: authorize agent device login (see https://github.com/Pieczasz/tty-cards/issues/18) to let the cloud agent push instead.
+Applies clean on `tarsier-dev/tarsier` `main`.
