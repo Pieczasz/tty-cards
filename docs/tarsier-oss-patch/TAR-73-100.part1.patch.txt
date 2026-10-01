@@ -179,4 +179,325 @@ diff --git a/analyzers/msgtrace/testdata/src/a/a.go b/analyzers/msgtrace/testdat
 index 5465513..883a1dc 100644
 --- a/analyzers/msgtrace/testdata/src/a/a.go
 +++ b/analyzers/msgtrace/testdata/src/a/a.go
-@@ -47,6 +4
+@@ -47,6 +47,28 @@ func direct(ctx context.Context, w *kafka.Writer) {
+ 	})
+ }
+ 
++func viaVar(ctx context.Context, w *kafka.Writer) {
++	msg := kafka.Message{ // want "Message published with no Headers"
++		Topic: "t",
++		Value: []byte("x"),
++	}
++	_ = w.WriteMessages(ctx, msg)
++}
++
++func viaVarInjected(ctx context.Context, w *kafka.Writer) {
++	msg := kafka.Message{Topic: "t", Value: []byte("x")}
++	msg.Headers = []kafka.Header{{Key: "traceparent", Value: []byte("00")}}
++	_ = w.WriteMessages(ctx, msg) // intervening Headers assign: not adjacent
++}
++
++func viaVarWithInjectCall(ctx context.Context, w *kafka.Writer) {
++	msg := kafka.Message{Topic: "t", Value: []byte("x")}
++	inject(msg)
++	_ = w.WriteMessages(ctx, msg) // notwant: intervening call (otel-demo shape)
++}
++
++func inject(m kafka.Message) {}
++
+ func unkeyed(ctx context.Context, w *kafka.Writer) {
+ 	// Unkeyed elts are not KeyValueExpr; hasHeaders must skip them.
+ 	_ = w.WriteMessages(ctx, kafka.Message{"t", []byte("x"), nil}) // want "Message published with no Headers"
+diff --git a/fixtures/_badshop/README.md b/fixtures/_badshop/README.md
+index 984e399..1b8e9bf 100644
+--- a/fixtures/_badshop/README.md
++++ b/fixtures/_badshop/README.md
+@@ -38,8 +38,7 @@ precision.
+ 
+ | Site | Rule | Why it stays `gap:` |
+ |------|------|---------------------|
+-| `api/publish.go` build-then-produce | `msgtrace/kafka-produce-no-inject` | Message built into a variable, then sent - inline-at-produce ceiling (same as tempo/otel-demo FPs) |
+-| `web/publish.ts` build-then-produce | `msgtrace/kafka-produce-no-inject` | Same ceiling as Go |
++| `web/publish.ts` build-then-produce | `msgtrace/kafka-produce-no-inject` | Same ceiling as Go (TS via-var not in TAR-100) |
+ | `web/publish.ts` consume | `msgtrace/kafka-consume-no-extract` | Node idiom is auto-instrumentation; source extract is the wrong shape |
+ | `worker/Publisher.java` build-then-send | `msgtrace/kafka-produce-no-inject` | Same ceiling as Go |
+ | `worker/Metrics.java` `System.out` | `logs/unstructured-logging` | Rule **cut** (8 FPs / 0 TPs on corpus) |
+diff --git a/fixtures/_badshop/api/publish.go b/fixtures/_badshop/api/publish.go
+index 5204e08..19b4fba 100644
+--- a/fixtures/_badshop/api/publish.go
++++ b/fixtures/_badshop/api/publish.go
+@@ -32,8 +32,8 @@ func buildRecord(orderID string) *kafka.Message {
+ }
+ 
+ func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
+-	msg := kafka.Message{Topic: "orders", Value: []byte(orderID)} // gap: msgtrace/kafka-produce-no-inject
+-	return w.WriteMessages(ctx, msg)
++	msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++	return w.WriteMessages(ctx, msg) // want: msgtrace/kafka-produce-no-inject
+ }
+ 
+ func notifyCustomer(orderID string) {
+diff --git a/fixtures/godeep/publish.go b/fixtures/godeep/publish.go
+index 9a7126f..8970aff 100644
+--- a/fixtures/godeep/publish.go
++++ b/fixtures/godeep/publish.go
+@@ -26,3 +26,12 @@ func CheckoutOK(ctx context.Context, w *kafka.Writer, orderID string) error {
+ 		Headers: []kafka.Header{{Key: "traceparent", Value: []byte("00-a-b-01")}},
+ 	})
+ }
++
++// ViaVar is adjacent build-then-produce (TAR-100).
++func ViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++	msg := kafka.Message{ // want-deep: msgtrace/kafka-produce-no-inject
++		Topic: "orders",
++		Value: []byte(orderID),
++	}
++	return w.WriteMessages(ctx, msg)
++}
+diff --git a/fixtures/ruletests/__snapshots__/msgtrace-kafka-produce-no-inject-go-snapshot.yml b/fixtures/ruletests/__snapshots__/msgtrace-kafka-produce-no-inject-go-snapshot.yml
+index 8703bb4..4f1b5d5 100644
+--- a/fixtures/ruletests/__snapshots__/msgtrace-kafka-produce-no-inject-go-snapshot.yml
++++ b/fixtures/ruletests/__snapshots__/msgtrace-kafka-produce-no-inject-go-snapshot.yml
+@@ -84,6 +84,102 @@ snapshots:
+       style: secondary
+       start: 0
+       end: 235
++  ? |
++    package main
++    import (
++        "context"
++        "github.com/segmentio/kafka-go"
++    )
++    func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++        msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++        return w.WriteMessages(ctx, msg)
++    }
++  : labels:
++    - source: 'msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}'
++      style: primary
++      start: 159
++      end: 220
++    - source: return w.WriteMessages(ctx, msg)
++      style: secondary
++      start: 225
++      end: 257
++    - source: |
++        package main
++        import (
++            "context"
++            "github.com/segmentio/kafka-go"
++        )
++        func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++            msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++            return w.WriteMessages(ctx, msg)
++        }
++      style: secondary
++      start: 0
++      end: 260
++  ? |
++    package main
++    import (
++        "context"
++        "github.com/segmentio/kafka-go"
++    )
++    func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++        msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++        return w.WriteMessages(ctx, msg) // comment ok on produce line
++    }
++  : labels:
++    - source: return w.WriteMessages(ctx, msg)
++      style: primary
++      start: 225
++      end: 257
++    - source: 'msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}'
++      style: secondary
++      start: 159
++      end: 220
++    - source: |
++        package main
++        import (
++            "context"
++            "github.com/segmentio/kafka-go"
++        )
++        func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++            msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++            return w.WriteMessages(ctx, msg) // comment ok on produce line
++        }
++      style: secondary
++      start: 0
++      end: 290
++  ? |
++    package main
++    import (
++        "context"
++        "github.com/segmentio/kafka-go"
++    )
++    func viaPtr(ctx context.Context, w *kafka.Writer, orderID string) error {
++        msg := &kafka.Message{Topic: "orders", Value: []byte(orderID)}
++        return w.WriteMessages(ctx, *msg)
++    }
++  : labels:
++    - source: return w.WriteMessages(ctx, *msg)
++      style: primary
++      start: 219
++      end: 252
++    - source: 'msg := &kafka.Message{Topic: "orders", Value: []byte(orderID)}'
++      style: secondary
++      start: 152
++      end: 214
++    - source: |
++        package main
++        import (
++            "context"
++            "github.com/segmentio/kafka-go"
++        )
++        func viaPtr(ctx context.Context, w *kafka.Writer, orderID string) error {
++            msg := &kafka.Message{Topic: "orders", Value: []byte(orderID)}
++            return w.WriteMessages(ctx, *msg)
++        }
++      style: secondary
++      start: 0
++      end: 255
+   ? |
+     package main
+     import (
+diff --git a/fixtures/ruletests/msgtrace-kafka-produce-no-inject-go.yml b/fixtures/ruletests/msgtrace-kafka-produce-no-inject-go.yml
+index deb60c4..1860f2a 100644
+--- a/fixtures/ruletests/msgtrace-kafka-produce-no-inject-go.yml
++++ b/fixtures/ruletests/msgtrace-kafka-produce-no-inject-go.yml
+@@ -125,3 +125,25 @@ invalid:
+     func bad4(ctx context.Context, w *kafka.Writer) error {
+         return w.WriteMessages(ctx, kafka.Message{Topic: "orders", Value: encode(envelope{Headers: nil})})
+     }
++  # TAR-100: adjacent build-then-produce (_badshop publishViaVar).
++  - |
++    package main
++    import (
++        "context"
++        "github.com/segmentio/kafka-go"
++    )
++    func publishViaVar(ctx context.Context, w *kafka.Writer, orderID string) error {
++        msg := kafka.Message{Topic: "orders", Value: []byte(orderID)}
++        return w.WriteMessages(ctx, msg) // comment ok on produce line
++    }
++  # TAR-100: pointer literal then produce via *msg.
++  - |
++    package main
++    import (
++        "context"
++        "github.com/segmentio/kafka-go"
++    )
++    func viaPtr(ctx context.Context, w *kafka.Writer, orderID string) error {
++        msg := &kafka.Message{Topic: "orders", Value: []byte(orderID)}
++        return w.WriteMessages(ctx, *msg)
++    }
+diff --git a/rules/msgtrace/kafka-produce-no-inject.go.yml b/rules/msgtrace/kafka-produce-no-inject.go.yml
+index af9b9e7..a06beba 100644
+--- a/rules/msgtrace/kafka-produce-no-inject.go.yml
++++ b/rules/msgtrace/kafka-produce-no-inject.go.yml
+@@ -21,30 +21,95 @@ note: |
+     franz-go (kgo): set Record.Headers before Produce/ProduceSync
+     Prefer a client interceptor (kotel, otelsarama, otelconfluent) if you have one.
+ 
++  Also matches adjacent same-function build-then-produce (TAR-100):
++    msg := kafka.Message{…}
++    return w.WriteMessages(ctx, msg)
++  Intervening statements (e.g. inject(msg)) stay a non-finding so the
++  otel-demo shape is preserved. Non-adjacent cases need `--engine=go`.
++
+   Ceiling: injection via a client hook or interceptor (kotel, Java agent,
+   @opentelemetry/instrumentation-kafkajs) is invisible to a per-file rule.
+-  A message built outside the produce call and an aliased Kafka import are
+-  also missed. Any Headers key counts as instrumented, so business-only
+-  headers and an explicit `Headers: nil` are missed too - gating on a
+-  traceparent/b3 key would instead flag `Headers: hdrs`, where the keys are
+-  not in the literal. See README 13.2 for the full list.
++  An aliased Kafka import is also missed. Any Headers key counts as
++  instrumented, so business-only headers and an explicit `Headers: nil` are
++  missed too - gating on a traceparent/b3 key would instead flag
++  `Headers: hdrs`, where the keys are not in the literal. See README 13.2.
+ 
+ rule:
+-  kind: composite_literal
+-  all:
+-    - has: {field: type, regex: '^(kafka|sarama|kgo)\.(Message|ProducerMessage|Record)$'}
+-    - not:
+-        has:
+-          kind: literal_value
+-          has:
+-            kind: keyed_element
+-            has: {field: key, regex: '^Headers$'}
+-    - inside:
+-        stopBy: {kind: argument_list}
+-        kind: argument_list
+-        inside:
+-          kind: call_expression
+-          has:
+-            field: function
+-            regex: '\.(WriteMessages|SendMessage|SendMessages|Produce|ProduceSync)$'
+-    - inside: {stopBy: end, matches: kafka-client-imported}
++  any:
++    # Inline message literal at the produce call.
++    - kind: composite_literal
++      all:
++        - has: {field: type, regex: '^(kafka|sarama|kgo)\.(Message|ProducerMessage|Record)$'}
++        - not:
++            has:
++              kind: literal_value
++              has:
++                kind: keyed_element
++                has: {field: key, regex: '^Headers$'}
++        - inside:
++            stopBy: {kind: argument_list}
++            kind: argument_list
++            inside:
++              kind: call_expression
++              has:
++                field: function
++                regex: '\.(WriteMessages|SendMessage|SendMessages|Produce|ProduceSync)$'
++        - inside: {stopBy: end, matches: kafka-client-imported}
++    # Adjacent build-then-produce (TAR-100). Match the produce/return so
++    # trailing // want: comments on that line do not break adjacency.
++    - all:
++        - any:
++            - pattern: return $W.WriteMessages($CTX, $MSG)
++            - pattern: $W.WriteMessages($CTX, $MSG)
++            - pattern: return $W.SendMessage($MSG)
++            - pattern: $W.SendMessage($MSG)
++            - pattern: return $W.SendMessages($MSG)
++            - pattern: $W.SendMessages($MSG)
++            - pattern: return $W.Produce($CTX, $MSG)
++            - pattern: $W.Produce($CTX, $MSG)
++            - pattern: return $W.ProduceSync($CTX, $MSG)
++            - pattern: $W.ProduceSync($CTX, $MSG)
++        - follows:
++            pattern: $MSG := kafka.Message{$$$FIELDS}
++            not:
++              has:
++                kind: keyed_element
++                has: {field: key, regex: '^Headers$'}
++        - inside: {stopBy: end, matches: kafka-client-imported}
++    - all:
++        - any:
++            - pattern: return $W.WriteMessages($CTX, *$MSG)
++            - pattern: $W.WriteMessages($CTX, *$MSG)
++            - pattern: return $W.SendMessage(&$MSG)
++            - pattern: $W.SendMessage(&$MSG)
++            - pattern: return $W.Produce($CTX, &$MSG)
++            - pattern: $W.Produce($CTX, &$MSG)
++            - pattern: return $W.ProduceSync($CTX, &$MSG)
++            - pattern: $W.ProduceSync($CTX, &$MSG)
++        - follows:
++            any:
++              - pattern: $MSG := &kafka.Message{$$$FIELDS}
++              - pattern: $MSG := &sarama.ProducerMessage{$$$FIELDS}
++              - pattern: $MSG := &kgo.Record{$$$FIELDS}
++            not:
++              has:
++                kind: keyed_element
++                has: {field: key, regex: '^Headers$'}
++        - inside: {stopBy: end, matches: kafka-client-imported}
++    - all:
++        - any:
++            - pattern: return $W.SendMessage($MSG)
++            -
