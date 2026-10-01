@@ -13,7 +13,7 @@ adjacent local walk. Promote _badshop publishViaVar gap to want.
 
 Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
 ---
- analyzers/msgtrace/msgtrace.go                | 106 ++++++++++++++++
+ analyzers/msgtrace/msgtrace.go                | 106 ++++++++++++++++-
  analyzers/msgtrace/testdata/src/a/a.go        |  22 ++++
  fixtures/_badshop/README.md                   |   3 +-
  fixtures/_badshop/api/publish.go              |   4 +-
