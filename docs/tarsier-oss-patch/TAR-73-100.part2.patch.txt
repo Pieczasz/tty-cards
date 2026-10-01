@@ -1,1 +1,482 @@
-SEE_FULL_CONTENT_IN_PAYLOAD_FILE
+ pattern: $W.SendMessage($MSG)
++            - pattern: return $W.Produce($CTX, $MSG)
++            - pattern: $W.Produce($CTX, $MSG)
++            - pattern: return $W.ProduceSync($CTX, $MSG)
++            - pattern: $W.ProduceSync($CTX, $MSG)
++        - follows:
++            any:
++              - pattern: $MSG := sarama.ProducerMessage{$$$FIELDS}
++              - pattern: $MSG := kgo.Record{$$$FIELDS}
++            not:
++              has:
++                kind: keyed_element
++                has: {field: key, regex: '^Headers$'}
++        - inside: {stopBy: end, matches: kafka-client-imported}
+-- 
+2.43.0
+
+
+From 85edb1e482a261f51ec30c2f0e67321c3de71f7e Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:43:21 +0000
+Subject: [PATCH 2/5] feat: Datadog DogStatsD high-cardinality tag rule
+ (TAR-73)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+First vendor-datadog static slice: flag unbounded keys on DogStatsD
+metric tags when DataDog/datadog-go is imported. Medium confidence
+per PRECISION.md; shared denylist util accepts optional key: suffix.
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ README.md                                     |  1 +
+ cli/check_cardinality.go                      |  3 +-
+ cli/check_cardinality_test.go                 |  3 +
+ cli/policy.go                                 |  1 +
+ docs/PRECISION.md                             |  1 +
+ fixtures/_badshop/api/datadog.go              | 14 +++
+ ...tadog-high-cardinality-tag-go-snapshot.yml | 98 +++++++++++++++++++
+ .../datadog-high-cardinality-tag-go.yml       | 53 ++++++++++
+ rules/datadog/high-cardinality-tag.go.yml     | 45 +++++++++
+ ruleutils/unbounded-label.yml                 |  5 +-
+ 10 files changed, 222 insertions(+), 2 deletions(-)
+ create mode 100644 fixtures/_badshop/api/datadog.go
+ create mode 100644 fixtures/ruletests/__snapshots__/datadog-high-cardinality-tag-go-snapshot.yml
+ create mode 100644 fixtures/ruletests/datadog-high-cardinality-tag-go.yml
+ create mode 100644 rules/datadog/high-cardinality-tag.go.yml
+
+diff --git a/README.md b/README.md
+index 1012ca8..576a793 100644
+--- a/README.md
++++ b/README.md
+@@ -74,6 +74,7 @@ Example workflow: [`examples/github-actions/scan.yml`](examples/github-actions/s
+ | --- | --- | --- |
+ | `metrics/high-cardinality-label` | Go, TS, Java, Rust, Python | Literal unbounded label names at declaration |
+ | `metrics/unbounded-label-value` | Go, TS, Java, Python | `err.Error()` / uuid-shaped values at the call site |
++| `datadog/high-cardinality-tag` | Go | DogStatsD tags with unbounded keys (`user_id:…`; medium; TAR-73) |
+ | `logs/unstructured-logging` | Go, TS | `log.Printf`/`console.*` where slog/zap/pino/winston is imported |
+ | `msgtrace/kafka-produce-no-inject` | Go, TS, Java | Headerless produce (medium on TS/Java when inject is invisible) |
+ | `msgtrace/kafka-consume-no-extract` | Go, Java | Read without `.Headers`/`Extract` |
+diff --git a/cli/check_cardinality.go b/cli/check_cardinality.go
+index 82c9943..59c6ba0 100644
+--- a/cli/check_cardinality.go
++++ b/cli/check_cardinality.go
+@@ -78,5 +78,6 @@ func newCheckCardinalityCommand() *cobra.Command {
+ 
+ func isCardinalityRule(rule string) bool {
+ 	return strings.HasPrefix(rule, "metrics/high-cardinality-label") ||
+-		strings.HasPrefix(rule, "metrics/unbounded-label-value")
++		strings.HasPrefix(rule, "metrics/unbounded-label-value") ||
++		strings.HasPrefix(rule, "datadog/high-cardinality-tag")
+ }
+diff --git a/cli/check_cardinality_test.go b/cli/check_cardinality_test.go
+index b37b4e0..bf5c437 100644
+--- a/cli/check_cardinality_test.go
++++ b/cli/check_cardinality_test.go
+@@ -36,6 +36,9 @@ func TestIsCardinalityRule(t *testing.T) {
+ 	if !isCardinalityRule("metrics/high-cardinality-label") || !isCardinalityRule("metrics/unbounded-label-value") {
+ 		t.Fatal("expected match")
+ 	}
++	if !isCardinalityRule("datadog/high-cardinality-tag") {
++		t.Fatal("expected datadog cardinality match")
++	}
+ 	if isCardinalityRule("logs/unstructured-logging") {
+ 		t.Fatal("unexpected match")
+ 	}
+diff --git a/cli/policy.go b/cli/policy.go
+index 83affa4..3c47f2c 100644
+--- a/cli/policy.go
++++ b/cli/policy.go
+@@ -17,6 +17,7 @@ var blockableClasses = map[string][]string{
+ 	"unbounded-metric-labels": {
+ 		"metrics/high-cardinality-label",
+ 		"metrics/unbounded-label-value",
++		"datadog/high-cardinality-tag",
+ 	},
+ 	"secrets-in-logs": {
+ 		"logs/secrets-in-logs",
+diff --git a/docs/PRECISION.md b/docs/PRECISION.md
+index 10cfe33..36c7f7a 100644
+--- a/docs/PRECISION.md
++++ b/docs/PRECISION.md
+@@ -25,5 +25,6 @@ When adding a provider family (e.g. slog bridge, TS OTel):
+ * Documented this gate.
+ * Demoted `otel/semconv-drift` (Go + TS) from `high` -> `medium` (notes already said precision unmeasured).
+ * Added Go **slog sprintf-message** provider (`logs/slog-sprintf-message`) at **medium** with ruletests + FP note.
++* Added Go **Datadog DogStatsD** provider (`datadog/high-cardinality-tag`) at **medium** (TAR-73 first slice; promote after corpus triage).
+ 
+ No phones-home / learning telemetry in the public CLI.
+diff --git a/fixtures/_badshop/api/datadog.go b/fixtures/_badshop/api/datadog.go
+new file mode 100644
+index 0000000..5f86d64
+--- /dev/null
++++ b/fixtures/_badshop/api/datadog.go
+@@ -0,0 +1,14 @@
++package main
++
++import "github.com/DataDog/datadog-go/v5/statsd"
++
++// DogStatsD cardinality traps (TAR-73). Pattern-tier only — no live DD API.
++func trackOrder(c *statsd.Client, userID string) {
++	_ = c.Incr("badshop.orders", []string{"user_id:" + userID}, 1) // want: datadog/high-cardinality-tag
++	_ = c.Incr("badshop.orders.status", []string{"status:ok"}, 1)   // notwant: datadog/high-cardinality-tag
++}
++
++func trackSpanIdentity(userID string) {
++	// APM span tags are out of scope for this metrics rule.
++	_ = userID // notwant: datadog/high-cardinality-tag
++}
+diff --git a/fixtures/ruletests/__snapshots__/datadog-high-cardinality-tag-go-snapshot.yml b/fixtures/ruletests/__snapshots__/datadog-high-cardinality-tag-go-snapshot.yml
+new file mode 100644
+index 0000000..e416698
+--- /dev/null
++++ b/fixtures/ruletests/__snapshots__/datadog-high-cardinality-tag-go-snapshot.yml
+@@ -0,0 +1,98 @@
++id: datadog-high-cardinality-tag-go
++snapshots:
++  ? |
++    package p
++    import "github.com/DataDog/datadog-go/statsd"
++    func f(c *statsd.Client, rid string) {
++      _ = c.Histogram("latency", 12, []string{"request_id:" + rid}, 1)
++    }
++  : labels:
++    - source: '"request_id:"'
++      style: primary
++      start: 137
++      end: 150
++    - source: c.Histogram
++      style: secondary
++      start: 101
++      end: 112
++    - source: c.Histogram("latency", 12, []string{"request_id:" + rid}, 1)
++      style: secondary
++      start: 101
++      end: 161
++    - source: '"github.com/DataDog/datadog-go/statsd"'
++      style: secondary
++      start: 17
++      end: 55
++    - source: |
++        package p
++        import "github.com/DataDog/datadog-go/statsd"
++        func f(c *statsd.Client, rid string) {
++          _ = c.Histogram("latency", 12, []string{"request_id:" + rid}, 1)
++        }
++      style: secondary
++      start: 0
++      end: 164
++  ? |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client) {
++      _ = c.Incr("orders.placed", []string{"user_id:42"}, 1)
++    }
++  : labels:
++    - source: '"user_id:42"'
++      style: primary
++      start: 125
++      end: 137
++    - source: c.Incr
++      style: secondary
++      start: 92
++      end: 98
++    - source: c.Incr("orders.placed", []string{"user_id:42"}, 1)
++      style: secondary
++      start: 92
++      end: 142
++    - source: '"github.com/DataDog/datadog-go/v5/statsd"'
++      style: secondary
++      start: 17
++      end: 58
++    - source: |
++        package p
++        import "github.com/DataDog/datadog-go/v5/statsd"
++        func f(c *statsd.Client) {
++          _ = c.Incr("orders.placed", []string{"user_id:42"}, 1)
++        }
++      style: secondary
++      start: 0
++      end: 145
++  ? |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client, id string) {
++      _ = c.Gauge("cart.value", 9.99, []string{"email:" + id}, 1)
++    }
++  : labels:
++    - source: '"email:"'
++      style: primary
++      start: 140
++      end: 148
++    - source: c.Gauge
++      style: secondary
++      start: 103
++      end: 110
++    - source: c.Gauge("cart.value", 9.99, []string{"email:" + id}, 1)
++      style: secondary
++      start: 103
++      end: 158
++    - source: '"github.com/DataDog/datadog-go/v5/statsd"'
++      style: secondary
++      start: 17
++      end: 58
++    - source: |
++        package p
++        import "github.com/DataDog/datadog-go/v5/statsd"
++        func f(c *statsd.Client, id string) {
++          _ = c.Gauge("cart.value", 9.99, []string{"email:" + id}, 1)
++        }
++      style: secondary
++      start: 0
++      end: 161
+diff --git a/fixtures/ruletests/datadog-high-cardinality-tag-go.yml b/fixtures/ruletests/datadog-high-cardinality-tag-go.yml
+new file mode 100644
+index 0000000..76c4e5a
+--- /dev/null
++++ b/fixtures/ruletests/datadog-high-cardinality-tag-go.yml
+@@ -0,0 +1,53 @@
++id: datadog-high-cardinality-tag-go
++valid:
++  # Bounded DogStatsD tags.
++  - |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client) {
++      _ = c.Incr("orders.placed", []string{"status:ok", "region:eu"}, 1)
++    }
++  # Span tags are free on APM — not this rule.
++  - |
++    package p
++    import "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    func f(userID string) {
++      span := tracer.StartSpan("checkout", tracer.Tag("user_id", userID))
++      span.Finish()
++    }
++  # Same string shape without a Datadog statsd import.
++  - |
++    package p
++    func f(c interface{ Incr(string, []string, float64) error }, id string) {
++      _ = c.Incr("orders.placed", []string{"user_id:" + id}, 1)
++    }
++  # Bounded key with concatenated value still OK.
++  - |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client, status string) {
++      _ = c.Count("orders", 1, []string{"status:" + status}, 1)
++    }
++
++invalid:
++  # Literal key:value tag with unbounded key.
++  - |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client) {
++      _ = c.Incr("orders.placed", []string{"user_id:42"}, 1)
++    }
++  # Concatenated unbounded key.
++  - |
++    package p
++    import "github.com/DataDog/datadog-go/v5/statsd"
++    func f(c *statsd.Client, id string) {
++      _ = c.Gauge("cart.value", 9.99, []string{"email:" + id}, 1)
++    }
++  # Histogram with request_id tag.
++  - |
++    package p
++    import "github.com/DataDog/datadog-go/statsd"
++    func f(c *statsd.Client, rid string) {
++      _ = c.Histogram("latency", 12, []string{"request_id:" + rid}, 1)
++    }
+diff --git a/rules/datadog/high-cardinality-tag.go.yml b/rules/datadog/high-cardinality-tag.go.yml
+new file mode 100644
+index 0000000..ae14661
+--- /dev/null
++++ b/rules/datadog/high-cardinality-tag.go.yml
+@@ -0,0 +1,45 @@
++id: datadog-high-cardinality-tag-go
++language: go
++severity: warning
++
++metadata:
++  rule: datadog/high-cardinality-tag
++  requires: bounded_cardinality
++  expectation_layer: "2"
++  confidence: medium
++  spec_ref: datadog/dogstatsd-tags
++
++message: "DogStatsD tag $TAG uses an unbounded key; each distinct value mints a new custom metric series."
++note: |
++  Datadog custom metrics bill by unique tag combinations. Putting user_id,
++  email, request_id (or similar) on DogStatsD tags is the same cost trap as
++  unbounded Prometheus/OTel metric labels.
++
++  Fix: drop the tag, or replace it with a bounded dimension (status, route,
++  region, error_kind). Put per-request identity on a span tag instead —
++  high cardinality is cheap on APM traces.
++
++  Ceiling (TAR-73 first slice): only literal tags inside DogStatsD metric
++  calls when the file imports DataDog/datadog-go. Aliased imports,
++  fmt.Sprintf-built tags, and dd-trace span.SetTag / tracer.Tag are
++  deliberate misses. Confidence stays medium until corpus precision is
++  measured (PRECISION.md / TAR-77).
++
++rule:
++  all:
++    - kind: interpreted_string_literal
++      pattern: $TAG
++      matches: is-unbounded-label
++      inside:
++        stopBy: end
++        kind: call_expression
++        has:
++          field: function
++          regex: '\.(Incr|Increment|Count|Gauge|Histogram|Distribution|Timing|TimeInMilliseconds|Decr|Decrement|Set)$'
++    - inside:
++        stopBy: end
++        kind: source_file
++        has:
++          stopBy: end
++          kind: import_spec
++          regex: 'DataDog/datadog-go'
+diff --git a/ruleutils/unbounded-label.yml b/ruleutils/unbounded-label.yml
+index c6d110b..8f7d9c5 100644
+--- a/ruleutils/unbounded-label.yml
++++ b/ruleutils/unbounded-label.yml
+@@ -1,6 +1,9 @@
+ # TODO: grow this list from corpus evidence, not from imagination. A label only
+ # earns a place here once it has been seen unbounded in real code.
++#
++# Optional `:…` suffix covers DogStatsD tag literals (`user_id:42`, `user_id:`)
++# used by datadog/high-cardinality-tag (TAR-73) without a second denylist.
+ id: is-unbounded-label
+ language: go
+ rule:
+-  regex: '^[''"]?(user_id|userid|email|uuid|request_id|session_id|trace_id|span_id|order_id|ip|ip_address|url|token)[''"]?$'
+\ No newline at end of file
++  regex: '^[''"]?(user_id|userid|email|uuid|request_id|session_id|trace_id|span_id|order_id|ip|ip_address|url|token)(:[^'']*)?[''"]?$'
+-- 
+2.43.0
+
+
+From feabfcabd974abec74f0bdcbb4302f671cff3b9a Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:43:29 +0000
+Subject: [PATCH 3/5] docs: note DogStatsD fixture in _badshop layout (TAR-73)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ fixtures/_badshop/README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fixtures/_badshop/README.md b/fixtures/_badshop/README.md
+index 1b8e9bf..17a688d 100644
+--- a/fixtures/_badshop/README.md
++++ b/fixtures/_badshop/README.md
+@@ -54,7 +54,7 @@ Go/TS/Python stay behind import gates.
+ ## Layout
+ 
+ ```
+-api/          Go       prometheus/promauto metrics, Kafka publish, HTTP client, SDK resource
++api/          Go       prometheus/promauto + DogStatsD metrics, Kafka publish, HTTP client, SDK resource
+ web/          TS       prom-client metrics, OpenTelemetry metrics/spans, NodeSDK init
+ worker/       Java     Micrometer and simpleclient metrics, Kafka produce and consume
+ catalog/      Rust     register_*_vec! macros and CounterVec::new
+-- 
+2.43.0
+
+
+From 97fc37990fe9d52f19521bcc6f58711d754d5181 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:48:27 +0000
+Subject: [PATCH 4/5] feat: Datadog span error-not-set rule (TAR-73)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Flag return err after dd-trace StartSpan without WithError / ext.Error.
+Medium confidence; badshop + ruletests. Complements DogStatsD cardinality.
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ README.md                                     |   1 +
+ docs/PRECISION.md                             |   3 +-
+ fixtures/_badshop/api/datadog.go              |  30 +++-
+ ...datadog-span-error-not-set-go-snapshot.yml | 160 ++++++++++++++++++
+ .../datadog-span-error-not-set-go.yml         |  94 ++++++++++
+ rules/datadog/span-error-not-set.go.yml       |  69 ++++++++
+ 6 files changed, 354 insertions(+), 3 deletions(-)
+ create mode 100644 fixtures/ruletests/__snapshots__/datadog-span-error-not-set-go-snapshot.yml
+ create mode 100644 fixtures/ruletests/datadog-span-error-not-set-go.yml
+ create mode 100644 rules/datadog/span-error-not-set.go.yml
+
+diff --git a/README.md b/README.md
+index 576a793..5a0732b 100644
+--- a/README.md
++++ b/README.md
+@@ -75,6 +75,7 @@ Example workflow: [`examples/github-actions/scan.yml`](examples/github-actions/s
+ | `metrics/high-cardinality-label` | Go, TS, Java, Rust, Python | Literal unbounded label names at declaration |
+ | `metrics/unbounded-label-value` | Go, TS, Java, Python | `err.Error()` / uuid-shaped values at the call site |
+ | `datadog/high-cardinality-tag` | Go | DogStatsD tags with unbounded keys (`user_id:…`; medium; TAR-73) |
++| `datadog/span-error-not-set` | Go | return err after `StartSpan` without WithError / ext.Error (medium; TAR-73) |
+ | `logs/unstructured-logging` | Go, TS | `log.Printf`/`console.*` where slog/zap/pino/winston is imported |
+ | `msgtrace/kafka-produce-no-inject` | Go, TS, Java | Headerless produce (medium on TS/Java when inject is invisible) |
+ | `msgtrace/kafka-consume-no-extract` | Go, Java | Read without `.Headers`/`Extract` |
+diff --git a/docs/PRECISION.md b/docs/PRECISION.md
+index 36c7f7a..c7fe0f3 100644
+--- a/docs/PRECISION.md
++++ b/docs/PRECISION.md
+@@ -25,6 +25,7 @@ When adding a provider family (e.g. slog bridge, TS OTel):
+ * Documented this gate.
+ * Demoted `otel/semconv-drift` (Go + TS) from `high` -> `medium` (notes already said precision unmeasured).
+ * Added Go **slog sprintf-message** provider (`logs/slog-sprintf-message`) at **medium** with ruletests + FP note.
+-* Added Go **Datadog DogStatsD** provider (`datadog/high-cardinality-tag`) at **medium** (TAR-73 first slice; promote after corpus triage).
++* Added Go **Datadog DogStatsD** provider (`datadog/high-cardinality-tag`) at **medium** (TAR-73; promote after corpus triage).
++* Added Go **Datadog APM** provider (`datadog/span-error-not-set`) at **medium** (TAR-73; promote after corpus triage).
+ 
+ No phones-home / learning telemetry in the public CLI.
+diff --git a/fixtures/_badshop/api/datadog.go b/fixtures/_badshop/api/datadog.go
+index 5f86d64..df8cafa 100644
+--- a/fixtures/_badshop/api/datadog.go
++++ b/fixtures/_badshop/api/datadog.go
+@@ -1,6 +1,11 @@
+ package main
+ 
+-import "github.com/DataDog/datadog-go/v5/statsd"
++import (
++	"errors"
++
++	"github.com/DataDog/datadog-go/v5/statsd"
++	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++)
+ 
+ // DogStatsD cardinality traps (TAR-73). Pattern-tier only — no live DD API.
+ func trackOrder(c *statsd.Client, userID string) {
+@@ -9,6 +14,27 @@ func trackOrder(c *statsd.Client, userID string) {
+ }
+ 
+ func trackSpanIdentity(userID string) {
+-	// APM span tags are out of scope for this metrics rule.
++	// APM span tags are out of scope for the DogStatsD cardinality rule.
+ 	_ = userID // notwant: datadog/high-cardinality-tag
+ }
++
++func ddCheckout() error {
++	span := tracer.StartSpan("badshop.checkout")
++	defer span.Finish()
++	if err := ddStep(); err != nil { // want: datadog/span-error-not-set
++		return err
++	}
++	return nil
++}
++
++func ddCheckoutOK() error {
++	span := tracer.StartSpan("badshop.checkout")
++	defer span.Finish()
++	if err 
