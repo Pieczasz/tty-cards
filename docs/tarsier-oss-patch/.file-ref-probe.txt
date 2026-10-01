@@ -1,1 +1,1 @@
-@file:///workspace/.content-1.json
+@file:///tmp/p1_only.txt
