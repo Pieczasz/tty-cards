@@ -1,0 +1,26 @@
+From b147a77a4fa8bfddc9b14225ee5304a1e86aeccb Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:38:14 +0000
+Subject: [PATCH 1/5] feat: detect adjacent Kafka build-then-produce (TAR-100)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Pattern-tier msgtrace now flags same-function
+`msg := kafka.Message{…}; WriteMessages(ctx, msg)` when adjacent
+(otel-demo inject-between stays clean). Deep msgtrace mirrors the
+adjacent local walk. Promote _badshop publishViaVar gap to want.
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ analyzers/msgtrace/msgtrace.go                | 106 ++++++++++
+ analyzers/msgtrace/testdata/src/a/a.go        |  22 ++++
+ fixtures/_badshop/README.md                   |   3 +-
+ fixtures/_badshop/api/publish.go              |   4 +-
+ fixtures/godeep/publish.go                    |   9 ++
+ ...ce-kafka-produce-no-inject-go-snapshot.yml |  96 +++++++++++++++
+ .../msgtrace-kafka-produce-no-inject-go.yml   |  22 ++++
+ rules/msgtrace/kafka-produce-no-inject.go.yml | 111 ++++++++++++++----
+ 8 files changed, 341 insertions(+), 32 deletions(-)
+
+SIZE_PROBE_2K_PREFIX_ONLY
