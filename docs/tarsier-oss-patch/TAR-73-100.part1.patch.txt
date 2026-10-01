@@ -6,4 +6,177 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-SEE_FULL_CONTENT_IN_PAYLOAD_FILE
+Pattern-tier msgtrace now flags same-function
+`msg := kafka.Message{…}; WriteMessages(ctx, msg)` when adjacent
+(otel-demo inject-between stays clean). Deep msgtrace mirrors the
+adjacent local walk. Promote _badshop publishViaVar gap to want.
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ analyzers/msgtrace/msgtrace.go                | 106 +++++++++-
+ analyzers/msgtrace/testdata/src/a/a.go        |  22 ++++
+ fixtures/_badshop/README.md                   |   3 +-
+ fixtures/_badshop/api/publish.go              |   4 +-
+ fixtures/godeep/publish.go                    |   9 ++
+ ...ce-kafka-produce-no-inject-go-snapshot.yml |  96 +++++++++++++++
+ .../msgtrace-kafka-produce-no-inject-go.yml   |  22 ++++
+ rules/msgtrace/kafka-produce-no-inject.go.yml | 111 ++++++++++++++----
+ 8 files changed, 341 insertions(+), 32 deletions(-)
+
+diff --git a/analyzers/msgtrace/msgtrace.go b/analyzers/msgtrace/msgtrace.go
+index 32faa12..f017571 100644
+--- a/analyzers/msgtrace/msgtrace.go
++++ b/analyzers/msgtrace/msgtrace.go
+@@ -1,9 +1,11 @@
+ // Package msgtrace finds Kafka produce without trace headers, including
+-// one-hop local wrappers around WriteMessages/SendMessage/Produce.
++// one-hop local wrappers around WriteMessages/SendMessage/Produce and
++// adjacent same-function build-then-produce (TAR-100).
+ package msgtrace
+ 
+ import (
+ 	"go/ast"
++	"go/token"
+ 	"go/types"
+ 	"strings"
+ 
+@@ -13,10 +15,11 @@ import (
+ )
+ 
+ // Analyzer reports headerless Kafka produces, following one hop into local
+-// wrappers. Ambiguous wrapper matches use medium confidence via the engine map.
++// wrappers and adjacent Message locals. Ambiguous wrapper matches use
++// medium confidence via the engine map.
+ var Analyzer = &analysis.Analyzer{
+ 	Name:     "msgtrace",
+-	Doc:      "report Kafka produce without trace headers (one-hop wrappers)",
++	Doc:      "report Kafka produce without trace headers (wrappers + adjacent locals)",
+ 	Requires: []*analysis.Analyzer{inspect.Analyzer},
+ 	Run:      run,
+ }
+@@ -78,7 +81,7 @@ func run(pass *analysis.Pass) (any, error) { //nolint:gocyclo // one-hop wrapper
+ 		// Direct produce with inline message literal.
+ 		if isProduceCall(call) {
+ 			for _, arg := range call.Args {
+-				if lit, ok := arg.(*ast.CompositeLit); ok && isMessageLit(pass, lit) && !hasHeaders(lit) {
++				if lit, ok := unwrapMessageLit(arg); ok && isMessageLit(pass, lit) && !hasHeaders(lit) {
+ 					pass.Reportf(lit.Pos(), "Message published with no Headers, so consumers start orphan traces")
+ 				}
+ 			}
+@@ -92,7 +95,7 @@ func run(pass *analysis.Pass) (any, error) { //nolint:gocyclo // one-hop wrapper
+ 			return false
+ 		}
+ 		arg := call.Args[idx]
+-		lit, ok := arg.(*ast.CompositeLit)
++		lit, ok := unwrapMessageLit(arg)
+ 		if !ok || !isMessageLit(pass, lit) || hasHeaders(lit) {
+ 			return false
+ 		}
+@@ -102,9 +105,102 @@ func run(pass *analysis.Pass) (any, error) { //nolint:gocyclo // one-hop wrapper
+ 		})
+ 		return false
+ 	})
++
++	// Adjacent build-then-produce: msg := kafka.Message{…}; WriteMessages(ctx, msg)
++	// (no intervening statements — keeps otel-demo inject(msg) as a non-finding).
++	insp.Nodes([]ast.Node{(*ast.BlockStmt)(nil)}, func(n ast.Node, push bool) bool {
++		if !push {
++			return true
++		}
++		block, ok := n.(*ast.BlockStmt)
++		if !ok {
++			return true
++		}
++		reportAdjacentBuildProduce(pass, block.List)
++		return true
++	})
+ 	return nil, nil
+ }
+ 
++func reportAdjacentBuildProduce(pass *analysis.Pass, stmts []ast.Stmt) {
++	for i := 0; i+1 < len(stmts); i++ {
++		name, lit, ok := headerlessMessageAssign(pass, stmts[i])
++		if !ok {
++			continue
++		}
++		if !produceUsesIdent(stmts[i+1], name) {
++			continue
++		}
++		pass.Reportf(lit.Pos(), "Message published with no Headers, so consumers start orphan traces")
++	}
++}
++
++func headerlessMessageAssign(pass *analysis.Pass, stmt ast.Stmt) (string, *ast.CompositeLit, bool) {
++	as, ok := stmt.(*ast.AssignStmt)
++	if !ok || (as.Tok != token.DEFINE && as.Tok != token.ASSIGN) {
++		return "", nil, false
++	}
++	if len(as.Lhs) != 1 || len(as.Rhs) != 1 {
++		return "", nil, false
++	}
++	id, ok := as.Lhs[0].(*ast.Ident)
++	if !ok || id.Name == "_" {
++		return "", nil, false
++	}
++	lit, ok := unwrapMessageLit(as.Rhs[0])
++	if !ok || !isMessageLit(pass, lit) || hasHeaders(lit) {
++		return "", nil, false
++	}
++	return id.Name, lit, true
++}
++
++func produceUsesIdent(stmt ast.Stmt, name string) bool {
++	var found bool
++	ast.Inspect(stmt, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
++		if !ok || !isProduceCall(call) {
++			return true
++		}
++		for _, arg := range call.Args {
++			id, ok := unwrapIdent(arg)
++			if ok && id.Name == name {
++				found = true
++				return false
++			}
++		}
++		return true
++	})
++	return found
++}
++
++func unwrapMessageLit(expr ast.Expr) (*ast.CompositeLit, bool) {
++	switch e := expr.(type) {
++	case *ast.CompositeLit:
++		return e, true
++	case *ast.UnaryExpr:
++		if e.Op == token.AND {
++			if lit, ok := e.X.(*ast.CompositeLit); ok {
++				return lit, true
++			}
++		}
++	}
++	return nil, false
++}
++
++func unwrapIdent(expr ast.Expr) (*ast.Ident, bool) {
++	switch e := expr.(type) {
++	case *ast.Ident:
++		return e, true
++	case *ast.UnaryExpr:
++		if e.Op == token.AND || e.Op == token.MUL {
++			if id, ok := e.X.(*ast.Ident); ok {
++				return id, true
++			}
++		}
++	}
++	return nil, false
++}
++
+ func isProduceCall(call *ast.CallExpr) bool {
+ 	sel, ok := call.Fun.(*ast.SelectorExpr)
+ 	return ok && produceMethods[sel.Sel.Name]
+diff --git a/analyzers/msgtrace/testdata/src/a/a.go b/analyzers/msgtrace/testdata/src/a/a.go
+index 5465513..883a1dc 100644
+--- a/analyzers/msgtrace/testdata/src/a/a.go
++++ b/analyzers/msgtrace/testdata/src/a/a.go
+@@ -47,6 +4
