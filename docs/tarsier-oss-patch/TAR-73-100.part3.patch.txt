@@ -1,1 +1,627 @@
-SEE_FULL_CONTENT_IN_PAYLOAD_FILE
+:= ddStep(); err != nil { // notwant: datadog/span-error-not-set
++		span.Finish(tracer.WithError(err))
++		return err
++	}
++	return nil
++}
++
++func ddStep() error { return errors.New("boom") }
+diff --git a/fixtures/ruletests/__snapshots__/datadog-span-error-not-set-go-snapshot.yml b/fixtures/ruletests/__snapshots__/datadog-span-error-not-set-go-snapshot.yml
+new file mode 100644
+index 0000000..55420f6
+--- /dev/null
++++ b/fixtures/ruletests/__snapshots__/datadog-span-error-not-set-go-snapshot.yml
+@@ -0,0 +1,160 @@
++id: datadog-span-error-not-set-go
++snapshots:
++  ? |
++    package p
++    import "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    func (s *Svc) Pay() error {
++      span := tracer.StartSpan("pay")
++      defer span.Finish()
++      if err := s.charge(); err != nil {
++        return err
++      }
++      return nil
++    }
++    type Svc struct{}
++    func (s *Svc) charge() error { return nil }
++  : labels:
++    - source: |-
++        if err := s.charge(); err != nil {
++            return err
++          }
++      style: primary
++      start: 152
++      end: 205
++    - source: err != nil
++      style: secondary
++      start: 174
++      end: 184
++    - source: return err
++      style: secondary
++      start: 191
++      end: 201
++    - source: return err
++      style: secondary
++      start: 191
++      end: 201
++    - source: |-
++        {
++          span := tracer.StartSpan("pay")
++          defer span.Finish()
++          if err := s.charge(); err != nil {
++            return err
++          }
++          return nil
++        }
++      style: secondary
++      start: 92
++      end: 220
++    - source: |-
++        func (s *Svc) Pay() error {
++          span := tracer.StartSpan("pay")
++          defer span.Finish()
++          if err := s.charge(); err != nil {
++            return err
++          }
++          return nil
++        }
++      style: secondary
++      start: 66
++      end: 220
++    - source: '"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"'
++      style: secondary
++      start: 17
++      end: 65
++    - source: |
++        package p
++        import "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++        func (s *Svc) Pay() error {
++          span := tracer.StartSpan("pay")
++          defer span.Finish()
++          if err := s.charge(); err != nil {
++            return err
++          }
++          return nil
++        }
++        type Svc struct{}
++        func (s *Svc) charge() error { return nil }
++      style: secondary
++      start: 0
++      end: 283
++  ? |
++    package p
++    import (
++      "errors"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func checkout() error {
++      span := tracer.StartSpan("checkout")
++      defer span.Finish()
++      if err := step(); err != nil {
++        return err
++      }
++      return nil
++    }
++    func step() error { return errors.New("x") }
++  : labels:
++    - source: |-
++        if err := step(); err != nil {
++            return err
++          }
++      style: primary
++      start: 170
++      end: 219
++    - source: err != nil
++      style: secondary
++      start: 188
++      end: 198
++    - source: return err
++      style: secondary
++      start: 205
++      end: 215
++    - source: return err
++      style: secondary
++      start: 205
++      end: 215
++    - source: |-
++        {
++          span := tracer.StartSpan("checkout")
++          defer span.Finish()
++          if err := step(); err != nil {
++            return err
++          }
++          return nil
++        }
++      style: secondary
++      start: 105
++      end: 234
++    - source: |-
++        func checkout() error {
++          span := tracer.StartSpan("checkout")
++          defer span.Finish()
++          if err := step(); err != nil {
++            return err
++          }
++          return nil
++        }
++      style: secondary
++      start: 83
++      end: 234
++    - source: '"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"'
++      style: secondary
++      start: 32
++      end: 80
++    - source: |
++        package p
++        import (
++          "errors"
++          "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++        )
++        func checkout() error {
++          span := tracer.StartSpan("checkout")
++          defer span.Finish()
++          if err := step(); err != nil {
++            return err
++          }
++          return nil
++        }
++        func step() error { return errors.New("x") }
++      style: secondary
++      start: 0
++      end: 280
+diff --git a/fixtures/ruletests/datadog-span-error-not-set-go.yml b/fixtures/ruletests/datadog-span-error-not-set-go.yml
+new file mode 100644
+index 0000000..a25fbc1
+--- /dev/null
++++ b/fixtures/ruletests/datadog-span-error-not-set-go.yml
+@@ -0,0 +1,94 @@
++id: datadog-span-error-not-set-go
++valid:
++  # WithError on Finish.
++  - |
++    package p
++    import (
++      "errors"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func checkout() error {
++      span := tracer.StartSpan("checkout")
++      defer span.Finish()
++      if err := step(); err != nil {
++        span.Finish(tracer.WithError(err))
++        return err
++      }
++      return nil
++    }
++    func step() error { return errors.New("x") }
++  # ext.Error tag.
++  - |
++    package p
++    import (
++      "errors"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func checkout() error {
++      span := tracer.StartSpan("checkout")
++      defer span.Finish()
++      if err := step(); err != nil {
++        span.SetTag(ext.Error, err)
++        return err
++      }
++      return nil
++    }
++    func step() error { return errors.New("x") }
++  # No StartSpan — not this rule.
++  - |
++    package p
++    import "errors"
++    func checkout() error {
++      if err := step(); err != nil {
++        return err
++      }
++      return nil
++    }
++    func step() error { return errors.New("x") }
++  # OTel Start is covered by traces/error-path-not-recorded-on-span, not DD.
++  - |
++    package p
++    import (
++      "context"
++      "go.opentelemetry.io/otel"
++    )
++    func checkout(ctx context.Context) error {
++      ctx, span := otel.Tracer("t").Start(ctx, "checkout")
++      defer span.End()
++      if err := step(); err != nil {
++        return err
++      }
++      return nil
++    }
++    func step() error { return nil }
++
++invalid:
++  - |
++    package p
++    import (
++      "errors"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func checkout() error {
++      span := tracer.StartSpan("checkout")
++      defer span.Finish()
++      if err := step(); err != nil {
++        return err
++      }
++      return nil
++    }
++    func step() error { return errors.New("x") }
++  - |
++    package p
++    import "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    func (s *Svc) Pay() error {
++      span := tracer.StartSpan("pay")
++      defer span.Finish()
++      if err := s.charge(); err != nil {
++        return err
++      }
++      return nil
++    }
++    type Svc struct{}
++    func (s *Svc) charge() error { return nil }
+diff --git a/rules/datadog/span-error-not-set.go.yml b/rules/datadog/span-error-not-set.go.yml
+new file mode 100644
+index 0000000..9c40c37
+--- /dev/null
++++ b/rules/datadog/span-error-not-set.go.yml
+@@ -0,0 +1,69 @@
++id: datadog-span-error-not-set-go
++language: go
++severity: warning
++
++metadata:
++  rule: datadog/span-error-not-set
++  requires: trace
++  expectation_layer: "1"
++  confidence: medium
++  spec_ref: datadog/apm-errors
++
++message: "Error is returned without marking the Datadog span as failed, so APM shows success."
++note: |
++  A function that started a dd-trace span and returns err without
++  tracer.WithError / span.SetTag(ext.Error, …) leaves the span green while
++  the request failed.
++
++  Fix before returning:
++    span.Finish(tracer.WithError(err))
++  or:
++    span.SetTag(ext.Error, err)
++
++  Ceiling (TAR-73): gated on StartSpan in the enclosing function (no type
++  info). Only the if consequence is inspected. Nested func literals are
++  ignored. Confidence stays medium until corpus precision is measured
++  (PRECISION.md).
++
++rule:
++  kind: if_statement
++  all:
++    - has:
++        stopBy: end
++        regex: 'err != nil'
++    - has:
++        field: consequence
++        has:
++          stopBy: end
++          kind: return_statement
++          regex: 'err'
++          not:
++            inside:
++              stopBy: end
++              kind: func_literal
++    - not:
++        has:
++          field: consequence
++          has:
++            stopBy: end
++            regex: '(WithError|ext\.Error|SetTag\([^\)]*[Ee]rror)'
++    - any:
++        - inside:
++            stopBy: end
++            kind: function_declaration
++            has:
++              stopBy: end
++              regex: 'StartSpan\('
++        - inside:
++            stopBy: end
++            kind: method_declaration
++            has:
++              stopBy: end
++              regex: 'StartSpan\('
++    - inside:
++        stopBy: end
++        kind: source_file
++        has:
++          stopBy: end
++          kind: import_spec
++          regex: 'dd-trace-go|ddtrace/tracer'
+-- 
+2.43.0
+
+
+From 7290935a3531c4c5f28dddcd31bdd6f5b64ab589 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 07:53:50 +0000
+Subject: [PATCH 5/5] feat: Datadog HTTP client missing contrib wrap (TAR-73)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Flag http.Get/Post/Head/PostForm when dd-trace APM is imported but
+contrib/net/http is not. Medium confidence; policy missing-propagation.
+
+Co-authored-by: Bartłomiej Piekarz <Pieczasz@users.noreply.github.com>
+---
+ README.md                                     |  1 +
+ cli/policy.go                                 |  1 +
+ docs/PRECISION.md                             |  2 +-
+ fixtures/_badshop/api/datadog.go              |  4 +
+ ...tadog-http-client-no-trace-go-snapshot.yml | 74 +++++++++++++++++++
+ .../datadog-http-client-no-trace-go.yml       | 59 +++++++++++++++
+ rules/datadog/http-client-no-trace.go.yml     | 47 ++++++++++++
+ 7 files changed, 187 insertions(+), 1 deletion(-)
+ create mode 100644 fixtures/ruletests/__snapshots__/datadog-http-client-no-trace-go-snapshot.yml
+ create mode 100644 fixtures/ruletests/datadog-http-client-no-trace-go.yml
+ create mode 100644 rules/datadog/http-client-no-trace.go.yml
+
+diff --git a/README.md b/README.md
+index 5a0732b..33eb0b7 100644
+--- a/README.md
++++ b/README.md
+@@ -76,6 +76,7 @@ Example workflow: [`examples/github-actions/scan.yml`](examples/github-actions/s
+ | `metrics/unbounded-label-value` | Go, TS, Java, Python | `err.Error()` / uuid-shaped values at the call site |
+ | `datadog/high-cardinality-tag` | Go | DogStatsD tags with unbounded keys (`user_id:…`; medium; TAR-73) |
+ | `datadog/span-error-not-set` | Go | return err after `StartSpan` without WithError / ext.Error (medium; TAR-73) |
++| `datadog/http-client-no-trace` | Go | `http.Get/Post` with dd-trace imported but no contrib wrap (medium; TAR-73) |
+ | `logs/unstructured-logging` | Go, TS | `log.Printf`/`console.*` where slog/zap/pino/winston is imported |
+ | `msgtrace/kafka-produce-no-inject` | Go, TS, Java | Headerless produce (medium on TS/Java when inject is invisible) |
+ | `msgtrace/kafka-consume-no-extract` | Go, Java | Read without `.Headers`/`Extract` |
+diff --git a/cli/policy.go b/cli/policy.go
+index 3c47f2c..5b7bf98 100644
+--- a/cli/policy.go
++++ b/cli/policy.go
+@@ -25,6 +25,7 @@ var blockableClasses = map[string][]string{
+ 	"missing-propagation": {
+ 		"msgtrace/kafka-produce-no-inject",
+ 		"msgtrace/kafka-consume-no-extract",
++		"datadog/http-client-no-trace",
+ 	},
+ 	"removed-required-events": {
+ 		// reserved: required business events removed from critical path
+diff --git a/docs/PRECISION.md b/docs/PRECISION.md
+index c7fe0f3..da3ce95 100644
+--- a/docs/PRECISION.md
++++ b/docs/PRECISION.md
+@@ -26,6 +26,6 @@ When adding a provider family (e.g. slog bridge, TS OTel):
+ * Demoted `otel/semconv-drift` (Go + TS) from `high` -> `medium` (notes already said precision unmeasured).
+ * Added Go **slog sprintf-message** provider (`logs/slog-sprintf-message`) at **medium** with ruletests + FP note.
+ * Added Go **Datadog DogStatsD** provider (`datadog/high-cardinality-tag`) at **medium** (TAR-73; promote after corpus triage).
+-* Added Go **Datadog APM** provider (`datadog/span-error-not-set`) at **medium** (TAR-73; promote after corpus triage).
++* Added Go **Datadog APM** providers (`datadog/span-error-not-set`, `datadog/http-client-no-trace`) at **medium** (TAR-73; promote after corpus triage).
+ 
+ No phones-home / learning telemetry in the public CLI.
+diff --git a/fixtures/_badshop/api/datadog.go b/fixtures/_badshop/api/datadog.go
+index df8cafa..962e76e 100644
+--- a/fixtures/_badshop/api/datadog.go
++++ b/fixtures/_badshop/api/datadog.go
+@@ -38,3 +38,7 @@ func ddCheckoutOK() error {
+ }
+ 
+ func ddStep() error { return errors.New("boom") }
++
++// http.Get + dd-trace without contrib is covered by ruletests
++// (datadog/http-client-no-trace); planting it here would also trip
++// httpctx/outbound-call-without-context on the same line.
+diff --git a/fixtures/ruletests/__snapshots__/datadog-http-client-no-trace-go-snapshot.yml b/fixtures/ruletests/__snapshots__/datadog-http-client-no-trace-go-snapshot.yml
+new file mode 100644
+index 0000000..e507a4b
+--- /dev/null
++++ b/fixtures/ruletests/__snapshots__/datadog-http-client-no-trace-go-snapshot.yml
+@@ -0,0 +1,74 @@
++id: datadog-http-client-no-trace-go
++snapshots:
++  ? |
++    package p
++    import (
++      "net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func f(url string) {
++      span := tracer.StartSpan("fetch")
++      defer span.Finish()
++      _, _ = http.Get(url)
++    }
++  : labels:
++    - source: http.Get(url)
++      style: primary
++      start: 173
++      end: 186
++    - source: http.Get
++      style: secondary
++      start: 173
++      end: 181
++    - source: '"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"'
++      style: secondary
++      start: 34
++      end: 82
++    - source: |
++        package p
++        import (
++          "net/http"
++          "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++        )
++        func f(url string) {
++          span := tracer.StartSpan("fetch")
++          defer span.Finish()
++          _, _ = http.Get(url)
++        }
++      style: secondary
++      start: 0
++      end: 189
++  ? |
++    package p
++    import (
++      "net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func post(url, ct string, body interface{ Read([]byte) (int, error) }) {
++      _, _ = http.Post(url, ct, body)
++    }
++  : labels:
++    - source: http.Post(url, ct, body)
++      style: primary
++      start: 167
++      end: 191
++    - source: http.Post
++      style: secondary
++      start: 167
++      end: 176
++    - source: '"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"'
++      style: secondary
++      start: 34
++      end: 82
++    - source: |
++        package p
++        import (
++          "net/http"
++          "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++        )
++        func post(url, ct string, body interface{ Read([]byte) (int, error) }) {
++          _, _ = http.Post(url, ct, body)
++        }
++      style: secondary
++      start: 0
++      end: 194
+diff --git a/fixtures/ruletests/datadog-http-client-no-trace-go.yml b/fixtures/ruletests/datadog-http-client-no-trace-go.yml
+new file mode 100644
+index 0000000..113bb0a
+--- /dev/null
++++ b/fixtures/ruletests/datadog-http-client-no-trace-go.yml
+@@ -0,0 +1,59 @@
++id: datadog-http-client-no-trace-go
++valid:
++  # Contrib wrap present — Context-free helpers are still a smell, but this
++  # rule only fires when the contrib import is missing.
++  - |
++    package p
++    import (
++      "net/http"
++      httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func f(url string) {
++      _ = httptrace.WrapClient(http.DefaultClient)
++      _ = tracer.StartSpan("x")
++      _, _ = http.Get(url)
++    }
++  # No Datadog APM import — covered by httpctx/outbound-call-without-context.
++  - |
++    package p
++    import "net/http"
++    func f(url string) { _, _ = http.Get(url) }
++  # NewRequestWithContext is fine.
++  - |
++    package p
++    import (
++      "context"
++      "net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func f(ctx context.Context, url string) error {
++      span := tracer.StartSpan("fetch")
++      defer span.Finish()
++      req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
++      if err != nil { return err }
++      _, err = http.DefaultClient.Do(req)
++      return err
++    }
++
++invalid:
++  - |
++    package p
++    import (
++      "net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func f(url string) {
++      span := tracer.StartSpan("fetch")
++      defer span.Finish()
++      _, _ = http.Get(url)
++    }
++  - |
++    package p
++    import (
++      "net/http"
++      "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
++    )
++    func post(url, ct string, body interface{ Read([]byte) (int, error) }) {
++      _, _ = http.Post(url, ct, body)
++    }
+diff --git a/rules/datadog/http-client-no-trace.go.yml b/rules/datadog/http-client-no-trace.go.yml
+new file mode 100644
+index 0000000..94d29c6
+--- /dev/null
++++ b/rules/datadog/http-client-no-trace.go.yml
+@@ -0,0 +1,47 @@
++id: datadog-http-client-no-trace-go
++language: go
++severity: warning
++
++metadata:
++  rule: datadog/http-client-no-trace
++  requires: trace
++  expectation_layer: "1"
++  confidence: medium
++  spec_ref: datadog/contrib-net-http
++
++message: "Outbound HTTP uses the Context-free client while Datadog APM is imported, so the trace dies here."
++note: |
++  This file imports dd-trace-go APM but calls http.Get / Post / Head / PostForm,
++  which always use context.Background(). Downstream services never see the
++  parent Datadog span.
++
++  Fix: use gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http —
++    client := httptrace.WrapClient(http.DefaultClient)
++    req, _ := http.NewRequestWithContext(ctx, …)
++    client.Do(req)
++
++  Ceiling (TAR-73): only the four Context-free package funcs; named
++  *http.Client methods and otelhttp-only stacks are out of scope. Confidence
++  stays medium until corpus precision is measured (PRECISION.md).
++
++rule:
++  kind: call_expression
++  all:
++    - has:
++        field: function
++        regex: '^http\.(Get|Post|Head|PostForm)$'
++    - inside:
++        stopBy: end
++        kind: source_file
++        has:
++          stopBy: end
++          kind: import_spec
++          regex: 'dd-trace-go|ddtrace/tracer'
++    - not:
++        inside:
++          stopBy: end
++          kind: source_file
++          has:
++            stopBy: end
++            kind: import_spec
++            regex: 'dd-trace-go\.v1/contrib/net/http|contrib/net/http'
+-- 
+2.43.0
+
