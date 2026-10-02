@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -19,6 +20,9 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// What observability.Setup installs in production: without it a test could not
+	// tell a handler that ignores a visitor's traceparent from one that never saw it.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(testSpans)))
 	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(testMetrics)))
 	goleak.VerifyTestMain(m)

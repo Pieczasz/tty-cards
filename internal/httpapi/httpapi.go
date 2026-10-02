@@ -22,11 +22,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
-	// 200 is also the repository's cache page size, so every limit this endpoint
+	// 200 is also the repository's bestPlayersCacheSize, so every limit this endpoint
 	// accepts is one the cache can serve. Raising it past that turns each request
 	// into its own database query.
 	maxLeaderboardLimit = 200
@@ -37,6 +38,8 @@ const (
 	readTimeout  = 5 * time.Second
 	writeTimeout = 10 * time.Second
 	idleTimeout  = 60 * time.Second
+
+	healthTimeout = 2 * time.Second
 )
 
 // SessionCounter is how many players are connected: ssh.SessionTracker in production.
@@ -54,27 +57,17 @@ type LobbyCounter interface {
 // forever instead of failing the boot.
 var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies and Users")
 
-// Deps is what the stats API reads from. Sessions, Lobbies and Users are required.
+// Deps are what the stats API reads from. Sessions, Lobbies and Users are required.
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
-	// Users is a db interface while Sessions and Lobbies are local one-method
-	// interfaces: the two counters exist only to keep this package from importing ssh
-	// and lobby, whereas db.Leaderboard is already the contract.
-	Users db.Leaderboard
+	Users    db.Leaderboard
 
-	// Both required: config.Load owns the defaults and validates them, so a second
-	// copy here could only drift from it.
-	AllowOrigin       string
-	RequestsPerMinute int
-	TrustedProxy      bool
-	// TrustedProxyNetworks, when set, are the only peers whose X-Forwarded-For is
-	// believed: the port is reachable from every container on the network, not just
-	// the proxy. Empty trusts the header from any peer, as TrustedProxy alone always did.
+	AllowOrigin          string
+	RequestsPerMinute    int
+	TrustedProxy         bool
 	TrustedProxyNetworks []netip.Prefix
 
-	// Health reports whether the process's dependencies are usable (the database
-	// ping, in practice). nil means /healthz only asserts the process serves HTTP.
 	Health func(ctx context.Context) error
 }
 
@@ -128,8 +121,6 @@ func newHandler(deps Deps) (http.Handler, error) {
 	mux.Handle("GET /healthz", healthHandler(deps))
 	mux.Handle("GET /v1/leaderboard", leaderboardHandler(deps))
 
-	// The preflight answer is a route rather than a short-circuit in withCORS, so
-	// that OPTIONS is spent against the same budget as every other request.
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -138,16 +129,14 @@ func newHandler(deps Deps) (http.Handler, error) {
 		writeError(w, r, http.StatusNotFound, "not found")
 	})
 
+	// No spans and no propagation: a noop tracer still carries an extracted
+	// traceparent into the request context, where the repository's spans would take
+	// the visitor's chosen trace id as their parent.
 	return otelhttp.NewHandler(
 		withCORS(deps.AllowOrigin, withRateLimit(limiter, clientAddr, mux)),
 		"stats-api",
-		// No spans: every website visitor polls this API, and a span per request put
-		// each visitor's address and User-Agent into Tempo. The request metrics, which
-		// carry neither, are what an operator reads here.
 		otelhttp.WithTracerProvider(tracenoop.NewTracerProvider()),
-		// Pins server.address and, through the explicit default port, server.port.
-		// Without both, otelhttp labels every request metric from the client's own
-		// Host header - an unbounded name, and up to 65535 port series.
+		otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator()),
 		otelhttp.WithServerName("stats-api:80"),
 	), nil
 }
@@ -175,9 +164,6 @@ func leaderboardHandler(deps Deps) http.Handler {
 			limit = min(n, maxLeaderboardLimit)
 		}
 
-		// No per-game filter: the only client never asked for one, and a caller-supplied
-		// game name is a cache miss by construction - one indexed join per request for
-		// any string that is not a real game.
 		rankings, err := deps.Users.BestPlayers(r.Context(), "", limit)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "leaderboard query failed", "error", err)
@@ -210,24 +196,19 @@ func clientIPFunc(trustProxy bool, proxies []netip.Prefix) func(*http.Request) s
 		return socketHost
 	}
 	return func(r *http.Request) string {
-		if !fromProxy(socketHost(r), proxies) {
-			return socketHost(r)
+		peer := socketHost(r)
+		if !fromProxy(peer, proxies) {
+			return peer
 		}
 		first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
 		first = strings.TrimSpace(first)
-		// Only an address the header actually parses as counts. A blank or malformed
-		// leftmost entry (", 10.0.0.1" and " " both reach here) would otherwise become
-		// NetKey("") and drop every such caller into one shared bucket, which is a
-		// rate limit anybody can either dodge or weaponise against everyone else.
 		if _, err := netip.ParseAddr(first); err != nil {
-			return socketHost(r)
+			return peer
 		}
 		return first
 	}
 }
 
-// fromProxy reports whether a peer may speak for its client. No networks means any
-// peer may, which is what TrustedProxy meant before the networks were configurable.
 func fromProxy(host string, proxies []netip.Prefix) bool {
 	if len(proxies) == 0 {
 		return true
@@ -246,8 +227,6 @@ func writeJSON(w http.ResponseWriter, r *http.Request, v any) {
 	encodeJSON(w, r, http.StatusOK, v)
 }
 
-// writeError replaces http.Error: a client that asked for JSON gets JSON back,
-// including on the 429 and 503 paths it is most likely to have to parse.
 func writeError(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Add("Vary", "Origin")
@@ -292,13 +271,10 @@ func withRateLimit(
 	})
 }
 
-// healthHandler backs the container healthcheck: 200 when the process serves and
-// its dependencies answer, 503 otherwise, so orchestration restarts a wedged
-// process instead of routing players into it.
 func healthHandler(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.Health != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
 			defer cancel()
 			if err := deps.Health(ctx); err != nil {
 				slog.ErrorContext(ctx, "health check failed", "error", err)
