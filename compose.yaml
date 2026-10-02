@@ -1,16 +1,17 @@
-# Sizing target: this whole stack fits in 6 GiB of a 12 GiB / 6-core VPS, leaving the
-# other half to the host. Every service therefore carries an explicit mem_limit, and
-# they add up on purpose:
+# Sizing target: this whole stack fits in 8 GiB and 4 cores of a 12 GiB / 6-core VPS,
+# leaving the rest to the host. Every service therefore carries an explicit mem_limit,
+# and they add up on purpose:
 #
-#   backend 2048 + db 1536 + prometheus 512 + loki 512 + tempo 384
-#   + alloy 256 + grafana 256 + proxy 128 + docker-socket-proxy 32
-#                                                         = 5664 MiB (~5.5 GiB)
+#   backend 4096 + db 1536 + prometheus 512 + loki 512 + tempo 384
+#   + alloy 256 + grafana 320 + proxy 128 + certbot 128 + docker-socket-proxy 32
+#   + alertmanager 32                                     = 7936 MiB (~7.75 GiB)
 #
-# migrate is not in that sum: it runs to completion before the backend starts, so it
-# never holds memory at the same time as anything it is listed beside.
+# migrate, db-certs and proxy-certs are not in that sum: they run to completion before
+# the backend starts, so they never hold memory at the same time as anything they are
+# listed beside. Nor is rclone, which runs only for the minute a backup upload takes.
 #
 # CPU works the other way round. `cpus` is a ceiling, not a reservation, and only two
-# services here can sustain load: backend (3.0) and db (1.5) = 4.5 of 6 cores. The
+# services here can sustain load: backend (3.0) and db (1.0) = 4.0 of 6 cores. The
 # observability sidecars are capped tight (2.0 total, ~0.2 in practice) purely so that
 # none of them can ever compete with a game in progress.
 #
@@ -32,6 +33,28 @@ x-defaults: &defaults
     - no-new-privileges:true
 
 services:
+  # The backend refuses a plaintext database outside ENV=development, so the bundled
+  # Postgres serves TLS with a self-signed certificate made here on first start.
+  # sslmode=require encrypts without verifying the certificate, which is what a
+  # private network with no CA can offer. Remove the db-tls volume to rotate it.
+  db-certs:
+    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    <<: *defaults
+    mem_limit: 32m
+    cpus: 0.5
+    volumes:
+      - db-tls:/tls
+    entrypoint: ["sh", "-euc"]
+    command:
+      - |
+        [ -s /tls/server.key ] && exit 0
+        openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+          -subj /CN=db -addext subjectAltName=DNS:db \
+          -keyout /tls/server.key.tmp -out /tls/server.crt
+        chown 70:70 /tls/server.key.tmp /tls/server.crt
+        chmod 600 /tls/server.key.tmp
+        mv /tls/server.key.tmp /tls/server.key
+
   migrate:
     image: migrate/migrate:v4.18.3@sha256:39b59b389634e43bb3f2d4e94bc1edef0775ec2a9a3540ce6a2cf330e5daae55
     <<: *defaults
@@ -39,18 +62,15 @@ services:
     cpus: 0.5
     volumes:
       - ./internal/db/migrations:/migrations:ro
-    # ACKNOWLEDGED DEBT: the password is in this argv, so it shows up in `ps` on the
-    # host and in `docker inspect`. migrate's image is FROM scratch - no shell - so it
-    # cannot read a Docker secret and assemble the DSN itself, and moving the value to
-    # an env_file changes nothing: compose interpolates it into argv either way.
-    # The two real fixes, neither done here because neither can be verified without
-    # bringing the stack up: (a) drop the password from the URL and pass PGPASSWORD,
-    # if the pinned migrate build's postgres driver honours it, or (b) run migrations
-    # from `make migrate-up` on the host and delete this service.
+    # The password stays out of the URL, where it would be argv - visible in `ps` on
+    # the host and in `docker inspect`'s Args. migrate's postgres driver is lib/pq,
+    # which reads PGPASSWORD when the URL carries none. CI asserts the URL has none.
+    environment:
+      - PGPASSWORD=${DB_PASSWORD:?set DB_PASSWORD in .env}
     command:
       [
         "-path=/migrations",
-        "-database=postgres://${DB_USER:-postgres}:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/${DB_NAME:-terminal_card}?sslmode=disable",
+        "-database=postgres://${DB_USER:-postgres}@db:5432/${DB_NAME:-terminal_card}?sslmode=require",
         "up",
       ]
     depends_on:
@@ -88,17 +108,21 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_NAME=${DB_NAME:-terminal_card}
       - DB_PASSWORD=${DB_PASSWORD:?set DB_PASSWORD in .env}
-      - DB_SSLMODE=disable
-      - ALLOW_INSECURE_DB=true
+      - DB_SSLMODE=require
       # Must stay at or under the db service's max_connections (50) minus migrate's
       # one, or a saturated pool becomes "FATAL: sorry, too many clients already".
       - DB_MAX_OPEN_CONNS=25
       - SSH_KEY_PATH=/data/ssh/server
-      - OTEL_EXPORTER_OTLP_ENDPOINT=alloy:4317
-      - OTEL_EXPORTER_OTLP_INSECURE=true
+      # A URL: the OTel SDK parses this variable too, and http:// is what says plaintext.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
       - RATE_LIMIT_CONNECTIONS=5
       - RATE_LIMIT_WINDOW=1s
-      - MAX_CONNECTIONS=1000
+      # The most sessions measured to hold on this service's 3 cores (cmd/loadtest,
+      # a third playing, the rest browsing at 120x40): 1250 kept the p95
+      # move round-trip at 131ms with none lost; 1500 saturated the cores and lost
+      # moves and sessions. Past this a player gets "server full" instead of every
+      # table slowing down. Re-measure before raising it, with cpus and GOMEMLIMIT.
+      - MAX_CONNECTIONS=1250
       # Rendering a frame costs ~4k allocations against a live heap of a few tens of
       # MB, so the default GOGC=100 collects constantly and GC, not the cores, becomes
       # the ceiling: measured on 6 cores, GOGC=400 renders 62% more frames a second
@@ -108,15 +132,19 @@ services:
       - GOGC=400
       # The backstop that makes the line above safe: collection is forced as the heap
       # approaches this, so a traffic spike cannot turn a relaxed GOGC into an OOM.
-      # Keep it at roughly 75% of whatever mem_limit this service is given.
-      # Measured (cmd/loadtest, menu journey): ~1MB per parked session. 1GiB sat
-      # exactly at the limit with 1000 sessions; 1536MiB gives the advertised
-      # MAX_CONNECTIONS=1000 real headroom. Raise both together before raising
-      # MAX_CONNECTIONS.
-      - GOMEMLIMIT=1536MiB
-    # The hard ceiling GOMEMLIMIT is 75% of; the kernel kills past this, Go GC
-    # holds well under it.
-    mem_limit: 2g
+      # With GOGC=400 the heap grows until it meets this limit, so the container sits
+      # above it by whatever the runtime holds but has not returned: measured at
+      # 1000 sessions, 1.87GiB resident against a 1.5GiB limit (+25%, mostly
+      # transparent huge pages). Hence 62.5% of mem_limit, not 75%: 2.5GiB x 1.25 =
+      # 3.1GiB, leaving ~900MiB before the kernel kills. GODEBUG=disablethp=1 closed
+      # that gap but cost 45% more CPU and a 120ms p95 move round-trip; not worth it.
+      # A session costs ~1.3MiB of heap at the 120x40 floor tier (internal/ssh
+      # termsize.go), so 1250 of them need ~1.6GiB live (2.8GiB resident at 1250
+      # measured), plus up to ~330MiB for terminals granted more than the floor
+      # (extraCellBudget, decision #61): raise this with MAX_CONNECTIONS, never alone.
+      - GOMEMLIMIT=2560MiB
+    # The hard ceiling the kernel enforces; GOMEMLIMIT above is sized against it.
+    mem_limit: 4g
     cpus: 3.0
     volumes:
       - ssh-keys:/data/ssh
@@ -140,7 +168,7 @@ services:
     # API + 15s finalizers + a second 15s finalizer window + 5s OTel flush = 70s),
     # with headroom for the db close and final log writes, so a redeploy cannot
     # SIGKILL the process while a ranked match is still being persisted or
-    # telemetry flushed. cmd/server's waitForFinalizers comment depends on this number.
+    # telemetry flushed. cmd/server's shutdown timeout constants depend on this number.
     stop_grace_period: 80s
     depends_on:
       db:
@@ -153,7 +181,12 @@ services:
     restart: always
     <<: *defaults
     mem_limit: 1536m
-    cpus: 1.5
+    # Measured under 1000 players: under 1% of a core and ~70MiB. A cap, not a
+    # reservation; with the backend's 3.0 it keeps sustained load within 4 cores.
+    cpus: 1.0
+    depends_on:
+      db-certs:
+        condition: service_completed_successfully
     # Postgres sizes nothing from the cgroup, so every number below is derived from
     # the 1536m above by hand:
     #   shared_buffers        25% of the limit
@@ -175,10 +208,20 @@ services:
       - maintenance_work_mem=96MB
       - -c
       - max_connections=50
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/etc/postgresql/tls/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
     # PG 18+ versions PGDATA under /var/lib/postgresql/<major>/docker; the volume
     # is the parent so a later major upgrade can pg_upgrade in place.
     volumes:
       - db-data:/var/lib/postgresql
+      - db-tls:/etc/postgresql/tls:ro
+      - ./internal/config/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     environment:
       - POSTGRES_DB=${DB_NAME:-terminal_card}
       - POSTGRES_USER=${DB_USER:-postgres}
@@ -191,6 +234,30 @@ services:
       timeout: 5s
       retries: 5
 
+  # nginx will not start without the certificate its 443 server names, and Let's
+  # Encrypt cannot issue one until nginx is up to answer the challenge. This breaks
+  # the cycle: a self-signed placeholder on first start, which certbot (below)
+  # overwrites with the real certificate once issued. Browsers reject the
+  # placeholder, which is the honest answer until then.
+  proxy-certs:
+    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    <<: *defaults
+    mem_limit: 32m
+    cpus: 0.5
+    volumes:
+      - proxy-tls:/tls
+    environment:
+      - TTY_DOMAIN=${TTY_DOMAIN:-tty.cards}
+    entrypoint: ["sh", "-euc"]
+    command:
+      - |
+        [ -s /tls/fullchain.pem ] && exit 0
+        umask 077
+        openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+          -subj "/CN=$$TTY_DOMAIN" -addext "subjectAltName=DNS:$$TTY_DOMAIN" \
+          -keyout /tls/privkey.pem -out /tls/fullchain.pem.tmp
+        mv /tls/fullchain.pem.tmp /tls/fullchain.pem
+
   proxy:
     image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     restart: unless-stopped
@@ -202,6 +269,27 @@ services:
         source: ./internal/config/nginx.conf
         target: /etc/nginx/nginx.conf
         read_only: true
+      - proxy-tls:/etc/nginx/tls:ro
+      - acme-webroot:/var/www/certbot:ro
+    # nginx reads its certificate at start and on reload only, and certbot replaces
+    # it in a volume, so this checks the file once a minute and reloads when it
+    # changed (after `nginx -t`, so a bad pair keeps the old one serving). Skipping
+    # the image's entrypoint costs nothing: its scripts only edit the default
+    # conf.d, which nginx.conf does not include.
+    entrypoint: ["sh", "-euc"]
+    command:
+      - |
+        cert=/etc/nginx/tls/fullchain.pem
+        (
+          last=$$(cksum < "$$cert")
+          while sleep 60; do
+            now=$$(cksum < "$$cert") || continue
+            if [ "$$now" != "$$last" ] && nginx -t -q; then
+              nginx -s reload && last=$$now
+            fi
+          done
+        ) &
+        exec nginx -g 'daemon off;'
     # The only ports this deployment publishes. Everything else talks over the compose
     # network: publishing 6969 would let clients forge PROXY headers and defeat the
     # per-network rate limiter, and publishing 6970 would let them forge
@@ -209,6 +297,7 @@ services:
     ports:
       - 22:22
       - 80:80
+      - 443:443
     # Only the edge network: nginx needs the backend and nothing else, and the
     # backend trusts PROXY headers from this network alone.
     networks: [edge]
@@ -222,8 +311,63 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      # Probed every 2s until the first pass, so certbot, which waits for this,
+      # does not sit out a whole 30s interval on every start.
+      start_period: 30s
+      start_interval: 2s
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      proxy-certs:
+        condition: service_completed_successfully
+
+  # Obtains and renews the apex certificate (internal/config/certbot/renew.sh) over
+  # the webroot nginx serves at /.well-known/acme-challenge/. TTY_DOMAIN must resolve
+  # to this host, grey-clouded, with port 80 open; until then it retries hourly and
+  # nginx keeps the placeholder. ACME_EMAIL is optional.
+  certbot:
+    image: certbot/certbot:v5.8.0@sha256:f70ad0adbb7e117f0fe42a63c553f28ea451edabc0148757b6efcd9735acaa20
+    restart: unless-stopped
+    <<: *defaults
+    mem_limit: 128m
+    cpus: 0.2
+    # renew.sh is PID 1 otherwise, and a shell there ignores the SIGTERM `docker
+    # compose stop` sends, so every stop would wait out the 10s kill timeout.
+    init: true
+    environment:
+      - TTY_DOMAIN=${TTY_DOMAIN:-tty.cards}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./internal/config/certbot/renew.sh:/renew.sh:ro
+      # The account key and every issued certificate: keep it, or a redeploy
+      # re-issues and spends Let's Encrypt's five-per-week duplicate limit.
+      - letsencrypt:/etc/letsencrypt
+      - acme-webroot:/var/www/certbot
+      - proxy-tls:/tls
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/log/letsencrypt
+      - /var/lib/letsencrypt
+    cap_drop: [ALL]
+    entrypoint: ["/renew.sh"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+  # Only the off-host copy in scripts/backup.sh runs this, with the backup directory
+  # and the rclone config mounted per run; the profile keeps it out of `up`. A
+  # service rather than a `docker run` in the script so the digest pin is checked
+  # by CI and moved by Dependabot like every other image.
+  rclone:
+    image: rclone/rclone:1.75.1@sha256:45401ad7410db1d67ffdb58e19059ad20b0d8e0285a60e38bbec55cc1019c7a5
+    profiles: [backup]
+    <<: *defaults
+    mem_limit: 256m
+    cpus: 0.5
+    read_only: true
+    tmpfs:
+      - /tmp
 
   # Observability stack (Alloy -> Loki/Tempo/Prometheus + Grafana). None of these
   # publish a port: Grafana is the only one an operator ever opens, and it is reached
@@ -236,19 +380,28 @@ services:
     <<: *defaults
     volumes:
       - ./internal/config/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Log read positions and the metrics WAL. In the container layer they went with
+      # every recreate, which then replayed each container's whole log: old lines
+      # rejected as too old, recent ones stored twice.
+      - alloy-data:/var/lib/alloy/data
     # docker-api reaches the socket proxy below; default reaches Loki and the rest.
     networks: [default, docker-api]
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
+    # ~80% of mem_limit; config.alloy's memory_limiter refuses data below it.
+    environment:
+      - GOMEMLIMIT=204MiB
     # The backend reaches these over the compose network as alloy:4317.
     expose:
       - 4317
       - 4318
     # No healthcheck: the alloy image carries no shell HTTP client (no wget, no curl,
     # no nc), and a healthcheck whose command does not exist marks the container
-    # unhealthy forever, which is worse than none. Its /-/ready is scraped instead.
+    # unhealthy forever, which is worse than none. Prometheus scrapes its /metrics
+    # instead, so a stopped Alloy fires PipelineTargetDown (alerts-pipeline.yml).
     depends_on:
       - loki
       - tempo
@@ -257,22 +410,29 @@ services:
 
   # What Alloy reads container logs through, instead of mounting the Docker socket:
   # `:ro` on a socket restricts nothing - any client of it can start a privileged
-  # container, which is root on the host. This answers GET only (POST defaults to 0)
-  # and only the sections enabled here: containers (list, inspect, logs) and
-  # networks, which discovery.docker lists. Its network is internal and shared with
-  # Alloy alone, because container inspect includes every container's environment,
-  # DB_PASSWORD among it.
+  # container, which is root on the host. This passes exactly the GETs Alloy makes
+  # (list, inspect, logs, networks, version) and refuses every other path and method:
+  # a section-level proxy (CONTAINERS=1) also serves /containers/{id}/archive and
+  # /export, i.e. any container's files - PGDATA, the SSH host key. Its network is
+  # internal and it answers Alloy alone, because container inspect includes every
+  # container's environment, DB_PASSWORD among it.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    image: wollomatic/socket-proxy:1.13.1@sha256:3935b709275e4ec35d6ed5a5c4a1f0d01ed31eec5e7234efc3357ecd47689002
     restart: unless-stopped
     mem_limit: 32m
     cpus: 0.1
     <<: *defaults
-    environment:
-      - CONTAINERS=1
-      - NETWORKS=1
-      # haproxy logs every request at info, and Alloy polls every few seconds.
-      - LOG_LEVEL=warning
+    # Root rather than the image's 65534, because the docker group's id differs per
+    # host. With no capabilities, root here opens the socket it owns and nothing else.
+    user: "0:0"
+    cap_drop: [ALL]
+    read_only: true
+    command:
+      - -listenip=0.0.0.0
+      - -allowfrom=alloy
+      - -loglevel=warn
+      - -allowGET=(/v[0-9.]+)?/(_ping|version|networks|containers/json|containers/[a-zA-Z0-9_.-]+/(json|logs))
+      - -allowHEAD=(/v[0-9.]+)?/_ping
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [docker-api]
@@ -286,6 +446,10 @@ services:
     cpus: 0.3
     <<: *defaults
     command: -config.file=/etc/loki/loki.yaml
+    # Go does not read the cgroup limit, so without this the GC lets the heap grow
+    # until the kernel kills it. ~80% of mem_limit; the same holds for tempo.
+    environment:
+      - GOMEMLIMIT=410MiB
     volumes:
       # Replaces the image's local-config.yaml, which keeps logs forever and stores
       # them in the container's writable layer. 14-day retention lives in this file.
@@ -307,6 +471,8 @@ services:
     cpus: 0.2
     <<: *defaults
     command: -config.file=/etc/tempo/tempo.yaml
+    environment:
+      - GOMEMLIMIT=307MiB
     volumes:
       - ./internal/config/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/var/tempo
@@ -340,6 +506,7 @@ services:
     volumes:
       - ./internal/config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./internal/config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./internal/config/prometheus/alerts-pipeline.yml:/etc/prometheus/alerts-pipeline.yml:ro
       - prometheus-data:/prometheus
     expose:
       - 9090
@@ -353,7 +520,9 @@ services:
   grafana:
     image: grafana/grafana:11.6.16@sha256:d67af92050b8d93b393dc741864752a69c9da1ffa39c1bb9af49ad5d9e47d2c3
     restart: unless-stopped
-    mem_limit: 256m
+    # Measured at 253 of 256m idle (page cache included), so any dashboard load
+    # risked the kernel's OOM kill.
+    mem_limit: 320m
     cpus: 0.2
     <<: *defaults
     volumes:
@@ -375,6 +544,8 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # Its info level was the noisiest stream in Loki (~1500 lines/h idle).
+      - GF_LOG_LEVEL=warn
       # DNS rebinding: a web page the operator visits can point its own hostname at
       # 127.0.0.1 and, through the ssh tunnel, reach this anonymous Admin from the
       # browser. Refusing any Host but localhost closes that; open it as
@@ -419,8 +590,13 @@ networks:
 
 volumes:
   db-data:
+  db-tls:
   ssh-keys:
+  proxy-tls:
+  letsencrypt:
+  acme-webroot:
   loki-data:
   tempo-data:
   prometheus-data:
   grafana-data:
+  alloy-data:
