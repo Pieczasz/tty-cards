@@ -21,12 +21,14 @@ linters:
     - goprintffuncname
     - noctx
     - nilerr
+    - nilnesserr
     - rowserrcheck
     - sqlclosecheck
     - wrapcheck
     - cyclop
     - funlen
     - gocognit
+    - maintidx
     - nestif
     - lll
     - prealloc
@@ -126,6 +128,15 @@ linters:
             - github.com/Pieczasz/tty-cards/internal/broadcaster
             - github.com/Pieczasz/tty-cards/internal/game
             - uuid
+        # The ladder's policy and its maths are domain rules, not storage: they decide
+        # from plain values, and the repository does the reading and writing.
+        rating-is-pure:
+          list-mode: strict
+          files: ["**/internal/rating/**", "**/internal/elo/**", "!$test"]
+          allow:
+            - $gostd
+            - github.com/Pieczasz/tty-cards/internal/elo
+            - uuid
     dupl:
       threshold: 120
     gocritic:
@@ -153,15 +164,16 @@ linters:
         - name: package-comments
           disabled: true
     cyclop:
-      # lobby view handleKey is 21: a flat key dispatch, branchy but not complex.
-      max-complexity: 21
+      # 16 is hearts validatePlayCard, poker ValidateAction and the poker view handleKey:
+      # flat rule checks and key dispatch, branchy but not complex.
+      max-complexity: 16
     funlen:
       lines: 75
-      statements: 55
+      statements: 40
     gocognit:
-      min-complexity: 30
+      min-complexity: 20
     nestif:
-      min-complexity: 9
+      min-complexity: 5
     lll:
       line-length: 140
 
