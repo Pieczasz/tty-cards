@@ -1,0 +1,24 @@
+# Every alert goes to Telegram. The bot token and chat id are read from files on the
+# host, never written here (bot_token_file needs v0.26+, chat_id_file v0.31+; the
+# pinned image is v0.34.1), and only when a notification is sent: without them
+# Alertmanager still runs and shows alerts at alertmanager:9093, logs each failed
+# send, and fires AlertmanagerNotificationsFailing. Setup: "Alert delivery" in
+# docs/SECURITY.md.
+route:
+  receiver: telegram
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="page"']
+      receiver: telegram
+      repeat_interval: 1h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token
+        chat_id_file: /etc/alertmanager/secrets/telegram_chat_id
+        parse_mode: HTML
+        send_resolved: true
