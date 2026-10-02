@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opens three SSH clients to a local terminal-card server in one tmux session.
+# Opens three SSH clients to a local tty-cards server in one tmux session.
 #
 #   ./scripts/dev-session.sh              # one window per player
 #   TC_LAYOUT=panes ./scripts/dev-session.sh   # all three tiled in one window
@@ -15,7 +15,7 @@ set -euo pipefail
 
 HOST="${TC_HOST:-localhost}"
 PORT="${TC_PORT:-22}"
-SESSION="${TC_SESSION:-terminal-card}"
+SESSION="${TC_SESSION:-tty-cards}"
 LAYOUT="${TC_LAYOUT:-windows}"
 
 PLAYERS=(
