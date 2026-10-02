@@ -38,7 +38,7 @@ func TooSmall(screenWidth, screenHeight int) bool {
 // RenderTooSmall fills the terminal with the resize prompt. It reports the current
 // size as well as the required one, so the player can see which way to drag.
 func (t Theme) RenderTooSmall(screenWidth, screenHeight int) string {
-	msg := lg.JoinVertical(lg.Center,
+	msg := JoinVertical(lg.Center,
 		t.Accented.Render("Terminal too small"),
 		"",
 		t.Muted.Render(fmt.Sprintf("need %d x %d", MinWidth, MinHeight)),
@@ -85,12 +85,57 @@ func layoutHeights(screenWidth, screenHeight int, header, footer string) (
 
 	// go-figure leaves trailing newlines that inflate the measured height. Wrap before
 	// measuring, or lg.Height reports the unwrapped height.
-	wrap := lg.NewStyle().Width(width).Align(lg.Center)
-	wrappedHeader = wrap.Render(strings.TrimRight(header, "\r\n"))
-	wrappedFooter = wrap.Render(strings.TrimRight(footer, "\r\n"))
+	wrappedHeader = centreWrapped(width, strings.TrimRight(header, "\r\n"))
+	wrappedFooter = centreWrapped(width, wrapActions(strings.TrimRight(footer, "\r\n"), width))
 
 	hContent = max(innerHeight-lg.Height(wrappedHeader)-lg.Height(wrappedFooter), 0)
 	return wrappedHeader, wrappedFooter, hContent
+}
+
+// centreWrapped is lg.NewStyle().Width(width).Align(lg.Center).Render(s), byte for
+// byte. Every frame's header and footer went through it, and they nearly always fit:
+// then lipgloss's wrap changes nothing and centring is padding.
+func centreWrapped(width int, s string) string {
+	b := splitBlock(s)
+	if width <= 0 || b.width > width || !closedLines(s) {
+		return lg.NewStyle().Width(width).Align(lg.Center).Render(s)
+	}
+	var sb strings.Builder
+	sb.Grow(b.bytes + len(b.lines)*(width+1))
+	for i, line := range b.lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		short := width - b.widths[i]
+		sb.WriteString(spaces(short / 2))
+		sb.WriteString(line)
+		sb.WriteString(spaces(short - short/2))
+	}
+	return sb.String()
+}
+
+// actionSeparator joins the footer's actions (RenderActionFooter).
+const actionSeparator = " | "
+
+// wrapActions breaks a footer that is wider than width between its actions, never
+// inside one: word wrapping split "t - Leaderboard" across two lines.
+func wrapActions(footer string, width int) string {
+	if width <= 0 || lg.Width(footer) <= width || strings.Contains(footer, "\n") {
+		return footer
+	}
+	var lines []string
+	line := ""
+	for action := range strings.SplitSeq(footer, actionSeparator) {
+		switch {
+		case line == "":
+			line = action
+		case lg.Width(line)+len(actionSeparator)+lg.Width(action) <= width:
+			line += actionSeparator + action
+		default:
+			lines, line = append(lines, line), action
+		}
+	}
+	return strings.Join(append(lines, line), "\n")
 }
 
 // AvailableContentHeight is how many lines of content a full-screen view may render
@@ -154,24 +199,38 @@ var figureFonts = []string{"slant", "small", "mini"}
 // the text itself when none does. Fonts are tried largest first and only rendered
 // when reached, so a roomy terminal never pays for the smaller two.
 func RenderFigureASCII(text string, maxWidth, maxHeight int) string {
+	return fitFigure(text, maxWidth, maxHeight, cachedFigure)
+}
+
+// RenderFigureUncached is RenderFigureASCII for text a player chose, such as their
+// name: it never touches the shared cache, so the caller memoizes it per session.
+func RenderFigureUncached(text string, maxWidth, maxHeight int) string {
+	return fitFigure(text, maxWidth, maxHeight, renderFigure)
+}
+
+func fitFigure(text string, maxWidth, maxHeight int, render func(text, font string) figureBanner) string {
 	for _, font := range figureFonts {
-		if b := figureFor(text, font); b.width <= maxWidth && b.height <= maxHeight {
+		if b := render(text, font); b.width <= maxWidth && b.height <= maxHeight {
 			return b.art
 		}
 	}
 	return text // no font fits; plain text always does
 }
 
-func figureFor(text, font string) figureBanner {
+func cachedFigure(text, font string) figureBanner {
 	key := figureKey{text: text, font: font}
 	if cached, ok := figureCache.Load(key); ok {
 		b, _ := cached.(figureBanner)
 		return b
 	}
-	art := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
-	b := figureBanner{art: art, width: lg.Width(art), height: lg.Height(art)}
+	b := renderFigure(text, font)
 	figureCache.Store(key, b)
 	return b
+}
+
+func renderFigure(text, font string) figureBanner {
+	art := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
+	return figureBanner{art: art, width: lg.Width(art), height: lg.Height(art)}
 }
 
 // RenderMainLayout frames a full-screen view: the header on top, the footer at the
@@ -188,8 +247,8 @@ func (t Theme) RenderMainLayout(width, height int, header, content, footer strin
 	footerArea := Place(inner, lg.Height(footer), lg.Center, lg.Bottom, footer)
 	contentArea := Place(inner, hContent, lg.Center, lg.Center, content)
 
-	stacked := lg.JoinVertical(lg.Center, headerArea, contentArea, footerArea)
-	return t.Box.Width(boxWidth(width)).Height(boxHeight(height)).Render(stacked)
+	stacked := JoinVertical(lg.Center, headerArea, contentArea, footerArea)
+	return renderBox(t.Box, boxWidth(width), boxHeight(height), stacked)
 }
 
 // footerKey is the action list a view offers, at one palette. Each view has a fixed
@@ -215,7 +274,7 @@ func (t Theme) RenderActionFooter(actions []string) string {
 	for _, action := range actions {
 		renderedActions = append(renderedActions, t.ActionsText.Render(action))
 	}
-	footer := strings.Join(renderedActions, " | ")
+	footer := strings.Join(renderedActions, actionSeparator)
 	footerCache.Store(key, footer)
 	return footer
 }

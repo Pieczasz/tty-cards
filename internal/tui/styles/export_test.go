@@ -7,6 +7,9 @@ var (
 	BoxHeight     = boxHeight
 	PadHorizontal = padHorizontal
 	PadVertical   = padVertical
+	WrapActions   = wrapActions
+	RenderBox     = renderBox
+	CentreWrapped = centreWrapped
 )
 
 // ResetFigureCacheForTest empties the banner cache, for the cache-size tests, which
