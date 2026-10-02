@@ -66,6 +66,22 @@ func TestBroadcaster_Unsubscribe(t *testing.T) {
 	assert.Equal(t, "hello", got2)
 }
 
+// A view's Close and the router's both unsubscribe, and Close may already have
+// closed every channel: a second close would panic the session.
+func TestBroadcaster_UnsubscribeTwiceOrAfterCloseIsANoOp(t *testing.T) {
+	t.Parallel()
+	b := New[int](10)
+	ch := mustSubscribe(t, b)
+	kept := mustSubscribe(t, b)
+
+	b.Unsubscribe(ch)
+	require.NotPanics(t, func() { b.Unsubscribe(ch) })
+	assert.Equal(t, 1, b.Len(), "a repeat must not free somebody else's slot")
+
+	b.Close()
+	require.NotPanics(t, func() { b.Unsubscribe(kept) })
+}
+
 func TestBroadcaster_SubscribeAfterClose(t *testing.T) {
 	t.Parallel()
 	b := New[int](10)

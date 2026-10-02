@@ -22,13 +22,12 @@ const (
 	kFactor float64 = 32.0
 )
 
-// clampRating bounds a rating to [MinRating, MaxRating].
-func clampRating(rating float64) float64 {
-	if math.IsNaN(rating) {
-		slog.Error("NaN rating clamped to the default", "default", DefaultRating)
-		return DefaultRating
-	}
-	return min(max(rating, MinRating), MaxRating)
+// Player is one seat in a Calculate: who, at what rating, finishing where.
+type Player struct {
+	ID          string
+	Rating      float64
+	Place       int
+	Provisional bool
 }
 
 // ToUint32 is a rating as it is stored: clamped to the scale and rounded.
@@ -36,40 +35,9 @@ func ToUint32(rating float64) uint32 {
 	return uint32(math.Round(clampRating(rating)))
 }
 
-// Player is one seat in a Calculate: who, at what rating, finishing where.
-type Player struct {
-	ID     string
-	Rating float64
-	Place  int
-	// Provisional marks an account without a track record yet. Identity is a free
-	// SSH keypair, so a fresh 1500 is free to mint: an established player never
-	// *gains* from a pair with one. They can still lose to one - otherwise seating an
-	// alt would freeze a rating in place, and the anti-farm rule becomes a shield.
-	// The provisional side always moves, so it converges on real games.
-	Provisional bool
-}
-
-// expectedScore is the classic Elo win expectancy of A against B.
-func expectedScore(ratingA, ratingB float64) float64 {
-	return 1.0 / (1.0 + math.Pow(10.0, (ratingB-ratingA)/400.0))
-}
-
 // Calculate applies the Simple Multiplayer Elo (SME) algorithm.
 // https://www.tckerrigan.com/Misc/Multiplayer_Elo/
 // The player slice MUST be sorted by performance, from 1st place (index 0) to last place (index n-1).
-//
-// IDs must be distinct. Two seats sharing one ID are still played against each other
-// - the transfer between them happens - but the results collapse into a single map
-// entry and the last one wins, so one of the two rating changes is lost. The return
-// shape has nowhere to report that, so it is logged loudly instead; the caller builds
-// the slice from a set of accounts and a repeat is a bug there.
-//
-// The float64 result conserves rating exactly, but the stored value does not: ToUint32
-// rounds each player independently, so a three-or-more-seat table can end up a point
-// heavier or lighter than it started. Rounding the table as a whole would mean
-// deciding whose rating absorbs the remainder, which is a worse answer than a point of
-// drift on a 1500-point scale. A pair that includes a provisional account breaks
-// conservation deliberately and by much more - see unpaidAgainstProvisional.
 func Calculate(players []Player) map[string]float64 {
 	n := len(players)
 	newRatings := make(map[string]float64, n)
@@ -108,10 +76,14 @@ func Calculate(players []Player) map[string]float64 {
 	return newRatings
 }
 
-// unpaidAgainstProvisional zeroes the gain on the established side of a mixed pair.
-// This deliberately breaks conservation for that pair - the zero-sum property of Elo
-// is worth less than an unfarmable ladder - but only for gains, so a loss to a fresh
-// account still costs what it should.
+func clampRating(rating float64) float64 {
+	if math.IsNaN(rating) {
+		slog.Error("NaN rating clamped to the default", "default", DefaultRating)
+		return DefaultRating
+	}
+	return min(max(rating, MinRating), MaxRating)
+}
+
 func unpaidAgainstProvisional(upper, lower Player, up, down float64) (float64, float64) {
 	if upper.Provisional == lower.Provisional {
 		return up, down
@@ -146,6 +118,10 @@ func rawTransfer(upper, lower Player) float64 {
 		score = 0.5
 	}
 	return kFactor * (score - expectedScore(upper.Rating, lower.Rating))
+}
+
+func expectedScore(ratingA, ratingB float64) float64 {
+	return 1.0 / (1.0 + math.Pow(10.0, (ratingB-ratingA)/400.0))
 }
 
 func capTransfer(moved, gainsRating, losesRating float64) float64 {
