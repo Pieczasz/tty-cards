@@ -69,7 +69,7 @@ operator soft-deleted is anonymised too.
 
 | Item | Where | Lifetime |
 |---|---|---|
-| Client IP, as a rate-limit key | `internal/ratelimit` - an in-memory map, IPv6 collapsed to its /64 by `NetKey` | one window: 1s for SSH auth, **1 hour for new-account registration** (`REGISTRATION_WINDOW`, `internal/config/config.go`), 60s for the API. Swept every 64 calls, capped at 10 000 keys |
+| Client IP, as a rate-limit key | `internal/ratelimit` - an in-memory map, IPv6 collapsed to its /64 by `NetKey`, and to its /48 by `WideKey` for the wide registration budget and the once-a-minute auth-refusal warning (IPv4 stays the address in both) | one window: 1s for SSH auth, 1 minute for the refusal warning, **1 hour for new-account registration** (`REGISTRATION_WINDOW`, `internal/config/config.go`), 60s for the API. Swept every 64 calls, capped at 10 000 keys |
 | Client IP, from the PROXY protocol header | `cmd/server` -> `github.com/pires/go-proxyproto` | the TCP connection |
 | Client IP, from `X-Forwarded-For` | `internal/httpapi` `clientIPFunc`, only when `API_TRUST_PROXY=true`, and with `PROXY_TRUSTED_CIDRS` set only from a peer inside it | the request |
 
@@ -78,18 +78,28 @@ Nothing here is persisted or exported. The limiter's map is the whole of it.
 ## 3. Reaches the observability stack
 
 Everything below is on the compose networks; none of these services publishes a
-port (`docker compose config` - only `proxy` 22/80 and Grafana on `127.0.0.1:3000`).
+port (`docker compose config` - only `proxy` 22/80/443 and Grafana on `127.0.0.1:3000`).
 
 ### Logs -> Loki. **14 days** (`internal/config/loki/loki.yaml`, `retention_period: 336h`, compactor retention enabled)
 
 Two sources reach Loki:
 
 1. **The application**, via `slog` -> the OTLP bridge (`cmd/server/main.go` installs a
-   MultiHandler: JSON to stderr *and* `otelslog`). The stderr copy is dropped in Alloy
-   (`internal/config/alloy/config.alloy`, `stage.drop`) so structured records are not
-   stored twice.
+   MultiHandler: JSON to stderr *and* `otelslog`) -> Alloy -> Loki's OTLP endpoint. The
+   stderr copy is dropped in Alloy (`internal/config/alloy/config.alloy`, `stage.drop`)
+   so structured records are not stored twice. Only `service_name` and
+   `deployment_environment_name` are index labels (`otlp_config` in
+   `internal/config/loki/loki.yaml`); every record attribute below, and `trace_id`, is
+   structured metadata on the line - kept and searchable for the same 14 days, never
+   an index label.
 2. **Container stdout/stderr** for everything that is not a structured record -
    panic dumps, Postgres, nginx.
+
+Database statements are logged only when slow (over 200ms, at WARN) and only if they
+succeeded, as parameterised SQL with **no bound values** - GORM would otherwise inline
+them, and they include fingerprints and usernames (`gormLogger.ParamsFilter`,
+`internal/repository/connect.go`). A failed query is logged once, by its caller, not
+by GORM as well.
 
 Personal data in those logs today:
 
@@ -99,7 +109,9 @@ Personal data in those logs today:
   durations, but at /64 granularity for IPv6 and full-address granularity for IPv4 -
   where a single address is already what a household shares.
 - **Full `remote_addr` on WARN and ERROR only** - an unkeyable address, a rate-limit
-  rejection, a failed session, a panic. Abuse investigation keeps what it needs; the
+  rejection (an auth flood logs the first per /48 a minute at WARN and the rest at
+  DEBUG, which the default `LOG_LEVEL=INFO` does not record), a failed session, a
+  panic. Abuse investigation keeps what it needs; the
   routine path does not.
 - **`client_version`** alongside both - the SSH client string, a weak fingerprinting
   signal.
@@ -133,18 +145,31 @@ carries the address.** `startSession` (`internal/ssh/server.go`) sets only
 comment in `startSession` states the reason.
 
 What remains: the username on `ssh.session` for 48h, and `user_id` on repository spans
-(`internal/repository/user.go`, including `db.DeleteAccount`).
+(`internal/repository/user.go`, including `db.DeleteAccount`). Every span is sampled
+(`internal/observability/otel.go`); the resource names the service
+(`tty-cards-server`), its version, `deployment.environment.name` and the SDK's own
+name and version - no host name and no `service.instance.id`.
 
-**The stats API makes no spans at all** (`internal/httpapi/httpapi.go`: `otelhttp` runs
-with a noop tracer provider). Every website visitor polls it, and a span per request
-put each visitor's address and User-Agent into Tempo. `internal/httpapi/telemetry_test.go`
-`TestHandler_ProducesNoSpans` asserts it.
+**The stats API makes no spans of its own and ignores incoming trace context**
+(`internal/httpapi/httpapi.go`: `otelhttp` runs with a noop tracer provider and an
+empty propagator). Every website visitor polls it, and a span per request put each
+visitor's address and User-Agent into Tempo; a visitor's `traceparent` header used to
+be honoured, so Tempo stored a trace under an id the visitor chose. What is left on
+this path is exactly one span, `db.BestPlayers`, around the leaderboard query a cache
+miss runs (`fetchBestPlayers`, `internal/repository/user.go`): at most once per
+5-minute cache TTL per game, a root span with no parent, carrying only `limit` and
+`rows` - no address, header or anything else from the request. A cache hit, which is
+nearly every poll, makes no span. `internal/httpapi/telemetry_test.go`
+(`TestNewServer_ProducesNoSpans`, `TestNewServer_IgnoresAVisitorsTraceContext`) and
+`internal/repository/telemetry_integration_test.go`
+(`TestUserRepository_BestPlayersSpansOnlyTheQuery`) assert it.
 
 ### Metrics -> Prometheus. **30 days** (`compose.yaml`, `--storage.tsdb.retention.time=30d`, plus an 8GB size cap)
 
 **No personal data**, and that is enforced rather than asserted:
 `internal/observability/metrics_test.go` collects every instrument and fails if any
-attribute key is outside `{outcome, limiter, game_type, ranked, reason, stream}`.
+attribute key is outside `{outcome, limiter, game_type, ranked, reason, stream}`
+(the connection-pool gauges, `ttycards.db.pool.*`, carry none).
 otelhttp's `http.server.*` metrics for the stats API get the same treatment in
 `internal/httpapi/telemetry_test.go`: only the method, status, route, scheme and
 protocol keys and `server.address`, which `otelhttp.WithServerName("stats-api:80")`
@@ -189,10 +214,12 @@ per-user endpoint, no writes, no auth.
 | Match history | Postgres | kept, anonymised on erasure | `match_participants` is not deleted |
 | Application and container logs | Loki | **14 days** | `internal/config/loki/loki.yaml` (`retention_period: 336h`, compactor retention on) |
 | Traces | Tempo | **48 hours** | `internal/config/tempo/tempo.yaml` (`block_retention: 48h`) |
+| Alert state (labels and annotations, no personal data) | Alertmanager `alertmanager-data` volume | **5 days** (its `--data.retention` default) | `compose.yaml` |
+| Log read positions, metrics not yet written | Alloy `alloy-data` volume | until delivered; the WAL is truncated within hours | `compose.yaml` (`--storage.path`) |
 | Metrics | Prometheus | **30 days**, 8 GB cap | `compose.yaml` (`--storage.tsdb.retention.time=30d`) |
 | Container stdout on disk | Docker json-file | 3 × 10 MB, size-bound not time-bound | `compose.yaml` `x-logging` |
-| Database backups (optional) | the host's `backups/` | **14 days** (`RETENTION_DAYS`), written `0600` (`umask 077`), never in the image build context | `scripts/backup.sh`, `.dockerignore` |
-| Rate-limit counters | process memory | one window (1s SSH auth, 1h registration, 60s API) | `internal/ratelimit` |
+| Backups: the whole database and the SSH host key (optional) | the host's `backups/`, and an off-host rclone remote when `BACKUP_REMOTE` is set | **the newest `BACKUP_KEEP` (14) archives**, in both places - a count, so the age depends on the schedule; written `0600` (`umask 077`), never in the image build context. An erased account survives in older archives until they age out | `scripts/backup.sh`, `.dockerignore`, [`decisions.md` #59](decisions.md#59-backups-hold-the-database-and-the-host-key-go-off-host-and-are-drilled) |
+| Rate-limit counters | process memory | one window (1s SSH auth, 1 min refusal warning, 1h registration, 60s API) | `internal/ratelimit` |
 | Live session and table state | process memory | until disconnect / match end | - |
 
 ## 7. Known gaps, for whoever picks them up

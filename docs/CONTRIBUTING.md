@@ -1,4 +1,4 @@
-# Contributing to Terminal Card
+# Contributing to tty cards
 
 The project is open source so it can outlive whoever is currently maintaining it.
 That goal drives most of the rules below: every one of them exists so the next
@@ -31,10 +31,13 @@ make build
 | `make test-short` | Unit tests, no Docker |
 | `make test` | `go test -race ./...` |
 | `make test-integration` | `-tags=integration`, needs Docker (testcontainers) |
-| `make lint` | golangci-lint |
+| `make lint` | golangci-lint, both build tags |
+| `make deadcode` | fails on any function unreachable from `main` and every test |
+| `make semgrep` | the project-invariant rules in `.semgrep/`, needs `uv` |
+| `make cover` | unit + integration with coverage, fails under 95%, needs Docker |
 | `make fmt` / `make fix` | `go fmt` / `go fix` |
 | `make build` | `bin/server` |
-| `make ci` | fmt, fix, lint, test, build - run this before you push |
+| `make ci` | fmt, fix, lint, deadcode, semgrep, cover, build - run this before you push |
 | `make migrate-create` / `migrate-up` / `migrate-down` | SQL migrations via `$DB_DSN` |
 | `make loadtest` | SSH concurrency harness against a **running** server |
 
@@ -48,6 +51,31 @@ refuse `go 1.27.x`. Match it locally the same way:
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 ~/go/bin/golangci-lint run      # or `make lint` if it is on your PATH
 ```
+
+### What each check guards
+
+- **`make lint`** - golangci-lint over the default and the `integration` build:
+  correctness, style, the size gates below, and `depguard`'s layer rules (nothing
+  but `cmd/server` imports `internal/repository`; `internal/game` imports from an
+  allow-list).
+- **`make deadcode`** - code reachable from neither `main` nor any test. Tests count
+  as roots, so a test-only hook is fine; a helper nothing calls is not.
+- **`make semgrep`** - the `CLAUDE.md` invariants a linter cannot express, in
+  `.semgrep/tty-cards.yml`: the turn cursor moves only through `SetTurn` /
+  `OverrideTurn`; TUI code never calls `Engine.WithState`, `SubmitAction` or the
+  two-argument `Frame`; recover helpers are deferred directly; no client address
+  on a span or metric, and none in an info/debug log; the DSN and DB password
+  never reach a log, print or error; a `Subscribe` error is never dropped; boolean
+  env values go through `strconv.ParseBool`. Every rule has `// ruleid:` / `// ok:`
+  cases in `.semgrep/tty-cards.go`, and the target runs them before scanning, so a
+  rule that stopped matching fails rather than passing as a clean tree. A new rule
+  ships with its cases and at zero findings on the tree.
+- **`make cover`** - the whole suite, unit and integration, with `-race` and
+  `-coverpkg` over the production packages, failing under 95.0% of statements.
+  `internal/testutil`, `internal/game/gametest`, `internal/tui/tuitest` and
+  `cmd/loadtest` are left out of the denominator: test support and a measurement
+  tool, not the product. `go tool cover -func=coverage.out` shows where the gaps
+  are. CI's integration job runs exactly this.
 
 ## Adding a game
 
@@ -104,13 +132,14 @@ Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 
 ### 2. View - `internal/tui/views/gameview/<name>/`
 
-Expose `New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model`,
-keep the model itself unexported, embed `gameview.Session` (built with
-`gameview.NewSession(global, engine, slug)`), and implement your rules rendering and
-nothing else. The slug is the catalog's, and it is the `game_type` label your view's
-metrics carry, the same one the lobby's carry for this game. Session already owns
-binding, subscribing, `Init` (the feed listener and the turn-clock tick - do not
-write your own), the `Update` loop (`HandleFrame`), the last rejected move
+Expose `New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model`
+(the seat the lobby bound to the session's player - a view never holds a
+`*game.Engine`, and semgrep fails one that does), keep the model itself unexported,
+embed `gameview.Session` (built with `gameview.NewSession(global, table, slug)`), and
+implement your rules rendering and nothing else. The slug is the catalog's, and it is
+the `game_type` label your view's metrics carry, the same one the lobby's carry for
+this game. Session already owns subscribing, `Init` (the feed listener and the
+turn-clock tick - do not write your own), the `Update` loop (`HandleFrame`), the last rejected move
 (`ActionErr`), the hand cursor, the forfeit prompt, leaving, idle removal and the
 idle-quit exemption, and `Close`. A suit or colour choice is `gameview.ChoicePicker`
 (crazy eights and uno share it); a between-hands result screen is
@@ -132,7 +161,7 @@ your job, and it should be a named function so a reviewer can find it
 
 ### 3. Register both together - `internal/catalog/catalog.go`
 
-One entry in `All`. This is the only registration point; `cmd/server/main.go`
+One entry in `Games`. This is the only registration point; `cmd/server/main.go`
 and `internal/tui/app.go` both read it.
 
 ```go
@@ -166,8 +195,8 @@ data migration, not a rename. The display `Name` is free to change.
 - **A fit test.** `TestView_FitsTheTerminal`-style, over `tuitest.FitSizes`
   (`{styles.MinWidth, styles.MinHeight}`, `{80, 24}`, `{120, 50}`), driving keys
   with `tuitest.Key`. Copy `internal/tui/views/gameview/uno/view_test.go`.
-- **Nothing per view for `Close`.** `TestAll_CloseReleasesTheEngineSubscription`
-  in `internal/catalog/close_test.go` checks every entry in `All` releases its
+- **Nothing per view for `Close`.** `TestGames_CloseReleasesTheEngineSubscription`
+  in `internal/catalog/close_test.go` checks every entry in `Games` releases its
   subscription (counted with `Engine.SubscriberCount`).
 - **`goleak_test.go`** with `goleak.VerifyTestMain(m)` in both new packages. 26
   packages have one; a view that subscribes and forgets to `Close` is exactly
@@ -204,8 +233,9 @@ this repo was invisible for months precisely because the behaviour looked fine;
 caught them. If you cannot construct that test, say so in the PR and explain
 why.
 
-Coverage sits at 90% or better in every package that is not pure wiring
-(`cmd/server` is ~42% and that is fine - it is `main`).
+Combined unit + integration coverage of the production packages stays at 95% or
+better; `make cover` and CI enforce it. Assert on outcomes: a test that only
+executes a line buys the number and none of the safety.
 
 ## Code style
 
@@ -266,7 +296,8 @@ Schema changes are SQL files in `internal/db/migrations/`, applied with
   in its own.
 - Describe *what* and *why* in the PR body. The *what* is readable from the diff;
   the *why* is the thing that is gone in six months.
-- CI must be green: unit tests, integration tests, lint, `govulncheck`, the
+- CI must be green: unit tests, integration tests and the coverage floor, lint,
+  semgrep, `govulncheck`, the
   Docker image build (amd64 + arm64), and `docker compose config`.
 - If you changed a contract - `SessionTracker`, finalize ownership, the grace
   state machine, the `Frame` signature, the catalog shape, a repository interface

@@ -52,13 +52,13 @@ work exists is per-session UI scheduling:
 ## 2. Topology
 
 ```
-        ssh client (port 22)              browser (port 80)
+        ssh client (port 22)           browser (ports 80, 443)
                  |                                |
                  v                                v
    +----------------------------------------------------------+
    |  nginx           internal/config/nginx.conf               |
    |  stream{}  limit_conn 8 / $client_net, proxy_protocol on  |
-   |  http{}    /api/ -> backend:6970, everything else -> www  |
+   |  http{}    :443 /api/ -> backend:6970, else -> www        |
    +----------------------------------------------------------+
                  |  PROXY header (real client IP)
                  v
@@ -79,11 +79,14 @@ work exists is per-session UI scheduling:
    +---------------+
 ```
 
-**Published ports are 22 and 80, both on nginx,** which listens on IPv4 and IPv6
-alike (`listen 22` and `listen [::]:22`, the same for 80). Grafana is the single
-exception and binds `127.0.0.1:3000`. Everything else - Postgres, Alloy, Loki,
-Tempo, Prometheus, and the backend's `6969`/`6970` - is `expose`-only on the
-compose networks.
+**Published ports are 22, 80 and 443, all on nginx,** which listens on IPv4 and
+IPv6 alike (`listen 22` and `listen [::]:22`, the same for 80 and 443). 80 is only
+a way in - the ACME challenge, nginx's own `/healthz` and a redirect - and 443
+serves the stats API with the certificate the `certbot` service keeps current
+(README, "TLS on the apex"). Grafana is the single exception and binds
+`127.0.0.1:3000`. Everything else - Postgres, Alloy, Loki, Tempo, Prometheus,
+Alertmanager, and the backend's `6969`/`6970` - is `expose`-only on the compose
+networks.
 
 The comment above `proxy.ports` in `compose.yaml` states the reason: publishing
 `6969` lets a client forge the PROXY header, and publishing `6970` lets it forge
@@ -103,9 +106,12 @@ fixed because the backend's `PROXY_TRUSTED_CIDRS` names them: a PROXY header is
 honored only from those networks and any other peer is refused before its header
 is read (`proxyListener`, `cmd/server/main.go`), and the stats API believes
 `X-Forwarded-For` only from the same networks. `default` carries everything else.
-`docker-api` is `internal: true` and holds only Alloy and `docker-socket-proxy`,
-which answers GET only, for containers and networks, so Alloy discovers container
-logs without the Docker socket itself.
+`docker-api` is `internal: true` and holds only Alloy and `docker-socket-proxy`
+(`wollomatic/socket-proxy`), which answers Alloy alone and only the GET/HEAD paths
+it makes - ping, version, networks, container list, inspect and logs. A
+section-level proxy would also serve `/containers/{id}/archive` and `/export`,
+which is any container's files (PGDATA, the SSH host key), and even the allowed
+inspect carries every container's environment, `DB_PASSWORD` among it.
 
 nginx resolves `backend` through Docker's DNS (`resolver 127.0.0.11 valid=10s`,
 `server backend:6969 resolve` in a `zone`d upstream), so a recreated backend with a
@@ -115,13 +121,15 @@ new address is picked up without restarting the proxy.
 
 | Layer | Limit | Where |
 |---|---|---|
-| nginx (stream) | 8 concurrent conns / client network; 5 s connect timeout to the backend | `nginx.conf` `limit_conn ssh_addr 8`, `proxy_connect_timeout 5s` |
-| nginx (http) | 16 concurrent conns / client network, 10 s header and body timeouts; 2 r/s + burst 10 on `/api/`; refusals are 429 | `nginx.conf` `limit_conn http_addr 16`, `limit_req_zone $client_net`, `limit_req_status 429` |
+| nginx (stream) | 8 concurrent conns / client network, 64 / IPv6 /48; 5 s connect timeout to the backend | `nginx.conf` `limit_conn ssh_addr 8`, `ssh_net48 64`, `proxy_connect_timeout 5s` |
+| nginx (http) | 16 concurrent conns / client network, 64 / IPv6 /48, 10 s header and body timeouts; 2 r/s + burst 10 on `/api/`; refusals are 429 | `nginx.conf` `limit_conn http_addr 16`, `http_net48 64`, `limit_req_zone $client_net`, `limit_req_status 429` |
 | PROXY header | honored only from `PROXY_TRUSTED_CIDRS` (compose: the `edge` subnets) | `proxyListener`, `cmd/server/main.go` |
 | listener | `2 x MAX_CONNECTIONS` (2000) | `netutil.LimitListener`, `cmd/server/main.go` |
 | account slots | `MAX_CONNECTIONS` (1000), with a message | `ssh.SessionTracker` |
 | auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` (5 / 1s, a Go duration - [#52](decisions.md#52-rate_limit_window-is-a-duration-and-the-old-name-fails-the-boot)) per network | `ssh.rateLimitAuth` over a `ratelimit.SlidingWindow` |
-| **registration** | **`REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` (5 / 1h) per network, new accounts only** | `ssh.allowRegistration` |
+| **registration** | **new accounts only, per `REGISTRATION_WINDOW` (1h): `REGISTRATION_LIMIT` (5) per network, `REGISTRATION_LIMIT_WIDE` (20) per IPv6 /48, `REGISTRATION_GLOBAL_LIMIT` (600) server-wide** | `ssh.allowRegistration` over a `registrationBudget` |
+| session input | 1 KiB/s after a 16 KiB burst; 32 KiB held without a 1 s pause or inside one paste; over either the session closes | `ssh.inputGuard` (`input.go`) |
+| terminal size | min(request, the active tier): 250x80 down to the 120x40 floor as sessions fill a 5M-cell budget; growth above the floor spends a 1.5M-cell pool held until the session ends | `sizeTiers`, `cellBudget`, `extraCellBudget`, `internal/ssh/termsize.go` |
 | stats API | `API_REQUESTS_PER_MINUTE` (120) per network | `httpapi.withRateLimit` |
 | channels | 2 session channels / SSH connection, refused before `Accept`; 32 `env` requests / 8 KiB per channel | `ssh.limitSessionChannels`, `envCappedChannel` |
 | account | one live slot / user; **a second `Connect` displaces and closes the first** | `ssh.SessionTracker.Connect` |
@@ -143,8 +151,16 @@ across the `stream` and `http` contexts because the two cannot share one. Three
 implementations of the same /64 rule therefore have to stay in sync; `NetKey` in
 Go is the authoritative one and `nginx.conf` says so.
 
-`NetKey` itself is total: an address it cannot parse comes back verbatim. The
-**fail-closed** decision is one level up, in `ssh.netKeyFor`, which returns
+A /64 is not the whole story for budgets an attacker can afford to spread: a free
+tunnel broker hands out a /48, which is 65,536 fresh /64s. `ratelimit.WideKey` (the
+/48 for IPv6, the address itself for IPv4, since one CGNAT address is already a
+crowd) is the second key registration spends, and nginx's `$client_net48` the
+second connection bucket; `REGISTRATION_GLOBAL_LIMIT` is the ceiling for an attacker
+with more /48s than that. A refusal by a wider budget refunds the narrower ones, so
+a flood filling the global ceiling does not also spend real players' own budgets.
+
+`NetKey` and `WideKey` are total: an address they cannot parse comes back verbatim.
+The **fail-closed** decision is one level up, in `ssh.clientHost`, which returns
 `ok=false` for a nil address or a `SplitHostPort` error; `rateLimitAuth` and
 `allowRegistration` both refuse on `!ok` rather than sharing one bucket for every
 unkeyable peer.
@@ -157,19 +173,19 @@ unkeyable peer.
 
 Order matters so deferred teardown runs correctly (LIFO):
 
-1. `installLogging()` - **first**, before config, so a config failure is a
-   structured record rather than a default-handler line
-2. `config.Load()` -> validated `*config.Config`. It reports every invalid
+1. `config.Load()` -> validated `*config.Config`. It reports every invalid
    variable at once (`errors.Join`), not just the first
+2. `installLogging(cfg.LogLevel)` (`cmd/server/logging.go`), at the level config
+   read, so nothing is logged at a level that is later overwritten
 3. `observability.Setup` (defer shutdown)
 4. `repository.Connect(cfg.DSN(), repository.Pool{...})` (defer close)
 5. Repositories -> `lobby.NewManager(ctx, matchRepo)`
-6. `defer waitForFinalizers(ctx, lobbyManager)` - registered **after** the DB-close
+6. `defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)` - registered **after** the DB-close
    defer, so LIFO drains match writes before closing the handle they write
    through
 7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose
    `GameRegistry` is `catalog.NewRegistry()` - `game.NewRegistry` over
-   `catalog.All`, which panics on a module declared twice or half-declared. The
+   `catalog.Games`, which panics on a module declared twice or half-declared. The
    one tracker is shared with the stats API; `NewServer` refuses to start without
    it (`ErrNoTracker`), because a second one counted nobody online
 8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
@@ -177,9 +193,9 @@ Order matters so deferred teardown runs correctly (LIFO):
    dependency (`ErrMissingDeps`), then `serve(...)`
 
 Both listen addresses are built with `net.JoinHostPort`, so an IPv6 literal
-`SERVER_HOST` binds. A failure before OTel is up is printed once as `fatal:` on
-stderr; every later one is logged once, by a deferred `slog` record that runs
-before the telemetry flush.
+`SERVER_HOST` binds. Every failure is logged once, by `logExit`: before logging is
+installed that is the slog default's plain stderr line, afterwards a record that
+runs before the deferred telemetry flush.
 
 `serve` stacks `tcp -> LimitListener -> proxyproto.Listener`, runs `Serve` in a
 goroutine, and blocks on a signal, an accept error or an API error. Every exit
@@ -187,9 +203,10 @@ path calls `drainServer` (`BeginShutdown` + graceful SSH stop), so ranked matche
 interrupted by a deploy are recorded **without** Elo.
 
 Shutdown is sequential and budgeted: 30 s SSH `Shutdown` + 5 s stats API + 15 s
-finalizers + a second 15 s finalizer window + 5 s OTel = 70 s worst case.
+finalizers + a second 15 s finalizer window + 6 s OTel (2 s per provider) = 71 s worst case.
 `compose.yaml` sets `stop_grace_period: 80s` against exactly that arithmetic, and
-the comment on `waitForFinalizers` says the two numbers depend on each other.
+the comment on the shutdown timeouts in `cmd/server/main.go` says the two numbers
+depend on each other.
 
 ### 3.2 Connection - `internal/ssh`
 
@@ -228,7 +245,11 @@ the OTLP handler.
    username. It needs only a `db.Authenticator`, and takes an `allowRegister func() bool` and consults it **only** on
    the `user == nil` branch, so a returning player never spends the registration
    budget - and only after `db.ValidateUsername` has passed, so a typo does not
-   spend it either.
+   spend it either. That rule also reserves, in any case, the `deleted_` prefix
+   and a fixed list of names that read as staff or as the server (`admin`, `root`,
+   `mod`, `system`, `support`, `tty_cards`, ...); every reserved name gets the same
+   "username is reserved", so it says nothing about which accounts exist. Existing
+   accounts are never re-validated.
 3. **`tracker.Connect(userID, conn)` -> generation.** A second session for the
    same account **displaces** the first *and closes its connection*, outside the
    tracker lock (a wedged peer must not hold every other account's `Connect`
@@ -271,10 +292,37 @@ nothing panics *out of* bubbletea, which owns the screen, so the primary path is
 **`s.Stderr()`**, and re-panics so bubbletea's own recover ends the program.
 Both record the panic as a metric and leave the lobby cleanly.
 
-`boundedPty` refuses a PTY wider than 2000 or taller than 600, and
-`filterSessionMsg` (a `tea.WithFilter`) clamps later resizes to the same bounds. It
-also answers a suspend as if already resumed: a `SuspendMsg` would send `SIGTSTP` to
-the server's own process group and stop every player's session.
+**The terminal size is a shared budget.** bubbletea's renderer holds two cell
+buffers, ~230 B a cell, for the session's whole life, and diffs the whole frame on
+every tick, so cells are what a session costs in memory and CPU. The server grants
+sizes from tiers (`sizeTiers` in `termsize.go`: 120x40, 160x50, 200x60, 250x80); the
+active tier is the largest whose cells x live sessions fit `cellBudget` (5M: the
+4.85M cells decision #60 measured to hold on 3 cores), and it climbs back only once
+that fits in 90% of the budget, so a count at a threshold does not flap. A session is
+told min(its request, the tier): by `tea.WithWindowSize` at start, because the
+renderer sizes its buffers from that and never passes it through the filter, and by
+`sessionSize.filter` on every resize. When the tier moves, one sweep goroutine
+(`sessionRegistry.retier`, off every lock) sends a `retierMsg` to each session it
+resizes, and that session's event loop grants its latest request again. A shrink
+does not free memory, though: bubbletea reslices its buffers
+(`TestRenderer_KeepsItsBuffersAfterAShrink`), so a session holds the largest tier it
+was ever granted until it ends. Growth above the floor therefore spends
+`extraCellBudget` (1.5M cells, ~330 MiB), returned when the session ends, and held
+memory stays within sessions x the floor plus that pool. The floor is always
+granted: 1250 x 120x40 is the pre-tier ceiling compose's `GOMEMLIMIT` is sized for
+(`BenchmarkSessionMemory`: 1.3 / 2.0 / 3.1 / 4.7 MiB a session per tier; decision
+#61). The views get whatever size they are granted; a terminal bigger than it shows
+blank space right and below, because the renderer has no origin offset and centring
+would need full-size buffers. The filter also answers a
+suspend as if already resumed: a `SuspendMsg` would send `SIGTSTP` to the server's
+own process group and stop every player's session.
+
+**Input is metered before bubbletea decodes it.** stdin reaches the program through
+`inputGuard` (`input.go`): 1 KiB/s after a 16 KiB burst, and at most 32 KiB since
+the input last paused for 1 s - or since a paste began, which it learns from
+bubbletea's own `PasteStartMsg`. The second limit exists because the decoder
+buffers an unterminated paste, and anything behind a byte it cannot parse, without
+bound. Over either, the session closes with a notice and outcome `input_limit`.
 
 ### 3.3 TUI - `internal/tui`
 
@@ -292,19 +340,25 @@ the server's own process group and stop every player's session.
 There is **no `MatchRepository` on the TUI**. Persistence is owned by
 `lobby.Manager` after a game ends, and absence is the boundary.
 
-Navigation is a message, not a call: a view returns `router.Navigate(route, ctx)`,
-a command carrying a `router.ChangeViewMsg`, and the router performs the swap in
-`Goto`, closing the outgoing view if it implements `router.Closer`. Routes are a
-typed `router.Route`, and every factory is a `router.ViewFactory`.
+Navigation is a message, not a call: a view returns `router.Navigate(route)`,
+`router.NavigateToLobby(l)` or `router.NavigateToGame(slug, table)`, a command
+carrying a `router.ChangeViewMsg`, and the router performs the swap in `Goto`,
+closing the outgoing view if it implements `router.Closer`. Routes are a typed
+`router.Route`, and every factory is a `router.ViewFactory` handed a typed
+`router.Payload` (`Lobby` for `RouteLobby`, `Table` for a game route; zero
+otherwise), so a wrong payload is a compile error rather than a failed cast. A
+factory whose field is nil falls back to home.
 
 Initial route: `tui.ResumeSeat` -> `Manager.ResumePlayer` -> a mid-game reconnect
 lands back at the table (through the lobby view, which routes onward into a running
 game); otherwise home. The ssh layer calls `ResumeSeat` separately from `tui.New`,
 once the session owns its tracker slot (§3.2).
 
-Game routes come from `catalog.All` via `router.GameRoute(slug)` ->
-`"game_<slug>"`, and each entry's `View(global, engine, slug)` is handed that same
-slug. `internal/game` knows nothing about routes.
+Game routes come from `catalog.Games` via `router.GameRoute(slug)` ->
+`"game_<slug>"`, and each entry's `View(global, table, slug)` is handed that same
+slug and a `*game.BoundEngine` - never the engine. The game-route factory
+(`registerGameViews`) refuses a table bound to anyone but the session's own player.
+`internal/game` knows nothing about routes.
 
 **A seated player cannot navigate away from their table.** `RouteHome`,
 `RouteLobbyCreate`, `RouteLobbyJoin`, `RouteProfile` and `RouteLeaderboard` are all
@@ -362,6 +416,30 @@ banners once per terminal size. That is at most three entries per title and no c
 which is safe only because every banner text is a fixed string in the source.
 Nothing player-controlled may be banner text: the home screen used to figlet the
 username, which let any account mint cache entries.
+
+#### Frame cost - `internal/tui/styles/join.go`
+
+Under 1000 sessions, building frames was half the server's CPU, and lipgloss's
+joins were two thirds of that: an unsized builder grown over a whole-screen frame
+(the runtime zeroing each regrowth was 27% of all CPU), every line measured twice,
+and each run of padding allocated. `styles.JoinVertical`, `styles.JoinHorizontal`
+and `styles.MarginTop` measure once, size the output up front and pad from a shared
+run of spaces. `join_test.go` checks them against lipgloss byte for byte with
+`rapid`; semgrep's `tui-uses-lipgloss-join` keeps lipgloss's out of `internal/tui`.
+The screen's border went the same way (`styles/box.go`): lipgloss word-wraps a
+whole frame before it borders it, which was 38% of every byte the server allocated,
+and the header and footer wrap another 12%. `renderBox` and `centreWrapped` build
+the border, padding and centring directly when lipgloss's wrap would change
+nothing - every line fits, none leaves a style open (the wrap closes and reopens
+one) and none holds a control byte (it drops a trailing `\r`) - and otherwise call
+lipgloss. At 120x40 `RenderMainLayout` went from 1.03 ms, 222 KB and 6,281
+allocations a frame to 0.22 ms, 41 KB and 60.
+An opponent's turn clock reads in 5s steps until its last 10s
+(`gameview.formatTurnClock`), so three seats of four redraw every 5s rather than
+every second; the seat on turn keeps the exact clock. Measured at 1000 users, the
+three together took total CPU from 36.7s to 24.2s per minute and frame building
+from 17.8s to 8.0s. The heap did not move: 73% of it is bubbletea's per-session
+cell buffers (112 B a cell), which only an upstream change can shrink.
 
 #### Theme resolution is per session
 
@@ -434,7 +512,8 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
 **Starting a game.** `startGameLocked` -> `registry.Create(name)` ->
 `game.NewEngine(rules, players, rules.InitialDeck())` -> `engine.Start()` ->
 `l.startedAt = time.Now()` -> `watchGameLocked(engine, db.GameRef{...})` ->
-`setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the `*game.Engine`.
+`setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the engine in an
+unexported field; a subscriber gets its own seat with `Event.Seat(playerID)`.
 The leader is always seat 0.
 
 **The finalize snapshot is taken when the game starts, not when it ends.**
@@ -458,9 +537,11 @@ because a 15-second write must not pin the table `inGame` while the TUI is alrea
 registration comes first because the reopen waits on `m.mu` in `releaseHeldSeats`,
 and a shutdown that began inside that wait would otherwise refuse it and drop the
 match. If the feed closes
-without ever delivering `EventGameEnded` - the broadcaster is latest-wins and can
-drop it - the loop falls through to `engine.IsFinished()` and does the same thing
-with `EndReasonUnknown`. The same loop counts `EventTurnTimedOut` and
+without ever delivering `EventGameEnded` - it is the last event an engine sends, so
+latest-wins never drops it, but `RemoveLobby` closes the feed and a leave already on
+its way can still end the game on the closed engine, whose broadcast is a no-op - the
+loop falls through to `engine.IsFinished()` and does the same thing with
+`EndReasonUnknown`, which is recorded unrated. The same loop counts `EventTurnTimedOut` and
 `EventPlayerIdle` under the game's slug, the `game_type` label every game metric
 carries ([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)).
 
@@ -504,13 +585,14 @@ lock hold for the snapshot, the player's own hand, the turn clock and the live
 The lobby watcher sees `EventGameEnded` -> `requestFinalize` (using the snapshot
 taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
 
-1. `registerFinalizer` **first**, in `requestFinalize` before the table reopens -
+1. `registerFinalizer` **first**, in `requestFinalize` before the table reopens,
+   then the `GameFinished` metric (labelled with the slug and `EndReason.String()`)
+   for every end, dropped or not, so games started minus finished stays true -
    every statement between observing the end and that call is a window for
    shutdown to begin, and a refusal then drops a finished match with nothing for
    `WaitForFinalizers` to wait on. A refused registration goes to
    `dropFinishedMatch` instead; `finalizeFinishedGame` takes the result
-2. `GameFinished` metric (labelled with the slug and `EndReason.String()`), then a
-   15-second timeout context
+2. A 15-second timeout context
 3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (ties share
    a place where the rules implement `StandingScorer`)
 4. The rating gate (§6.4)
@@ -566,7 +648,8 @@ card in play; `false` is a forced pass), `shed.OpenDiscard`, `shed.Leave`,
 is unexported and returns nothing: the error it used to return was unreachable.
 Both games prove the shared contract once, through `gametest.RunShed` and
 `gametest.SoakTimeoutIsAlwaysLegal` (`internal/game/gametest`, imported only by
-tests).
+tests); the soak mixes random legal plays, Eights' and Wilds' suit choices among
+them, into the clock's own moves before a clock-only tail proves the table still ends.
 
 `NewEngine` seats **copies** of the players it is given, with `Cards` cleared, so
 a finished engine's viewers and the next engine never share a hand. `Start` has no
@@ -681,7 +764,7 @@ the rest keep playing.
 
 ### 4.3 BoundEngine
 
-`Bind(engine, playerID)` is the default safe path: `Submit` acts as self,
+`Bind(engine, playerID)` is the only path the TUI has: `Submit` acts as self,
 `Frame` is one coherent read whose hand is yours, and `Subscribe`/`Unsubscribe`
 join the feed without handing out the broadcaster (a view holding it could
 `Broadcast` or `Close` the table's feed). The engine itself does not hand it out
@@ -693,11 +776,19 @@ reads every seat from it. There is no `Engine()` escape hatch; what the view sho
 from that state is the view's stated job (`buildSeats`, which has its own test
 file).
 
+The TUI never holds a `*game.Engine`, so it cannot act as another seat. The lobby
+makes the handle: `Lobby.Seat(playerID)` (nil unless that player still holds a seat at
+a live, unfinished table - the reconnect path) and `Event.Seat(playerID)` on
+`EventGameStarted`. `Lobby.ActiveGame()` is the server side's. The semgrep rule
+`tui-uses-server-engine-api` fails non-test code under `internal/tui` that names
+`game.Engine`, calls `game.NewEngine` / `game.Bind` or reads `ActiveGame`
+([`decisions.md` #5](decisions.md#5-boundengine-is-a-façade-not-a-capability)).
+
 ### 4.4 Session / view baseline
 
 Every game view embeds `gameview.Session`
-(`internal/tui/views/gameview/session.go`): binding, `NewSession(global, engine,
-slug)`'s subscribe - the slug is the catalog's, and the `game_type` label on the
+(`internal/tui/views/gameview/session.go`): `NewSession(global, table,
+slug)`'s subscribe to the seat the lobby bound - the slug is the catalog's, and the `game_type` label on the
 view's metrics
 ([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) -
 `Init` (the event listener and the turn-clock countdown, through the unexported
@@ -818,8 +909,9 @@ and `CurrentPlayerID`, because two players can share a name and whose turn it is
 from the former. A player's own cards come only from `BoundEngine.Frame`, which
 clones the cards of the bound `playerID` and nobody else.
 
-`lobby.Event` is `{Type EventType; Engine *game.Engine}`, and `Engine` is set on
-`EventGameStarted` only. `lobby.EventType` starts at one, so the zero value is no
+`lobby.Event` is `{Type EventType; engine *game.Engine}`; the engine is set on
+`EventGameStarted` only and unexported, and `Event.Seat(playerID)` binds it for one
+subscriber (nil for any other event). `lobby.EventType` starts at one, so the zero value is no
 event (a departure with nothing to announce), and has a `String()` of its own.
 
 ---
@@ -872,7 +964,7 @@ only their union, for the composition root that builds the one implementation
 
 | Interface | Methods | Consumer |
 |---|---|---|
-| `db.Authenticator` | `LoadUserByFingerprint`, `RegisterUserWithKey`, `UpdateUserActivity` | `internal/ssh` (`Deps.Auth`, `LoadOrRegisterUser`) |
+| `db.Authenticator` | `LoadUserByFingerprint`, `RegisterUserWithSSHKey`, `UpdateUserActivity` | `internal/ssh` (`Deps.Auth`, `LoadOrRegisterUser`) |
 | `db.Profiles` | `UserProfile`, `UserMatchHistory`, `DeleteAccount` | the profile screen, through `GlobalContext.Profiles` |
 | `db.Leaderboard` | `BestPlayers` | the leaderboard screen, and the stats API (`httpapi.Deps.Users`) |
 | `db.MatchRepository` | `RecordCasualMatch`, `FinalizeRankedMatch`, `FinalizeInterruptedMatch` | `lobby.Manager` only |
@@ -996,12 +1088,13 @@ if why := unratedReason(reason, m.isShuttingDown()); rated && why != "" {
 }
 ```
 
-Three ways a ranked match is written without Elo, and the comment gives one
+Four ways a ranked match is written without Elo, and the comment gives one
 reason for each: a deploy decided who was left holding cards, not play; a
-half-applied rules error must not move the ladder; and an **abandoned** table -
+half-applied rules error must not move the ladder; an **abandoned** table -
 every seat left - has standings that are reverse leave order, so rating it pays
-the last to quit. `EndReasonForfeit` (last player standing) **is** rated, and so
-is `EndReasonUnknown`. `unratedReason` names which of the three it was for the log,
+the last to quit; and `EndReasonUnknown` - an end the watcher never saw announced -
+may have been an interrupted match whose finishers must not be rated.
+`EndReasonForfeit` (last player standing) **is** rated. `unratedReason` names which it was for the log,
 and `EndReason.String()` gives the metric its label. An abandoned match with no standings
 writes nothing at all.
 
@@ -1058,8 +1151,11 @@ place, because splitting them mints Elo between two people who both quit.
    `ON CONFLICT DO NOTHING` locks nothing in the common case where the row already
    exists. Without the fixed order two overlapping finalizes lock in opposite
    orders and Postgres aborts one.
-5. **The pairing damp** (`isDamped`) and **the provisional rule**, inside
-   `calculateNewElos` -> `elo.Calculate`.
+5. **The decision** - `repeatedPairCountLast24h` reads the pair count, then
+   `rating.Rate` (`internal/rating`, pure) applies the pairing damp, the
+   provisional rule (through `elo.Calculate`) and the scope, and returns the rows
+   to write with their deltas. A damped table logs `ranked match damped` at Info:
+   it is the policy working, not a fault.
 6. **Write** each seat's rating (`applyRatings` -> `writeRanking`, which also bumps
    `matches_played`), then the match, the participants, the places and the deltas
    (`recordMatch`).
@@ -1074,7 +1170,7 @@ with `CONSTRAINT elo_valid CHECK (elo >= 0 AND elo <= 4000)` - deliberately the
 wider bound, so application policy can move the floor without a migration.
 
 **Provisional is a per-pair rule, not a per-account flag.** `elo.Player` carries
-`Provisional`, set by the repository from `MatchesPlayed < provisionalMatches`
+`Provisional`, set by `rating.Rate` from `MatchesPlayed < rating.ProvisionalMatches`
 (5; a missing ranking row counts as provisional). `unpaidAgainstProvisional`
 clamps the **established** side's delta to at most zero on a mixed pair, while
 letting losses through unchanged. Identity is a free SSH keypair, so a fresh 1500
@@ -1093,7 +1189,7 @@ it reads the last day's ranked traffic, not a veteran's whole history. `{A,B}`, 
 so a cap on set repeats handed each its own budget and two accounts could farm
 each other forever by rotating a third alt through. The window spans every game
 for the same reason: switching game does not make it legitimate. At
-`maxSamePairingPerDay` (3) the table is **damped** - the count is per pair but the
+`rating.MaxSamePairingPerDay` (3) the table is **damped** - the count is per pair but the
 damp is table-wide, so nobody's `elo` is written, only `matches_played`, which is
 what still lets a provisional account graduate.
 
@@ -1130,7 +1226,7 @@ before the erasure committed re-caches the erased name for the whole TTL.
   exactly 40 characters, which has to satisfy `varchar(40)` and the CHECK that
   allows either a chosen name of at most 16 characters or that exact `deleted_`
   form), and `last_seen_at` becomes NULL. `ValidateUsername` refuses the
-  `deleted_` prefix so nobody can squat it. The row is updated **by column**, not
+  `deleted_` prefix, in any case, so nobody can squat it. The row is updated **by column**, not
   `Save`d from a loaded struct, because the save hooks would walk the
   associations the transaction just deleted and write them back, and `Unscoped`,
   so an operator soft-delete does not make a still-named account look unknown.
@@ -1146,10 +1242,10 @@ after.
 
 ## 7. Catalog - single registration point
 
-`internal/catalog/catalog.go` `All` is the only place a game is declared. Each
+`internal/catalog/catalog.go` `Games` is the only place a game is declared. Each
 entry embeds a `game.Module` (`Name`, `Slug`, `Factory`) **and** carries the TUI
-view constructor, `View(global, engine, slug)`. `cmd/server` builds the registry
-with `catalog.NewRegistry()`; `internal/tui/app.go` registers the routes. A missing
+view constructor, `View(global, table, slug)`, `table` a `*game.BoundEngine`.
+`cmd/server` builds the registry with `catalog.NewRegistry()`; `internal/tui/app.go` registers the routes. A missing
 field or duplicate slug fails `catalog_test.go`, and `game.NewRegistry` panics on
 either at boot. Copying an entry and changing only the
 rules still compiles, so keep the pair in lockstep by hand.
@@ -1173,13 +1269,15 @@ rules still compiles, so keep the pair in lockstep by hand.
 | `internal/lobby` | tables, grace, finalize orchestration | card rules |
 | `internal/game` | engine + rules | db, tui, routes, lobby |
 | `internal/game/shed` | what the shedding games (crazy eights, uno) share | engine internals |
-| `internal/game/gametest` | the shared rules suites (`RunShed`, `SoakTimeoutIsAlwaysLegal`) | production imports |
+| `internal/game/gametest` | the shared rules suites (`RunShed`, `SoakTimeoutIsAlwaysLegal`) and test helpers every rules package uses (`Extra`, `ForeignAction`, `LogSink`) | production imports |
 | `internal/db` | models + repository **interfaces** + auth sentinels | GORM queries |
 | `internal/repository` | GORM implementations | SSH / TUI |
 | `internal/catalog` | the game list | runtime state |
 | `internal/httpapi` | read-only stats/leaderboard | writes / auth |
 | `internal/deck` | shared card helpers | game-specific rules |
+| `internal/rating` | the ladder policy: which seats a ranked result writes, and to what (`rating.Rate`) | locks, reads, writes - the repository keeps those |
 | `internal/elo` | rating maths | I/O of any kind |
+| `internal/ratelimit` | sliding windows, the /64 (`NetKey`) and /48 (`WideKey`) keys | deciding what an unkeyable address means |
 | `internal/broadcaster` | fan-out | domain knowledge |
 
 The two rules that matter are lint rules, not conventions -
@@ -1247,10 +1345,13 @@ client cannot prepend its own value. With `PROXY_TRUSTED_CIDRS` set
 networks and anyone else is keyed on its socket address: `6970` is reachable from
 every container on the backend's networks, not just nginx.
 
-**The stats API makes no spans.** `otelhttp` runs with a noop tracer provider:
-every website visitor polls this API, and a span per request put each visitor's
-address and User-Agent into Tempo. The request metrics, which carry neither, are
-what an operator reads. `otelhttp.WithServerName("stats-api:80")` pins
+**The stats API makes no spans.** `otelhttp` runs with a noop tracer provider and
+an empty propagator: every website visitor polls this API, and a span per request
+put each visitor's address and User-Agent into Tempo; an extracted `traceparent`
+made the repository's spans children of a trace id the visitor chose. The one
+span left on this path is `db.BestPlayers`, which covers only the query a cache
+miss runs (at most once per 5-minute TTL per game) and carries no visitor data.
+The request metrics, which carry neither, are what an operator reads. `otelhttp.WithServerName("stats-api:80")` pins
 `server.address` and, through the explicit port, `server.port`; without it otelhttp
 labels every request metric from the client's own `Host` header - an unbounded
 name and up to 65535 port series. `internal/httpapi/telemetry_test.go` asserts
@@ -1260,9 +1361,13 @@ both: no spans, and only allow-listed `http.server.*` attributes.
 
 ## 10. Observability and retention
 
-The app **pushes** OTLP to Alloy; Alloy scrapes only the host. Nothing pulls the
-Go process, and there is no `/metrics` and no pprof endpoint. There is no
-Prometheus client library in `go.mod`.
+The app **pushes** OTLP to Alloy, which remote-writes its metrics, and the host's,
+to Prometheus. Nothing pulls the Go process, and there is no `/metrics` and no
+pprof endpoint in the shipped binary (a `-tags pprof` build serves one on loopback,
+for profiling under `cmd/loadtest`); there is no Prometheus client library in `go.mod`. Prometheus does
+scrape the pipeline itself - Alloy, Loki, Tempo and Alertmanager, each cut down to
+the few series the pipeline alerts and memory panels read - so a dead component is
+`up == 0` rather than a dashboard that quietly goes flat.
 
 | Signal | Store | Retention | Set in |
 |---|---|---|---|
@@ -1270,6 +1375,7 @@ Prometheus client library in `go.mod`.
 | Traces | Tempo | **48 hours** | `internal/config/tempo/tempo.yaml` `block_retention: 48h` |
 | Metrics | Prometheus | **30 days** (8 GB cap) | `compose.yaml` `--storage.tsdb.retention.time=30d` |
 | Container stdout | Docker json-file | 3 x 10 MB | `compose.yaml` `x-logging` |
+| Alert state (silences, notification log) | Alertmanager | 5 days (its `--data.retention` default) | `alertmanager-data` volume |
 
 Loki's `retention_period` alone only affects queries; the compactor block is what
 actually deletes chunks, and the file says so.
@@ -1277,9 +1383,22 @@ actually deletes chunks, and the file says so.
 Tracing is honest about its own extent: one `ssh.session` span per session and ten
 `db.*` spans. The stats API makes none (§9). `game`, `lobby` and `tui` are
 untraced, so a trace shows a session and the database work under it,
-not the game events between them. Prometheus alerts live in
-`internal/config/prometheus/alerts.yml`; `MatchResultLost` and
-`BackendMetricsAbsent` are the two that page.
+not the game events between them. Every span is kept
+(`ParentBased(AlwaysSample)`, set explicitly so `OTEL_TRACES_SAMPLER` cannot turn
+it off). The resource is `service.name=tty-cards-server` plus
+`deployment.environment.name`, so Prometheus' `job` and Loki's `service_name` are
+`tty-cards-server` in every environment. Prometheus alerts live in
+`internal/config/prometheus/alerts.yml` (the application) and `alerts-pipeline.yml`
+(the telemetry pipeline watching itself: a target down, dropped or refused logs and
+spans, failing remote write or alert delivery, a filling disk), each with promtool
+unit tests beside it; `MatchResultLost`, `BackendMetricsAbsent` and `DiskFilling`
+are the ones that page. Prometheus sends them to Alertmanager
+(`internal/config/alertmanager/alertmanager.yml`), which groups and dedupes them and
+delivers them to Telegram. The bot token and chat id are files on the host, read
+only when a notification is sent (steps in [`SECURITY.md`](SECURITY.md) "Alert
+delivery"), so no secret lives in the repo and a host without them still runs.
+The `increase()` alerts fire on a first event because `Setup` exports a zero for
+every series they watch - a counter has no series until its first `Add`.
 
 Two decisions worth knowing before you add an attribute:
 
@@ -1323,11 +1442,12 @@ new key is a new account and therefore a **rating reset**; losing the key loses
 the account; and because minting an identity is free, every anti-farm rule in §6.5
 exists.
 
-**Registration is open on purpose, but rate limited.** A separate limiter caps
-new accounts at `REGISTRATION_LIMIT` per `REGISTRATION_WINDOW` (5 per hour) per
-client network, consulted only on the first-sight branch, after the name has
-passed validation. For a private instance, put it behind a firewall, a VPN or an
-allowlist.
+**Registration is open on purpose, but rate limited.** A separate budget caps new
+accounts per `REGISTRATION_WINDOW` (1 hour) at `REGISTRATION_LIMIT` (5) per client
+network, `REGISTRATION_LIMIT_WIDE` (20) per IPv6 /48 and
+`REGISTRATION_GLOBAL_LIMIT` (600) server-wide, consulted only on the first-sight
+branch, after the name has passed validation (§2, "Defence in depth"). For a
+private instance, put it behind a firewall, a VPN or an allowlist.
 
 **One live session per account, and the second wins.** A half-open TCP session
 used to lock a player out of their own seat for the whole 90-second grace window,
@@ -1352,12 +1472,15 @@ volumes and every secret in the compose file. A password there would protect
 nothing and add one more credential to rotate and forget. Widening the binding
 without adding authentication is a vulnerability, and the compose comment says so.
 
-**TLS is not terminated here yet.** The apex cannot sit behind Cloudflare,
-because a proxied hostname resolves to Cloudflare's IPs and `ssh tty.cards` would
-follow it there; so the apex is grey-clouded and needs a publicly trusted
-certificate of its own. The `:443` block in `nginx.conf` is written and commented
-out. Until it is enabled the website's live-stats panel, served over https, cannot
-call the plaintext origin and says "server unreachable".
+**nginx terminates TLS on the apex itself.** The apex cannot sit behind
+Cloudflare, because a proxied hostname resolves to Cloudflare's IPs and
+`ssh tty.cards` would follow it there; so the apex is grey-clouded and needs a
+publicly trusted certificate of its own. `proxy-certs` writes a self-signed
+placeholder so nginx can boot before one exists, `certbot` obtains and renews the
+real one over the http-01 webroot, and nginx reloads when the file changes
+(README, "TLS on the apex"). Port 80 only answers the challenge, a liveness probe
+and a redirect; HSTS starts at `max-age=300` and is raised by hand once a renewal
+has gone through.
 
 **Container hardening.** The backend image is `FROM scratch` with a `nonroot`
 (uid 65532) passwd entry and no shell; the container runs `read_only: true`,
@@ -1365,16 +1488,16 @@ call the plaintext origin and says "server unreachable".
 re-executing the server binary with `-healthcheck`, because there is no wget in
 the image. Every compose image is pinned by digest. nginx keeps only the four
 capabilities its master process needs (`NET_BIND_SERVICE`, `CHOWN`, `SETUID`,
-`SETGID`). Alloy reads container logs through `docker-socket-proxy` on an internal
-network rather than mounting the Docker socket, because `:ro` on a socket restricts
-nothing and container inspect includes every container's environment.
+`SETGID`). Alloy reads container logs through `docker-socket-proxy`
+(`wollomatic/socket-proxy`) on an internal network rather than mounting the Docker
+socket, because `:ro` on a socket restricts nothing; the proxy passes only the
+GET/HEAD paths Alloy makes and answers Alloy alone, because container inspect
+includes every container's environment (§2).
 
-One acknowledged debt, named in `compose.yaml`: the `migrate` service takes the
-database password in its argv, so it is visible in `ps` on the host and in
-`docker inspect`. The image is `FROM scratch` and cannot assemble a DSN from a
-secret itself. The two real fixes are `PGPASSWORD` or running migrations from the
-host, and the comment says neither has been done because neither can be verified
-without bringing the stack up.
+The `migrate` service takes the database password as `PGPASSWORD`, not in its
+`-database` URL, which would be argv - visible in `ps` on the host and in
+`docker inspect`. migrate's driver is lib/pq, which reads `PGPASSWORD` when the URL
+carries none, and CI asserts the URL carries none.
 
 ---
 
@@ -1415,14 +1538,17 @@ without bringing the stack up.
     miss is charged once per seat-turn.
 18. Every TUI feed message carries the channel that delivered it; a view drops one
     stamped with any other.
+19. The floor tier (120x40) times `MAX_CONNECTIONS`, plus `extraCellBudget`, has to
+    fit `GOMEMLIMIT`, and `cellBudget` has to fit the cores: raise one only with the
+    others, after a load test (`BenchmarkSessionMemory`, `cmd/loadtest`).
 
 ---
 
 ## 13. Reading the call graph
 
-The repo is indexed by GitNexus (`.gitnexus/`, local, not committed). Two seams
-matter more than any single query result, because channel receives and
-`time.AfterFunc` do not become CALLS edges.
+The repo is indexed by code-review-graph (`.code-review-graph/`, local, not
+committed). Two seams matter more than any single query result, because channel
+receives and `time.AfterFunc` do not become call edges.
 
 **There is no static path from `BoundEngine.Submit` to `finalizeFinishedGame`.**
 The engine broadcasts `EventGameEnded`; a different goroutine
@@ -1456,7 +1582,7 @@ releaseSession
 Re-index after a large merge:
 
 ```bash
-node .gitnexus/run.cjs analyze --index-only
+uvx code-review-graph update
 ```
 
 Absent edges across channels and timers mean "dynamic hop", not "dead code".

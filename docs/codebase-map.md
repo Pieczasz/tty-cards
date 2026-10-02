@@ -6,16 +6,16 @@ owner of facts. Every section links to the document that owns the detail
 ([`docs/README.md`](README.md) "Which document owns which fact"). When this file
 and the code disagree, the code wins and this file is the one to fix.
 
-*Snapshot: commit `3ab702e` (2026-09-23, branch `fix/review-2026-09`). Regenerate
-the numbers with the commands in [Keeping this current](#9-keeping-this-current).*
+*Snapshot: the working tree on `905e8a1` (2026-09-30, branch `fix/review-2026-09`).
+Regenerate the numbers with the commands in [Keeping this current](#9-keeping-this-current).*
 
 | | |
 |---|---|
-| Go packages | 40 (108 non-test files, ~19.1k lines) |
-| Test files | 158 (~33.7k lines) - tests outweigh code almost 2:1 |
+| Go packages | 41 (120 non-test files, ~20.5k lines) |
+| Test files | 181 (~39.0k lines) - tests outweigh code almost 2:1 |
 | Games | 5: Crazy Eights, Poker (NL Hold'em), Uno, Hearts, Gin Rummy |
 | Migrations | 7 up/down pairs |
-| Design records | 54 in [`decisions.md`](decisions.md) |
+| Design records | 59 in [`decisions.md`](decisions.md) |
 | Tagged releases | none - `main` is what runs |
 
 ---
@@ -35,7 +35,7 @@ C4Context
 
     Rel(player, ttycards, "ssh tty.cards", "SSH :22")
     Rel(visitor, pages, "Reads marketing site and blog", "HTTPS")
-    Rel(visitor, ttycards, "Live stats panel calls /api/v1/*", "HTTP :80")
+    Rel(visitor, ttycards, "Live stats panel calls /api/v1/*", "HTTPS :443")
     Rel(operator, ttycards, "Grafana via ssh -L 3000", "loopback only")
 ```
 
@@ -52,20 +52,22 @@ C4Container
     Person(visitor, "Visitor")
 
     Container_Boundary(host, "One VPS, docker compose") {
-        Container(nginx, "nginx 1.28", "stream + http", "Publishes 22 and 80 only, IPv4 and IPv6. limit_conn by /64, PROXY protocol to backend")
+        Container(nginx, "nginx 1.28", "stream + http", "Publishes 22, 80 and 443 only, IPv4 and IPv6. limit_conn by /64 and /48, PROXY protocol to backend, TLS for the API")
+        Container(certbot, "certbot", "Let's Encrypt", "Issues and renews the apex certificate over the webroot")
         Container(backend, "backend", "Go 1.27, cmd/server", "Wish SSH :6969 + Bubble Tea TUI + lobby/engine in RAM + stats API :6970")
         Container(migrate, "migrate", "golang-migrate", "Applies internal/db/migrations before backend starts")
         ContainerDb(pg, "Postgres 18", "SQL", "users, public_keys, games, rankings, matches, match_participants")
-        Container(alloy, "Alloy", "OTLP receiver", "Receives pushed logs/metrics/traces, scrapes host")
-        Container(sockproxy, "docker-socket-proxy", "haproxy", "GET-only containers and networks, internal network shared with Alloy alone")
+        Container(alloy, "Alloy", "OTLP receiver", "Receives pushed logs/metrics/traces, exports host metrics")
+        Container(sockproxy, "docker-socket-proxy", "wollomatic/socket-proxy", "GET/HEAD path allow-list (list, inspect, logs, networks), answers Alloy alone on an internal network")
         ContainerDb(loki, "Loki", "logs", "14 days")
         ContainerDb(tempo, "Tempo", "traces", "48 hours")
-        ContainerDb(prom, "Prometheus", "metrics", "30 days")
+        ContainerDb(prom, "Prometheus", "metrics", "30 days; scrapes the pipeline")
+        Container(am, "Alertmanager", "alerts", "Routes alerts to Telegram")
         Container(grafana, "Grafana", "dashboards", "127.0.0.1:3000 only")
     }
 
     Rel(player, nginx, "SSH", ":22")
-    Rel(visitor, nginx, "GET /api/", ":80")
+    Rel(visitor, nginx, "GET /api/", ":443")
     Rel(nginx, backend, "SSH + PROXY header, edge network only", ":6969")
     Rel(nginx, backend, "HTTP, X-Forwarded-For from $remote_addr", ":6970")
     Rel(alloy, sockproxy, "container discovery and logs", ":2375")
@@ -75,6 +77,8 @@ C4Container
     Rel(alloy, loki, "logs")
     Rel(alloy, tempo, "traces")
     Rel(alloy, prom, "remote write")
+    Rel(prom, am, "alerts")
+    Rel(certbot, nginx, "certificate via the proxy-tls volume")
     Rel(grafana, loki, "query")
     Rel(grafana, tempo, "query")
     Rel(grafana, prom, "query")
@@ -121,6 +125,7 @@ flowchart TD
         shed["internal/game/shed<br/>shedding-game helpers"]
         deck["internal/deck"]
         elo["internal/elo"]
+        rating["internal/rating<br/>ladder policy, pure"]
         bc["internal/broadcaster"]
     end
 
@@ -148,7 +153,7 @@ flowchart TD
     catalog --> game & rules & router & vgames
     vgames --> vgame & rules & game & deck & comp & router & styles
     vgame --> views & game & deck & comp & router & styles & obs
-    vother --> views & lobby & game & db & comp & router & styles
+    vother --> views & lobby & game & db & comp & router & styles & obs
     views --> lobby & game & router & styles
     router --> lobby & game & db & styles
     comp --> deck & styles
@@ -159,7 +164,8 @@ flowchart TD
     gametest --> game & deck & shed
     tuitest --> styles
     testutil --> game
-    repo --> db & elo
+    repo --> db & elo & rating & obs
+    rating --> elo
     obs --> cfg
 ```
 
@@ -179,6 +185,9 @@ What the arrows prove:
   lobby's job. `router.GlobalContext` carries `*lobby.Manager`, `db.Profiles` and
   `db.Leaderboard`, nothing else that writes
   ([#50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface)).
+- **`internal/rating` decides, `internal/repository` stores.** It imports only
+  `elo` (`depguard` rule `rating-is-pure`), so the ladder rules are tested without
+  a database ([#56](decisions.md#56-the-rating-policy-is-a-pure-package)).
 - **`internal/db` imports nothing of ours.** `repository.Connect` takes a DSN and
   pool settings, so the contract no longer reaches into `config`.
 
@@ -426,7 +435,7 @@ classDiagram
         Close()
     }
     class Entry {
-        <<catalog.All>>
+        <<catalog.Games>>
         game.Module
         Name string
         Slug string
@@ -518,7 +527,7 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 |---|---|---|
 | Strategy | `game.Rules`, five implementations | a sixth game touches the engine in no way |
 | Optional interface (capability probe) | `TurnTimeoutHandler`, `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface. No timeout handler means no clock |
-| Single registration point | `catalog.All`, each `Entry` embedding a `game.Module` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs, and `game.NewRegistry` panics on a half-declared or duplicate module |
+| Single registration point | `catalog.Games`, each `Entry` embedding a `game.Module` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs, and `game.NewRegistry` panics on a half-declared or duplicate module |
 | Facade | `game.BoundEngine` | the safe path is the default; `Frame`'s callback is the one way to whole-table state, and there is no `Engine()` escape hatch ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
 | Embedded base type | `gameview.Session` | every view gets `Init`, binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free; `gameview.RenderHandOver` and `ChoicePicker` are the shared hand-over screen and suit/colour picker |
 | Observer, latest-wins | `broadcaster.Broadcaster[T]`, reached only through `Engine.Subscribe`/`Unsubscribe`/`Dropped`/`SubscriberCount` | a slow SSH client can never stall the engine ([#3](decisions.md#3-latest-wins-broadcaster-and-subscribe-returns-an-error)), and no view can publish on or close a table's feed ([#51](decisions.md#51-the-engine-hands-out-subscriptions-not-its-broadcaster)) |
@@ -558,14 +567,13 @@ process.
 | Web or HTTP game client | the SSH terminal is the product | [`architecture.md` §1](architecture.md#1-what-this-is) |
 | Passwords, email, account recovery | identity is a key fingerprint | [#16](decisions.md#16-identity-is-an-ssh-key-fingerprint) |
 | Writes or auth on the stats API | narrowness is what makes it safe unauthenticated | [`architecture.md` §9](architecture.md#9-stats-api---internalhttpapi) |
-| `/metrics`, pprof | the app pushes OTLP; nothing pulls it | [`architecture.md` §10](architecture.md#10-observability-and-retention) |
+| `/metrics`, pprof in production | the app pushes OTLP; nothing pulls it (pprof is a loopback-only `-tags pprof` build) | [`architecture.md` §10](architecture.md#10-observability-and-retention) |
 
 ### 8.2 Known open items (not by design)
 
-- **TLS on the apex is not configured.** The `:443` block in
-  `internal/config/nginx.conf` is commented out. Until it lands, the `https` site's
-  live-stats panel cannot call `http://tty.cards/api` and shows "server
-  unreachable". Recorded as open in [#18](decisions.md#18-tls-is-not-terminated-here-yet-and-the-apex-cannot-sit-behind-cloudflare).
+- **HSTS is still at `max-age=300`.** It is raised by hand once the first automatic
+  certificate renewal has gone through
+  ([#58](decisions.md#58-tls-on-the-apex-a-placeholder-first-certbot-over-the-webroot-a-reload-on-change)).
 - **No tagged releases.** The changelog has only `[Unreleased]`, and there are no
   git tags.
 - **Tracing stops at the session and the database.** `game`, `lobby` and `tui` are
@@ -578,7 +586,7 @@ process.
   existing account, so changing laptops resets every rating.
 - **`web/README.md` is the Astro starter template.** The real brief is `web/CLAUDE.md`.
 - **The catalog lockstep hazard is accepted, not solved.** Copying an entry and
-  changing only `Rules` compiles ([#6](decisions.md#6-catalogall-is-the-single-registration-point-and-the-lockstep-hazard-is-accepted)).
+  changing only `Rules` compiles ([#6](decisions.md#6-cataloggames-is-the-single-registration-point-and-the-lockstep-hazard-is-accepted)).
 
 ### 8.3 Not built, and no decision either way
 
@@ -590,33 +598,30 @@ invites (beyond sharing a lobby code), tournaments, replays.
 These are suggestions ranked by value over cost, not commitments. Each names the
 seam that already exists for it.
 
-1. **Terminate TLS on the apex** with certbot and uncomment the `:443` block. It
-   unblocks the live-stats panel and needs no Go change.
-2. **Link a second key to an account.** An authenticated session could add a
+1. **Link a second key to an account.** An authenticated session could add a
    `public_keys` row for a new fingerprint. The schema already allows many keys per
    user. Mind the anti-farm model: linking must not let one person merge alts.
-3. **Tag a first release** and cut the changelog under it.
-4. **Spectator seats.** The pieces exist. `StateSnapshot` is already the redaction
+2. **Tag a first release** and cut the changelog under it.
+3. **Spectator seats.** The pieces exist. `StateSnapshot` is already the redaction
    boundary, and the broadcaster has `+8` subscriber headroom. What is missing is a
    read-only binding that never exposes a hand, plus a lobby route to reach it.
-5. **Bots to fill a table.** Every game already ships a legal, safe move in
+4. **Bots to fill a table.** Every game already ships a legal, safe move in
    `TimeoutAction`, which is soak-tested to pass `ValidateAction`. A bot seat could
    start by submitting exactly that. It must stay out of ranked play.
-6. **Spans for lobby start and finalize.** Two spans would make a lost match
+5. **Spans for lobby start and finalize.** Two spans would make a lost match
    visible in Tempo, not only as the `MatchFinalize(outcome="dropped")` metric.
-7. **Retention for dormant accounts**, if the privacy policy needs one.
-8. **Horizontal scale only when one VPS is not enough.** The seams are
+6. **Retention for dormant accounts**, if the privacy policy needs one.
+7. **Horizontal scale only when one VPS is not enough.** The seams are
    `broadcaster.Broadcaster[T]` and `Manager.lobbies`/`playerLobby`; the hard part is
    moving the lock-order guarantees across a network ([`onboarding.md` §5](onboarding.md#5-premises-that-do-not-hold)).
 
 ## 9. Keeping this current
 
-Two code graphs index this repository. Both are local and gitignored.
+One code graph indexes this repository. It is local and gitignored.
 
 | Tool | Refresh | Good for |
 |---|---|---|
-| GitNexus (`.gitnexus/`) | `node .gitnexus/run.cjs analyze --index-only` | `impact`, `context`, `query`, `detect-changes` - required by `CLAUDE.md` before edits |
-| code-review-graph (`.code-review-graph/`) | `code-review-graph update` (full: `build`) | communities, flows, hub and bridge nodes, `architecture`, MCP tools via `.mcp.json` |
+| code-review-graph (`.code-review-graph/`) | `uvx code-review-graph update` (full: `build`) | `query callers_of`/`tests_for`, `impact`, communities, flows, hub and bridge nodes, `architecture`, MCP tools via `.mcp.json` |
 
 Regenerate the package diagram in §3 from the compiler:
 
@@ -633,5 +638,3 @@ Caveats when reading graph output for Go:
 - **Same-named symbols merge.** Its top hub, `Equal`, is `Player.Equal` fused with
   testify's `assert.Equal`. The meaningful bridges it reports are
   `FinalizeRankedMatch`, `updateRankings` and `Lobby.ToggleReady`.
-- **GitNexus truncates flows.** Its analyze log says so. An absent flow is not
-  an absent code path.
