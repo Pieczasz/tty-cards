@@ -1,13 +1,13 @@
 {
   "annotations": {"list": []},
-  "description": "Application metrics for terminal-card.",
+  "description": "Application metrics for tty-cards.",
   "editable": true,
   "graphTooltip": 0,
   "schemaVersion": 39,
-  "tags": ["terminal-card"],
+  "tags": ["tty-cards"],
   "time": {"from": "now-6h", "to": "now"},
   "timezone": "browser",
-  "title": "Terminal Card - App Usage",
+  "title": "tty cards - App Usage",
   "uid": "tc-app-usage",
   "version": 1,
   "panels": [
@@ -20,19 +20,19 @@
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
       "options": {"showThresholdLabels": false, "showThresholdMarkers": true},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "terminalcard_ssh_sessions_active"}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ttycards_ssh_sessions_active"}
       ]
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Games started (since deploy)",
+      "title": "Games started (time range)",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "terminalcard_games_started_total"}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(increase(ttycards_games_started_total[$__range]))"}
       ]
     },
     {
@@ -44,7 +44,7 @@
       "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(terminalcard_games_started_total[5m])"}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (game_type) (rate(ttycards_games_started_total[5m]))", "legendFormat": "{{game_type}}"}
       ]
     },
     {
@@ -56,7 +56,7 @@
       "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(terminalcard_ratelimit_rejects_total[5m])"}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(ttycards_ratelimit_rejects_total[5m])"}
       ]
     },
     {
@@ -74,13 +74,65 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Go heap in-use (bytes)",
+      "title": "Go runtime memory in use, by type",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
       "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "go_memory_used_bytes"}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (go_memory_type) (go_memory_used_bytes)", "legendFormat": "{{go_memory_type}}"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "SSH session duration (1h window)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.5, sum by (le) (rate(ttycards_ssh_session_duration_seconds_bucket{outcome!~\"rejected.*|auth_failed\"}[1h])))", "legendFormat": "p50"},
+        {"refId": "B", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(ttycards_ssh_session_duration_seconds_bucket{outcome!~\"rejected.*|auth_failed\"}[1h])))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Lobby time to start (1h window)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.5, sum by (le) (rate(ttycards_lobby_time_to_start_seconds_bucket[1h])))", "legendFormat": "p50"},
+        {"refId": "B", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(ttycards_lobby_time_to_start_seconds_bucket[1h])))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Database pool connections",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ttycards_db_pool_connections_used", "legendFormat": "used"},
+        {"refId": "B", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ttycards_db_pool_connections_idle", "legendFormat": "idle"},
+        {"refId": "C", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ttycards_db_pool_connections_max", "legendFormat": "max"}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Ranked matches damped (anti-farm cap), per hour",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (game_type) (increase(ttycards_match_damped_total[1h]))", "legendFormat": "{{game_type}}"}
       ]
     }
   ]

@@ -1,0 +1,86 @@
+# The telemetry pipeline watching itself. Without these, a stopped Alloy, a Loki
+# refusing pushes or a full disk shows up only as dashboards that quietly go flat.
+groups:
+  - name: pipeline
+    rules:
+      # Only the directly scraped jobs have an up{} (prometheus.yml); the host
+      # exporter's travels by remote write, so its absence is the next rule.
+      - alert: PipelineTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "{{ $labels.job }} is down"
+
+      - alert: HostMetricsAbsent
+        expr: absent(node_load1)
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "no host metrics are arriving from Alloy"
+
+      - alert: LogsDropped
+        expr: sum by (reason) (increase(loki_write_dropped_entries_total[10m])) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Alloy dropped container log lines ({{ $labels.reason }})"
+
+      - alert: LokiDiscardingLogs
+        expr: sum by (reason) (increase(loki_discarded_samples_total[10m])) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Loki refused log lines ({{ $labels.reason }})"
+
+      # Both halves of "OTLP data did not arrive": the receiver refused it (memory
+      # limiter), or it was sent and failed after every retry. One `or` per metric:
+      # increase() drops the name, so a single regex selector would collide.
+      - alert: TelemetryExportFailing
+        expr: >-
+          sum by (component_id) (increase(otelcol_exporter_send_failed_log_records_total[10m])) > 0
+          or sum by (component_id) (increase(otelcol_exporter_send_failed_spans_total[10m])) > 0
+          or sum by (component_id) (increase(otelcol_receiver_refused_log_records_total[10m])) > 0
+          or sum by (component_id) (increase(otelcol_receiver_refused_spans_total[10m])) > 0
+          or sum by (component_id) (increase(otelcol_receiver_refused_metric_points_total[10m])) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "{{ $labels.component_id }} is losing telemetry"
+
+      - alert: RemoteWriteFailing
+        expr: increase(prometheus_remote_storage_samples_failed_total[10m]) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Alloy cannot write metrics to Prometheus"
+
+      # The alloy-data volume sits on Docker's data root, the disk every volume
+      # (Postgres, Loki, Tempo, Prometheus) and every container log fills.
+      - alert: DiskFilling
+        expr: >-
+          node_filesystem_avail_bytes{mountpoint="/var/lib/alloy/data"}
+          / node_filesystem_size_bytes{mountpoint="/var/lib/alloy/data"} < 0.15
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "Docker's disk is {{ $value | humanizePercentage }} free"
+
+      # The 8GB cap in compose.yaml is now deciding what history is kept, not the
+      # 30d retention: usually a cardinality mistake.
+      - alert: PrometheusSizeRetention
+        expr: increase(prometheus_tsdb_size_retentions_total[1h]) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Prometheus is deleting blocks to stay under its size cap"
+
+      - alert: AlertDeliveryFailing
+        expr: sum by (integration) (increase(alertmanager_notifications_failed_total[15m])) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: "Alertmanager cannot deliver to {{ $labels.integration }}"
