@@ -8,6 +8,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	lg "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -171,7 +172,7 @@ func TestRenderFigureASCII_CachesPerFontNotPerSize(t *testing.T) {
 
 	for w := 60; w <= 120; w++ {
 		for h := 5; h <= 10; h++ {
-			require.NotEmpty(t, styles.RenderFigureASCII("Terminal Cards", w, h))
+			require.NotEmpty(t, styles.RenderFigureASCII("tty cards", w, h))
 		}
 	}
 
@@ -213,4 +214,39 @@ func TestRenderFigureASCII_FallsBackByHeightToo(t *testing.T) {
 
 	assert.Equal(t, 2, styles.TitleHeightBudget(styles.MinHeight),
 		"the declared minimum terminal gets a plain title")
+}
+
+// A player's name is drawn with RenderFigureUncached so that no account can add an
+// entry to the shared banner cache.
+//
+//nolint:paralleltest // mutates the package-wide banner cache
+func TestRenderFigureUncached_LeavesTheCacheAlone(t *testing.T) {
+	styles.ResetFigureCacheForTest()
+	for _, name := range []string{"alice", "bobby", "carol", "david"} {
+		assert.Equal(t, styles.RenderFigureASCII(name, 120, 10), styles.RenderFigureUncached(name, 120, 10))
+		styles.ResetFigureCacheForTest()
+		require.NotEmpty(t, styles.RenderFigureUncached(name, 120, 10))
+		assert.Zero(t, styles.FigureCacheLenForTest(), "%s reached the shared cache", name)
+	}
+}
+
+// A footer too wide for its box breaks between actions: word wrapping used to leave
+// "t -" at the end of one line and "Leaderboard" at the start of the next.
+func TestWrapActions_BreaksOnlyBetweenActions(t *testing.T) {
+	t.Parallel()
+	actions := []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats", "n - New Game",
+		"f - Join Game", "p - Profile", "t - Leaderboard", "ctrl+c - Quit"}
+	footer := styles.NewTheme(true).RenderActionFooter(actions)
+
+	for _, width := range []int{30, 60, 100, 108} {
+		wrapped := styles.WrapActions(footer, width)
+		var seen []string
+		for line := range strings.Lines(wrapped) {
+			line = strings.TrimRight(line, "\n")
+			assert.LessOrEqual(t, lg.Width(line), width, "a line is wider than %d", width)
+			seen = append(seen, strings.Split(ansi.Strip(line), " | ")...)
+		}
+		assert.Equal(t, actions, seen, "at %d an action was split or lost", width)
+	}
+	assert.Equal(t, footer, styles.WrapActions(footer, 500), "a footer that fits is left alone")
 }

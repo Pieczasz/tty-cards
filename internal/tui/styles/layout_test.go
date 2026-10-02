@@ -237,7 +237,7 @@ func TestRenderMainLayout_HonoursAvailableContentHeight(t *testing.T) {
 	theme := styles.NewTheme(true)
 	// A long single line that fits 200 columns and wraps at 64: the wrapping header is
 	// the regression this protects.
-	header := "Terminal Cards - the lobby you are in, the game you picked and the seat you hold"
+	header := "tty cards - the lobby you are in, the game you picked and the seat you hold"
 	footer := "n - New Game | f - Join Game | p - Profile | t - Leaderboard | ctrl+c - Quit"
 
 	sizes := []struct{ w, h int }{{w: 64, h: 20}, {w: 80, h: 24}, {w: 120, h: 50}, {w: 200, h: 60}}
