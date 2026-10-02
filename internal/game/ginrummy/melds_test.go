@@ -161,7 +161,7 @@ func TestBestMeldSplit_BeatsGreedy(t *testing.T) {
 // TimeoutAction has no recover, so the oversized path must not panic.
 func TestBestMeldSplit_OversizedHandIsAllDeadwood(t *testing.T) {
 	t.Parallel()
-	hand := deck.StandardDeck()[:maskBits+1]
+	hand := deck.Standard()[:maskBits+1]
 
 	var melds [][]deck.Card
 	var dw []deck.Card
@@ -171,7 +171,7 @@ func TestBestMeldSplit_OversizedHandIsAllDeadwood(t *testing.T) {
 	assert.Equal(t, hand, dw)
 	assert.Equal(t, sumDeadwood(hand), pts)
 
-	assert.NotPanics(t, func() { bestMeldSplit(deck.StandardDeck()[:maskBits]) },
+	assert.NotPanics(t, func() { bestMeldSplit(deck.Standard()[:maskBits]) },
 		"the largest searchable hand is still searched")
 }
 
@@ -196,7 +196,7 @@ func TestBestMeldSplit_EmptyHandLooksLikeAnyOtherEmptyResult(t *testing.T) {
 // points match the cards, and every meld is a real one.
 func TestBestMeldSplit_IsAPartition(t *testing.T) {
 	t.Parallel()
-	full := deck.StandardDeck()
+	full := deck.Standard()
 
 	rapid.Check(t, func(rt *rapid.T) {
 		size := rapid.IntRange(1, 11).Draw(rt, "size")
@@ -271,7 +271,7 @@ func FuzzBestMeldSplit(f *testing.F) {
 	f.Add([]byte{7, 8, 9, 10, 20, 33, 46, 3, 17, 51})  // a run plus scattered deadwood
 	f.Add([]byte{255, 128, 64, 32, 16, 8, 4, 2, 1, 0}) // wide spread
 
-	full := deck.StandardDeck()
+	full := deck.Standard()
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		// A hand is a set of distinct cards; duplicates in the input are dropped
 		// rather than rejected, so the fuzzer is not fighting the encoding.

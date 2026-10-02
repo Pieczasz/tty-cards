@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Match is one finished game. Ranked is whether it moved Elo.
 type Match struct {
 	gorm.Model
 	GameID       uint
@@ -14,6 +15,7 @@ type Match struct {
 	Participants []MatchParticipant `gorm:"foreignKey:MatchID"`
 }
 
+// MatchParticipant is one seat's result in a Match.
 type MatchParticipant struct {
 	MatchID   uint      `gorm:"primaryKey;autoIncrement:false"`
 	UserID    uuid.UUID `gorm:"primaryKey;autoIncrement:false;serializer:stduuid"`

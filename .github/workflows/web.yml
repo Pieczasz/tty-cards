@@ -3,8 +3,8 @@ name: Web
 # Builds the Astro site and publishes it to GitHub Pages.
 #
 # The path filter matters: without it every Go-only push would spend a Pages
-# deployment doing nothing. The mirror of this lives in test.yml, which should carry
-# `paths-ignore: ['web/**', '**.md']` so site commits do not run the Go matrix.
+# deployment doing nothing. The mirror of this lives in test.yml, which carries
+# `paths-ignore: ["web/**", "**.md"]` so site commits do not run the Go matrix.
 on:
   push:
     branches: [main]
@@ -30,16 +30,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # There is no package.json at the repo root - this is a Go module with the
           # site nested inside it - so the action has to be pointed at web/ or it
           # cannot find `packageManager` and fails to resolve a pnpm version.
           package_json_file: web/package.json
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: web/.nvmrc
           cache: pnpm
@@ -60,7 +60,7 @@ jobs:
       # build above and act purely as a gate.
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: web/dist
 
@@ -85,4 +85,4 @@ jobs:
 
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -32,7 +32,7 @@ func TestAnyScoreAtLeast(t *testing.T) {
 	}
 }
 
-// Standings and StandingScore have to agree or StandingsWithPlaces records a tie the
+// Standings and StandingScore have to agree or Engine.Standings records a tie the
 // rules never meant, so four games share this sort. Stability is the contract: equal
 // scores keep seat order, which is what makes the places deterministic.
 func TestStandingsByScore(t *testing.T) {

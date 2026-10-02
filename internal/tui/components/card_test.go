@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -45,14 +46,14 @@ func TestRenderCard_EveryCardIsDistinct(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	seen := make(map[string]deck.Card)
-	for _, c := range deck.StandardDeck() {
+	for _, c := range deck.Standard() {
 		rendered := RenderCard(theme, c, false)
 		if previous, clash := seen[rendered]; clash {
 			t.Fatalf("%v and %v render identically", previous, c)
 		}
 		seen[rendered] = c
 	}
-	require.Len(t, seen, len(deck.StandardDeck()))
+	require.Len(t, seen, len(deck.Standard()))
 }
 
 // The cache must return the same string on the miss that fills it and every hit after, or
@@ -79,7 +80,7 @@ func TestFaceCells_PipCountMatchesTheRank(t *testing.T) {
 		deck.Six: 6, deck.Seven: 7, deck.Eight: 8, deck.Nine: 9, deck.Ten: 10,
 	}
 	for rank, want := range counts {
-		rows := FaceCells(deck.Card{Rank: rank, Suit: deck.Spades}, "♠")
+		rows := faceCells(deck.Card{Rank: rank, Suit: deck.Spades}, "♠")
 		pips := 0
 		// The rank corners are the first and last rows; only the art rows carry pips.
 		for _, row := range rows[1 : len(rows)-1] {
@@ -98,9 +99,9 @@ func TestFaceCells_PipCountMatchesTheRank(t *testing.T) {
 func TestFaceCells_EveryRowIsFaceWidth(t *testing.T) {
 	t.Parallel()
 
-	for _, c := range deck.StandardDeck() {
+	for _, c := range deck.Standard() {
 		suit, _ := suitStyle(styles.NewTheme(true), c.Suit)
-		rows := FaceCells(c, suit)
+		rows := faceCells(c, suit)
 		require.Lenf(t, rows, FaceHeight, "%v row count", c)
 		for i, row := range rows {
 			assert.Lenf(t, row, FaceWidth, "%v row %d", c, i)
@@ -113,7 +114,7 @@ func TestFaceCells_CourtCardsCarryArtAndTheirSuit(t *testing.T) {
 	t.Parallel()
 
 	for _, rank := range []deck.Rank{deck.Jack, deck.Queen, deck.King} {
-		rows := FaceCells(deck.Card{Rank: rank, Suit: deck.Hearts}, "H")
+		rows := faceCells(deck.Card{Rank: rank, Suit: deck.Hearts}, "H")
 		var art strings.Builder
 		for _, row := range rows[1 : len(rows)-1] {
 			art.WriteString(strings.Join(row, ""))
@@ -131,7 +132,7 @@ func TestFaceCells_CourtCardsCarryArtAndTheirSuit(t *testing.T) {
 				}
 			}
 		}
-		assert.Equalf(t, CentreColumn, suitCol, "%v suit column", rank)
+		assert.Equalf(t, centreColumn, suitCol, "%v suit column", rank)
 	}
 }
 
@@ -145,18 +146,18 @@ func TestRenderFan_OnlyTheTopCardClosesItsEdge(t *testing.T) {
 		{Rank: deck.Three, Suit: deck.Hearts},
 	}
 
-	flat := stripANSI(RenderFan(theme, hand, -1, overlapWidth))
+	flat := tuitest.StripANSI(RenderFan(theme, hand, nil, overlapWidth))
 	assert.Equal(t, 1, strings.Count(flat, "╮"), "only the rightmost card closes")
 	wantWidth := 0
 	for i := range hand {
-		wantWidth += CardSlotWidth(i, len(hand), -1, overlapWidth)
+		wantWidth += CardSlotWidth(i, len(hand), overlapWidth, nil)
 	}
 	assert.Equal(t, wantWidth, lg.Width(flat), "the fan is as wide as it claims")
 
-	picked := stripANSI(RenderFan(theme, hand, 1, overlapWidth))
+	picked := tuitest.StripANSI(RenderFan(theme, hand, Selection(1), overlapWidth))
 	assert.Equal(t, 2, strings.Count(picked, "╮"), "the picked card closes over its neighbour")
 
-	assert.Empty(t, RenderFan(theme, nil, -1, overlapWidth), "no cards, nothing to draw")
+	assert.Empty(t, RenderFan(theme, nil, nil, overlapWidth), "no cards, nothing to draw")
 }
 
 // rankLabels replaced an exhaustive switch, so the compiler no longer catches a
@@ -176,20 +177,4 @@ func TestRankLabels_CoversAllDeckRanks(t *testing.T) {
 		assert.Falsef(t, dup, "ranks %d and %d both render as %q", prev, rank, label)
 		seen[label] = rank
 	}
-}
-
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && r == 'm':
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }

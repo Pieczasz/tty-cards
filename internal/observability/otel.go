@@ -1,3 +1,6 @@
+// Package observability owns the process's telemetry: the OTLP providers Setup
+// installs, and the app's own metric instruments, each behind a small function so
+// callers cannot attach an unbounded attribute.
 package observability
 
 import (
@@ -13,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -22,7 +24,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
-func SetupOTel(ctx context.Context, cfg *config.Config) (shutdown func(context.Context) error, err error) {
+// Setup installs the OTLP log, trace and meter providers as the otel globals and
+// starts the runtime metrics. The returned shutdown flushes all three; on error
+// everything already started has been shut down and shutdown is nil.
+func Setup(ctx context.Context, cfg *config.Config) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 	cleanup := func(ctx context.Context) error {
 		var errs error
@@ -40,7 +45,7 @@ func SetupOTel(ctx context.Context, cfg *config.Config) (shutdown func(context.C
 
 	res, err := newResource(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create otel resource failed: %w", err)
+		return nil, fmt.Errorf("create otel resource: %w", err)
 	}
 
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -72,25 +77,18 @@ func SetupOTel(ctx context.Context, cfg *config.Config) (shutdown func(context.C
 	if err := runtime.Start(runtime.WithMeterProvider(meterProvider)); err != nil {
 		return nil, fmt.Errorf("start runtime metrics: %w", err)
 	}
-	if err := registerAppMetrics(meterProvider); err != nil {
-		return nil, fmt.Errorf("register app metrics: %w", err)
-	}
 
 	return cleanup, nil
 }
 
 func newResource(cfg *config.Config) (*resource.Resource, error) {
-	version := cfg.ServiceVersion
-	if version == "" {
-		version = "0.1.0"
-	}
 	r, err := resource.Merge(resource.Default(),
 		resource.NewWithAttributes(resource.Default().SchemaURL(),
 			semconv.ServiceName(cfg.Env+"-terminal-card-server"),
-			semconv.ServiceVersion(version),
+			semconv.ServiceVersion(cfg.ServiceVersion),
 		))
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge default resource attributes: %w", err)
+		return nil, fmt.Errorf("merge default resource attributes: %w", err)
 	}
 	return r, nil
 }
@@ -102,7 +100,7 @@ func newLoggerProvider(ctx context.Context, cfg *config.Config, res *resource.Re
 	}
 	exporter, err := otlploggrpc.New(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create otlp log exporter: %w", err)
+		return nil, fmt.Errorf("create otlp log exporter: %w", err)
 	}
 	return sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),
@@ -117,7 +115,7 @@ func newTracerProvider(ctx context.Context, cfg *config.Config, res *resource.Re
 	}
 	exporter, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create otlp trace exporter: %w", err)
+		return nil, fmt.Errorf("create otlp trace exporter: %w", err)
 	}
 	return sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
@@ -132,29 +130,10 @@ func newMeterProvider(ctx context.Context, cfg *config.Config, res *resource.Res
 	}
 	exporter, err := otlpmetricgrpc.New(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create otlp metric exporter: %w", err)
+		return nil, fmt.Errorf("create otlp metric exporter: %w", err)
 	}
 	return sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
 		sdkmetric.WithResource(res),
 	), nil
-}
-
-func registerAppMetrics(mp metric.MeterProvider) error {
-	meter := mp.Meter("terminal-card")
-
-	active, err := meter.Int64ObservableGauge("terminalcard.ssh.sessions.active",
-		metric.WithDescription("Currently connected SSH sessions"))
-	if err != nil {
-		return fmt.Errorf("create sessions gauge: %w", err)
-	}
-
-	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		o.ObserveInt64(active, SSHSessionsActive.Load())
-		return nil
-	}, active)
-	if err != nil {
-		return fmt.Errorf("register metric callback: %w", err)
-	}
-	return nil
 }

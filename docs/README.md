@@ -13,7 +13,8 @@ project can live without its author.
 | Document | For | Read when |
 |---|---|---|
 | [`architecture.md`](architecture.md) | **The canonical design document.** What the system is, the topology, the session lifecycle, the engine contract, the lobby state machine, ratings, persistence, the layout budget, the security model, observability, and the invariant list | First, and again whenever you are about to change a contract |
-| [`decisions.md`](decisions.md) | One record per non-obvious choice: context, decision, consequences, where in the code. Thirty-seven of them | When the code looks wrong and you want to know whether it is deliberate |
+| [`codebase-map.md`](codebase-map.md) | C4 and UML diagrams of the whole system, what is absent on purpose, open items and candidate next steps. A map that links to the owners below | First, for the picture; then follow its links |
+| [`decisions.md`](decisions.md) | One record per non-obvious choice: context, decision, consequences, where in the code. Fifty-four of them | When the code looks wrong and you want to know whether it is deliberate |
 | [`reading-guide.md`](reading-guide.md) | An ordered, bottom-up walk through the Go packages. Per step: the files and their size, what to understand, the invariant to check, the one test that teaches it | With the code open, on your first few days |
 | [`onboarding.md`](onboarding.md) | The product story, the annotated file tree, and the three ways to run it locally | Day one, before you write anything |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to add a game, the test conventions, the size gates, commit and PR norms | Before your first pull request |

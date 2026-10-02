@@ -1,3 +1,5 @@
+// Package tui builds a session's Bubble Tea program: the router with every view
+// registered, the games' routes derived from the catalog.
 package tui
 
 import (
@@ -18,24 +20,27 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-type ModelDependencies struct {
+// Deps is what New needs from the session and the server.
+type Deps struct {
 	SessionCtx   context.Context
 	User         db.User
-	UserRepo     db.UserRepository
+	Profiles     db.Profiles
+	Leaderboard  db.Leaderboard
 	LobbyManager *internallobby.Manager
 	GameRegistry *game.Registry
 }
 
-// Model builds the session's root model. It returns the router itself rather than a
+// New builds the session's root model. It returns the router itself rather than a
 // tea.Model: the ssh layer has to Close it when the session ends, and an interface
 // value would hide the one method that releases the active view's subscription.
-func Model(deps ModelDependencies) *router.Router {
+func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
-		User:           &deps.User,
-		UserRepository: deps.UserRepo,
-		LobbyManager:   deps.LobbyManager,
-		GameRegistry:   deps.GameRegistry,
-		SessionCtx:     deps.SessionCtx,
+		User:         &deps.User,
+		Profiles:     deps.Profiles,
+		Leaderboard:  deps.Leaderboard,
+		LobbyManager: deps.LobbyManager,
+		GameRegistry: deps.GameRegistry,
+		SessionCtx:   deps.SessionCtx,
 	}
 
 	r := router.New(global)
@@ -43,7 +48,7 @@ func Model(deps ModelDependencies) *router.Router {
 	// Navigating away from a lobby unsubscribes but keeps the seat, so a player who
 	// reached a menu would never see the game start - the engine would auto-play
 	// until the idle timer took the seat.
-	seatedOr := func(fallback func(router.GlobalContext) tea.Model) func(router.GlobalContext, any) tea.Model {
+	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
 		return func(g router.GlobalContext, _ any) tea.Model {
 			if l := g.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(g)); l != nil {
 				return lobby.New(g, l)
@@ -68,16 +73,20 @@ func Model(deps ModelDependencies) *router.Router {
 
 	registerGameViews(r)
 
-	// A player who reconnected inside the disconnect grace window still occupies a
-	// lobby seat; start them there (the lobby view routes onward into a running
-	// game) instead of at a home screen that pretends nothing is happening.
-	if l := deps.LobbyManager.ResumePlayer(views.SessionPlayer(global)); l != nil {
-		r.SetInitialRoute(router.RouteLobby, l)
-	}
-
 	// No Goto here: the router builds its first view in Init, so that view's Init
 	// runs exactly once. See Router.Init.
 	return r
+}
+
+// ResumeSeat cancels the disconnect grace holding this session's seat, if any, and
+// starts the session there (the lobby view routes onward into a running game)
+// instead of at a home screen that pretends nothing is happening. It is separate
+// from New because the ssh layer may only call it once the session owns its
+// tracker slot, and must run before the router's Init.
+func ResumeSeat(r *router.Router) {
+	if l := r.Global.LobbyManager.ResumePlayer(views.SessionPlayer(r.Global)); l != nil {
+		r.SetInitialRoute(router.RouteLobby, l)
+	}
 }
 
 func registerGameViews(r *router.Router) {
@@ -87,7 +96,7 @@ func registerGameViews(r *router.Router) {
 			if !ok {
 				return home.New(g)
 			}
-			return e.View(g, engine)
+			return e.View(g, engine, e.Slug)
 		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -29,20 +30,12 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	leader := mockPlayer("leader", testutil.UID(1))
 	guest := mockPlayer("guest", testutil.UID(2))
 
-	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	registry := game.NewRegistry()
-	rules := new(MockRules)
-	rules.On("MinPlayers").Return(2).Maybe()
-	rules.On("MaxPlayers").Return(4).Maybe()
-	rules.On("InitialDeck").Return(deck.StandardDeck()).Maybe()
-	rules.On("InitialDealCount").Return(2).Maybe()
-	rules.On("OnGameStart", mock.Anything).Return(nil).Maybe()
-	rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
-	rules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest}).Maybe()
-	registerGame(registry, "MockGame", rules)
+	// The standings are the seats in order: leader, then guest.
+	registry := gameRegistry("MockGame", stubRules{minPlayers: 2, maxPlayers: 4})
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -69,9 +62,7 @@ func TestConcurrent_FinalizeRacesRemoveLobby(t *testing.T) {
 	// The hand really is over, so both racers have a result to persist: the watcher
 	// through the event, or - if RemoveLobby closes the feed first and the event is
 	// never delivered - through the finished engine it finds when the feed ends.
-	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
-
-	go engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
 	go m.RemoveLobby(l.Code())
 
 	select {
@@ -84,8 +75,8 @@ func TestConcurrent_FinalizeRacesRemoveLobby(t *testing.T) {
 	assert.Empty(t, recorded, "the match was recorded more than once")
 }
 
-// A single hand produces a single row no matter how many times the terminal event is
-// published: the engine ends once, the watcher stops reading after the first.
+// A single hand produces a single row no matter how many times something tries to end
+// it: the engine ends once, the watcher stops reading after the first.
 func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 	t.Parallel()
 
@@ -97,8 +88,8 @@ func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 
 	m, _, engine := newFinishedGameLobby(t, repo)
 
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+	endHand(engine, stubWin)
+	endHand(engine, stubWin)
 
 	select {
 	case <-calls:
@@ -134,7 +125,7 @@ func TestShutdown_MatchEndingDuringDrainIsNotSilentlyDropped(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonWin})
+			endHand(engine, stubWin)
 		}()
 		drained := m.WaitForFinalizers(2 * time.Second)
 		<-done
@@ -189,13 +180,13 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
-	require.Equal(t, InGame, l.state)
+	require.Equal(t, inGame, l.state)
 
-	require.ErrorContains(t, m.Kick(leader, guest), "cannot kick during a game")
+	require.ErrorIs(t, m.Kick(leader, guest), errKickInGame)
 	assert.True(t, l.HasPlayer(guest), "the target is still at the table")
 	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "and still indexed to it")
 
@@ -216,9 +207,9 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	m := newTestManager(t, nil)
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
-	l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
 	require.NoError(t, err)
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	observer, err := l.Subscribe("observer")
 	require.NoError(t, err)
@@ -227,7 +218,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	require.NoError(t, l.ToggleReady(leader, game.NewRegistry()))
 	require.Error(t, l.ToggleReady(guest, game.NewRegistry()))
 
-	assert.Equal(t, []string{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
+	assert.Equal(t, []EventType{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
 		"the second flip was committed without telling anyone")
 	assert.True(t, l.IsReady(guest), "and it really was committed")
 }
@@ -258,8 +249,9 @@ func TestWaitForFinalizers_TimeoutDoesNotLeakItsWaiter(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(2*time.Second))
 }
 
-// A ranked hand the deploy interrupted has no honest winner, so it is history only.
-func TestFinalize_InterruptedRankedMatchIsRecordedWithoutElo(t *testing.T) {
+// A ranked hand that ends while the server shuts down has no honest winner - teardown
+// order, not play, decided it - so it is history only.
+func TestFinalize_RankedMatchEndingDuringShutdownIsRecordedWithoutElo(t *testing.T) {
 	t.Parallel()
 
 	repo := new(MockMatchRepo)
@@ -271,12 +263,12 @@ func TestFinalize_InterruptedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 	m, _, engine := newFinishedGameLobby(t, repo)
 	m.BeginShutdown()
 
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonForfeit})
+	engine.RemovePlayer("guest") // the last seat standing is a forfeit
 
 	select {
 	case <-recorded:
 	case <-time.After(2 * time.Second):
-		t.Fatal("the interrupted match was never recorded")
+		t.Fatal("the match ending during shutdown was never recorded")
 	}
 	require.True(t, m.WaitForFinalizers(2*time.Second))
 	repo.AssertNotCalled(t, "FinalizeRankedMatch",
@@ -294,7 +286,7 @@ func TestFinalize_RulesErrorIsRecordedWithoutElo(t *testing.T) {
 		Return(nil)
 
 	_, _, engine := newFinishedGameLobby(t, repo)
-	engine.Broadcaster().Broadcast(game.Event{Type: game.EventGameEnded, Reason: game.EndReasonRulesError})
+	endHand(engine, stubBoom)
 
 	select {
 	case <-recorded:
@@ -313,10 +305,10 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
-	require.Equal(t, InGame, l.state)
+	require.Equal(t, inGame, l.state)
 
 	m.DisconnectPlayer(guest)
 
@@ -337,7 +329,7 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -357,7 +349,7 @@ func TestResumePlayer_AfterExpireClaimReturnsNil(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -381,7 +373,7 @@ func TestResumePlayer_TakeoverWithoutPendingLeave(t *testing.T) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 
@@ -393,8 +385,8 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 
 	m, l, _ := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
-	require.Equal(t, Waiting, l.state)
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.Equal(t, waiting, l.state)
 
 	m.DisconnectPlayer(guest)
 
@@ -409,7 +401,7 @@ func startedGame(t *testing.T) (*Manager, *Lobby, *game.Player, *game.Player) {
 	m, l, registry := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 	require.NotNil(t, l.ActiveGame(), "the game did not start")
@@ -427,16 +419,39 @@ func pendingGrace(m *Manager, id string) bool {
 // skipped entirely when no match repository was configured. The engine then dropped
 // the seat while the lobby roster kept it, and the table could never reach all-ready
 // again.
+//
+// The turn clock is real, so this runs in a synctest bubble: the idle removal takes
+// MaxMissedTurns of one seat's turns, minutes of fake time that pass at once.
 func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 	t.Parallel()
-	m, l, _, guest := startedGame(t)
+	synctest.Test(t, func(t *testing.T) {
+		m := newTestManager(t, nil)
+		leader, guest := mockPlayer("p1", testutil.UID(1)), mockPlayer("p2", testutil.UID(2))
+		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
+		require.NoError(t, err)
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+		registry := gameRegistry("Mock", idleRules{stubRules{minPlayers: 2, maxPlayers: 2}})
+		require.NoError(t, l.ToggleReady(leader, registry))
+		require.NoError(t, l.ToggleReady(guest, registry))
+		idler, other := leader, guest
+		if l.ActiveGame().CurrentPlayerID() != leader.ID {
+			idler, other = guest, leader
+		}
 
-	l.ActiveGame().Broadcaster().Broadcast(game.Event{Type: game.EventPlayerIdle, PlayerID: guest.ID})
+		// Each seat's turn times out in turn; the first seat's third miss takes it.
+		time.Sleep(2 * game.MaxMissedTurns * game.DefaultTurnTimeout)
+		synctest.Wait()
 
-	require.Eventually(t, func() bool { return !l.HasPlayer(guest) }, 2*time.Second, 10*time.Millisecond,
-		"the engine took the seat but the lobby roster kept it")
-	assert.Nil(t, m.FindLobbyByPlayer(guest))
+		assert.False(t, l.HasPlayer(idler), "the engine took the seat but the lobby roster kept it")
+		assert.Nil(t, m.FindLobbyByPlayer(idler))
+		assert.True(t, l.HasPlayer(other), "only the idle seat leaves")
+	})
 }
+
+// idleRules puts stubRules on the turn clock: an expired turn passes.
+type idleRules struct{ stubRules }
+
+func (idleRules) TimeoutAction(*game.State) game.Action { return stubAction("pass") }
 
 // A seat is held for a reconnect because the hand is still running. Once the game is
 // over the lobby is Waiting, where DisconnectPlayer gives a seat up immediately - so a
@@ -524,7 +539,7 @@ func TestResumePlayer_DropsAStaleIndexEntry(t *testing.T) {
 	t.Parallel()
 	m, l, _ := newTestLobby(t, 3)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	l.mu.Lock()
 	l.guests = nil
@@ -571,9 +586,10 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 
 			repo := new(MockMatchRepo)
 			m := newTestManager(t, repo)
-			engine := game.NewEngine(&noStandingsRules{}, nil, deck.StandardDeck())
+			engine := game.NewEngine(&noStandingsRules{}, nil, deck.Standard())
 			t.Cleanup(engine.Close)
 
+			require.True(t, m.registerFinalizer())
 			m.finalizeFinishedGame(tt.req, engine, tt.reason)
 
 			assert.True(t, logged.contains(tt.wantLog), "the drop was silent: %s", logged.String())
@@ -588,3 +604,121 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 type noStandingsRules struct{ stubRules }
 
 func (noStandingsRules) Standings(*game.State) []*game.Player { return nil }
+
+// The finish metric is labelled with EndReason.String(). These are the labels the
+// dashboards already group by, so a rename there splits every series in two, and a
+// reason falling through to "unknown" hides a whole class of endings.
+func TestFinalize_EndReasonMetricLabelsAreStable(t *testing.T) {
+	t.Parallel()
+	for reason, want := range map[game.EndReason]string{
+		game.EndReasonWin:         "win",
+		game.EndReasonRulesError:  "rules_error",
+		game.EndReasonForfeit:     "forfeit",
+		game.EndReasonAbandoned:   "abandoned",
+		game.EndReasonInterrupted: "interrupted",
+		game.EndReasonUnknown:     "unknown",
+	} {
+		assert.Equal(t, want, reason.String())
+	}
+}
+
+// The watcher reopens the table before it persists, and reopening waits on m.mu in
+// releaseHeldSeats. Registering the finalizer only after that left the drain a window
+// to see zero writes in flight and stop accepting them: the match was dropped at
+// shutdown with the process already told it was safe to exit.
+func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
+	t.Parallel()
+
+	repo := new(MockMatchRepo)
+	recorded := make(chan struct{}, 1)
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
+	repo.On("RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
+
+	m, l, engine := newFinishedGameLobby(t, repo)
+	m.mu.Lock()
+	endHand(engine, stubWin)
+	// The table is Waiting again, so the watcher is parked in releaseHeldSeats on m.mu.
+	require.Eventually(t, func() bool {
+		l.mu.RLock()
+		defer l.mu.RUnlock()
+		return l.state == waiting
+	}, 2*time.Second, time.Millisecond)
+
+	assert.False(t, m.WaitForFinalizers(50*time.Millisecond),
+		"the drain finished while a finished match had not been written")
+	m.mu.Unlock()
+
+	require.True(t, m.WaitForFinalizers(2*time.Second))
+	select {
+	case <-recorded:
+	default:
+		t.Fatal("the match that ended during the drain was dropped")
+	}
+}
+
+// A match one leaver ended early for everyone (decision D-1): the seats still
+// playing are not rated on a result nobody finished, but the leaver still loses, or
+// quitting a losing match would be free. The repository applies that; the lobby's
+// job is to route the match there with the leavers named.
+func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
+	t.Parallel()
+
+	seated := []*game.Player{mockPlayer("a", testutil.UID(1)), mockPlayer("b", testutil.UID(2))}
+	leaver := mockPlayer("c", testutil.UID(3))
+	standings := []uuid.UUID{testutil.UID(1), testutil.UID(2), testutil.UID(3)}
+
+	tests := []struct {
+		name     string
+		ranked   bool
+		shutdown bool
+		expect   func(r *MockMatchRepo)
+	}{
+		{
+			name:   "ranked: only the leaver is rated",
+			ranked: true,
+			expect: func(r *MockMatchRepo) {
+				r.On("FinalizeInterruptedMatch", mock.Anything, gameRef("Mock"), standings, mock.Anything,
+					[]uuid.UUID{testutil.UID(3)}).Return(nil).Once()
+			},
+		},
+		{
+			name: "casual: history only",
+			expect: func(r *MockMatchRepo) {
+				r.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), standings).Return(nil).Once()
+			},
+		},
+		{
+			name:     "shutdown: not even the leaver is rated",
+			ranked:   true,
+			shutdown: true,
+			expect: func(r *MockMatchRepo) {
+				r.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), standings).Return(nil).Once()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := new(MockMatchRepo)
+			tt.expect(repo)
+			m := newTestManager(t, repo)
+			if tt.shutdown {
+				m.shuttingDown.Store(true)
+			}
+
+			engine := game.NewEngine(&stubRules{}, seated, deck.Standard())
+			t.Cleanup(engine.Close)
+			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
+
+			require.True(t, m.registerFinalizer())
+			m.finalizeFinishedGame(finalizeRequest{
+				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
+			}, engine, game.EndReasonInterrupted)
+
+			repo.AssertExpectations(t)
+			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}

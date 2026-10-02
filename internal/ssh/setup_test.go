@@ -26,28 +26,41 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-func TestSetupServer_Errors(t *testing.T) {
+func TestNewServer_Errors(t *testing.T) {
 	t.Parallel()
 
-	deps := ServerDependencies{
-		Config: &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+	deps := Deps{
+		Config:  &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+		Tracker: NewSessionTracker(0),
 	}
-	_, err := SetupServer(deps)
-	assert.ErrorContains(t, err, "error while saving keypair")
+	_, err := NewServer(deps)
+	assert.ErrorContains(t, err, "write host key")
 }
 
-func TestSetupServer_SetsConnectionTimeouts(t *testing.T) {
+// The tracker is shared with the stats API, which counts who is online from it. A
+// server that quietly built its own would leave that count at zero forever.
+func TestNewServer_RequiresATracker(t *testing.T) {
 	t.Parallel()
 
-	deps := ServerDependencies{
+	_, err := NewServer(Deps{
+		Config: &config.Config{SSHKeyPath: t.TempDir() + "/id_ed25519", RateLimitCount: 5, RateLimitWindow: time.Second},
+	})
+	require.ErrorIs(t, err, ErrNoTracker)
+}
+
+func TestNewServer_SetsConnectionTimeouts(t *testing.T) {
+	t.Parallel()
+
+	deps := Deps{
 		Config: &config.Config{
 			SSHKeyPath:      t.TempDir() + "/id_ed25519",
 			RateLimitCount:  5,
 			RateLimitWindow: time.Second,
 		},
+		Tracker: NewSessionTracker(0),
 	}
 
-	server, err := SetupServer(deps)
+	server, err := NewServer(deps)
 	require.NoError(t, err)
 
 	assert.Equal(t, 20*time.Second, server.HandshakeTimeout, "an unauthenticated connection must be dropped")
@@ -148,7 +161,7 @@ func TestRateLimitAuth(t *testing.T) {
 			t.Parallel()
 			nextCalls := 0
 			handler := rateLimitAuth(
-				ratelimit.NewSlidingWindowLimiter(3, time.Minute),
+				ratelimit.New(3, time.Minute),
 				func(ssh.Context, ssh.PublicKey) bool { nextCalls++; return true },
 			)
 
@@ -168,7 +181,7 @@ func TestRateLimitAuth_CollapsesIPv6ToItsPrefix(t *testing.T) {
 	t.Parallel()
 
 	handler := rateLimitAuth(
-		ratelimit.NewSlidingWindowLimiter(1, time.Minute),
+		ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true },
 	)
 
@@ -182,25 +195,24 @@ func TestAllowRegistration(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		limiter  *ratelimit.SlidingWindowLimiter
+		limiter  *ratelimit.SlidingWindow
 		addr     net.Addr
 		attempts int
 		want     bool
 	}{
-		{name: "no limiter configured", limiter: nil, addr: stubAddr{"10.0.0.1:1"}, attempts: 1, want: true},
 		{
 			name:    "inside the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"10.0.0.2:1"}, attempts: 2, want: true,
 		},
 		{
 			name:    "over the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"10.0.0.3:1"}, attempts: 3, want: false,
 		},
 		{
 			name:    "an unkeyable address fails closed",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
+			limiter: ratelimit.New(2, time.Hour),
 			addr:    stubAddr{"not-an-address"}, attempts: 1, want: false,
 		},
 	}
@@ -212,15 +224,17 @@ func TestAllowRegistration(t *testing.T) {
 
 			var got bool
 			for range tt.attempts {
-				got = allowRegistration(context.Background(), tt.limiter, s)
+				got = allowRegistration(t.Context(), tt.limiter, s)
 			}
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// stubSession is enough ssh.Session for sessionModel's refusal paths: wish.Fatalf
-// writes to Stderr, then exits and closes.
+// stubSession is the one ssh.Session double: enough for sessionModel's refusal paths
+// (wish.Fatalf writes to Stderr, then exits and closes) and for the teardown helpers,
+// which only look the session up in the registry. Embedding the interface leaves every
+// other method nil on purpose: calling one is a bug in the test, not a silent pass.
 type stubSession struct {
 	ssh.Session
 	pubKey ssh.PublicKey
@@ -241,7 +255,7 @@ func (s *stubSession) Context() ssh.Context     { return newStubSSHContext(s.add
 
 // stubUserRepo answers only what sessionModel asks of it.
 type stubUserRepo struct {
-	db.UserRepository
+	db.Authenticator
 	user *db.User
 	err  error
 }
@@ -255,12 +269,13 @@ func (r stubUserRepo) LoadUserByFingerprint(context.Context, string) (*db.User, 
 
 func (stubUserRepo) UpdateUserActivity(context.Context, *db.User, *db.PublicKey) error { return nil }
 
-func newSessionDeps(repo db.UserRepository) ServerDependencies {
-	return ServerDependencies{
-		Config:         &config.Config{},
-		UserRepository: repo,
-		LobbyManager:   lobby.NewManager(context.Background(), nil),
-		GameRegistry:   game.NewRegistry(),
+func newSessionDeps(t *testing.T, repo db.Authenticator) Deps {
+	t.Helper()
+	return Deps{
+		Config:       &config.Config{},
+		Auth:         repo,
+		LobbyManager: lobby.NewManager(t.Context(), nil),
+		GameRegistry: game.NewRegistry(),
 	}
 }
 
@@ -273,7 +288,7 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 	tests := []struct {
 		name       string
 		session    *stubSession
-		repo       db.UserRepository
+		repo       db.Authenticator
 		tracker    *SessionTracker
 		storeState bool
 		wantOutput string
@@ -315,18 +330,18 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			reg := &sessionRegistry{}
 			if tt.storeState {
-				sessionStates.Store(tt.session, &sessionState{traceCtx: context.Background()})
-				t.Cleanup(func() { sessionStates.Delete(tt.session) })
+				reg.store(tt.session, &sessionState{traceCtx: t.Context()})
 			}
 			before := tt.tracker.Count()
 
-			deps := newSessionDeps(tt.repo)
-			limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
-			model, opts := sessionModel(deps, tt.tracker, limiter)(tt.session)
+			deps := newSessionDeps(t, tt.repo)
+			deps.Tracker = tt.tracker
+			limiter := ratelimit.New(5, time.Hour)
+			model := sessionModel(deps, reg, limiter)(tt.session)
 
 			assert.Nil(t, model, "a refused session must not be handed to bubbletea")
-			assert.Nil(t, opts)
 			assert.Contains(t, tt.session.errOut.String(), tt.wantOutput)
 			assert.Equal(t, 1, tt.session.exited, "the client is left waiting on a session that never starts")
 			assert.Equal(t, before, tt.tracker.Count(), "a refused session kept a tracker slot")
@@ -360,23 +375,23 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 
 	user := &db.User{ID: testutil.UID(42), Username: "player"}
 	s := &stubSession{addr: stubAddr{"10.0.0.9:1"}, pubKey: testPublicKey(t), user: "player"}
-	st := &sessionState{traceCtx: context.Background()}
-	sessionStates.Store(s, st)
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	st := &sessionState{traceCtx: t.Context()}
+	reg := &sessionRegistry{}
+	reg.store(s, st)
 
 	tracker := NewSessionTracker(0)
-	deps := newSessionDeps(stubUserRepo{user: user})
-	limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
+	deps := newSessionDeps(t, stubUserRepo{user: user})
+	limiter := ratelimit.New(5, time.Hour)
 
-	model, _ := sessionModel(deps, tracker, limiter)(s)
+	deps.Tracker = tracker
+	model := sessionModel(deps, reg, limiter)(s)
 	require.NotNil(t, model)
 	t.Cleanup(func() { st.model.Close() })
 
-	assert.True(t, st.owns, "teardown skips a session that does not own its slot")
-	assert.Equal(t, user, st.user)
+	assert.Equal(t, user, st.user, "teardown skips a session with no user, so it would free nothing")
 	assert.NotZero(t, st.gen)
 	assert.NotNil(t, st.model, "closeSessionModel would leave the view's subscriptions running")
-	assert.True(t, tracker.Owns(user.ID, st.gen))
+	assert.True(t, release(tracker, user.ID, st.gen), "the session does not own the slot it claimed")
 	assert.Zero(t, s.exited, "an accepted session must not be hung up on")
 }
 
@@ -386,12 +401,13 @@ func TestSessionProgram_RefusedSessionGetsNoProgram(t *testing.T) {
 	t.Parallel()
 
 	s := &stubSession{addr: stubAddr{"10.0.0.10:1"}}
-	sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	reg := &sessionRegistry{}
+	reg.store(s, &sessionState{traceCtx: t.Context()})
 
-	deps := newSessionDeps(stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
-	program := sessionProgram(deps, NewSessionTracker(0),
-		ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow))
+	deps := newSessionDeps(t, stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
+	deps.Tracker = NewSessionTracker(0)
+	program := sessionProgram(deps, reg,
+		ratelimit.New(5, time.Hour))
 
 	assert.Nil(t, program(s), "a refused session must not get a bubbletea program")
 }
@@ -406,10 +422,10 @@ func TestReportingModel_TellsTheClientAboutThePanic(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			t.Parallel()
 			s := &stubSession{addr: stubAddr{"10.0.0.11:1"}}
-			sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-			t.Cleanup(func() { sessionStates.Delete(s) })
+			reg := &sessionRegistry{}
+			reg.store(s, &sessionState{traceCtx: t.Context()})
 
-			m := reportingModel{Model: panicModel{on: method}, session: s}
+			m := reportingModel{Model: panicModel{on: method}, session: s, reg: reg}
 			require.Panics(t, func() {
 				switch method {
 				case "init":

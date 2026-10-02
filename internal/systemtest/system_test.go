@@ -3,10 +3,11 @@
 package systemtest
 
 import (
-	"context"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -24,13 +25,13 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	t.Parallel()
 
 	repo := newRankedFinalizeRecorder()
-	manager := lobby.NewManager(context.Background(), repo)
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), repo)
+	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
 	guests := []*game.Player{newPlayer(testutil.UID(2), "bob"), newPlayer(testutil.UID(3), "carol"), newPlayer(testutil.UID(4), "dave")}
 
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame(pokerGame),
 		lobby.WithMaxPlayers(2),
 		lobby.WithPrivate(true),
@@ -48,7 +49,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.Error(t, l.SetMaxPlayers(guests[0], 9, 2, 9), "only the leader may change settings")
 
 	for _, g := range guests {
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g), "guest %s should join", g.ID)
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)), "guest %s should join", g.ID)
 	}
 	require.Equal(t, 4, l.CurrentPlayers())
 	assert.Contains(t, browseCodes(manager, leader), l.Code(), "a public waiting lobby is listed")
@@ -57,14 +58,14 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.NoError(t, subErr)
 	t.Cleanup(func() { l.Unsubscribe(leader.ID, events) })
 
-	all := append([]*game.Player{leader}, guests...)
+	all := slices.Concat([]*game.Player{leader}, guests)
 	for _, p := range all {
 		require.NoError(t, l.ToggleReady(p, registry))
 	}
 
 	engine := awaitGameStart(t, events)
 	require.NotNil(t, engine)
-	assert.False(t, l.IsWaiting(), "a started lobby is no longer waiting")
+	assert.NotNil(t, l.ActiveGame(), "a started lobby is in game")
 	assert.NotContains(t, browseCodes(manager, leader), l.Code(),
 		"and stops being offered to anyone browsing for a seat")
 
@@ -82,7 +83,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	playOutMatch(t, engine)
 
 	assert.Equal(t, startingChips, chipsInPlay(t, engine), "chips survive the whole match")
-	standings := engine.StandingsIDs()
+	standings := standingIDs(engine)
 	assert.NotEmpty(t, standings, "a finished hand ranks its players")
 	assert.Contains(t, standings, leaver.ID, "a player who left still places")
 
@@ -99,11 +100,11 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame(pokerGame),
 		lobby.WithMaxPlayers(2),
 	)
@@ -112,23 +113,23 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	err = l.ToggleReady(leader, registry)
 	require.ErrorContains(t, err, "at least 2 players")
 	assert.True(t, l.IsReady(leader), "the ready flag still toggles")
-	assert.True(t, l.IsWaiting(), "one ready player cannot start a two-player game")
+	assert.Nil(t, l.ActiveGame(), "one ready player cannot start a two-player game")
 
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob")))
-	assert.Error(t, manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(3), "carol")),
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob"))))
+	assert.Error(t, joinErr(manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(3), "carol"))),
 		"a full lobby rejects further joins")
 }
 
 func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
 	leader := newPlayer(testutil.UID(1), "alice")
 	guest := newPlayer(testutil.UID(2), "bob")
 
-	l, err := manager.New(leader, lobby.WithCardGame(pokerGame), lobby.WithMaxPlayers(4))
+	l, err := manager.CreateLobby(leader, lobby.WithCardGame(pokerGame), lobby.WithMaxPlayers(4))
 	require.NoError(t, err)
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), guest))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
 
 	manager.LeaveLobby(leader)
 	assert.Equal(t, guest, l.Leader(), "the remaining guest takes over")
@@ -146,4 +147,13 @@ func browseCodes(manager *lobby.Manager, p *game.Player) []string {
 		codes = append(codes, e.Code)
 	}
 	return codes
+}
+
+func standingIDs(engine *game.Engine) []string {
+	standings := engine.Standings()
+	ids := make([]string, len(standings))
+	for i, s := range standings {
+		ids[i] = s.Player.ID
+	}
+	return ids
 }

@@ -42,35 +42,26 @@ func applyLayoffs(
 // spending a card on the set when it also fits a run can strand the deadwood that
 // would have extended the run behind it.
 func findAttach(card deck.Card, melds [][]deck.Card) (int, bool) {
-	for i, meld := range melds {
-		if isRun(meld) && canAttach(card, meld) {
-			return i, true
-		}
+	if i := slices.IndexFunc(melds, func(m []deck.Card) bool { return isRun(m) && extendsRun(card, m) }); i >= 0 {
+		return i, true
 	}
-	for i, meld := range melds {
-		if isSet(meld) && canAttach(card, meld) {
-			return i, true
-		}
+	if i := slices.IndexFunc(melds, func(m []deck.Card) bool { return isSet(m) && extendsSet(card, m) }); i >= 0 {
+		return i, true
 	}
 	return 0, false
 }
 
-func canAttach(card deck.Card, meld []deck.Card) bool {
-	if isSet(meld) {
-		return len(meld) < 4 && card.Rank == meld[0].Rank
-	}
-	if !isRun(meld) {
+// extendsSet is a card of the set's rank while the set still has a suit free.
+func extendsSet(card deck.Card, set []deck.Card) bool {
+	return len(set) < maxSetSize && card.Rank == set[0].Rank
+}
+
+// extendsRun is a card of the run's suit that sits on either end of it.
+func extendsRun(card deck.Card, run []deck.Card) bool {
+	lo, hi := slices.MinFunc(run, byRunOrder), slices.MaxFunc(run, byRunOrder)
+	if card.Suit != lo.Suit {
 		return false
 	}
-	sorted := slices.Clone(meld)
-	slices.SortFunc(sorted, func(a, b deck.Card) int {
-		return deck.RunOrder(a.Rank) - deck.RunOrder(b.Rank)
-	})
-	if card.Suit != sorted[0].Suit {
-		return false
-	}
-	lo := deck.RunOrder(sorted[0].Rank)
-	hi := deck.RunOrder(sorted[len(sorted)-1].Rank)
 	v := deck.RunOrder(card.Rank)
-	return v == lo-1 || v == hi+1
+	return v == deck.RunOrder(lo.Rank)-1 || v == deck.RunOrder(hi.Rank)+1
 }

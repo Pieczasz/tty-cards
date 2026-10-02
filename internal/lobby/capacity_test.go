@@ -1,7 +1,6 @@
 package lobby
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/testutil"
@@ -12,23 +11,20 @@ import (
 func TestLobby_EveryPlayerGetsAFeedAfterTheTableGrows(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(2), WithCardGame("Uno"))
+	seats := testutil.Players(10)
+	leader := seats[0]
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Uno"))
 	require.NoError(t, err)
 
 	require.NoError(t, l.SetMaxPlayers(leader, 10, 2, 10))
-
-	ids := []string{leader.ID}
-	for i := 1; i < 10; i++ {
-		guest := mockPlayer(fmt.Sprintf("guest%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), guest))
-		ids = append(ids, guest.ID)
+	for _, guest := range seats[1:] {
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	}
 	require.Equal(t, 10, l.CurrentPlayers())
 
-	for _, id := range ids {
-		_, err := l.Subscribe(id)
-		require.NoErrorf(t, err, "seat %s was refused a lobby feed", id)
+	for _, p := range seats {
+		_, err := l.Subscribe(p.ID)
+		require.NoErrorf(t, err, "seat %s was refused a lobby feed", p.ID)
 	}
 
 	_, err = l.Subscribe(leader.ID)

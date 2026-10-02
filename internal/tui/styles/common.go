@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/common-nighthawk/go-figure"
@@ -48,19 +47,20 @@ func (t Theme) RenderTooSmall(screenWidth, screenHeight int) string {
 	return lg.Place(max(screenWidth, 1), max(screenHeight, 1), lg.Center, lg.Center, msg)
 }
 
-// BoxWidth is the outer width of the framed layout. It must never shrink as the
+// boxWidth is the outer width of the framed layout. It must never shrink as the
 // terminal grows, and must never go negative: Router.Global.Width is 0 until the
 // first WindowSizeMsg, so every session's opening frame renders at zero.
-func BoxWidth(screenWidth int) int {
+func boxWidth(screenWidth int) int {
 	return max(min(screenWidth-4, maxBoxWidth), 0)
 }
 
-func BoxHeight(screenHeight int) int {
+func boxHeight(screenHeight int) int {
 	return max(min(screenHeight-2, maxBoxHeight), 0)
 }
 
+// InnerWidth is the width a full-screen view's content may use inside the box.
 func InnerWidth(screenWidth int) int {
-	return max(BoxWidth(screenWidth)-6, 0)
+	return max(boxWidth(screenWidth)-6, 0)
 }
 
 // opticalPadding is the two blank lines RenderMainLayout appends to content. They are
@@ -74,28 +74,29 @@ const opticalPadding = 2
 // content cannot have - and opticalPadding was never deducted. Either one alone makes
 // a full-screen view a row taller than the terminal, which the frame then hands to
 // the terminal to wrap, shifting every row under it.
+//
+// It hands back the header and footer as wrapped, so the layout places exactly what
+// was measured rather than wrapping them a second time.
 func layoutHeights(screenWidth, screenHeight int, header, footer string) (
-	innerWidth, hHeader, hFooter, hContent int,
+	wrappedHeader, wrappedFooter string, hContent int,
 ) {
-	innerWidth = max(BoxWidth(screenWidth)-6, 0)
-	innerHeight := max(BoxHeight(screenHeight)-4, 0)
+	width := InnerWidth(screenWidth)
+	innerHeight := max(boxHeight(screenHeight)-4, 0)
 
-	// go-figure leaves trailing newlines that inflate the measured height.
-	header = strings.TrimRight(header, "\r\n")
-	footer = strings.TrimRight(footer, "\r\n")
+	// go-figure leaves trailing newlines that inflate the measured height. Wrap before
+	// measuring, or lg.Height reports the unwrapped height.
+	wrap := lg.NewStyle().Width(width).Align(lg.Center)
+	wrappedHeader = wrap.Render(strings.TrimRight(header, "\r\n"))
+	wrappedFooter = wrap.Render(strings.TrimRight(footer, "\r\n"))
 
-	// Wrap before measuring, or lg.Height reports the unwrapped height.
-	header = lg.NewStyle().Width(innerWidth).Align(lg.Center).Render(header)
-	footer = lg.NewStyle().Width(innerWidth).Align(lg.Center).Render(footer)
-
-	hHeader, hFooter = lg.Height(header), lg.Height(footer)
-	return innerWidth, hHeader, hFooter, max(innerHeight-hHeader-hFooter, 0)
+	hContent = max(innerHeight-lg.Height(wrappedHeader)-lg.Height(wrappedFooter), 0)
+	return wrappedHeader, wrappedFooter, hContent
 }
 
 // AvailableContentHeight is how many lines of content a full-screen view may render
 // at this size without the frame outgrowing the terminal.
 func AvailableContentHeight(screenWidth, screenHeight int, header, footer string) int {
-	_, _, _, hContent := layoutHeights(screenWidth, screenHeight, header, footer)
+	_, _, hContent := layoutHeights(screenWidth, screenHeight, header, footer)
 	return max(hContent-opticalPadding, 0)
 }
 
@@ -117,13 +118,17 @@ func PadTruncate(s string, width int) string {
 	return string(runes[:width-3]) + "..."
 }
 
-// figureKey is a title at a terminal size. Widths are bounded by maxBoxWidth, heights
-// by maxBoxHeight, and the titles are a fixed handful, so the cache cannot grow
-// without limit.
+// figureKey is a title in one font. The size it has to fit is not part of it: a
+// banner's measurements do not depend on the box, so keying on the box stored the same
+// three banners once per terminal size.
 type figureKey struct {
-	text      string
-	maxWidth  int
-	maxHeight int
+	text string
+	font string
+}
+
+type figureBanner struct {
+	art           string
+	width, height int
 }
 
 // TitleHeightBudget is how many lines a screen may spend on its figlet title: a fifth
@@ -131,75 +136,60 @@ type figureKey struct {
 // plain text and the content gets those lines back - the banner is decoration, and
 // three lines of it in a fourteen-line box left some screens no room for a single row.
 func TitleHeightBudget(screenHeight int) int {
-	return max((BoxHeight(screenHeight)-4)/5, 1)
+	return max((boxHeight(screenHeight)-4)/5, 1)
 }
 
 // figureCache memoises rendered banners. go-figure re-reads and re-parses the whole
-// figlet font on every call, which measured as 85% of the allocations in a menu frame
-// - and a banner is a pure function of its text and the width it has to fit.
+// figlet font on every call, which measured as 85% of the allocations in a menu frame.
 //
-// Every key is now a fixed screen title at a bounded size, so the cache cannot grow
-// with the player base - the home screen used to banner the username itself, which let
-// any account mint entries. The cap stays as the backstop that made that harmless:
-// titles times sizes is still thousands of entries, and past the cap banners simply
-// stop being remembered rather than failing.
-var (
-	figureCache   sync.Map // figureKey -> string
-	figureCached  atomic.Int64
-	maxFigureKeys = int64(512)
-)
+// It holds at most three entries per title and has no cap, which is safe only because
+// every banner text is a fixed string in the source. Nothing player-controlled may be
+// banner text: the home screen used to banner the username, which let any account
+// mint entries.
+var figureCache sync.Map // figureKey -> figureBanner
+
+var figureFonts = []string{"slant", "small", "mini"}
 
 // RenderFigureASCII is text as the largest figlet banner that fits both bounds, or
-// the text itself when none does.
+// the text itself when none does. Fonts are tried largest first and only rendered
+// when reached, so a roomy terminal never pays for the smaller two.
 func RenderFigureASCII(text string, maxWidth, maxHeight int) string {
-	key := figureKey{text: text, maxWidth: maxWidth, maxHeight: maxHeight}
-	if cached, ok := figureCache.Load(key); ok {
-		banner, _ := cached.(string)
-		return banner
-	}
-
-	banner := renderFigureASCII(text, maxWidth, maxHeight)
-	if figureCached.Load() < maxFigureKeys {
-		if _, loaded := figureCache.LoadOrStore(key, banner); !loaded {
-			figureCached.Add(1)
-		}
-	}
-	return banner
-}
-
-func renderFigureASCII(text string, maxWidth, maxHeight int) string {
-	fonts := []string{"slant", "small", "mini"}
-	for _, font := range fonts {
-		fig := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
-		if lg.Width(fig) <= maxWidth && lg.Height(fig) <= maxHeight {
-			return fig
+	for _, font := range figureFonts {
+		if b := figureFor(text, font); b.width <= maxWidth && b.height <= maxHeight {
+			return b.art
 		}
 	}
 	return text // no font fits; plain text always does
 }
 
+func figureFor(text, font string) figureBanner {
+	key := figureKey{text: text, font: font}
+	if cached, ok := figureCache.Load(key); ok {
+		b, _ := cached.(figureBanner)
+		return b
+	}
+	art := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
+	b := figureBanner{art: art, width: lg.Width(art), height: lg.Height(art)}
+	figureCache.Store(key, b)
+	return b
+}
+
+// RenderMainLayout frames a full-screen view: the header on top, the footer at the
+// bottom and the content centred in the rows between, inside the capped box.
 func (t Theme) RenderMainLayout(width, height int, header, content, footer string) string {
-	boxWidth := BoxWidth(width)
-	boxHeight := BoxHeight(height)
-
-	innerWidth, hHeader, hFooter, hContent := layoutHeights(width, height, header, footer)
-
-	// Re-render at the measured width so the placed areas match what was measured.
-	header = lg.NewStyle().Width(innerWidth).Align(lg.Center).
-		Render(strings.TrimRight(header, "\r\n"))
-	footer = lg.NewStyle().Width(innerWidth).Align(lg.Center).
-		Render(strings.TrimRight(footer, "\r\n"))
+	header, footer, hContent := layoutHeights(width, height, header, footer)
+	inner := InnerWidth(width)
 
 	// Optical centering: two trailing blank lines push the visible text one line up,
 	// which reads as centered where true centering reads as slightly low.
 	content = strings.TrimRight(content, "\r\n") + "\n\n"
 
-	headerArea := Place(innerWidth, hHeader, lg.Center, lg.Top, header)
-	footerArea := Place(innerWidth, hFooter, lg.Center, lg.Bottom, footer)
-	contentArea := Place(innerWidth, hContent, lg.Center, lg.Center, content)
+	headerArea := Place(inner, lg.Height(header), lg.Center, lg.Top, header)
+	footerArea := Place(inner, lg.Height(footer), lg.Center, lg.Bottom, footer)
+	contentArea := Place(inner, hContent, lg.Center, lg.Center, content)
 
 	stacked := lg.JoinVertical(lg.Center, headerArea, contentArea, footerArea)
-	return t.Box.Width(boxWidth).Height(boxHeight).Render(stacked)
+	return t.Box.Width(boxWidth(width)).Height(boxHeight(height)).Render(stacked)
 }
 
 // footerKey is the action list a view offers, at one palette. Each view has a fixed
@@ -213,6 +203,7 @@ type footerKey struct {
 // ten-item footer emits ten colour sequences on a frame that never changes.
 var footerCache sync.Map // footerKey -> string
 
+// RenderActionFooter is the key-hint footer for actions, one styled item each.
 func (t Theme) RenderActionFooter(actions []string) string {
 	key := footerKey{actions: strings.Join(actions, "\x00"), dark: t.Dark}
 	if cached, ok := footerCache.Load(key); ok {
@@ -227,17 +218,4 @@ func (t Theme) RenderActionFooter(actions []string) string {
 	footer := strings.Join(renderedActions, " | ")
 	footerCache.Store(key, footer)
 	return footer
-}
-
-var GlobalActions = []string{"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard", "ctrl+c - Quit"}
-
-// ResetFigureCacheForTest empties the banner cache. Exported for the cap test, which
-// cannot observe a bound it shares with every other test in the package.
-func ResetFigureCacheForTest() {
-	figureCache.Clear()
-	figureCached.Store(0)
-}
-
-func FigureCacheLenForTest() int {
-	return int(figureCached.Load())
 }

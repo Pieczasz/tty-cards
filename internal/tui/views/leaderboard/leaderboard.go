@@ -1,12 +1,11 @@
+// Package leaderboard is the paged rankings screen, filterable by game.
 package leaderboard
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
@@ -66,13 +65,16 @@ type model struct {
 	exhausted bool
 }
 
+// New builds the board with one filter per registered game, in registry order.
 func New(global router.GlobalContext) tea.Model {
-	filters := make([]boardFilter, 0, 1+len(catalog.All))
-	filters = append(filters, boardFilter{label: filterAll})
-	for _, e := range catalog.All {
-		filters = append(filters, boardFilter{label: e.Name, slug: e.Slug})
+	filters := []boardFilter{{label: filterAll}}
+	if reg := global.GameRegistry; reg != nil {
+		for _, name := range reg.GameNames() {
+			mod, _ := reg.Module(name)
+			filters = append(filters, boardFilter{label: mod.Name, slug: mod.Slug})
+		}
 	}
-	return model{global: global, filters: filters}
+	return &model{global: global, filters: filters}
 }
 
 // loadedMsg carries the filter it was fetched for as well as the page. Pressing the
@@ -83,22 +85,25 @@ type loadedMsg struct {
 	err      error
 	gameSlug string
 	wantPage int
+	// limit is what was asked for: judging the answer against anything else is how a
+	// filter change that asked for a screenful read five rows as the end of the feed.
+	limit int
 }
 
-func (m model) gameFilter() string {
+func (m *model) gameFilter() string {
 	if m.filterIndex == 0 {
 		return ""
 	}
 	return m.filters[m.filterIndex].slug
 }
 
-func (m model) filterLabel() string {
+func (m *model) filterLabel() string {
 	return m.filters[m.filterIndex].label
 }
 
 // rowsPerPage is how many ranks fit between the header and the footer right now.
 // Paging and rendering both read it, so a page always holds exactly what is drawn.
-func (m model) rowsPerPage() int {
+func (m *model) rowsPerPage() int {
 	rows, _ := m.pageLayout()
 	return rows
 }
@@ -106,7 +111,7 @@ func (m model) rowsPerPage() int {
 // pageLayout splits the content budget between the rows and the chrome around them.
 // The optional spacing goes first: at 64x20 the full chrome costs as many lines as
 // the whole content area, so keeping it would leave no room for a single rank.
-func (m model) pageLayout() (rows int, compact bool) {
+func (m *model) pageLayout() (rows int, compact bool) {
 	budget := views.ScreenContentHeight(m.global, screenTitle, m.actions())
 	chrome := fullChrome
 	if budget-fullChrome < minRowsPerPage {
@@ -115,7 +120,7 @@ func (m model) pageLayout() (rows int, compact bool) {
 	return min(max(budget-chrome, 1), maxRowsPerPage), compact
 }
 
-func (m model) pageCount() int {
+func (m *model) pageCount() int {
 	rows := m.rowsPerPage()
 	if len(m.rankings) == 0 {
 		return 1
@@ -123,7 +128,7 @@ func (m model) pageCount() int {
 	return (len(m.rankings) + rows - 1) / rows
 }
 
-func (m model) needsFetch(page int) int {
+func (m *model) needsFetch(page int) int {
 	// A short last page still covers that page index; only ask for more when the
 	// cursor would land past what we already hold.
 	rows := m.rowsPerPage()
@@ -139,40 +144,45 @@ func (m model) needsFetch(page int) int {
 	return need
 }
 
-func (m model) load(limit int, wantPage int) tea.Cmd {
+// load fetches limit rankings for the current filter. Everything the query needs is
+// read here, on the update goroutine, rather than off m inside the command.
+func (m *model) load(limit, wantPage int) tea.Cmd {
 	gameSlug := m.gameFilter()
+	reqCtx, users := m.global.RequestContext(), m.global.Leaderboard
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(m.global.RequestContext(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(reqCtx, views.RequestTimeout)
 		defer cancel()
-		rankings, err := m.global.UserRepository.BestPlayers(ctx, limit, gameSlug)
-		return loadedMsg{rankings: rankings, err: err, gameSlug: gameSlug, wantPage: wantPage}
+		rankings, err := users.BestPlayers(ctx, gameSlug, limit)
+		return loadedMsg{rankings: rankings, err: err, gameSlug: gameSlug, wantPage: wantPage, limit: limit}
 	}
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	// The first WindowSizeMsg has not arrived yet, so ask for a full page: it covers
 	// any terminal, and rowsPerPage decides how much of it is drawn.
 	return m.load(maxRowsPerPage, 0)
 }
 
-func (m model) cycleFilter(delta int) (tea.Model, tea.Cmd) {
+func (m *model) cycleFilter(delta int) (tea.Model, tea.Cmd) {
 	m.filterIndex = components.CycleIndex(m.filterIndex, delta, len(m.filters))
 	m.rankings = nil
 	m.err = nil
 	m.page = 0
 	m.exhausted = false
 	m.loading = true
-	return m, m.load(m.rowsPerPage(), 0)
+	cmd := m.load(maxRowsPerPage, 0)
+	return m, cmd
 }
 
-func (m model) goPage(delta int) (tea.Model, tea.Cmd) {
+func (m *model) goPage(delta int) (tea.Model, tea.Cmd) {
 	next := m.page + delta
 	if next < 0 {
 		return m, nil
 	}
 	if need := m.needsFetch(next); need > 0 {
 		m.loading = true
-		return m, m.load(need, next)
+		cmd := m.load(need, next)
+		return m, cmd
 	}
 	if next >= m.pageCount() {
 		return m, nil
@@ -181,7 +191,7 @@ func (m model) goPage(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
 	}
@@ -199,14 +209,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Fewer rows than the request (or the hard cap) means there is nothing left to page into.
-		asked := min(max((msg.wantPage+1)*m.rowsPerPage(), maxRowsPerPage), maxLeaderboardPlayers)
-		m.exhausted = len(msg.rankings) < asked || len(msg.rankings) >= maxLeaderboardPlayers
+		m.exhausted = len(msg.rankings) < msg.limit || len(msg.rankings) >= maxLeaderboardPlayers
 		m.page = min(msg.wantPage, max(m.pageCount()-1, 0))
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "g":
-			return m.cycleFilter(1)
-		case "right", "l":
+		case "g", "right", "l":
 			return m.cycleFilter(1)
 		case "left", "h":
 			return m.cycleFilter(-1)
@@ -222,11 +229,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) actions() []string {
+func (m *model) actions() []string {
 	return []string{"g/←/-> - Filter: " + m.filterLabel(), "↑/↓ - Page"}
 }
 
-func (m model) View() tea.View {
+func (m *model) View() tea.View {
 	return tea.NewView(views.RenderScreen(m.global, screenTitle, m.actions(), func(int) string {
 		switch {
 		case m.err != nil:
@@ -241,24 +248,24 @@ func (m model) View() tea.View {
 	}))
 }
 
-func (m model) renderError() string {
-	return lg.JoinVertical(lg.Center, "Unable to load leaderboard. Please try again.")
+func (m *model) renderError() string {
+	return "Unable to load leaderboard. Please try again."
 }
 
-func (m model) renderLoading() string {
-	return lg.JoinVertical(lg.Center, "Loading leaderboard.")
+func (m *model) renderLoading() string {
+	return "Loading leaderboard."
 }
 
-func (m model) renderEmpty() string {
+func (m *model) renderEmpty() string {
 	if m.filterIndex == 0 {
-		return lg.JoinVertical(lg.Center, "No players have ranked yet.")
+		return "No players have ranked yet."
 	}
-	return lg.JoinVertical(lg.Center, fmt.Sprintf("No rankings for %s yet.", m.filterLabel()))
+	return fmt.Sprintf("No rankings for %s yet.", m.filterLabel())
 }
 
 // table is the fixed-cell board. The player column is the only one that flexes, and
 // only with the terminal: the rest stay put so paging cannot shift the columns.
-func (m model) table(contentWidth, rows int) components.Table {
+func (m *model) table(contentWidth, rows int) components.Table {
 	playerWidth := min(max(contentWidth-(colRank+colGame+colElo+9), minPlayerWidth), maxPlayerWidth)
 	return components.Table{
 		Cols: []components.Column{
@@ -271,7 +278,7 @@ func (m model) table(contentWidth, rows int) components.Table {
 	}
 }
 
-func (m model) renderRankings(contentWidth int) string {
+func (m *model) renderRankings(contentWidth int) string {
 	rows, compact := m.pageLayout()
 	tbl := m.table(contentWidth, rows)
 	start := m.page * rows
@@ -302,7 +309,7 @@ func (m model) renderRankings(contentWidth int) string {
 // renderPlayerRow lays the cells out itself rather than through Table.Cells: the
 // viewer's own row is highlighted, and a styled cell cannot be padded by rune count
 // afterwards without counting the escape sequence as text.
-func (m model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) string {
+func (m *model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) string {
 	playerWidth := tbl.Cols[1].Width
 	userStr := styles.PadTruncate(r.User.Username, playerWidth)
 	if m.global.User != nil && r.User.ID == m.global.User.ID {

@@ -6,11 +6,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/ratelimit"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
@@ -36,26 +39,39 @@ const (
 	idleTimeout  = 60 * time.Second
 )
 
+// SessionCounter is how many players are connected: ssh.SessionTracker in production.
 type SessionCounter interface {
 	Count() int
 }
 
+// LobbyCounter is how many tables are playing and waiting: lobby.Manager in production.
 type LobbyCounter interface {
 	Stats() (inGame, waiting int)
 }
 
+// ErrMissingDeps refuses a server built without its counters or its repository. A
+// nil one used to be skipped, so a miswiring served zeros or an empty leaderboard
+// forever instead of failing the boot.
+var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies and Users")
+
+// Deps is what the stats API reads from. Sessions, Lobbies and Users are required.
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
-	// Users is the concrete db interface while Sessions and Lobbies are local
-	// one-method interfaces. That asymmetry is deliberate and shipped: the two
-	// counters exist only to keep this package from importing ssh and lobby, whereas
-	// db.UserRepository is already the contract every consumer depends on.
-	Users db.UserRepository
+	// Users is a db interface while Sessions and Lobbies are local one-method
+	// interfaces: the two counters exist only to keep this package from importing ssh
+	// and lobby, whereas db.Leaderboard is already the contract.
+	Users db.Leaderboard
 
+	// Both required: config.Load owns the defaults and validates them, so a second
+	// copy here could only drift from it.
 	AllowOrigin       string
 	RequestsPerMinute int
 	TrustedProxy      bool
+	// TrustedProxyNetworks, when set, are the only peers whose X-Forwarded-For is
+	// believed: the port is reachable from every container on the network, not just
+	// the proxy. Empty trusts the header from any peer, as TrustedProxy alone always did.
+	TrustedProxyNetworks []netip.Prefix
 
 	// Health reports whether the process's dependencies are usable (the database
 	// ping, in practice). nil means /healthz only asserts the process serves HTTP.
@@ -83,13 +99,29 @@ type leaderboardEntry struct {
 	Elo      uint32 `json:"elo"`
 }
 
-func Handler(deps Deps) http.Handler {
-	perMinute := deps.RequestsPerMinute
-	if perMinute <= 0 {
-		perMinute = 120
+// NewServer returns the stats API's http.Server for addr, with its timeouts set. The
+// caller runs and shuts it down.
+func NewServer(addr string, deps Deps) (*http.Server, error) {
+	h, err := newHandler(deps)
+	if err != nil {
+		return nil, err
 	}
-	limiter := ratelimit.NewSlidingWindowLimiter(perMinute, time.Minute)
-	clientAddr := clientIPFunc(deps.TrustedProxy)
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
+}
+
+func newHandler(deps Deps) (http.Handler, error) {
+	if deps.Sessions == nil || deps.Lobbies == nil || deps.Users == nil {
+		return nil, ErrMissingDeps
+	}
+	limiter := ratelimit.New(deps.RequestsPerMinute, time.Minute)
+	clientAddr := clientIPFunc(deps.TrustedProxy, deps.TrustedProxyNetworks)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/stats", statsHandler(deps))
@@ -109,37 +141,22 @@ func Handler(deps Deps) http.Handler {
 	return otelhttp.NewHandler(
 		withCORS(deps.AllowOrigin, withRateLimit(limiter, clientAddr, mux)),
 		"stats-api",
-		otelhttp.WithSpanNameFormatter(routeSpanName),
-		// Without this, otelhttp labels every request metric with the client's own
-		// Host header - the same unbounded-cardinality hole routeSpanName closes
-		// for span names.
-		otelhttp.WithServerName("stats-api"),
-	)
-}
-
-// routeSpanName names a span after the route, never after the raw path: anything
-// else lets a caller mint unbounded span names by inventing URLs.
-func routeSpanName(operation string, r *http.Request) string {
-	switch r.URL.Path {
-	case "/v1/stats", "/v1/leaderboard":
-		return r.Method + " " + r.URL.Path
-	default:
-		return operation
-	}
+		// No spans: every website visitor polls this API, and a span per request put
+		// each visitor's address and User-Agent into Tempo. The request metrics, which
+		// carry neither, are what an operator reads here.
+		otelhttp.WithTracerProvider(tracenoop.NewTracerProvider()),
+		// Pins server.address and, through the explicit default port, server.port.
+		// Without both, otelhttp labels every request metric from the client's own
+		// Host header - an unbounded name, and up to 65535 port series.
+		otelhttp.WithServerName("stats-api:80"),
+	), nil
 }
 
 func statsHandler(deps Deps) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inGame, waiting := 0, 0
-		if deps.Lobbies != nil {
-			inGame, waiting = deps.Lobbies.Stats()
-		}
-		online := 0
-		if deps.Sessions != nil {
-			online = deps.Sessions.Count()
-		}
+		inGame, waiting := deps.Lobbies.Stats()
 		writeJSON(w, r, statsResponse{
-			PlayersOnline: online,
+			PlayersOnline: deps.Sessions.Count(),
 			HandsInPlay:   inGame,
 			TablesOpen:    waiting,
 		})
@@ -158,15 +175,10 @@ func leaderboardHandler(deps Deps) http.Handler {
 			limit = min(n, maxLeaderboardLimit)
 		}
 
-		if deps.Users == nil {
-			writeJSON(w, r, []leaderboardEntry{})
-			return
-		}
-
 		// No per-game filter: the only client never asked for one, and a caller-supplied
 		// game name is a cache miss by construction - one indexed join per request for
 		// any string that is not a real game.
-		rankings, err := deps.Users.BestPlayers(r.Context(), limit, "")
+		rankings, err := deps.Users.BestPlayers(r.Context(), "", limit)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "leaderboard query failed", "error", err)
 			writeError(w, r, http.StatusServiceUnavailable, "leaderboard unavailable")
@@ -186,7 +198,7 @@ func leaderboardHandler(deps Deps) http.Handler {
 	})
 }
 
-func clientIPFunc(trustProxy bool) func(*http.Request) string {
+func clientIPFunc(trustProxy bool, proxies []netip.Prefix) func(*http.Request) string {
 	socketHost := func(r *http.Request) string {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -198,6 +210,9 @@ func clientIPFunc(trustProxy bool) func(*http.Request) string {
 		return socketHost
 	}
 	return func(r *http.Request) string {
+		if !fromProxy(socketHost(r), proxies) {
+			return socketHost(r)
+		}
 		first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
 		first = strings.TrimSpace(first)
 		// Only an address the header actually parses as counts. A blank or malformed
@@ -211,15 +226,18 @@ func clientIPFunc(trustProxy bool) func(*http.Request) string {
 	}
 }
 
-func Serve(addr string, h http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: readTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
+// fromProxy reports whether a peer may speak for its client. No networks means any
+// peer may, which is what TrustedProxy meant before the networks were configurable.
+func fromProxy(host string, proxies []netip.Prefix) bool {
+	if len(proxies) == 0 {
+		return true
 	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	return slices.ContainsFunc(proxies, func(p netip.Prefix) bool { return p.Contains(addr) })
 }
 
 func writeJSON(w http.ResponseWriter, r *http.Request, v any) {
@@ -250,9 +268,6 @@ func encodeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 }
 
 func withCORS(origin string, next http.Handler) http.Handler {
-	if origin == "" {
-		origin = "*"
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
@@ -262,7 +277,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 }
 
 func withRateLimit(
-	limiter *ratelimit.SlidingWindowLimiter,
+	limiter *ratelimit.SlidingWindow,
 	clientAddr func(*http.Request) string,
 	next http.Handler,
 ) http.Handler {

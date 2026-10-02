@@ -6,17 +6,19 @@ import (
 	"slices"
 )
 
+// Pile is an ordered stack of cards - a stock or a discard - drawn from the top, the
+// end of the slice.
 type Pile struct {
 	cards []Card
 }
 
+// New is a pile of a copy of cards, the last one on top.
 func New(cards []Card) *Pile {
 	return &Pile{
 		cards: slices.Clone(cards),
 	}
 }
 
-// Shuffle uses crypto/rand for unpredictable deal order in ranked play.
 // Shuffle is a uniform permutation from a stdlib shuffle seeded once per call from
 // crypto/rand, so the order is unpredictable to a player who has seen every previous
 // deal. It cannot fail: since Go 1.24 crypto/rand.Read never returns an error (it
@@ -30,6 +32,7 @@ func (p *Pile) Shuffle() {
 	})
 }
 
+// Peek is the top card without drawing it; false on an empty pile.
 func (p *Pile) Peek() (Card, bool) {
 	if len(p.cards) < 1 {
 		return Card{}, false
@@ -37,6 +40,7 @@ func (p *Pile) Peek() (Card, bool) {
 	return p.cards[len(p.cards)-1], true
 }
 
+// Draw takes the top card; false on an empty pile.
 func (p *Pile) Draw() (Card, bool) {
 	if len(p.cards) < 1 {
 		return Card{}, false
@@ -47,7 +51,9 @@ func (p *Pile) Draw() (Card, bool) {
 	return topCard, true
 }
 
-func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
+// DrawN takes the top cardsToDraw cards, topmost first. Asking for more than the
+// pile holds draws nothing and answers false.
+func (p *Pile) DrawN(cardsToDraw int) ([]Card, bool) {
 	if cardsToDraw < 0 || cardsToDraw > len(p.cards) {
 		return nil, false
 	}
@@ -61,18 +67,36 @@ func (p *Pile) DrawNCards(cardsToDraw int) ([]Card, bool) {
 	return nCards, true
 }
 
-func (p *Pile) AddCard(cards ...Card) {
+// Add puts cards on top, the last one uppermost.
+func (p *Pile) Add(cards ...Card) {
 	p.cards = append(p.cards, cards...)
 }
 
+// Size is how many cards the pile holds.
 func (p *Pile) Size() int {
 	return len(p.cards)
 }
 
+// IsEmpty reports whether the pile holds no cards.
 func (p *Pile) IsEmpty() bool {
 	return len(p.cards) < 1
 }
 
+// Cards is a copy of the pile, bottom first.
 func (p *Pile) Cards() []Card {
 	return slices.Clone(p.cards)
+}
+
+// Standard is the 52 cards of a standard deck, no jokers, in suit then rank order.
+func Standard() []Card {
+	cards := make([]Card, 0, 52)
+	for s := Spades; s <= Clubs; s++ {
+		for r := Ace; r <= King; r++ {
+			cards = append(cards, Card{
+				Suit: s,
+				Rank: r,
+			})
+		}
+	}
+	return cards
 }

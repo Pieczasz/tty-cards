@@ -1,13 +1,13 @@
 package router
 
 import (
-	"context"
 	"image/color"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -39,9 +39,9 @@ func isQuit(cmd tea.Cmd) bool {
 func TestGameRoute(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "game_poker", GameRoute("poker"))
-	assert.Equal(t, RouteGamePrefix, GameRoute(""))
-	assert.Greater(t, len(GameRoute("uno")), len(RouteGamePrefix), "a slug contributes to its route")
+	assert.Equal(t, Route("game_poker"), GameRoute("poker"))
+	assert.Equal(t, Route(routeGamePrefix), GameRoute(""))
+	assert.Greater(t, len(GameRoute("uno")), len(routeGamePrefix), "a slug contributes to its route")
 }
 
 // Goto on an unknown route is a silent no-op, so callers that cannot tolerate one ask
@@ -63,8 +63,9 @@ func TestHasRoute(t *testing.T) {
 func TestGlobalContext_RequestContext(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, context.Background(), GlobalContext{}.RequestContext(),
-		"an unset session context falls back to Background rather than nil")
+	fallback := GlobalContext{}.RequestContext()
+	require.NotNil(t, fallback, "an unset session context falls back to Background rather than nil")
+	assert.Nil(t, fallback.Done(), "and the fallback is never cancelled")
 
 	ctx := t.Context()
 	assert.Equal(t, ctx, GlobalContext{SessionCtx: ctx}.RequestContext(),
@@ -114,9 +115,11 @@ func TestRouter_IdleQuit(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		route    string
+		route    Route
 		idleFor  time.Duration
 		keyPress bool
+		// exempt, when set, is the active view's IdleExempt answer.
+		exempt   *bool
 		wantQuit bool
 	}{
 		{name: "idle at a menu is dropped", route: RouteHome, idleFor: 6 * time.Minute, wantQuit: true},
@@ -124,7 +127,12 @@ func TestRouter_IdleQuit(t *testing.T) {
 		{name: "just inside the threshold stays", route: RouteHome, idleFor: 5*time.Minute - 30*time.Second},
 		// The player is watching other seats act; the engine's own turn clock is what
 		// removes someone who has genuinely stopped playing.
-		{name: "idle at a table is not dropped", route: GameRoute("poker"), idleFor: time.Hour},
+		{name: "idle at a live table is not dropped", route: GameRoute("poker"), idleFor: time.Hour, exempt: new(true)},
+		// A game-over screen is a menu: nothing is left to forfeit, and it used to hold
+		// the connection and a subscriber slot forever because its route is a game's.
+		{name: "idle at a finished table is dropped", route: GameRoute("poker"), idleFor: 6 * time.Minute,
+			exempt: new(false), wantQuit: true},
+		{name: "a game route alone exempts nothing", route: GameRoute("poker"), idleFor: 6 * time.Minute, wantQuit: true},
 		{name: "a key press resets the clock", route: RouteHome, idleFor: time.Hour, keyPress: true},
 	}
 
@@ -133,12 +141,17 @@ func TestRouter_IdleQuit(t *testing.T) {
 			t.Parallel()
 
 			r := New(GlobalContext{})
-			r.Register(tt.route, func(GlobalContext, any) tea.Model { return MockModel{} })
+			r.Register(tt.route, func(GlobalContext, any) tea.Model {
+				if tt.exempt != nil {
+					return exemptModel{exempt: *tt.exempt}
+				}
+				return MockModel{}
+			})
 			r.Goto(tt.route, nil)
 
 			r.lastActivity = time.Now().Add(-tt.idleFor)
 			if tt.keyPress {
-				r.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+				r.Update(tuitest.Key("a"))
 			}
 
 			_, cmd := r.Update(tickMsg(time.Now()))
@@ -149,6 +162,13 @@ func TestRouter_IdleQuit(t *testing.T) {
 		})
 	}
 }
+
+type exemptModel struct {
+	MockModel
+	exempt bool
+}
+
+func (m exemptModel) IdleExempt() bool { return m.exempt }
 
 // A mouse click is activity too - a player navigating with the mouse alone would
 // otherwise be dropped mid-menu.
@@ -252,10 +272,10 @@ func TestRouter_ChangeViewMsgRoutes(t *testing.T) {
 	r.Goto("first", nil)
 
 	r.Update(ChangeViewMsg{ViewName: "second", Context: "ctx"})
-	assert.Equal(t, "second", r.activeKey)
+	assert.Equal(t, Route("second"), r.activeKey)
 
 	r.Update(ChangeViewMsg{ViewName: "nope"})
-	assert.Equal(t, "second", r.activeKey, "an unknown route leaves the player where they were")
+	assert.Equal(t, Route("second"), r.activeKey, "an unknown route leaves the player where they were")
 
 	// The navigation message is consumed rather than handed on; the view that receives
 	// it has already been replaced.

@@ -6,10 +6,12 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/game/crazyeight"
+	"github.com/Pieczasz/terminal-card/internal/game/hearts"
 	"github.com/Pieczasz/terminal-card/internal/game/poker"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -21,16 +23,16 @@ import (
 // between them exercises the clamp.
 func bothGamesRegistry(t *testing.T) *game.Registry {
 	t.Helper()
-	r := game.NewRegistry()
-	r.RegisterModule(game.Module{
-		Name: "Poker", Slug: "poker",
-		Factory: func() game.Rules { return &poker.Rules{} },
-	})
-	r.RegisterModule(game.Module{
-		Name: "Crazy Eights", Slug: "crazy_eights",
-		Factory: func() game.Rules { return &crazyeight.Rules{} },
-	})
-	return r
+	return game.NewRegistry(
+		game.Module{
+			Name: "Poker", Slug: "poker",
+			Factory: func() game.Rules { return &poker.Rules{} },
+		},
+		game.Module{
+			Name: "Crazy Eights", Slug: "crazy_eights",
+			Factory: func() game.Rules { return &crazyeight.Rules{} },
+		},
+	)
 }
 
 func newCreateModel(t *testing.T) *createModel {
@@ -74,6 +76,25 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 	assert.Equal(t, 6, m.maxPlayers, "crazy eights caps at six, so the setting must come down")
 }
 
+// Stepping the setting down stops at the game's own minimum, not at two: a Hearts
+// table set to three seats is a lobby its rules can never start.
+func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
+	t.Parallel()
+	r := game.NewRegistry(game.Module{
+		Name: "Hearts", Slug: "hearts",
+		Factory: func() game.Rules { return &hearts.Rules{} },
+	})
+	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), GameRegistry: r}).(*createModel)
+	require.True(t, ok)
+	m.cursor = createCursorPlayers
+
+	for range 3 {
+		m.adjustSetting(-1)
+	}
+
+	assert.Equal(t, 4, m.maxPlayers, "hearts cannot go below four")
+}
+
 // The clamp must also raise a too-small setting to the game's minimum.
 func TestCreate_ClampRaisesBelowMinimum(t *testing.T) {
 	t.Parallel()
@@ -115,7 +136,7 @@ func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
 	require.NotPanics(t, func() { m.View() }, "an empty form still has to render")
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.handleKey(keyMsg("enter"))
+	_, cmd := m.handleKey(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "there is nothing to create, so nowhere to navigate")
 	assert.ErrorIs(t, m.err, errNoGames)
 }
@@ -134,7 +155,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
-		want string
+		want router.Route
 	}{
 		{name: "new game", key: "n", want: router.RouteLobbyCreate},
 		{name: "join game", key: "f", want: router.RouteLobbyJoin},
@@ -148,7 +169,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
-			_, cmd := m.Update(keyMsg(tt.key))
+			_, cmd := m.Update(tuitest.Key(tt.key))
 			assert.Equal(t, tt.want, routeOf(t, cmd))
 		})
 	}
@@ -199,7 +220,8 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				assert.Equal(t, m.gameMaxPlayers(), m.maxPlayers)
+				_, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
 		{
@@ -249,7 +271,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			m := newCreateModel(t)
 			m.cursor = tt.cursor
 			for _, key := range tt.keys {
-				m.Update(keyMsg(key))
+				m.Update(tuitest.Key(key))
 			}
 			tt.check(t, m)
 		})
@@ -262,12 +284,12 @@ func TestCreate_CursorStaysInBounds(t *testing.T) {
 	m := newCreateModel(t)
 
 	for range 10 {
-		m.Update(keyMsg("j"))
+		m.Update(tuitest.Key("j"))
 	}
 	assert.Equal(t, createCursorSubmit, m.cursor)
 
 	for range 10 {
-		m.Update(keyMsg("k"))
+		m.Update(tuitest.Key("k"))
 	}
 	assert.Equal(t, createCursorGame, m.cursor)
 }
@@ -283,7 +305,7 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	m.isRanked = true
 	m.cursor = createCursorSubmit
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
@@ -305,11 +327,11 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	manager := lobby.NewManager(t.Context(), nil)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
-	_, err := manager.New(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
+	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd, "nothing was created, so there is nowhere to navigate")
 	require.Error(t, m.err)
@@ -324,7 +346,7 @@ func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
 	m.cursor = createCursorVisibility
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd)
 	assert.NoError(t, m.err)
@@ -337,7 +359,9 @@ func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
 	m := newCreateModel(t)
 	m.global.GameRegistry = game.NewRegistry()
 
-	assert.Equal(t, 8, m.gameMaxPlayers())
+	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+	assert.Equal(t, fallbackMinPlayers, minP)
+	assert.Equal(t, fallbackMaxPlayers, maxP)
 }
 
 // Anything that is not a keystroke reaches this form too - a resize has to land on the
@@ -360,25 +384,18 @@ func TestCreate_UpdateIgnoresWhatIsNotAKey(t *testing.T) {
 // support - with the error line showing, which is the tallest it ever gets.
 func TestCreateView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{name: "the declared minimum", w: styles.MinWidth, h: styles.MinHeight},
-		{name: "a stock terminal", w: 80, h: 24},
-		{name: "a tall terminal", w: 120, h: 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
 			m.global.Theme = styles.NewTheme(true)
-			m.global.Width, m.global.Height = size.w, size.h
+			m.global.Width, m.global.Height = size.Width, size.Height
 			m.err = errors.New("no games are available right now")
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
 }

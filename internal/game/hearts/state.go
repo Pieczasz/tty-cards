@@ -6,31 +6,45 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/deck"
 )
 
-type Stage uint8
+// Phase is where a hand is. The zero value is PhasePassing, the phase every hand but
+// a hold hand deals into.
+type Phase uint8
 
+// The phases of a hearts hand.
 const (
-	StagePassing Stage = iota
-	StageTrickPlay
-	StageHandOver
+	PhasePassing Phase = iota
+	PhaseTrickPlay
+	PhaseHandOver
 )
 
+// PassDirection is where a hand's three passed cards go. It rotates left, right,
+// across and hold, one hand each.
 type PassDirection uint8
 
+// The pass directions, in the order they rotate.
 const (
 	PassLeft PassDirection = iota
 	PassRight
 	PassAcross
 	PassNone
+
+	// passDirectionCount is the length of the rotation.
+	passDirectionCount = iota
 )
 
+// targetScore is the total that ends the match once a player reaches it.
+const targetScore = 100
+
 const (
-	playerCount         = 4
-	cardsPerHand        = 13
-	cardsToPass         = 3
-	penaltyPointsTotal  = 26
-	DefaultTargetScore  = 100
-	passTurnTimeout     = 45 * time.Second
-	handOverTurnTimeout = time.Minute
+	playerCount  = 4
+	cardsPerHand = 13
+	cardsToPass  = 3
+	// penaltyPointsTotal is every point in a hand: the thirteen hearts and the queen.
+	penaltyPointsTotal  = cardsPerHand + queenOfSpadesPoints
+	queenOfSpadesPoints = 13
+
+	passTurnDuration     = 45 * time.Second
+	handOverTurnDuration = time.Minute
 )
 
 var (
@@ -55,13 +69,14 @@ func (d PassDirection) String() string {
 	}
 }
 
-// State is Hearts-specific match state stored in game.State.Extra.
+// State is the Hearts match state stored in game.State.Extra.
 type State struct {
-	Stage Stage
+	Phase Phase
 
 	PassDirection PassDirection
+	// PendingPasses holds each seat's three cards from the moment it passes until
+	// every seat has; a seat with an entry has passed.
 	PendingPasses map[string][]deck.Card
-	Passed        map[string]bool
 
 	LedSuit    deck.Suit
 	TrickCards map[string]deck.Card
@@ -78,10 +93,19 @@ type State struct {
 	HandNumber       int
 	DealerIndex      int
 	TargetScore      int
-	HandComplete     bool
 	MatchComplete    bool
 
 	LastTrickWinner string
+}
+
+// HandComplete is derived from Phase rather than kept beside it, so the two cannot
+// disagree about whether the hand is over.
+func (s *State) HandComplete() bool { return s.Phase == PhaseHandOver }
+
+// passed reports whether the seat has already handed over its three cards this hand.
+func (s *State) passed(playerID string) bool {
+	_, ok := s.PendingPasses[playerID]
+	return ok
 }
 
 // leadingTrick reports whether the next card played opens a trick. A won trick
@@ -102,10 +126,10 @@ func (s *State) startTrick() {
 }
 
 func resetHandState(extra *State) {
-	extra.Stage = StagePassing
+	extra.Phase = PhasePassing
 	extra.PassDirection = PassLeft
 	extra.PendingPasses = nil
-	extra.Passed = nil
+
 	extra.LedSuit = deck.NoSuit
 	extra.TrickCards = make(map[string]deck.Card, playerCount)
 	extra.TrickComplete = false
@@ -115,6 +139,5 @@ func resetHandState(extra *State) {
 	// Fresh rather than cleared: every read is by index, so an absent seat already
 	// reads zero and beginHand does not have to seed one key per player.
 	extra.HandPoints = make(map[string]int, playerCount)
-	extra.HandComplete = false
 	extra.LastTrickWinner = ""
 }

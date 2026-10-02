@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -13,13 +12,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// SSHSessionsActive stays an atomic behind an observable gauge: it is a
-// dimensionless level, which is the one shape that pattern fits. Everything else
-// is a synchronous instrument below, because those carry attributes.
-var SSHSessionsActive atomic.Int64
-
 // meter uses the otel global, which delegates: instruments created before
-// SetupOTel installs the real provider start recording once it does.
+// Setup installs the real provider start recording once it does.
 var meter = otel.Meter("terminal-card")
 
 // mustCounter panics only on a malformed instrument name, which is a compile-time
@@ -42,7 +36,7 @@ func mustHistogram(name, desc string) metric.Float64Histogram {
 	return h
 }
 
-// Attribute values here are bounded sets only (game names, small enums, route
+// Attribute values here are bounded sets only (game slugs, small enums, route
 // patterns) - never a user ID, session ID, or address, which belong on spans
 // and log lines where cardinality is free.
 var (
@@ -78,28 +72,34 @@ var (
 		"Time from lobby creation to game start")
 )
 
+// SSHSession counts an ssh connection outcome: accepted, or why it was refused.
 func SSHSession(ctx context.Context, outcome string) {
 	sshSessions.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
+// SSHSessionEnded records how long a session lasted and how it ended.
 func SSHSessionEnded(ctx context.Context, d time.Duration, outcome string) {
 	sshSessionDuration.Record(ctx, d.Seconds(),
 		metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
+// SSHPanicRecovered counts a panic recovered inside an ssh session.
 func SSHPanicRecovered(ctx context.Context) {
 	sshPanics.Add(ctx, 1)
 }
 
+// RateLimitReject counts a request refused by the named limiter.
 func RateLimitReject(ctx context.Context, limiter string) {
 	rateLimitRejects.Add(ctx, 1, metric.WithAttributes(attribute.String("limiter", limiter)))
 }
 
+// GameStarted counts a game that began.
 func GameStarted(ctx context.Context, gameType string, ranked bool) {
 	gamesStarted.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("game_type", gameType), attribute.Bool("ranked", ranked)))
 }
 
+// GameFinished counts a finished game and records its wall-clock duration.
 func GameFinished(ctx context.Context, gameType string, ranked bool, reason string, d time.Duration) {
 	attrs := metric.WithAttributes(
 		attribute.String("game_type", gameType),
@@ -109,14 +109,17 @@ func GameFinished(ctx context.Context, gameType string, ranked bool, reason stri
 	gameDuration.Record(ctx, d.Seconds(), attrs)
 }
 
+// TurnTimedOut counts a turn the clock played instead of the player.
 func TurnTimedOut(ctx context.Context, gameType string) {
 	turnTimeouts.Add(ctx, 1, metric.WithAttributes(attribute.String("game_type", gameType)))
 }
 
+// PlayerIdleRemoved counts a seat taken for idling.
 func PlayerIdleRemoved(ctx context.Context, gameType string) {
 	idleRemovals.Add(ctx, 1, metric.WithAttributes(attribute.String("game_type", gameType)))
 }
 
+// ActionRejected counts a player action the rules refused.
 func ActionRejected(ctx context.Context, gameType string) {
 	actionsRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("game_type", gameType)))
 }
@@ -128,21 +131,44 @@ func MatchFinalize(ctx context.Context, outcome string, ranked bool) {
 		attribute.String("outcome", outcome), attribute.Bool("ranked", ranked)))
 }
 
+// BroadcastDropped counts n events a slow subscriber on stream never saw.
 func BroadcastDropped(ctx context.Context, stream string, n int64) {
 	broadcastDrops.Add(ctx, n, metric.WithAttributes(attribute.String("stream", stream)))
 }
 
+// SubscribeFailure counts a refused subscription to stream.
 func SubscribeFailure(ctx context.Context, stream string) {
 	subscribeFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("stream", stream)))
 }
 
+// LobbyJoin counts a lobby join attempt by outcome.
 func LobbyJoin(ctx context.Context, outcome string) {
 	lobbyJoins.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
+// LobbyStarted records how long a lobby waited before its game started.
 func LobbyStarted(ctx context.Context, gameType string, waited time.Duration) {
 	lobbyTimeToStart.Record(ctx, waited.Seconds(),
 		metric.WithAttributes(attribute.String("game_type", gameType)))
+}
+
+// RegisterSessionGauge exposes count as the connected-sessions gauge. It reads the
+// session tracker's own count rather than a second counter kept beside it, which
+// could only drift from the number the tracker enforces.
+func RegisterSessionGauge(count func() int) error {
+	active, err := meter.Int64ObservableGauge("terminalcard.ssh.sessions.active",
+		metric.WithDescription("Currently connected SSH sessions"))
+	if err != nil {
+		return fmt.Errorf("create sessions gauge: %w", err)
+	}
+	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(active, int64(count()))
+		return nil
+	}, active)
+	if err != nil {
+		return fmt.Errorf("register sessions callback: %w", err)
+	}
+	return nil
 }
 
 // RegisterDBStats exposes the connection pool as gauges. The pool is a hard cap

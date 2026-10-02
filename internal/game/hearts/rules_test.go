@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/terminal-card/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,11 +32,11 @@ func createTestState(hands ...[]deck.Card) *game.State {
 	players := fourPlayers(hands...)
 	state := game.NewState(rules, players, nil)
 	extra := &State{
-		Stage:            StageTrickPlay,
+		Phase:            PhaseTrickPlay,
 		TrickCards:       make(map[string]deck.Card, playerCount),
 		HandPoints:       make(map[string]int, playerCount),
 		CumulativeScores: make(map[string]int, playerCount),
-		TargetScore:      DefaultTargetScore,
+		TargetScore:      targetScore,
 	}
 	for _, p := range players {
 		extra.HandPoints[p.ID] = 0
@@ -60,8 +61,7 @@ func TestRules_ValidateAction_Pass(t *testing.T) {
 	t.Run("accepts three owned cards", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState(hand)
-		state.Extra.(*State).Stage = StagePassing
-		state.Extra.(*State).Passed = map[string]bool{}
+		extra(t, state).Phase = PhasePassing
 		err := rules.ValidateAction(state, ActionPassCards{Cards: hand[:3]})
 		require.NoError(t, err)
 	})
@@ -69,8 +69,7 @@ func TestRules_ValidateAction_Pass(t *testing.T) {
 	t.Run("rejects wrong count", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState(hand)
-		state.Extra.(*State).Stage = StagePassing
-		state.Extra.(*State).Passed = map[string]bool{}
+		extra(t, state).Phase = PhasePassing
 		err := rules.ValidateAction(state, ActionPassCards{Cards: hand[:2]})
 		require.ErrorContains(t, err, "exactly 3")
 	})
@@ -78,8 +77,7 @@ func TestRules_ValidateAction_Pass(t *testing.T) {
 	t.Run("rejects duplicate", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState(hand)
-		state.Extra.(*State).Stage = StagePassing
-		state.Extra.(*State).Passed = map[string]bool{}
+		extra(t, state).Phase = PhasePassing
 		err := rules.ValidateAction(state, ActionPassCards{Cards: []deck.Card{hand[0], hand[0], hand[1]}})
 		require.ErrorContains(t, err, "duplicate")
 	})
@@ -87,9 +85,9 @@ func TestRules_ValidateAction_Pass(t *testing.T) {
 	t.Run("rejects second pass", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState(hand)
-		extra := state.Extra.(*State)
-		extra.Stage = StagePassing
-		extra.Passed = map[string]bool{"p1": true}
+		extra := extra(t, state)
+		extra.Phase = PhasePassing
+		extra.PendingPasses = map[string][]deck.Card{"p1": hand[:3]}
 		err := rules.ValidateAction(state, ActionPassCards{Cards: hand[:3]})
 		require.ErrorContains(t, err, "already passed")
 	})
@@ -111,11 +109,10 @@ func TestRules_AfterAction_Pass_AppliesOnFourth(t *testing.T) {
 	hands[0][3] = twoOfClubs
 
 	state := createTestState(hands...)
-	extra := state.Extra.(*State)
-	extra.Stage = StagePassing
+	extra := extra(t, state)
+	extra.Phase = PhasePassing
 	extra.PassDirection = PassLeft
 	extra.PendingPasses = make(map[string][]deck.Card, 4)
-	extra.Passed = make(map[string]bool, 4)
 
 	for seat := range 4 {
 		state.CurrentTurn = seat
@@ -125,7 +122,7 @@ func TestRules_AfterAction_Pass_AppliesOnFourth(t *testing.T) {
 		require.NoError(t, rules.AfterAction(state, ActionPassCards{Cards: pass}))
 	}
 
-	assert.Equal(t, StageTrickPlay, extra.Stage)
+	assert.Equal(t, PhaseTrickPlay, extra.Phase)
 	assert.Nil(t, extra.PendingPasses)
 	assert.Len(t, state.Players[0].Cards, 4) // kept 1, received 3
 	require.NotNil(t, state.OverrideNextTurn)
@@ -153,7 +150,7 @@ func TestRules_ValidateAction_Play(t *testing.T) {
 			{Rank: deck.Ace, Suit: deck.Clubs},
 			{Rank: deck.King, Suit: deck.Hearts},
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.TricksPlayed = 1
 		extra.LedSuit = deck.Clubs
 		extra.TrickCards["p2"] = deck.Card{Rank: deck.Two, Suit: deck.Clubs}
@@ -167,7 +164,7 @@ func TestRules_ValidateAction_Play(t *testing.T) {
 			{Rank: deck.Ace, Suit: deck.Hearts},
 			{Rank: deck.King, Suit: deck.Spades},
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.TricksPlayed = 1
 		err := rules.ValidateAction(state, ActionPlayCard{Card: deck.Card{Rank: deck.Ace, Suit: deck.Hearts}})
 		require.ErrorContains(t, err, "not been broken")
@@ -179,7 +176,7 @@ func TestRules_ValidateAction_Play(t *testing.T) {
 			{Rank: deck.Ace, Suit: deck.Hearts},
 			{Rank: deck.King, Suit: deck.Diamonds},
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.LedSuit = deck.Clubs
 		extra.TrickCards["p2"] = deck.Card{Rank: deck.Two, Suit: deck.Clubs}
 		err := rules.ValidateAction(state, ActionPlayCard{Card: deck.Card{Rank: deck.Ace, Suit: deck.Hearts}})
@@ -196,7 +193,7 @@ func TestRules_ApplyAction_Play_BreaksHeartsAndTrickWinner(t *testing.T) {
 		[]deck.Card{{Rank: deck.Three, Suit: deck.Hearts}},
 		[]deck.Card{{Rank: deck.Two, Suit: deck.Diamonds}},
 	)
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TricksPlayed = 1
 
 	plays := []struct {
@@ -232,7 +229,7 @@ func TestRules_ApplyAction_Play_TrickWithoutHeartsLeavesThemUnbroken(t *testing.
 		[]deck.Card{{Rank: deck.Three, Suit: deck.Clubs}},
 		[]deck.Card{{Rank: deck.Two, Suit: deck.Diamonds}},
 	)
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TricksPlayed = 1
 
 	for seat, card := range []deck.Card{
@@ -261,7 +258,7 @@ func TestRules_AfterAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
 		[]deck.Card{{Rank: deck.King, Suit: deck.Clubs}},
 		[]deck.Card{{Rank: deck.Two, Suit: deck.Diamonds}},
 	)
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TricksPlayed = 1
 
 	for seat, card := range []deck.Card{
@@ -280,54 +277,43 @@ func TestRules_AfterAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
 	assert.Equal(t, 2, *state.OverrideNextTurn, "the trick winner leads the next one")
 }
 
-func TestThreeLowestCards(t *testing.T) {
+// Passing the lowest cards kept the Q♠ and the high spades that catch it, which is the
+// worst pass there is. An absent player sheds the danger instead.
+func TestThreeMostDangerous(t *testing.T) {
 	t.Parallel()
+	qs := deck.Card{Rank: deck.Queen, Suit: deck.Spades}
+	as := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
+	ks := deck.Card{Rank: deck.King, Suit: deck.Spades}
+	ah := deck.Card{Rank: deck.Ace, Suit: deck.Hearts}
+	th := deck.Card{Rank: deck.Ten, Suit: deck.Hearts}
+	ac := deck.Card{Rank: deck.Ace, Suit: deck.Clubs}
+	kd := deck.Card{Rank: deck.King, Suit: deck.Diamonds}
+	kc := deck.Card{Rank: deck.King, Suit: deck.Clubs}
+	low := deck.Card{Rank: deck.Two, Suit: deck.Clubs}
 
-	t.Run("picks the three lowest by rank", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{
-			{Rank: deck.King, Suit: deck.Spades},
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Ace, Suit: deck.Clubs},
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Ten, Suit: deck.Clubs},
-			{Rank: deck.Four, Suit: deck.Spades},
-		}
-		got := threeLowestCards(hand)
-		assert.Equal(t, []deck.Card{
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Four, Suit: deck.Spades},
-		}, got, "ace is high in Hearts, so it is never among the lowest")
-	})
-
-	t.Run("same-rank cards break the tie on suit", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{
-			{Rank: deck.Three, Suit: deck.Hearts},
-			{Rank: deck.Two, Suit: deck.Clubs},
-			{Rank: deck.King, Suit: deck.Spades},
-			{Rank: deck.Two, Suit: deck.Diamonds},
-		}
-		assert.Equal(t, []deck.Card{
-			{Rank: deck.Two, Suit: deck.Diamonds},
-			{Rank: deck.Two, Suit: deck.Clubs},
-			{Rank: deck.Three, Suit: deck.Hearts},
-		}, threeLowestCards(hand), "equal ranks order by suit, so the pass is deterministic")
-	})
-
-	t.Run("a short hand passes whatever it has", func(t *testing.T) {
-		t.Parallel()
-		hand := []deck.Card{{Rank: deck.King, Suit: deck.Spades}, {Rank: deck.Two, Suit: deck.Clubs}}
-		assert.Equal(t, hand, threeLowestCards(hand))
-	})
+	tests := []struct {
+		name string
+		hand []deck.Card
+		want []deck.Card
+	}{
+		{name: "the queen and her catchers first", hand: []deck.Card{low, ah, ks, ac, qs, as}, want: []deck.Card{qs, as, ks}},
+		{name: "then the highest hearts", hand: []deck.Card{th, low, ac, ah, ks}, want: []deck.Card{ks, ah, th}},
+		{name: "then the highest cards, ties on suit", hand: []deck.Card{low, kc, ac, kd}, want: []deck.Card{ac, kd, kc}},
+		{name: "a short hand passes whatever it has", hand: []deck.Card{low, ks}, want: []deck.Card{low, ks}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, threeMostDangerous(tt.hand))
+		})
+	}
 }
 
 func TestRules_CheckWinCondition_AndStandings(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 
 	assert.False(t, rules.CheckWinCondition(state))
 	extra.MatchComplete = true
@@ -358,7 +344,7 @@ func TestRules_TimeoutAction(t *testing.T) {
 			{Rank: deck.King, Suit: deck.Hearts},
 		}
 		state := createTestState(hand)
-		state.Extra.(*State).Stage = StagePassing
+		extra(t, state).Phase = PhasePassing
 		act := rules.TimeoutAction(state)
 		pass, ok := act.(ActionPassCards)
 		require.True(t, ok)
@@ -369,7 +355,7 @@ func TestRules_TimeoutAction(t *testing.T) {
 	t.Run("hand over returns next hand", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		state.Extra.(*State).Stage = StageHandOver
+		extra(t, state).Phase = PhaseHandOver
 		act := rules.TimeoutAction(state)
 		assert.Equal(t, ActionNextHand{}, act)
 		require.NoError(t, rules.ValidateAction(state, act))
@@ -378,8 +364,8 @@ func TestRules_TimeoutAction(t *testing.T) {
 	t.Run("match complete returns nil", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := state.Extra.(*State)
-		extra.Stage = StageHandOver
+		extra := extra(t, state)
+		extra.Phase = PhaseHandOver
 		extra.MatchComplete = true
 		assert.Nil(t, rules.TimeoutAction(state))
 	})
@@ -399,7 +385,7 @@ func TestRules_FinishedTrickStaysOnTheTableUntilTheNextLead(t *testing.T) {
 		[]deck.Card{{Rank: deck.King, Suit: deck.Clubs}, {Rank: deck.Nine, Suit: deck.Diamonds}},
 		[]deck.Card{{Rank: deck.Two, Suit: deck.Clubs}},
 	)
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TricksPlayed = 1 // past the opening trick, so the 2♣ lead rule is done
 
 	for seat, p := range state.Players {
@@ -431,23 +417,47 @@ func TestRules_OnPlayerLeave_EndsMatch(t *testing.T) {
 	rules := &Rules{}
 	state := createTestState()
 	rules.OnPlayerLeave(state, "p2")
-	assert.True(t, state.Extra.(*State).MatchComplete)
+	assert.True(t, extra(t, state).MatchComplete)
 	assert.True(t, rules.CheckWinCondition(state))
+	assert.True(t, state.Interrupted, "the match ended on a leave, not on the score")
+}
+
+// Hearts cannot go on three-handed, so one leave ends the match for everyone. That is
+// not a result the seats still playing earned, and the engine has to say so.
+func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
+	t.Parallel()
+	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
+	engine := game.NewEngine(&Rules{}, players, deck.Standard())
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+	events, err := engine.Subscribe()
+	require.NoError(t, err)
+
+	engine.RemovePlayer("p2")
+
+	require.True(t, engine.IsFinished())
+	reason := game.EndReasonUnknown
+	for len(events) > 0 {
+		if ev := <-events; ev.Type == game.EventGameEnded {
+			reason = ev.Reason
+		}
+	}
+	assert.Equal(t, game.EndReasonInterrupted, reason)
 }
 
 func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	// Drive the opening pass (or skip if hand 1 somehow had PassNone - it won't).
 	for {
-		var stage Stage
+		var phase Phase
 		engine.WithState(func(s *game.State) {
-			stage = s.Extra.(*State).Stage
+			phase = extra(t, s).Phase
 		})
-		if stage != StagePassing {
+		if phase != PhasePassing {
 			break
 		}
 		id := engine.CurrentPlayerID()
@@ -455,7 +465,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 		engine.WithState(func(s *game.State) {
 			for _, p := range s.Players {
 				if p.ID == id {
-					cards = threeLowestCards(p.Cards)
+					cards = threeMostDangerous(p.Cards)
 					break
 				}
 			}
@@ -468,7 +478,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 			id := engine.CurrentPlayerID()
 			var act game.Action
 			engine.WithState(func(s *game.State) {
-				extra := s.Extra.(*State)
+				extra := extra(t, s)
 				p := s.Players[s.CurrentTurn]
 				card, ok := firstLegalCard(extra, p)
 				require.True(t, ok, "seat %s must have a legal card", id)
@@ -479,8 +489,8 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	}
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
-		assert.Equal(t, StageHandOver, extra.Stage)
+		extra := extra(t, s)
+		assert.Equal(t, PhaseHandOver, extra.Phase)
 		assert.Equal(t, cardsPerHand, extra.TricksPlayed)
 		total := 0
 		for _, pts := range extra.HandPoints {
@@ -515,7 +525,7 @@ func TestApplyAllPasses_DeliversInEveryDirection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state := createTestState()
-			extra := state.Extra.(*State)
+			extra := extra(t, state)
 			extra.PassDirection = tt.dir
 			extra.PendingPasses = make(map[string][]deck.Card, playerCount)
 			// One card per seat, its rank naming the seat it came from.
@@ -555,7 +565,7 @@ func TestMatch_MoonFromRealTrickPlay(t *testing.T) {
 	state := createTestState(
 		suitOf(deck.Clubs), suitOf(deck.Spades), suitOf(deck.Hearts), suitOf(deck.Diamonds),
 	)
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TargetScore = penaltyPointsTotal
 
 	for trick := range cardsPerHand {
@@ -593,7 +603,7 @@ func TestRules_ValidateAction_FirstTrickExemptions(t *testing.T) {
 			{Rank: deck.Ace, Suit: deck.Hearts},
 			{Rank: deck.Three, Suit: deck.Hearts},
 		})
-		state.Extra.(*State).TricksPlayed = 1
+		extra(t, state).TricksPlayed = 1
 
 		require.NoError(t, rules.ValidateAction(state,
 			ActionPlayCard{Card: deck.Card{Rank: deck.Ace, Suit: deck.Hearts}}))
@@ -605,7 +615,7 @@ func TestRules_ValidateAction_FirstTrickExemptions(t *testing.T) {
 			{Rank: deck.Ace, Suit: deck.Hearts},
 			queenOfSpades,
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.LedSuit = deck.Clubs
 		extra.TrickCards["p2"] = twoOfClubs
 
@@ -627,7 +637,7 @@ func TestRules_TimeoutAction_TrickPlay(t *testing.T) {
 			{Rank: deck.King, Suit: deck.Hearts}, // illegal: cannot dump points on trick 1
 			{Rank: deck.Nine, Suit: deck.Diamonds},
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.LedSuit = deck.Clubs
 		extra.TrickCards["p2"] = twoOfClubs
 
@@ -644,7 +654,7 @@ func TestRules_TimeoutAction_TrickPlay(t *testing.T) {
 			{Rank: deck.Nine, Suit: deck.Diamonds},
 			{Rank: deck.Four, Suit: deck.Clubs},
 		})
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.TricksPlayed = 1
 		extra.LedSuit = deck.Clubs
 		extra.TrickCards["p2"] = twoOfClubs
@@ -665,15 +675,14 @@ func TestRules_TimeoutAction_TrickPlay(t *testing.T) {
 // clubs, which is a different code path from the one the passing hands take.
 func TestRules_BeginHand_HoldHandSeatsTheTwoOfClubs(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.HandNumber = 3 // the next hand is the fourth: PassNone
 
-	require.NoError(t, rules.beginHand(state, extra, 2))
+	require.NoError(t, beginHand(state, extra, 2))
 
 	require.Equal(t, PassNone, extra.PassDirection)
-	assert.Equal(t, StageTrickPlay, extra.Stage, "nothing to pass, so trick play starts at once")
+	assert.Equal(t, PhaseTrickPlay, extra.Phase, "nothing to pass, so trick play starts at once")
 	assert.Nil(t, extra.PendingPasses)
 	require.NotNil(t, state.OverrideNextTurn)
 	assert.Equal(t, findTwoOfClubs(state), *state.OverrideNextTurn)
@@ -685,7 +694,7 @@ func TestRules_BeginHand_HoldHandSeatsTheTwoOfClubs(t *testing.T) {
 func TestRules_ApplyAction_QueenOfSpadesDoesNotBreakHearts(t *testing.T) {
 	t.Parallel()
 	state := createTestState([]deck.Card{queenOfSpades})
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.TricksPlayed = 1
 	extra.LedSuit = deck.Spades
 	extra.TrickCards["p2"] = deck.Card{Rank: deck.Two, Suit: deck.Spades}
@@ -699,19 +708,19 @@ func TestRules_ApplyAction_QueenOfSpadesDoesNotBreakHearts(t *testing.T) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
+		extra := extra(t, s)
 		extra.CumulativeScores = map[string]int{"p1": 10, "p2": 10, "p3": 5, "p4": 20}
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, playerCount)
-	assert.Equal(t, "p3", standings[0].ID, "the fewest points wins hearts")
-	assert.Equal(t, []int{1, 2, 2, 4}, places, "equal totals are one place, not two")
+	assert.Equal(t, "p3", standings[0].Player.ID, "the fewest points wins hearts")
+	assert.Equal(t, []int{1, 2, 2, 4}, gametest.Places(standings), "equal totals are one place, not two")
 }
 
 // A table that ends mid-hand on a disconnect has a live hand nobody has scored yet.
@@ -720,22 +729,22 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	engine := game.NewEngine(rules, fourPlayers(), deck.StandardDeck())
+	engine := game.NewEngine(rules, fourPlayers(), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
+		extra := extra(t, s)
 		extra.CumulativeScores = map[string]int{"p1": 0, "p2": 0, "p3": 0, "p4": 0}
 		extra.HandPoints = map[string]int{"p1": 0, "p2": 0, "p3": 0, "p4": 25}
-		extra.HandComplete = false
+		extra.Phase = PhaseTrickPlay
 
 		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "mid-hand, the live hand counts")
 		assert.Equal(t, 0, rules.StandingScore(s, s.Players[0]))
 
 		// scoreHand has run: totals now hold the hand, and HandPoints still does too.
 		extra.CumulativeScores["p4"] = 25
-		extra.HandComplete = true
+		extra.Phase = PhaseHandOver
 		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "scored once, not twice")
 	})
 }
@@ -755,29 +764,29 @@ func TestRules_TableSize(t *testing.T) {
 // between-hands prompt, which is a decision rather than a move. Zero everywhere else
 // means "engine default", not "no clock" - returning a real duration there would
 // quietly redefine the turn length for every trick.
-func TestRules_TurnTimeout(t *testing.T) {
+func TestRules_TurnDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		stage Stage
+		phase Phase
 		want  time.Duration
 	}{
-		{name: "passing gets 45 seconds", stage: StagePassing, want: 45 * time.Second},
-		{name: "the hand-over prompt gets a minute", stage: StageHandOver, want: time.Minute},
-		{name: "trick play keeps the engine default", stage: StageTrickPlay},
+		{name: "passing gets 45 seconds", phase: PhasePassing, want: 45 * time.Second},
+		{name: "the hand-over prompt gets a minute", phase: PhaseHandOver, want: time.Minute},
+		{name: "trick play keeps the engine default", phase: PhaseTrickPlay},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state := createTestState()
-			state.Extra.(*State).Stage = tt.stage
-			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
+			extra(t, state).Phase = tt.phase
+			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
 
 	t.Run("a state that is not a hearts state has no opinion", func(t *testing.T) {
 		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnTimeout(&game.State{}))
+		assert.Zero(t, (&Rules{}).TurnDuration(&game.State{}))
 	})
 }
 
@@ -788,14 +797,13 @@ func TestRules_TurnTimeout(t *testing.T) {
 func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	engine := game.NewEngine(&Rules{}, players, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, players, deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
-		extra.Stage = StageTrickPlay
-		extra.HandComplete = false
+		extra := extra(t, s)
+		extra.Phase = PhaseTrickPlay
 		extra.CumulativeScores = map[string]int{"p1": 10, "p2": 0, "p3": 10, "p4": 10}
 		// p3 took the queen this hand, so on the totals alone they would tie p1 and p4
 		// and place ahead of both on seat order.
@@ -804,15 +812,15 @@ func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 
 	engine.RemovePlayer("p2")
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, 4)
 	ids := make([]string, len(standings))
-	for i, p := range standings {
-		ids[i] = p.ID
+	for i, s := range standings {
+		ids[i] = s.Player.ID
 	}
 	assert.Equal(t, []string{"p1", "p4", "p3", "p2"}, ids,
 		"lowest live total first, and the leaver last whatever they scored")
-	assert.Equal(t, []int{1, 2, 3, 4}, places,
+	assert.Equal(t, []int{1, 2, 3, 4}, gametest.Places(standings),
 		"p2 left on 5 points and must not tie anyone still at the table")
 }
 
@@ -823,25 +831,25 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		stage   Stage
+		phase   Phase
 		action  game.Action
 		wantErr string
 	}{
 		{
-			name: "a play during the pass phase", stage: StagePassing,
+			name: "a play during the pass phase", phase: PhasePassing,
 			action: ActionPlayCard{}, wantErr: "must pass cards during passing phase",
 		},
 		{
-			name: "a pass during trick play", stage: StageTrickPlay,
+			name: "a pass during trick play", phase: PhaseTrickPlay,
 			action:  ActionPassCards{Cards: make([]deck.Card, cardsToPass)},
 			wantErr: "must play a card during trick play",
 		},
 		{
-			name: "any move once the hand is over", stage: StageHandOver,
+			name: "any move once the hand is over", phase: PhaseHandOver,
 			action: ActionPlayCard{}, wantErr: "hand is over",
 		},
 		{
-			name: "the next hand while this one is live", stage: StageTrickPlay,
+			name: "the next hand while this one is live", phase: PhaseTrickPlay,
 			action: ActionNextHand{}, wantErr: "the hand is still being played",
 		},
 	}
@@ -849,7 +857,7 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state := createTestState()
-			state.Extra.(*State).Stage = tt.stage
+			extra(t, state).Phase = tt.phase
 			assert.ErrorContains(t, rules.ValidateAction(state, tt.action), tt.wantErr)
 		})
 	}
@@ -857,8 +865,8 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 	t.Run("the next hand once the match is over", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := state.Extra.(*State)
-		extra.Stage = StageHandOver
+		extra := extra(t, state)
+		extra.Phase = PhaseHandOver
 		extra.MatchComplete = true
 		assert.ErrorContains(t, rules.ValidateAction(state, ActionNextHand{}), "the match is over")
 	})
@@ -895,7 +903,7 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-		engine := game.NewEngine(rules, players, deck.StandardDeck())
+		engine := game.NewEngine(rules, players, deck.Standard())
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 
@@ -913,6 +921,6 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 			})
 			require.NoError(rt, engine.SubmitAction(id, act))
 		}
-		rt.Fatalf("a match played entirely by the clock never reached %d points", DefaultTargetScore)
+		rt.Fatalf("a match played entirely by the clock never reached %d points", targetScore)
 	})
 }

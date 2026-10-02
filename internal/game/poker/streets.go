@@ -4,63 +4,47 @@ import (
 	"cmp"
 	"errors"
 	"log/slog"
-	"maps"
 	"slices"
 
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
-func bettingRoundComplete(state *game.State, extra *State) bool {
-	for _, p := range state.Players {
-		if cannotAct(extra, p.ID) {
-			continue
-		}
-		if !extra.ActedThisRound[p.ID] {
-			return false
-		}
-		if extra.PlayerBets[p.ID] < extra.CurrentBet {
-			return false
-		}
-	}
-	return true
+// owesAction is a seat that can act and has not yet acted on, or not yet matched, the
+// current bet.
+func (s *State) owesAction(seat *Seat) bool {
+	return seat.canAct() && (!seat.Acted || seat.Bet < s.CurrentBet)
 }
 
-// nextSeat scans clockwise from seat from, wrapping once around a table of n seats,
-// and returns the first index ok accepts. -1 means no seat qualifies.
-func nextSeat(from, n int, ok func(idx int) bool) int {
-	for i := 1; i <= n; i++ {
-		idx := (from + i) % n
-		if ok(idx) {
-			return idx
-		}
-	}
-	return -1
+func bettingRoundComplete(state *game.State, extra *State) bool {
+	return !slices.ContainsFunc(state.Players, func(p *game.Player) bool {
+		return extra.owesAction(extra.Seats[p.ID])
+	})
 }
 
 func nextToAct(state *game.State, extra *State, from int) int {
-	return nextSeat(from, len(state.Players), func(idx int) bool {
-		id := state.Players[idx].ID
-		if cannotAct(extra, id) {
-			return false
-		}
-		return !extra.ActedThisRound[id] || extra.PlayerBets[id] < extra.CurrentBet
+	return game.NextSeat(from, len(state.Players), func(seat int) bool {
+		return extra.owesAction(extra.Seats[state.Players[seat].ID])
 	})
 }
 
 func firstToActPostflop(state *game.State, extra *State) int {
-	idx := nextSeat(extra.DealerIndex, len(state.Players), func(idx int) bool {
-		return !cannotAct(extra, state.Players[idx].ID)
+	seat := game.NextSeat(extra.DealerIndex, len(state.Players), func(seat int) bool {
+		return extra.Seats[state.Players[seat].ID].canAct()
 	})
-	if idx < 0 {
+	if seat < 0 {
 		return state.CurrentTurn
 	}
-	return idx
+	return seat
 }
 
 func settleAndAdvance(state *game.State, extra *State) error {
 	for _, p := range state.Players {
-		extra.PlayerBets[p.ID] = 0
-		extra.ActedThisRound[p.ID] = false
+		seat := extra.Seats[p.ID]
+		seat.Bet = 0
+		seat.Acted = false
+	}
+	for _, seat := range extra.Seats {
+		seat.LastBetLevel = 0
 	}
 	extra.CurrentBet = 0
 	extra.MinRaise = extra.BigBlind
@@ -68,8 +52,8 @@ func settleAndAdvance(state *game.State, extra *State) error {
 	// Betting can only continue with at least two players who still have chips;
 	// a lone live player against all-ins just runs the board out.
 	canStillBet := 0
-	for _, p := range activePlayers(state, extra) {
-		if !extra.PlayersAllIn[p.ID] && extra.PlayerChips[p.ID] > 0 {
+	for _, p := range unfolded(state, extra) {
+		if seat := extra.Seats[p.ID]; !seat.AllIn && seat.Chips > 0 {
 			canStillBet++
 		}
 	}
@@ -87,19 +71,30 @@ func settleAndAdvance(state *game.State, extra *State) error {
 	return nil
 }
 
+// settleOrUnwind is settleAndAdvance for callers that cannot finish the hand on a
+// failure: a street that cannot be dealt leaves chips no showdown will ever award, so
+// the pool goes back to whoever put it in before the error is passed on.
+func settleOrUnwind(state *game.State, extra *State) error {
+	if err := settleAndAdvance(state, extra); err != nil {
+		refundContributions(extra)
+		return err
+	}
+	return nil
+}
+
 // advanceStreet burns, deals what the next street needs and moves Phase onto it. It
 // reports false once there is no street left to deal, which is the showdown.
 func advanceStreet(state *game.State, extra *State) (bool, error) {
-	var next RoundPhase
+	var next Phase
 	var cards int
 	switch extra.Phase {
-	case PreFlop:
-		next, cards = Flop, 3
-	case Flop:
-		next, cards = Turn, 1
-	case Turn:
-		next, cards = River, 1
-	default:
+	case PhasePreFlop:
+		next, cards = PhaseFlop, flopCards
+	case PhaseFlop:
+		next, cards = PhaseTurn, 1
+	case PhaseTurn:
+		next, cards = PhaseRiver, 1
+	case PhaseUnknown, PhaseRiver, PhaseShowdown:
 		return false, nil
 	}
 	if err := dealCommunity(state, extra, cards); err != nil {
@@ -127,7 +122,7 @@ func dealCommunity(state *game.State, extra *State, n int) error {
 }
 
 func runOutBoard(state *game.State, extra *State) error {
-	for extra.Phase != River && extra.Phase != Showdown {
+	for extra.Phase != PhaseRiver && extra.Phase != PhaseShowdown {
 		dealt, err := advanceStreet(state, extra)
 		if err != nil {
 			return err
@@ -140,13 +135,12 @@ func runOutBoard(state *game.State, extra *State) error {
 }
 
 func runShowdown(state *game.State, extra *State) error {
-	extra.Phase = Showdown
+	extra.Phase = PhaseShowdown
 	extra.ReachedShowdown = true
 	live := contenders(state, extra)
-	scores := handScores(live, extra)
+	scores := handScores(extra, live)
 	refundUncalled(extra)
 	extra.Pots = buildSidePots(extra, live)
-	extra.HandComplete = true
 	extra.Winners = awardPots(extra, live, scores)
 	return nil
 }
@@ -156,9 +150,9 @@ func runShowdown(state *game.State, extra *State) error {
 // decisions left to make, so disconnecting cannot cost them a pot they are already
 // committed to - leaving still forfeits the hand for anyone with chips behind.
 func contenders(state *game.State, extra *State) []*game.Player {
-	out := activePlayers(state, extra)
+	out := unfolded(state, extra)
 	for _, p := range state.LeftPlayers {
-		if !isFolded(extra, p.ID) && extra.PlayersAllIn[p.ID] {
+		if seat := extra.Seats[p.ID]; !seat.Folded && seat.AllIn {
 			out = append(out, p)
 		}
 	}
@@ -173,7 +167,11 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 
 	// Distinct non-zero contribution levels, ascending: each one closes a pot
 	// layer. Contributions come from every player who put chips in, seated or not.
-	levels := slices.Sorted(maps.Values(extra.TotalContributed))
+	levels := make([]uint, 0, len(extra.Seats))
+	for _, seat := range extra.Seats {
+		levels = append(levels, seat.Contributed)
+	}
+	slices.Sort(levels)
 	levels = slices.Compact(levels)
 	levels = slices.DeleteFunc(levels, func(c uint) bool { return c == 0 })
 
@@ -183,11 +181,11 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 	for _, lvl := range levels {
 		var eligible []string
 		var amount uint
-		for id, contrib := range extra.TotalContributed {
+		for id, seat := range extra.Seats {
 			// A contribution below this level is always below prev too: every
 			// non-zero contribution is itself one of the levels, so by the time the
 			// loop passes it, prev has already reached it. Nothing to collect.
-			if contrib < lvl {
+			if seat.Contributed < lvl {
 				continue
 			}
 			amount += lvl - prev
@@ -224,23 +222,23 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 // pots are cut: a layer above every eligible player is unwinnable, and folding it into
 // the live pot would pay one player's uncalled chips to their opponents.
 func refundUncalled(extra *State) {
-	var topID string
+	var topSeat *Seat
 	var top, second uint
-	for id, contributed := range extra.TotalContributed {
+	for _, seat := range extra.Seats {
 		switch {
-		case contributed > top:
-			topID, top, second = id, contributed, top
-		case contributed > second:
-			second = contributed
+		case seat.Contributed > top:
+			topSeat, top, second = seat, seat.Contributed, top
+		case seat.Contributed > second:
+			second = seat.Contributed
 		}
 	}
 	uncalled := top - second
 	if uncalled == 0 {
 		return
 	}
-	extra.TotalContributed[topID] = second
-	extra.PlayerChips[topID] += uncalled
-	extra.MainPool -= uncalled
+	topSeat.Contributed = second
+	topSeat.Chips += uncalled
+	extra.Pool -= uncalled
 }
 
 // splitEvenly hands amount to ids, the odd chips going one each to the front of the
@@ -251,9 +249,9 @@ func splitEvenly(extra *State, ids []string, amount uint) {
 	share := amount / uint(len(ids))
 	rem := amount % uint(len(ids))
 	for i, id := range ids {
-		extra.PlayerChips[id] += share
+		extra.Seats[id].Chips += share
 		if uint(i) < rem {
-			extra.PlayerChips[id]++
+			extra.Seats[id].Chips++
 		}
 	}
 }
@@ -265,9 +263,9 @@ func splitEvenly(extra *State, ids []string, amount uint) {
 // table can belong to a short stack who only paid into the main pot, so a global
 // best-hand scan would announce a winner the side pot did not go to.
 //
-// Every pot is cut from MainPool, so paying one takes it back out rather than the pool
+// Every pot is cut from Pool, so paying one takes it back out rather than the pool
 // being zeroed on trust: a layer that never reaches a stack is then still sitting in
-// MainPool for the conservation check in finishHand to find.
+// Pool for the conservation check in finishHand to find.
 func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game.Player {
 	playerByID := make(map[string]*game.Player, len(live))
 	for _, p := range live {
@@ -291,7 +289,7 @@ func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game
 		}
 		slices.Sort(potWinners)
 		splitEvenly(extra, potWinners, pot.Amount)
-		extra.MainPool -= pot.Amount
+		extra.Pool -= pot.Amount
 		for _, id := range potWinners {
 			if p := playerByID[id]; !slices.Contains(winners, p) {
 				winners = append(winners, p)
@@ -301,52 +299,40 @@ func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game
 	return winners
 }
 
-func handScore(p *game.Player, extra *State) int {
-	cards := slices.Clone(p.Cards)
-	cards = append(cards, extra.Table...)
-	return evaluateHand(cards)
-}
-
 // handScores evaluates each player's hand once, so callers avoid re-running the
 // allocating evaluator inside a sort comparator or per-pot loop.
-func handScores(players []*game.Player, extra *State) map[string]int {
+func handScores(extra *State, players []*game.Player) map[string]int {
 	scores := make(map[string]int, len(players))
 	for _, p := range players {
-		scores[p.ID] = handScore(p, extra)
+		scores[p.ID] = evaluateHand(slices.Concat(p.Cards, extra.Table))
 	}
 	return scores
 }
 
-// awardUncontested pays the last live player when everyone else folded or left. A
-// player can only win from an opponent what they risked themselves, so anything
-// nobody matched goes back first - refundUncalled does the same job on the showdown
-// path, and without this the fold-out path pays the winner chips no one called.
+// awardUncontested pays the last live player when everyone else folded or left. The
+// pot is split the way the showdown path splits it: refundUncalled hands back the one
+// slice nobody matched - the top contributor's excess over the second-highest - and
+// everything else, dead money from folders included, goes to the winner, just as
+// buildSidePots rides it with the last live layer. Refunding each folder their excess
+// over the winner instead would let a player who called and folded take back chips
+// the showdown path would have paid out.
 func awardUncontested(extra *State, winner *game.Player) {
-	matched := extra.TotalContributed[winner.ID]
-	for id, contributed := range extra.TotalContributed {
-		if id == winner.ID || contributed <= matched {
-			continue
-		}
-		uncalled := contributed - matched
-		extra.PlayerChips[id] += uncalled
-		extra.MainPool -= uncalled
-	}
-
-	extra.PlayerChips[winner.ID] += extra.MainPool
-	extra.MainPool = 0
+	refundUncalled(extra)
+	extra.Seats[winner.ID].Chips += extra.Pool
+	extra.Pool = 0
 	extra.Pots = nil
 }
 
 // refundContributions unwinds the hand, handing every chip in the pool back to whoever
 // put it in. It is the only honest exit from a hand that cannot be played out - a deal
 // that runs the deck dry leaves chips no showdown will ever award, and finishHand would
-// otherwise strand them. Nothing has been paid at that point, so MainPool is still
+// otherwise strand them. Nothing has been paid at that point, so Pool is still
 // exactly the sum of the contributions.
 func refundContributions(extra *State) {
-	for id, contributed := range extra.TotalContributed {
-		extra.PlayerChips[id] += contributed
+	for _, seat := range extra.Seats {
+		seat.Chips += seat.Contributed
 	}
-	extra.MainPool = 0
+	extra.Pool = 0
 	extra.Pots = nil
 }
 
@@ -354,9 +340,9 @@ func refundContributions(extra *State) {
 // between a player's stack and the pool, so the two together are constant for the
 // whole hand.
 func chipsInPlay(extra *State) uint {
-	total := extra.MainPool
-	for _, c := range extra.PlayerChips {
-		total += c
+	total := extra.Pool
+	for _, seat := range extra.Seats {
+		total += seat.Chips
 	}
 	return total
 }
@@ -392,25 +378,40 @@ func resultOrder(state *game.State, extra *State) func(a, b *game.Player) int {
 // decided by the stack a player walks away with; everyone who busted is level on
 // chips, so how long they lasted is what separates them. The hand-level keys only
 // matter for players who finished holding equal stacks. Zero is a genuine draw.
+//
+// Hand score counts only for a hand that was shown down between two players still
+// seated: a pot won face-down was never contested on the cards, and a leaver's hand
+// was never played out, so ranking on either splits a draw by cards nobody showed.
 func resultLevel(state *game.State, extra *State) func(a, b *game.Player) int {
-	scores := handScores(slices.Concat(state.Players, state.LeftPlayers), extra)
+	scores := handScores(extra, slices.Concat(state.Players, state.LeftPlayers))
+	seated := make(map[string]bool, len(state.Players))
+	for _, p := range state.Players {
+		seated[p.ID] = true
+	}
 	return func(a, b *game.Player) int {
-		if c := cmp.Compare(extra.PlayerChips[b.ID], extra.PlayerChips[a.ID]); c != 0 {
+		sa, sb := extra.Seats[a.ID], extra.Seats[b.ID]
+		if c := cmp.Or(
+			cmp.Compare(sb.Chips, sa.Chips),
+			cmp.Compare(sb.BustedAtHand, sa.BustedAtHand),
+			compareFolded(sa.Folded, sb.Folded),
+		); c != 0 || sa.Folded {
 			return c
 		}
-		if c := cmp.Compare(extra.BustedAtHand[b.ID], extra.BustedAtHand[a.ID]); c != 0 {
-			return c
-		}
-		fa, fb := isFolded(extra, a.ID), isFolded(extra, b.ID)
-		if fa != fb {
-			if fa {
-				return 1
-			}
-			return -1
-		}
-		if !fa && len(extra.Table) >= 3 {
+		if extra.ReachedShowdown && seated[a.ID] && seated[b.ID] {
 			return cmp.Compare(scores[b.ID], scores[a.ID])
 		}
 		return 0
+	}
+}
+
+// compareFolded ranks a player still in the hand ahead of one who folded.
+func compareFolded(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return 1
+	default:
+		return -1
 	}
 }

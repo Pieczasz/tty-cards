@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/config"
+	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/terminal-card/internal/httpapi"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
 	charmssh "charm.land/ssh"
@@ -62,7 +63,7 @@ func runServe(t *testing.T, server sshServer) error {
 	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{config: testConfig(), sshServer: server})
+		errCh <- serve(t.Context(), serveDeps{config: testConfig(), sshServer: server})
 	}()
 
 	select {
@@ -128,7 +129,7 @@ func TestServe_StatsAPIFailureStopsTheServer(t *testing.T) {
 	server := &fakeServer{serveErr: make(chan error)}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{
+		errCh <- serve(t.Context(), serveDeps{
 			config:    testConfig(),
 			sshServer: server,
 			apiErr:    apiErr,
@@ -157,7 +158,7 @@ func TestServe_SignalDrainsAndReturnsCleanly(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(context.Background(), serveDeps{
+		errCh <- serve(t.Context(), serveDeps{
 			config:     testConfig(),
 			sshServer:  server,
 			signals:    signals,
@@ -173,6 +174,24 @@ func TestServe_SignalDrainsAndReturnsCleanly(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve ignored the signal")
 	}
+}
+
+// "%s:%d" turned SERVER_HOST=:: into ":::6969", which no listener accepts, so an
+// IPv6 literal host could never bind.
+func TestServe_ListensOnAnIPv6LiteralHost(t *testing.T) {
+	t.Parallel()
+	probe, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback here:", err)
+	}
+	require.NoError(t, probe.Close())
+
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGTERM
+	cfg := &config.Config{ServerHost: "::1", MaxConnections: 4}
+
+	err = serve(t.Context(), serveDeps{config: cfg, sshServer: &fakeServer{serveErr: make(chan error)}, signals: signals})
+	require.NoError(t, err, "the listener never bound")
 }
 
 func TestHealthcheck(t *testing.T) {
@@ -210,27 +229,13 @@ func TestHealthcheck(t *testing.T) {
 // happy path has to actually return rather than burn both windows on every shutdown.
 func TestWaitForFinalizers_ReturnsWhenThereIsNothingToWaitFor(t *testing.T) {
 	t.Parallel()
-	manager := lobby.NewManager(context.Background(), nil)
+	manager := lobby.NewManager(t.Context(), nil)
 
 	start := time.Now()
-	waitForFinalizers(manager)
+	waitForFinalizers(t.Context(), manager)
 
 	assert.Less(t, time.Since(start), finalizeDrainTimeout,
 		"an idle manager must not spend a drain window")
-}
-
-// buildRegistry is the seam between the catalog and the engine: a game missing here
-// is a game nobody can start, and the catalog is the only place it is declared.
-func TestBuildRegistry_HasEveryCatalogGame(t *testing.T) {
-	t.Parallel()
-	registry := buildRegistry()
-
-	require.NotEmpty(t, catalog.All)
-	for _, e := range catalog.All {
-		rules, err := registry.Create(e.Name)
-		require.NoErrorf(t, err, "%q is in the catalog but not in the registry", e.Name)
-		assert.NotNil(t, rules)
-	}
 }
 
 // installLogging replaces the process default, so it runs alone.
@@ -243,13 +248,33 @@ func TestInstallLogging_LevelIsLiveAndGatesBothSinks(t *testing.T) {
 	level := installLogging()
 	require.NotNil(t, level)
 
-	assert.False(t, slog.Default().Enabled(context.Background(), slog.LevelDebug),
+	assert.False(t, slog.Default().Enabled(t.Context(), slog.LevelDebug),
 		"debug must be off until configuration says otherwise")
 
 	// config.Load is read after the handler is installed, so the level has to be
 	// changeable afterwards or LOG_LEVEL=DEBUG would never take effect.
 	level.Set(slog.LevelDebug)
-	assert.True(t, slog.Default().Enabled(context.Background(), slog.LevelDebug))
+	assert.True(t, slog.Default().Enabled(t.Context(), slog.LevelDebug))
+}
+
+type onlineCount int
+
+func (n onlineCount) Count() int { return int(n) }
+
+type lobbyCounts struct{}
+
+func (lobbyCounts) Stats() (int, int) { return 0, 0 }
+
+type emptyUsers struct{ db.UserRepository }
+
+// A miswired stats api used to serve zeros for as long as it ran; now it refuses to
+// start, and run returns before anything binds.
+func TestStartStatsAPI_RefusesAMissingDependency(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{ServerHost: "127.0.0.1", APIRequestsPerMinute: 1}
+
+	_, _, err := startStatsAPI(t.Context(), cfg, nil, lobbyCounts{}, emptyUsers{}, nil)
+	require.ErrorIs(t, err, httpapi.ErrMissingDeps)
 }
 
 // The stats api runs on its own goroutine, and a bind failure there used to be a log
@@ -262,11 +287,12 @@ func TestStartStatsAPI_ServesAndStops(t *testing.T) {
 	require.NoError(t, listener.Close())
 
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIPort: port, APIRequestsPerMinute: 100}
-	stop, serveErr := startStatsAPI(cfg, nil, nil, nil, func(context.Context) error { return nil })
+	stop, serveErr, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
+	require.NoError(t, err)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
 	require.Eventually(t, func() bool {
-		req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		if reqErr != nil {
 			return false
 		}

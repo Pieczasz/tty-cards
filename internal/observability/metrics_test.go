@@ -46,7 +46,7 @@ func recordEverything(ctx context.Context) {
 func collect(t *testing.T) metricdata.ResourceMetrics {
 	t.Helper()
 	var got metricdata.ResourceMetrics
-	require.NoError(t, testReader.Collect(context.Background(), &got))
+	require.NoError(t, testReader.Collect(t.Context(), &got))
 	return got
 }
 
@@ -54,8 +54,7 @@ func collect(t *testing.T) metricdata.ResourceMetrics {
 //
 //nolint:paralleltest // reads a process-global manual reader
 func TestMetrics_AreRecordedWithBoundedAttributesOnly(t *testing.T) {
-	ctx := context.Background()
-	SSHSessionsActive.Store(7)
+	ctx := t.Context()
 	recordEverything(ctx)
 
 	got := collect(t)
@@ -133,6 +132,28 @@ func TestRegisterDBStats_ObservesThePool(t *testing.T) {
 	assert.Contains(t, found, "db.client.connections.used")
 	assert.Contains(t, found, "db.client.connections.idle")
 	assert.Contains(t, found, "db.client.connections.wait_count")
+}
+
+// The gauge reads the tracker's count at collection time; a second counter kept
+// beside it is what used to be able to disagree with the number the tracker enforces.
+//
+//nolint:paralleltest // reads a process-global manual reader
+func TestRegisterSessionGauge_ObservesTheCount(t *testing.T) {
+	online := 3
+	require.NoError(t, RegisterSessionGauge(func() int { return online }))
+	online = 7
+
+	var got []int64
+	for _, scope := range collect(t).ScopeMetrics {
+		for _, m := range scope.Metrics {
+			if gauge, ok := m.Data.(metricdata.Gauge[int64]); ok && m.Name == "terminalcard.ssh.sessions.active" {
+				for _, dp := range gauge.DataPoints {
+					got = append(got, dp.Value)
+				}
+			}
+		}
+	}
+	assert.Equal(t, []int64{7}, got, "the gauge must report the count as of the collection")
 }
 
 type unusedConnector struct{}

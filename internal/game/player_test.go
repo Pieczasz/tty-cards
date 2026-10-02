@@ -1,17 +1,18 @@
-package game
+package game_test
 
 import (
 	"testing"
 
+	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestPlayer_Equal(t *testing.T) {
 	t.Parallel()
-	p1 := &Player{ID: "a", UserID: testutil.UID(1)}
-	p2 := &Player{ID: "b", UserID: testutil.UID(1)}
-	p3 := &Player{ID: "a", UserID: testutil.UID(2)}
+	p1 := &game.Player{ID: "a", UserID: testutil.UID(1)}
+	p2 := &game.Player{ID: "b", UserID: testutil.UID(1)}
+	p3 := &game.Player{ID: "a", UserID: testutil.UID(2)}
 
 	t.Run("same account is the same player whatever the session ID", func(t *testing.T) {
 		t.Parallel()
@@ -25,24 +26,24 @@ func TestPlayer_Equal(t *testing.T) {
 
 	t.Run("nil receiver", func(t *testing.T) {
 		t.Parallel()
-		var pNil *Player
+		var pNil *game.Player
 		assert.False(t, pNil.Equal(p1))
 	})
 
 	t.Run("no account falls back to ID", func(t *testing.T) {
 		t.Parallel()
-		a := &Player{ID: "x"}
-		b := &Player{ID: "x"}
-		c := &Player{ID: "y"}
+		a := &game.Player{ID: "x"}
+		b := &game.Player{ID: "x"}
+		c := &game.Player{ID: "y"}
 		assert.True(t, a.Equal(b))
 		assert.False(t, a.Equal(c))
-		assert.False(t, (&Player{}).Equal(&Player{}), "two unidentified players are not the same one")
+		assert.False(t, (&game.Player{}).Equal(&game.Player{}), "two unidentified players are not the same one")
 	})
 }
 
 func TestPlayer_DisplayName(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "alice", (&Player{ID: "1", Name: "alice"}).DisplayName())
-	assert.Equal(t, "1", (&Player{ID: "1"}).DisplayName(), "a nameless seat shows its ID")
-	assert.Empty(t, (*Player)(nil).DisplayName())
+	assert.Equal(t, "alice", (&game.Player{ID: "1", Name: "alice"}).DisplayName())
+	assert.Equal(t, "1", (&game.Player{ID: "1"}).DisplayName(), "a nameless seat shows its ID")
+	assert.Empty(t, (*game.Player)(nil).DisplayName())
 }

@@ -3,7 +3,6 @@
 package repository_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
@@ -24,7 +23,7 @@ import (
 func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	users := repository.NewUserRepository(database)
 	matches := repository.NewMatchRepository(database)
@@ -56,7 +55,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "the leaderboard",
-			call: func() error { _, err := users.BestPlayers(ctx, 10, ""); return err },
+			call: func() error { _, err := users.BestPlayers(ctx, "", 10); return err },
 			want: "get best players",
 		},
 		{

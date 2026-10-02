@@ -14,7 +14,7 @@ import (
 // pass them.
 func TestPile_Shuffle_IsAPermutation(t *testing.T) {
 	t.Parallel()
-	cards := StandardDeck()
+	cards := Standard()
 	p := New(cards)
 
 	p.Shuffle()
@@ -91,12 +91,12 @@ func TestPile_Draw(t *testing.T) {
 	assert.False(t, gotEmptyOk)
 }
 
-func TestPile_DrawNCards(t *testing.T) {
+func TestPile_DrawN(t *testing.T) {
 	t.Parallel()
 	cards := []Card{{Rank: Ace, Suit: Spades}, {Rank: Two, Suit: Spades}, {Rank: Three, Suit: Spades}}
 	p := &Pile{cards: cards}
 
-	gotCards, gotOk := p.DrawNCards(2)
+	gotCards, gotOk := p.DrawN(2)
 	assert.True(t, gotOk)
 	assert.Len(t, gotCards, 2)
 
@@ -105,18 +105,18 @@ func TestPile_DrawNCards(t *testing.T) {
 
 	assert.Equal(t, 1, p.Size())
 
-	_, gotOkFail := p.DrawNCards(5)
+	_, gotOkFail := p.DrawN(5)
 	assert.False(t, gotOkFail)
 }
 
-func TestPile_AddCard(t *testing.T) {
+func TestPile_Add(t *testing.T) {
 	t.Parallel()
 	ace := Card{Rank: Ace, Suit: Spades}
 	king := Card{Rank: King, Suit: Hearts}
 
 	p := &Pile{}
-	p.AddCard(ace)
-	p.AddCard(king, ace)
+	p.Add(ace)
+	p.Add(king, ace)
 
 	assert.Equal(t, []Card{ace, king, ace}, p.Cards(),
 		"cards go on top in the order they were added, duplicates and all")
@@ -131,7 +131,7 @@ func TestPile_IsEmptyTracksSize(t *testing.T) {
 	assert.True(t, p.IsEmpty())
 	assert.Zero(t, p.Size())
 
-	p.AddCard(Card{Rank: Ace, Suit: Spades})
+	p.Add(Card{Rank: Ace, Suit: Spades})
 	assert.False(t, p.IsEmpty())
 
 	_, ok := p.Draw()
@@ -147,7 +147,7 @@ func TestPile_DoesNotAliasTheCallersSlice(t *testing.T) {
 	cards := []Card{ace, {Rank: King, Suit: Hearts}}
 
 	p := New(cards)
-	p.AddCard(Card{Rank: Two, Suit: Clubs})
+	p.Add(Card{Rank: Two, Suit: Clubs})
 	assert.Len(t, cards, 2, "New must copy")
 
 	out := p.Cards()
@@ -158,7 +158,7 @@ func TestPile_DoesNotAliasTheCallersSlice(t *testing.T) {
 	assert.Equal(t, []Card{ace, {Rank: King, Suit: Hearts}}, p.Cards(), "Cards must copy")
 }
 
-func FuzzPile_DrawNCards(f *testing.F) {
+func FuzzPile_DrawN(f *testing.F) {
 	f.Add(0, 0)
 	f.Add(3, -1)
 	f.Add(3, 5)
@@ -176,7 +176,7 @@ func FuzzPile_DrawNCards(f *testing.F) {
 		}
 		p := New(cards)
 
-		got, ok := p.DrawNCards(want)
+		got, ok := p.DrawN(want)
 		if !ok {
 			assert.Empty(t, got, "a refused draw yields no cards")
 			assert.Equal(t, size, p.Size(), "a refused draw leaves the pile untouched")
@@ -187,18 +187,38 @@ func FuzzPile_DrawNCards(f *testing.F) {
 	})
 }
 
-// DrawNCards copies rather than reslicing, and the truncated pile keeps its capacity -
-// so an aliased hand would be rewritten by the next AddCard. Both shedding games add
+// DrawN copies rather than reslicing, and the truncated pile keeps its capacity -
+// so an aliased hand would be rewritten by the next Add. Both shedding games add
 // the set-aside cards back after dealing, which is that exact sequence.
-func TestPile_DrawNCards_DoesNotAliasThePile(t *testing.T) {
+func TestPile_DrawN_DoesNotAliasThePile(t *testing.T) {
 	t.Parallel()
-	p := New(StandardDeck())
+	p := New(Standard())
 
-	hand, ok := p.DrawNCards(5)
+	hand, ok := p.DrawN(5)
 	require.True(t, ok)
 	dealt := slices.Clone(hand)
 
-	p.AddCard(Card{Rank: Ace, Suit: Spades}, Card{Rank: King, Suit: Hearts})
+	p.Add(Card{Rank: Ace, Suit: Spades}, Card{Rank: King, Suit: Hearts})
 
-	assert.Equal(t, dealt, hand, "AddCard rewrote a hand that was already dealt")
+	assert.Equal(t, dealt, hand, "Add rewrote a hand that was already dealt")
+}
+
+func TestStandard(t *testing.T) {
+	t.Parallel()
+	cards := Standard()
+
+	assert.Len(t, cards, 52, "standard deck should have exactly 52 cards")
+
+	suitCounts := make(map[Suit]int)
+
+	for _, card := range cards {
+		assert.NotEqual(t, Joker, card.Rank, "standard deck should not contain jokers")
+		assert.NotEqual(t, NoSuit, card.Suit, "standard deck should not contain cards without suit")
+		suitCounts[card.Suit]++
+	}
+
+	assert.Equal(t, 13, suitCounts[Spades], "should have 13 spades")
+	assert.Equal(t, 13, suitCounts[Hearts], "should have 13 hearts")
+	assert.Equal(t, 13, suitCounts[Diamonds], "should have 13 diamonds")
+	assert.Equal(t, 13, suitCounts[Clubs], "should have 13 clubs")
 }

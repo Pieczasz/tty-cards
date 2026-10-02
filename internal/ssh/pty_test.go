@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -43,7 +42,7 @@ func TestBoundedPty_RefusesGeometryNoTerminalHas(t *testing.T) {
 	}
 }
 
-func TestClampWindowSize(t *testing.T) {
+func TestFilterSessionMsg(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -81,7 +80,7 @@ func TestClampWindowSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, clampWindowSize(nil, tt.msg))
+			assert.Equal(t, tt.want, filterSessionMsg(nil, tt.msg))
 		})
 	}
 }
@@ -100,12 +99,12 @@ func TestSessionLifecycle_PanicClosingTheViewStillReleasesTheSession(t *testing.
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
 
-	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil)}
+	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil), Tracker: tracker}
+	reg := &sessionRegistry{}
 	srv := &ssh.Server{
-		Handler: sessionLifecycle(deps, tracker)(func(s ssh.Session) {
-			st, ok := lookupSessionState(s)
+		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
+			st, ok := reg.load(s)
 			require.True(t, ok)
-			st.owns = true
 			st.user = user
 			st.gen = gen
 			st.model = panickyModel{}

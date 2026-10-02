@@ -52,10 +52,10 @@ Named here so you recognise them on sight, not as an inventory.
 | Factory + single registration point | `internal/catalog.All` -> `game.Registry` |
 | Functional options | `lobby.Option` (`WithCardGame`, `WithMaxPlayers`, `WithPrivate`, `WithRanked`), `game.EngineOption` (`WithTurnTimeout`) |
 | Facade | `game.BoundEngine` via `game.Bind(engine, playerID)` - nil-safe throughout |
-| Embedded base type | `gameview.Session` in every game view's `Model` |
-| Repository | `db.UserRepository` / `db.MatchRepository` declared in `internal/db`, implemented in `internal/repository` - interfaces live with the consumer |
+| Embedded base type | `gameview.Session` in every game view's model; `shed.State` in the crazy eights and uno `Extra` |
+| Repository | `db.Authenticator` / `db.Profiles` / `db.Leaderboard` (their union is `db.UserRepository`) and `db.MatchRepository`, declared in `internal/db`, implemented in `internal/repository` - each consumer takes the smallest one it calls |
 | Middleware chain | `wish.WithMiddleware` in `internal/ssh/server.go`; `withCORS`/`withRateLimit` in `internal/httpapi` |
-| Generation counter (fencing token) | `Engine.turnSeq`, `SessionTracker` generations |
+| Generation counter (fencing token) | the engine's `clock.seq`, `SessionTracker` generations |
 | Snapshot / DTO | `game.StateSnapshot`, `game.PlayerSnapshot`, `lobby.BrowseEntry` - built under one lock, rendered lock-free |
 | Double-checked locking with TTL | `repository.BestPlayers` (5 min) |
 | Dirty-flag cache invalidation | `Manager.cacheDirty atomic.Bool` + a 2 s TTL - atomic specifically to avoid inverting lock order |
@@ -67,7 +67,7 @@ method; `%w` wrapping with lowercase messages (`wrapcheck` is on); non-blocking
 channel sends so a slow SSH client never stalls the engine; consumer-defined
 interfaces (`httpapi.SessionCounter` exists so `httpapi` need not import `ssh`);
 atomics only where a lock would invert an order; `defer` ordering used as a
-correctness tool in `cmd/server/main.go`; `goleak` `TestMain` in 22 packages.
+correctness tool in `cmd/server/main.go`; `goleak` `TestMain` in 26 packages.
 
 ---
 
@@ -85,7 +85,7 @@ terminal-card/
 │   ├── broadcaster/
 │   │   └── broadcaster.go      Broadcaster[T], latest-wins, ErrClosed/ErrAtCapacity
 │   ├── catalog/
-│   │   └── catalog.go          `All` - the ONLY place a game is declared
+│   │   └── catalog.go          `All` - the ONLY place a game is declared; NewRegistry
 │   ├── config/
 │   │   ├── config.go           env loading, Validate(), DSN(), String() (redacts pw)
 │   │   ├── nginx.conf          stream{} SSH proxy w/ PROXY protocol + http{} site+API
@@ -95,70 +95,82 @@ terminal-card/
 │   │   ├── prometheus/         prometheus.yml, alerts.yml
 │   │   └── grafana/            provisioning (datasources, dashboards) + 4 dashboards
 │   ├── db/                     GORM models AND the repository interfaces
-│   │   ├── repository.go       UserRepository, MatchRepository  ← the contract
+│   │   ├── repository.go       Authenticator, Profiles, Leaderboard (UserRepository
+│   │   │                       is their union), MatchRepository  ← the contract
 │   │   ├── users.go            User, PublicKey, Ranking, ValidateUsername
 │   │   ├── games.go            Game, GameRef (slug + display name)
 │   │   ├── matches.go          Match, MatchParticipant
 │   │   ├── uuid_sql.go         the `stduuid` GORM serializer for stdlib uuid.UUID
 │   │   ├── errors.go           the auth sentinels internal/ssh matches on
-│   │   ├── gorm.go             Connect(): pool, slow-query threshold
 │   │   ├── migrations.go       //go:embed migrations/*.sql
-│   │   └── migrations/         000001_init … 000005_game_slug (up + down each)
-│   ├── deck/                   builder.go, card.go, deck.go - shared card mechanics
+│   │   └── migrations/         000001_init … 000007_ranked_matches_window (up + down each)
+│   ├── deck/                   card.go, deck.go (Pile, Standard) - shared card mechanics
 │   ├── elo/elo.go              multiplayer Elo over adjacent pairs, bounded transfers
 │   ├── game/                   PURE rules/engine. no db, no tui, no routes
-│   │   ├── engine.go           Engine: one mutex, broadcast, RemovePlayer, standings
-│   │   ├── turnclock.go        per-turn timer, turnSeq fencing, idle removal
-│   │   ├── state.go            State - no lock of its own; Engine.mu covers it
+│   │   ├── engine.go           Engine: one mutex, Subscribe, RemovePlayer, Standings
+│   │   ├── turnclock.go        per-turn timer, clock.seq fencing, idle removal
+│   │   ├── turn.go             SetTurn/OverrideTurn, SeatAt, NextSeat, ValidateNextHand
+│   │   ├── state.go            State - no lock of its own; Engine.mu covers it;
+│   │   │                       StateSnapshot, PlayerSnapshot
+│   │   ├── event.go            Event, EventType, EndReason (each with String)
 │   │   ├── player.go           seat scalars (UserID, Name, Ratings, Cards)
-│   │   ├── rules.go            Rules + the four optional handler interfaces
-│   │   ├── action.go           Action, Event, EndReason, StateSnapshot
+│   │   ├── rules.go            Action, Rules + the four optional handler interfaces
 │   │   ├── bound.go            BoundEngine - the per-player façade
-│   │   ├── shed.go             what crazy eights and uno share
-│   │   ├── registry.go         name -> Module lookup
+│   │   ├── registry.go         immutable name -> Module lookup, NewRegistry(mods...)
+│   │   ├── shed/               what crazy eights and uno share (play check, draw, standings)
+│   │   ├── gametest/           the shared shedding-game suite, RunShed
 │   │   ├── crazyeight/         rules.go, state.go
 │   │   ├── uno/                rules.go, state.go, deck.go
 │   │   ├── hearts/             rules.go, state.go, trick.go
 │   │   ├── ginrummy/           rules.go, state.go, melds.go, layoffs.go
-│   │   └── poker/              rules.go, streets.go, evaluator.go, state.go
+│   │   └── poker/              rules.go, hand.go, betting.go, leave.go, streets.go,
+│   │                           evaluator.go, state.go
 │   ├── httpapi/httpapi.go      read-only JSON: /v1/stats, /v1/leaderboard, /healthz
 │   ├── lobby/
-│   │   ├── manager.go          lobby registry, codes, join limiter, grace release,
-│   │   │                       finalizer drain
-│   │   ├── lobby.go            one table: roster, ready, start, watcher
-│   │   ├── finalize.go         persist a finished match; the rating gate
-│   │   ├── disconnect.go       the 90s mid-game grace state machine
-│   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies
+│   │   ├── manager.go          lobby registry, CreateLobby, codes, join limiter, leave, kick
+│   │   ├── errors.go           the sentinels (ErrLobbyFull, ErrNotLeader, …)
+│   │   ├── lobby.go            one table: roster, settings, ready, start
+│   │   ├── watch.go            the engine watcher: register, reopen, persist
+│   │   ├── finalize.go         persist a finished match; the rating gate; the
+│   │   │                       finalizer registry, BeginShutdown, WaitForFinalizers
+│   │   ├── disconnect.go       the 90s mid-game grace state machine, ResumePlayer
+│   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies + the cache
 │   │   └── player.go           db.User -> game.Player, the only such place
 │   ├── observability/
-│   │   ├── otel.go             SetupOTel: logs + traces + metrics over OTLP gRPC
+│   │   ├── otel.go             Setup: logs + traces + metrics over OTLP gRPC
 │   │   └── metrics.go          counters + histograms; metrics_test pins the attrs
 │   ├── ratelimit/
-│   │   ├── limiter.go          sliding window; a full table evicts, it does not refuse
+│   │   ├── limiter.go          SlidingWindow (New); a full table evicts, it does not refuse
 │   │   └── netkey.go           NetKey: IPv6 -> /64, unmaps v4-in-v6
 │   ├── repository/             the GORM implementations (only cmd/server imports it)
+│   │   ├── connect.go          Connect(dsn, Pool): pool, slow-query threshold
 │   │   ├── user.go             register, profile, leaderboard cache, DeleteAccount
 │   │   └── match.go            FinalizeRankedMatch: advisory locks, SELECT … FOR UPDATE
 │   ├── ssh/
-│   │   ├── server.go           SetupServer, PTY clamp, SessionTracker,
-│   │   │                       sessionLifecycle, recoverSession, reportingModel
+│   │   ├── server.go           NewServer(Deps), PTY clamp, channel and env caps,
+│   │   │                       sessionRegistry, sessionLifecycle, recoverSession,
+│   │   │                       reportingModel
+│   │   ├── tracker.go          SessionTracker: generations, ReleaseWith
 │   │   └── auth.go             fingerprint auth, LoadOrRegisterUser
 │   ├── systemtest/             cross-package tests through public APIs only; only
 │   │                           persistence_test.go is behind //go:build integration
-│   ├── testutil/               db.go (testcontainers + the production migrations)
+│   ├── testutil/               db.go (testcontainers + the production migrations),
+│   │                           players.go (Players, NamedPlayers), uid.go
 │   └── tui/
-│       ├── app.go              Model(): builds GlobalContext, registers every route
-│       ├── router/router.go    Router, GlobalContext, ChangeViewMsg, Closer, idle tick
+│       ├── app.go              New(Deps): builds GlobalContext, registers every route
+│       ├── router/router.go    Router, typed Route, Navigate, GlobalContext, Closer, idle tick
 │       ├── styles/
 │       │   ├── theme.go        THE only file allowed to name a colour
 │       │   ├── common.go       layoutHeights / AvailableContentHeight /
 │       │   │                   RenderMainLayout / TitleHeightBudget - the fit budget
 │       │   └── pad.go          PadTruncate and friends
 │       ├── components/         card.go, fan.go, table.go, picker.go, cursor.go
+│       ├── tuitest/            the shared test helpers: Key, StripANSI, FitSizes
 │       └── views/
-│           ├── common.go       HandleCommonMsg, NavigateOn, RenderScreen
-│           ├── game/           session.go (the shared view baseline), layout.go,
-│           │   │               state.go (BaseState), frame.go, zones.go
+│           ├── common.go       HandleCommonMsg, NavigateOn, Footer, RenderScreen
+│           ├── gameview/       session.go (the shared view baseline), layout.go,
+│           │   │               state.go (BaseState), frame.go, zones.go,
+│           │   │               choice.go (ChoicePicker), handover.go (RenderHandOver)
 │           │   └── poker/ crazyeight/ uno/ hearts/ ginrummy/  - one MUV triple each
 │           └── home/  lobby/  leaderboard/  profile/
 ├── docs/                       ← you are here
@@ -193,7 +205,8 @@ terminal-card/
 - **`internal/game` imports no db, no tui, no lobby, no routes.** Seat identity is
   the scalars on `game.Player`, never a `*db.User`.
 
-Both are lint rules. See [`architecture.md`](architecture.md) §8 for the full
+Both are lint rules; the second is an allow-list (stdlib, `deck`, `broadcaster`,
+`internal/game/...`, `uuid`), so a new import there has to be argued for. See [`architecture.md`](architecture.md) §8 for the full
 table of what each package owns.
 
 ---
@@ -311,7 +324,7 @@ are things a reader coming from a real-time game server would reasonably expect.
 | **Mimir** | Not deployed. Metrics land in Prometheus' own TSDB via remote write |
 | **Alloy scraping the Go process** | Inverted: the app **pushes** OTLP to Alloy. Alloy scrapes only the host, via `prometheus.exporter.unix` |
 | **Frame-render-time metrics** | Not instrumented. There are counters and four histograms (session duration, game duration, lobby time-to-start), but nothing times a render |
-| **Tracing across game events** | Only `ssh.session`, nine `db.*` spans and the stats API's `otelhttp` spans. `game`, `lobby` and `tui` are untraced |
+| **Tracing across game events** | Only `ssh.session` and ten `db.*` spans; the stats API is deliberately untraced. `game`, `lobby` and `tui` are untraced |
 | **`tea.Every` subscription loops** | Not used. Periodic work is self-rescheduling `tea.Tick`, which is what lets the countdown change rate mid-turn |
 | **A WebSocket or HTTP game path to replace** | There never was one. `internal/httpapi` is a read-only stats feed for the marketing site |
 

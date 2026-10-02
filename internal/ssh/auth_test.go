@@ -1,36 +1,19 @@
-package ssh_test
+package ssh
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/ssh"
 
-	"uuid"
-
-	charmssh "charm.land/ssh"
 	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-type MockSession struct {
-	charmssh.Session
-	mock.Mock
-}
-
-func (m *MockSession) PublicKey() charmssh.PublicKey {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil
-	}
-	return args.Get(0).(charmssh.PublicKey)
-}
-
+// MockUserRepository mocks db.Authenticator, the three methods LoadOrRegisterUser calls.
 type MockUserRepository struct {
 	mock.Mock
 }
@@ -57,33 +40,15 @@ func (m *MockUserRepository) RegisterUserWithKey(ctx context.Context, username, 
 	return args.Get(0).(*db.User), args.Get(1).(*db.PublicKey), args.Error(2)
 }
 
-func (m *MockUserRepository) BestPlayers(_ context.Context, _ int, _ string) ([]db.Ranking, error) {
-	return nil, nil
+func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, user *db.User, key *db.PublicKey) error {
+	return m.Called(ctx, user, key).Error(0)
 }
 
-func (m *MockUserRepository) UserProfile(_ context.Context, _ uuid.UUID) (*db.User, error) {
-	return nil, nil
-}
-
-func (m *MockUserRepository) UpdateUserActivity(_ context.Context, _ *db.User, _ *db.PublicKey) error {
-	return nil
-}
-
-func (m *MockUserRepository) UserMatchHistory(_ context.Context, _ uuid.UUID, _ int) ([]db.MatchParticipant, error) {
-	return nil, nil
-}
-
-func (m *MockUserRepository) DeleteAccount(_ context.Context, _ uuid.UUID) error {
-	return nil
-}
-
-func TestAuthenticateSession_NoPublicKey(t *testing.T) {
+func TestSessionFingerprint_NoPublicKey(t *testing.T) {
 	t.Parallel()
-	m := new(MockSession)
-	m.On("PublicKey").Return(nil)
 
-	_, err := ssh.AuthenticateSession(m)
-	assert.ErrorIs(t, err, ssh.ErrNoPublicKey)
+	_, err := SessionFingerprint(&stubSession{})
+	assert.ErrorIs(t, err, ErrNoPublicKey)
 }
 
 func TestLoadOrRegisterUser_LoadError(t *testing.T) {
@@ -91,8 +56,8 @@ func TestLoadOrRegisterUser_LoadError(t *testing.T) {
 	repo := new(MockUserRepository)
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, errors.New("db error"))
 
-	_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ssh.ErrInternal)
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
+	assert.ErrorIs(t, err, ErrInternal)
 }
 
 func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
@@ -101,14 +66,14 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 	repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("reg error"))
 
-	_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ssh.ErrRegistrationFailed)
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
+	assert.ErrorIs(t, err, ErrRegistrationFailed)
 }
 
-// The caller here is unauthenticated, so "that name is taken" and "that name is not
-// allowed" have to read identically: distinguishing them lets anyone enumerate which
-// usernames exist, one connection at a time. A key already registered is the caller's
-// own key and tells them nothing new, so it still comes back as itself.
+// The caller here is unauthenticated, so "that name is taken" must not be told apart
+// from any other refusal: it would let anyone enumerate which usernames exist. A key
+// already registered is the caller's own key and tells them nothing new, so it still
+// comes back as itself.
 func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	t.Parallel()
 
@@ -120,15 +85,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	}{
 		{
 			name: "a taken username", cause: db.ErrUsernameTaken,
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
-		},
-		{
-			name: "an invalid username", cause: db.ErrInvalidUsername,
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
-		},
-		{
-			name: "a wrapped invalid username", cause: fmt.Errorf("%w: must be 3-16 characters", db.ErrInvalidUsername),
-			want: ssh.ErrNameUnavailable, wantText: "could not register that name",
+			want: ErrNameUnavailable, wantText: "could not register that name",
 		},
 		{
 			name: "the caller's own key", cause: db.ErrKeyAlreadyRegistered,
@@ -136,7 +93,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 		},
 		{
 			name: "anything else", cause: errors.New("disk on fire"),
-			want: ssh.ErrRegistrationFailed, wantText: "registration failed",
+			want: ErrRegistrationFailed, wantText: "registration failed",
 		},
 	}
 
@@ -147,16 +104,47 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 			repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, tt.cause)
 
-			_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp", nil)
+			_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
 
 			require.ErrorIs(t, err, tt.want)
 			require.ErrorContains(t, err, tt.wantText)
-			if errors.Is(tt.cause, db.ErrUsernameTaken) || errors.Is(tt.cause, db.ErrInvalidUsername) {
-				require.NotErrorIs(t, err, db.ErrUsernameTaken, "the client can tell taken from invalid")
-				require.NotErrorIs(t, err, db.ErrInvalidUsername, "the client can tell taken from invalid")
-				assert.NotContains(t, err.Error(), "must be 3-16 characters",
-					"the wrapped cause is for the log, not for the client")
+			if errors.Is(tt.cause, db.ErrUsernameTaken) {
+				require.NotErrorIs(t, err, db.ErrUsernameTaken, "the client can tell a taken name apart")
 			}
+		})
+	}
+}
+
+// Whether a name is allowed is a fixed rule, not a fact about other accounts, so it
+// is no oracle: the player gets the reason. And it is checked before the registration
+// budget is spent, or five typos lock a network out of signing up for an hour.
+func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		wantText string
+	}{
+		{name: "too long", username: "averyveryverylongname", wantText: "cannot exceed 16 characters"},
+		{name: "bad characters", username: "no-dashes", wantText: "English letters, numbers, and underscores"},
+		{name: "reserved prefix", username: "deleted_x", wantText: "reserved"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			repo := new(MockUserRepository)
+			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
+
+			asked := 0
+			_, err := LoadOrRegisterUser(t.Context(), repo, tt.username, "fp",
+				func() bool { asked++; return true })
+
+			require.ErrorIs(t, err, db.ErrInvalidUsername)
+			require.ErrorContains(t, err, tt.wantText)
+			assert.Zero(t, asked, "an invalid name spent the registration budget")
+			repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
 		})
 	}
 }
@@ -172,10 +160,10 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo := new(MockUserRepository)
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 
-		_, err := ssh.LoadOrRegisterUser(context.Background(), repo, "user", "fp",
+		_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
 			func() bool { return false })
 
-		require.ErrorIs(t, err, ssh.ErrTooManyRegistrations)
+		require.ErrorIs(t, err, ErrTooManyRegistrations)
 		repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
 	})
 
@@ -187,7 +175,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("UpdateUserActivity", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		asked := 0
-		user, err := ssh.LoadOrRegisterUser(context.Background(), repo, "known", "fp",
+		user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp",
 			func() bool { asked++; return false })
 
 		require.NoError(t, err, "an existing account is not a registration")
@@ -202,7 +190,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 		repo.On("RegisterUserWithKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicKey{}, nil)
 
-		user, err := ssh.LoadOrRegisterUser(context.Background(), repo, "new", "fp",
+		user, err := LoadOrRegisterUser(t.Context(), repo, "new", "fp",
 			func() bool { return true })
 
 		require.NoError(t, err)

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -9,7 +8,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	internallobby "github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -41,15 +40,12 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.User) {
 	t.Helper()
 
-	manager := internallobby.NewManager(context.Background(), nil)
+	manager := internallobby.NewManager(t.Context(), nil)
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
+	registry := catalog.NewRegistry()
 
-	r := Model(ModelDependencies{
-		SessionCtx:   context.Background(),
+	r := New(Deps{
+		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
 		GameRegistry: registry,
@@ -64,7 +60,7 @@ func TestModel_RegistersEveryRoute(t *testing.T) {
 	t.Parallel()
 	r, _, _ := sessionModel(t)
 
-	for _, route := range []string{
+	for _, route := range []router.Route{
 		router.RouteHome,
 		router.RouteProfile,
 		router.RouteLeaderboard,
@@ -82,18 +78,18 @@ func TestModel_RegistersEveryRoute(t *testing.T) {
 func TestModel_ASeatedPlayerIsBouncedBackToTheirLobby(t *testing.T) {
 	t.Parallel()
 
-	for _, route := range []string{
+	for _, route := range []router.Route{
 		router.RouteHome,
 		router.RouteLobbyCreate,
 		router.RouteLobbyJoin,
 		router.RouteProfile,
 		router.RouteLeaderboard,
 	} {
-		t.Run(route, func(t *testing.T) {
+		t.Run(string(route), func(t *testing.T) {
 			t.Parallel()
 			r, manager, user := sessionModel(t)
 
-			l, err := manager.New(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.All[0].Name))
+			l, err := manager.CreateLobby(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.All[0].Name))
 			require.NoError(t, err)
 			t.Cleanup(func() { manager.LeaveLobby(internallobby.NewPlayer(user)) })
 
@@ -119,7 +115,10 @@ func TestModel_AnUnseatedPlayerGetsTheOrdinaryScreens(t *testing.T) {
 func TestModel_AWrongContextFallsBackToHome(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ name, route string }{
+	for _, tc := range []struct {
+		name  string
+		route router.Route
+	}{
 		{name: "the lobby route without a lobby", route: router.RouteLobby},
 		{name: "a game route without an engine", route: router.GameRoute(catalog.All[0].Slug)},
 	} {
@@ -141,22 +140,22 @@ func TestModel_AWrongContextFallsBackToHome(t *testing.T) {
 func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	t.Parallel()
 
-	manager := internallobby.NewManager(context.Background(), nil)
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
+	manager := internallobby.NewManager(t.Context(), nil)
+	registry := catalog.NewRegistry()
 
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	host := internallobby.NewPlayer(user)
-	l, err := manager.New(host,
+	l, err := manager.CreateLobby(host,
 		internallobby.WithCardGame(catalog.All[0].Name),
 		internallobby.WithMaxPlayers(2),
 	)
 	require.NoError(t, err)
+	// Closing the table closes its engine, which is what ends the lobby's watcher.
+	t.Cleanup(func() { manager.RemoveLobby(l.Code()) })
 
 	guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), guest))
+	_, err = manager.JoinLobbyByCode(l.Code(), guest)
+	require.NoError(t, err)
 	require.NoError(t, l.ToggleReady(host, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
 	require.NotNil(t, l.ActiveGame(), "the match has to be under way for the seat to survive")
@@ -164,13 +163,14 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 	// The grace window is what keeps the seat; without it the drop is a forfeit.
 	manager.DisconnectPlayer(host)
 
-	r := Model(ModelDependencies{
-		SessionCtx:   context.Background(),
+	r := New(Deps{
+		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
 		GameRegistry: registry,
 	})
 	r.Global.Width, r.Global.Height = 120, 50
+	ResumeSeat(r)
 	r.Init()
 	t.Cleanup(r.Close)
 
@@ -185,7 +185,7 @@ func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
 func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	routes := []string{
+	routes := []router.Route{
 		router.RouteHome,
 		router.RouteProfile,
 		router.RouteLeaderboard,
@@ -193,24 +193,20 @@ func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 		router.RouteLobbyJoin,
 	}
 
-	for _, size := range []struct{ w, h int }{
-		{styles.MinWidth, styles.MinHeight},
-		{80, 24},
-		{120, 50},
-	} {
+	for _, size := range tuitest.FitSizes {
 		for _, route := range routes {
-			t.Run(fmt.Sprintf("%dx%d_%s", size.w, size.h, route), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%dx%d_%s", size.Width, size.Height, route), func(t *testing.T) {
 				t.Parallel()
 				r, _, _ := sessionModel(t)
-				r.Global.Width, r.Global.Height = size.w, size.h
+				r.Global.Width, r.Global.Height = size.Width, size.Height
 
 				r.Goto(route, nil)
 				t.Cleanup(r.Close)
 
 				out := r.View().Content
 				assert.NotEmpty(t, out)
-				assert.LessOrEqual(t, lg.Width(out), size.w)
-				assert.LessOrEqual(t, lg.Height(out), size.h)
+				assert.LessOrEqual(t, lg.Width(out), size.Width)
+				assert.LessOrEqual(t, lg.Height(out), size.Height)
 			})
 		}
 	}
@@ -225,13 +221,8 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 		t.Run(e.Slug, func(t *testing.T) {
 			t.Parallel()
 
-			rules := e.Rules()
-			players := make([]*game.Player, 0, rules.MinPlayers())
-			for i := range rules.MinPlayers() {
-				players = append(players, &game.Player{
-					ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1), Name: fmt.Sprintf("p%d", i+1),
-				})
-			}
+			rules := e.Factory()
+			players := testutil.Players(rules.MinPlayers())
 			engine := game.NewEngine(rules, players, rules.InitialDeck())
 			require.NoError(t, engine.Start())
 			t.Cleanup(engine.Close)

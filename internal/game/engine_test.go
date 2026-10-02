@@ -70,7 +70,7 @@ func (m *MockRules) Standings(state *State) []*Player {
 
 func setupMockRules() *MockRules {
 	m := new(MockRules)
-	m.On("InitialDeck").Return(deck.StandardDeck()).Maybe()
+	m.On("InitialDeck").Return(deck.Standard()).Maybe()
 	m.On("InitialDealCount").Return(5)
 	m.On("OnGameStart", mock.Anything).Return(nil)
 	return m
@@ -80,7 +80,7 @@ func TestEngine_Start(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	err := engine.Start()
@@ -95,9 +95,9 @@ func TestEngine_Start(t *testing.T) {
 	m.AssertExpectations(t)
 }
 
-// A start that fails must leave a table somebody can start again, not one parked in a
-// phase no player can act in.
-func TestEngine_Start_FailureLeavesTheTableStartable(t *testing.T) {
+// A start that fails reports it. The engine is not reused - the lobby builds a new one
+// per attempt - and its seats are its own, so the caller's players stay undealt.
+func TestEngine_Start_Failures(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a second start is refused", func(t *testing.T) {
@@ -111,14 +111,12 @@ func TestEngine_Start_FailureLeavesTheTableStartable(t *testing.T) {
 	t.Run("too few cards to deal", func(t *testing.T) {
 		t.Parallel()
 		m := setupMockRules()
-		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck()[:4])
+		players := []*Player{{ID: "p1"}, {ID: "p2"}}
+		engine := NewEngine(m, players, deck.Standard()[:4])
 		t.Cleanup(engine.Close)
 
 		require.ErrorContains(t, engine.Start(), "insufficient number of cards")
-		engine.WithState(func(state *State) {
-			assert.Equal(t, Waiting, state.Phase)
-			assert.Empty(t, state.Players[0].Cards, "a deal that could not finish deals nobody in")
-		})
+		assert.Empty(t, players[0].Cards, "a failed deal never reaches the caller's seats")
 	})
 
 	t.Run("rules that cannot set the game up", func(t *testing.T) {
@@ -126,11 +124,11 @@ func TestEngine_Start_FailureLeavesTheTableStartable(t *testing.T) {
 		m := new(MockRules)
 		m.On("InitialDealCount").Return(5)
 		m.On("OnGameStart", mock.Anything).Return(assert.AnError)
-		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 
-		require.ErrorContains(t, engine.Start(), "failed to setup game")
-		engine.WithState(func(state *State) { assert.Equal(t, Waiting, state.Phase) })
+		require.ErrorContains(t, engine.Start(), "set up game")
+		assert.True(t, engine.turnDeadline().IsZero(), "a table that never opened arms no clock")
 	})
 }
 
@@ -146,7 +144,7 @@ func TestEngine_SubmitAction(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -180,7 +178,7 @@ func TestEngine_SubmitAction_SetsWinnerFromStandings(t *testing.T) {
 	players := []*Player{loser, winner}
 
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -205,12 +203,12 @@ func TestEngine_SubmitAction_PostConditionBeforeBroadcast(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
-	ch, subErr := engine.Broadcaster().Subscribe()
+	ch, subErr := engine.Subscribe()
 	require.NoError(t, subErr)
-	t.Cleanup(func() { engine.Broadcaster().Unsubscribe(ch) })
+	t.Cleanup(func() { engine.Unsubscribe(ch) })
 
 	require.NoError(t, engine.Start())
 
@@ -266,7 +264,7 @@ func TestEngine_RemovePlayer(t *testing.T) {
 	players := []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
 	m := setupMockRules()
 	m.On("CheckWinCondition", mock.Anything).Return(false)
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -335,7 +333,7 @@ func TestEngine_RemovePlayer_MidTurnOverrideClamped(t *testing.T) {
 			state.OverrideNextTurn = new(preRemovalCount)
 		}
 
-		engine := NewEngine(r, players, deck.StandardDeck())
+		engine := NewEngine(r, players, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.NoError(t, engine.Start())
 		return engine
@@ -418,7 +416,7 @@ func newStartedEngine(t *testing.T, ids ...string) *Engine {
 	m.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	m.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
 
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 	return engine
@@ -436,12 +434,12 @@ func TestEngine_Snapshot(t *testing.T) {
 		snap := engine.Snapshot()
 
 		assert.Equal(t, Playing, snap.Phase)
-		assert.Equal(t, len(deck.StandardDeck())-2*5, snap.DeckSize, "what is left after dealing five each")
-		assert.NotEmpty(t, snap.CurrentPlayer, "somebody is always on turn while playing")
+		assert.Equal(t, len(deck.Standard())-2*5, snap.DeckSize, "what is left after dealing five each")
+		assert.NotEmpty(t, snap.CurrentPlayerName, "somebody is always on turn while playing")
 		require.Len(t, snap.Players, 2, "every seat is listed")
 		assert.Equal(t, "p1", snap.Players[0].ID)
 		assert.Equal(t, 5, snap.Players[0].HandSize)
-		assert.Empty(t, snap.Winner, "nobody has won yet")
+		assert.Empty(t, snap.WinnerName, "nobody has won yet")
 	})
 
 	t.Run("a finished game names the winner", func(t *testing.T) {
@@ -452,7 +450,7 @@ func TestEngine_Snapshot(t *testing.T) {
 			state.Winner = state.Players[1]
 		})
 
-		assert.Equal(t, "p2", engine.Snapshot().Winner)
+		assert.Equal(t, "p2", engine.Snapshot().WinnerName)
 	})
 
 	// The cursor is clamped everywhere it is set, but Snapshot is reached from views
@@ -480,7 +478,7 @@ func TestEngine_Snapshot(t *testing.T) {
 
 				var snap StateSnapshot
 				require.NotPanics(t, func() { snap = engine.Snapshot() })
-				assert.Equal(t, tt.want, snap.CurrentPlayer)
+				assert.Equal(t, tt.want, snap.CurrentPlayerName)
 			})
 		}
 	})
@@ -513,13 +511,13 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 
 		m := setupMockRules()
 		m.On("Standings", mock.Anything).Return([]*Player{stayed})
-		engine := NewEngine(m, []*Player{stayed}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{stayed}, deck.Standard())
 		t.Cleanup(engine.Close)
 		engine.WithState(func(state *State) {
 			state.LeftPlayers = []*Player{leftFirst, leftLast}
 		})
 
-		assert.Equal(t, []string{"p1", "p3", "p2"}, engine.StandingsIDs())
+		assert.Equal(t, []string{"p1", "p3", "p2"}, standingIDs(engine))
 	})
 
 	t.Run("players the rules placed themselves are not repeated", func(t *testing.T) {
@@ -531,11 +529,11 @@ func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
 		// Poker ranks a departed player on the chips they walked out with, so the
 		// engine must not append them a second time.
 		m.On("Standings", mock.Anything).Return([]*Player{stayed, left})
-		engine := NewEngine(m, []*Player{stayed}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{stayed}, deck.Standard())
 		t.Cleanup(engine.Close)
 		engine.WithState(func(state *State) { state.LeftPlayers = []*Player{left} })
 
-		assert.Equal(t, []string{"p1", "p2"}, engine.StandingsIDs())
+		assert.Equal(t, []string{"p1", "p2"}, standingIDs(engine))
 	})
 }
 
@@ -569,9 +567,9 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 	m.On("CheckWinCondition", mock.Anything).Return(true)
 	m.On("Standings", mock.Anything).Return([]*Player{winner, loser})
 
-	engine := NewEngine(m, []*Player{loser, winner}, deck.StandardDeck())
+	engine := NewEngine(m, []*Player{loser, winner}, deck.Standard())
 	t.Cleanup(engine.Close)
-	events, err := engine.Broadcaster().Subscribe()
+	events, err := engine.Subscribe()
 	require.NoError(t, err)
 	require.NoError(t, engine.Start())
 
@@ -599,15 +597,15 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 func TestEngine_SubscriberHeadroomAbovePlayerCount(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
-	engine := NewEngine(setupMockRules(), players, deck.StandardDeck())
+	engine := NewEngine(setupMockRules(), players, deck.Standard())
 	t.Cleanup(engine.Close)
 
 	for i := range len(players) + 8 {
-		_, err := engine.Broadcaster().Subscribe()
+		_, err := engine.Subscribe()
 		require.NoErrorf(t, err, "subscriber %d must fit", i)
 	}
 
-	_, err := engine.Broadcaster().Subscribe()
+	_, err := engine.Subscribe()
 	require.ErrorIs(t, err, broadcaster.ErrAtCapacity, "the cap is players plus headroom, not unbounded")
 }
 
@@ -619,22 +617,8 @@ func TestEngine_CloseClosesTheBroadcaster(t *testing.T) {
 
 	engine.Close()
 
-	_, err := engine.Broadcaster().Subscribe()
+	_, err := engine.Subscribe()
 	assert.ErrorIs(t, err, broadcaster.ErrClosed)
-}
-
-func TestCryptoIntN(t *testing.T) {
-	t.Parallel()
-
-	// An empty table must not reach crypto/rand, which panics on a non-positive bound.
-	for _, n := range []int{0, -1} {
-		_, err := cryptoIntN(n)
-		require.Errorf(t, err, "cryptoIntN(%d) must refuse rather than panic", n)
-	}
-
-	v, err := cryptoIntN(1)
-	require.NoError(t, err)
-	assert.Zero(t, v, "the only seat available")
 }
 
 // TestEngine_ConcurrentOperations hammers the engine from many goroutines to prove there is
@@ -658,7 +642,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	base.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	base.On("Standings", mock.Anything).Return(players).Maybe()
 
-	engine := NewEngine(base, players, deck.StandardDeck())
+	engine := NewEngine(base, players, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -667,13 +651,11 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	// Action submitters: every seat repeatedly tries to act. Most calls lose the
 	// turn race and error out; that is expected and must never panic.
 	for _, id := range ids {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 50 {
 				_ = engine.SubmitAction(id, MockAction{name: "Move"})
 			}
-		}(id)
+		})
 	}
 
 	// Readers: concurrent snapshot / standings / current-player queries.
@@ -682,8 +664,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 			for range 200 {
 				_ = engine.CurrentPlayerID()
 				_ = engine.Snapshot()
-				_, _ = engine.StandingsWithPlaces()
-				_ = engine.StandingsIDs()
+				_ = engine.Standings()
 			}
 		})
 	}
@@ -691,11 +672,7 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	// Removers: drop a subset of seats concurrently, always leaving at least two
 	// so the game never collapses to a trivial single-player finish here.
 	for _, id := range ids[:playerCount-2] {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			engine.RemovePlayer(id)
-		}(id)
+		wg.Go(func() { engine.RemovePlayer(id) })
 	}
 
 	wg.Wait()
@@ -754,16 +731,15 @@ func TestEngine_Places_LeaverNeverTiesASeatedPlayer(t *testing.T) {
 
 			m := setupMockRules()
 			m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-			engine := NewEngine(tt.rules(m), []*Player{stayed, alsoStayed}, deck.StandardDeck())
+			engine := NewEngine(tt.rules(m), []*Player{stayed, alsoStayed}, deck.Standard())
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *State) { state.LeftPlayers = []*Player{quitter} })
 
-			standings, places := engine.StandingsWithPlaces()
+			standings := engine.Standings()
 
 			require.Len(t, standings, 3)
-			assert.Equal(t, []string{"p1", "p2", "p3"},
-				[]string{standings[0].ID, standings[1].ID, standings[2].ID})
-			assert.Equal(t, tt.want, places, "the quitter always places last on their own")
+			assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine))
+			assert.Equal(t, tt.want, places(standings), "the quitter always places last on their own")
 		})
 	}
 }
@@ -780,23 +756,38 @@ func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
 
 	m := setupMockRules()
 	m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-	engine := NewEngine(tiedScorer{m}, []*Player{stayed, alsoStayed}, deck.StandardDeck())
+	engine := NewEngine(tiedScorer{m}, []*Player{stayed, alsoStayed}, deck.Standard())
 	t.Cleanup(engine.Close)
 	engine.WithState(func(state *State) {
 		state.LeftPlayers = []*Player{quitFirst, quitSecond}
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 
 	require.Len(t, standings, 4)
-	assert.Equal(t, []string{"p1", "p2", "p4", "p3"},
-		[]string{standings[0].ID, standings[1].ID, standings[2].ID, standings[3].ID})
-	assert.Equal(t, []int{1, 1, 3, 3}, places)
+	assert.Equal(t, []string{"p1", "p2", "p4", "p3"}, standingIDs(engine))
+	assert.Equal(t, []int{1, 1, 3, 3}, places(standings))
 }
 
 // drainEvents takes everything already published. Broadcast is synchronous under the
 // engine mutex, so once the call that caused it has returned the events are either in
 // the buffer or were never sent; waiting would only hide a missing one.
+func standingIDs(e *Engine) []string {
+	ids := make([]string, 0)
+	for _, s := range e.Standings() {
+		ids = append(ids, s.Player.ID)
+	}
+	return ids
+}
+
+func places(standings []Standing) []int {
+	out := make([]int, len(standings))
+	for i, s := range standings {
+		out[i] = s.Place
+	}
+	return out
+}
+
 func drainEvents(ch <-chan Event) []Event {
 	var out []Event
 	for {
@@ -817,10 +808,10 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	m := setupMockRules()
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	t.Cleanup(engine.Close)
 
-	ch, err := engine.Broadcaster().Subscribe()
+	ch, err := engine.Subscribe()
 	require.NoError(t, err)
 	require.NoError(t, engine.Start())
 	require.Equal(t, []EventType{EventGameStarted}, eventTypes(drainEvents(ch)))
@@ -891,11 +882,11 @@ func TestEngine_GameEndedCarriesItsReason(t *testing.T) {
 				r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
 			}
 
-			engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.StandardDeck())
+			engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.Standard())
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 
-			ch, err := engine.Broadcaster().Subscribe()
+			ch, err := engine.Subscribe()
 			require.NoError(t, err)
 
 			for _, id := range tt.leave {
@@ -926,7 +917,7 @@ func TestEngine_RemovePlayer_OverrideKeepsTheLastSeatPlaying(t *testing.T) {
 	r := &leaveAwareRules{MockRules: base}
 	r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
 
-	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -947,7 +938,7 @@ func TestEngine_FinishWithoutStandingsFallsBackToASeat(t *testing.T) {
 	m := setupMockRules()
 	m.On("Standings", mock.Anything).Return([]*Player{})
 	m.On("CheckWinCondition", mock.Anything).Return(true)
-	engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.StandardDeck())
+	engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}, deck.Standard())
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -967,14 +958,14 @@ func TestEngine_StartRefusesAnEmptyOrClosedTable(t *testing.T) {
 
 	t.Run("no players", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), nil, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), nil, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.ErrorContains(t, engine.Start(), "no players")
 	})
 
 	t.Run("already closed", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.Standard())
 		engine.Close()
 		require.ErrorContains(t, engine.Start(), "game is closed")
 	})
@@ -989,7 +980,7 @@ func TestEngine_StartRefusesAnEmptyOrClosedTable(t *testing.T) {
 
 	t.Run("submitting before the deal", func(t *testing.T) {
 		t.Parallel()
-		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.StandardDeck())
+		engine := NewEngine(setupMockRules(), []*Player{{ID: "p1"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 		require.ErrorContains(t, engine.SubmitAction("p1", MockAction{name: "Move"}), "not in playing phase")
 	})
@@ -1016,7 +1007,7 @@ func TestEngine_RemovePlayer_OutsideThePlayingPhase(t *testing.T) {
 	t.Run("a waiting table cannot be won by leaving it", func(t *testing.T) {
 		t.Parallel()
 		m := setupMockRules()
-		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+		engine := NewEngine(m, []*Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
 		t.Cleanup(engine.Close)
 
 		engine.RemovePlayer("p2")
@@ -1039,7 +1030,7 @@ func BenchmarkEngine_Frame(b *testing.B) {
 	m := new(MockRules)
 	m.On("InitialDealCount").Return(5)
 	m.On("OnGameStart", mock.Anything).Return(nil)
-	engine := NewEngine(m, players, deck.StandardDeck())
+	engine := NewEngine(m, players, deck.Standard())
 	defer engine.Close()
 	if err := engine.Start(); err != nil {
 		b.Fatal(err)

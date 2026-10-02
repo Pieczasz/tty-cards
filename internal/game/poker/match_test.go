@@ -2,7 +2,6 @@ package poker
 
 import (
 	"fmt"
-	"maps"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
@@ -17,32 +16,31 @@ func TestMatch_ChipsAndButtonCarryIntoTheNextHand(t *testing.T) {
 	engine := startTable(t, 3)
 	t.Cleanup(engine.Close)
 
-	before := extraOf(t, engine)
-	firstDealer := before.DealerIndex
+	firstDealer := readExtra(t, engine, func(e *State) int { return e.DealerIndex })
 
 	// Fold the table down to one player, ending hand one.
 	for range 3 {
-		if extraOf(t, engine).HandComplete {
+		if readExtra(t, engine, (*State).HandComplete) {
 			break
 		}
 		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionFold{}))
 	}
 
-	won := extraOf(t, engine)
-	require.True(t, won.HandComplete)
+	require.True(t, readExtra(t, engine, (*State).HandComplete))
 	require.False(t, engine.IsFinished())
-	stacks := maps.Clone(won.PlayerChips)
+	won := readExtra(t, engine, stacks)
 
 	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionNextHand{}))
 
-	next := extraOf(t, engine)
-	assert.Equal(t, 2, next.HandNumber)
-	assert.NotEqual(t, firstDealer, next.DealerIndex, "the button moves on between hands")
-	for id, want := range stacks {
-		// Only the two blinds have paid anything into the new hand.
-		assert.Equal(t, want, next.PlayerChips[id]+next.PlayerBets[id],
-			"player %s must start the hand with what they finished the last one with", id)
-	}
+	withExtra(t, engine, func(next *State) {
+		assert.Equal(t, 2, next.HandNumber)
+		assert.NotEqual(t, firstDealer, next.DealerIndex, "the button moves on between hands")
+		for id, want := range won {
+			// Only the two blinds have paid anything into the new hand.
+			assert.Equal(t, want, next.Seats[id].Chips+next.Seats[id].Bet,
+				"player %s must start the hand with what they finished the last one with", id)
+		}
+	})
 
 	engine.WithState(func(s *game.State) {
 		for _, p := range s.Players {
@@ -60,22 +58,21 @@ func TestStandings_LeavingForfeitsTheMatchButNotTheChipsWon(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra, ok := s.Extra.(*State)
-		require.True(t, ok)
+		extra := extra(t, s)
 		// p2 is well clear of the table, as if they had taken a couple of hands.
-		extra.PlayerChips["p1"] = 700
-		extra.PlayerChips["p2"] = 1600
-		extra.PlayerChips["p3"] = 700
+		extra.Seats["p1"].Chips = 700
+		extra.Seats["p2"].Chips = 1600
+		extra.Seats["p3"].Chips = 700
 		// Rewriting stacks mid-hand moves the conservation baseline with them.
 		extra.handStartChips = chipsInPlay(extra)
 	})
 
 	engine.RemovePlayer("p2")
-	assert.Equal(t, []string{"p1", "p3", "p2"}, engine.StandingsIDs(),
+	assert.Equal(t, []string{"p1", "p3", "p2"}, standingIDs(engine),
 		"the chip leader drops behind both players still at the table")
 
 	engine.RemovePlayer("p3")
-	assert.Equal(t, []string{"p1", "p2", "p3"}, engine.StandingsIDs(),
+	assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine),
 		"between leavers the bigger stack still places higher")
 
 	engine.WithState(func(s *game.State) {
@@ -99,7 +96,7 @@ func TestFinishHand(t *testing.T) {
 	t.Run("parks the turn on the next dealer", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.HandNumber, extra.HandsTotal = 1, HandsPerMatch
 		extra.DealerIndex = 0
 
@@ -113,7 +110,7 @@ func TestFinishHand(t *testing.T) {
 	t.Run("ends the match once the hands run out", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.HandNumber, extra.HandsTotal = HandsPerMatch, HandsPerMatch
 
 		finishHand(state, extra)
@@ -125,9 +122,9 @@ func TestFinishHand(t *testing.T) {
 	t.Run("ends the match once one player holds every chip", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := state.Extra.(*State)
+		extra := extra(t, state)
 		extra.HandNumber, extra.HandsTotal = 1, HandsPerMatch
-		extra.PlayerChips = map[string]uint{"p1": 3000, "p2": 0, "p3": 0}
+		extra.Seats = seatsWithChips(map[string]uint{"p1": 3000, "p2": 0, "p3": 0})
 
 		finishHand(state, extra)
 
@@ -140,23 +137,18 @@ func TestFinishHand(t *testing.T) {
 func tableWithChips(stacks ...uint) (*game.State, *State) {
 	players := make([]*game.Player, 0, len(stacks))
 	extra := &State{
-		SmallBlind:       DefaultSmallBlind,
-		BigBlind:         DefaultBigBlind,
-		HandsTotal:       HandsPerMatch,
-		Folded:           map[string]bool{},
-		PlayersAllIn:     map[string]bool{},
-		Table:            make([]deck.Card, 0, 5),
-		PlayerChips:      map[string]uint{},
-		PlayerBets:       map[string]uint{},
-		TotalContributed: map[string]uint{},
-		ActedThisRound:   map[string]bool{},
+		SmallBlind: DefaultSmallBlind,
+		BigBlind:   DefaultBigBlind,
+		HandsTotal: HandsPerMatch,
+		Table:      make([]deck.Card, 0, BoardSize),
+		Seats:      make(map[string]*Seat, len(stacks)),
 	}
 	for i, chips := range stacks {
 		id := fmt.Sprintf("p%d", i)
 		players = append(players, &game.Player{ID: id})
-		extra.PlayerChips[id] = chips
+		extra.Seats[id] = &Seat{Chips: chips}
 	}
-	state := game.NewState(&Rules{}, players, deck.StandardDeck())
+	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Extra = extra
 	state.Phase = game.Playing
 	return state, extra
@@ -171,7 +163,7 @@ func TestBeginHand_ShortBlindsDoNotMakeTheTableLookHeadsUp(t *testing.T) {
 	// blind - both smaller than the blind they owe, so both are all-in on posting.
 	state, extra := tableWithChips(1000, 20, 30, 1470)
 
-	require.NoError(t, (&Rules{}).beginHand(state, extra, 0))
+	require.NoError(t, beginHand(state, extra, 0))
 
 	assert.Equal(t, 1, extra.SBIndex)
 	assert.Equal(t, 2, extra.BBIndex)
@@ -189,10 +181,10 @@ func TestBeginHandOrFinish_ClosesAHandTheDealAlreadyFinished(t *testing.T) {
 	// or the match parks with nobody on turn.
 	state, extra := tableWithChips(20, 20)
 
-	require.NoError(t, (&Rules{}).beginHandOrFinish(state, extra, 0))
+	require.NoError(t, beginHandOrFinish(state, extra, 0))
 
-	require.True(t, extra.HandComplete, "nobody could act, so the board ran out")
-	assert.Equal(t, Showdown, extra.Phase, "the hand was closed, not left hanging")
+	require.True(t, extra.HandComplete(), "nobody could act, so the board ran out")
+	assert.Equal(t, PhaseShowdown, extra.Phase, "the hand was closed, not left hanging")
 	assert.NotEmpty(t, extra.Winners, "somebody took the chips")
 	// finishHand either ends the match (one funded seat) or parks the next dealer
 	// on turn - never leaves OverrideNextTurn nil while the match is still live.
@@ -211,7 +203,7 @@ func TestStandings_BustedPlayersRankByHowLongTheyLasted(t *testing.T) {
 	extra.HandNumber, extra.HandsTotal = HandsPerMatch, HandsPerMatch
 	// p1 went out early, p2 survived nearly to the end. Both finish on zero chips,
 	// so nothing but the bust-out hand can separate them.
-	extra.BustedAtHand = map[string]int{"p1": 2, "p2": 9}
+	extra.Seats["p1"].BustedAtHand, extra.Seats["p2"].BustedAtHand = 2, 9
 
 	standings := (&Rules{}).Standings(state)
 
@@ -226,13 +218,24 @@ func TestFinishHand_StampsTheHandAPlayerWentOutOn(t *testing.T) {
 
 	finishHand(state, extra)
 
-	assert.Equal(t, map[string]int{"p1": 4}, extra.BustedAtHand)
+	assert.Equal(t, map[string]int{"p1": 4}, bustedAt(extra))
 
 	// A later hand must not restamp a player who was already out.
 	extra.HandNumber = 5
-	extra.PlayerChips["p2"] = 0
+	extra.Seats["p2"].Chips = 0
 	finishHand(state, extra)
-	assert.Equal(t, map[string]int{"p1": 4, "p2": 5}, extra.BustedAtHand)
+	assert.Equal(t, map[string]int{"p1": 4, "p2": 5}, bustedAt(extra))
+}
+
+// bustedAt is the hand each busted seat went out on, leaving out those still in.
+func bustedAt(extra *State) map[string]int {
+	out := map[string]int{}
+	for id, seat := range extra.Seats {
+		if seat.BustedAtHand > 0 {
+			out[id] = seat.BustedAtHand
+		}
+	}
+	return out
 }
 
 // An uncontested pot is won face-down. With hands left to play, showing those
@@ -243,15 +246,16 @@ func TestFoldedOutHand_IsNotShownDown(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	for range 3 {
-		if extraOf(t, engine).HandComplete {
+		if readExtra(t, engine, (*State).HandComplete) {
 			break
 		}
 		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionFold{}))
 	}
 
-	extra := extraOf(t, engine)
-	require.True(t, extra.HandComplete)
-	assert.False(t, extra.ReachedShowdown, "nobody called, so nobody has to show")
+	withExtra(t, engine, func(extra *State) {
+		require.True(t, extra.HandComplete())
+		assert.False(t, extra.ReachedShowdown, "nobody called, so nobody has to show")
+	})
 }
 
 func TestShowdown_MarksTheHandAsShownDown(t *testing.T) {
@@ -260,27 +264,29 @@ func TestShowdown_MarksTheHandAsShownDown(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	for range 10 {
-		if extraOf(t, engine).HandComplete {
+		if readExtra(t, engine, (*State).HandComplete) {
 			break
 		}
 		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionAllIn{}))
 	}
 
-	extra := extraOf(t, engine)
-	require.True(t, extra.HandComplete)
-	assert.True(t, extra.ReachedShowdown, "an all-in board that runs out is shown down")
+	withExtra(t, engine, func(extra *State) {
+		require.True(t, extra.HandComplete())
+		assert.True(t, extra.ReachedShowdown, "an all-in board that runs out is shown down")
+	})
+
 }
 
 func TestBeginHand_BustedPlayerSitsOut(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := state.Extra.(*State)
+	extra := extra(t, state)
 	extra.HandsTotal = HandsPerMatch
-	extra.PlayerChips["p2"] = 0
+	extra.Seats["p2"].Chips = 0
 
-	require.NoError(t, (&Rules{}).beginHand(state, extra, 0))
+	require.NoError(t, beginHand(state, extra, 0))
 
-	assert.True(t, extra.Folded["p2"], "a busted player is folded for the rest of the match")
+	assert.True(t, extra.Seats["p2"].Folded, "a busted player is folded for the rest of the match")
 	assert.Empty(t, state.Players[1].Cards, "a busted player is not dealt in")
 	assert.NotEqual(t, 1, extra.SBIndex)
 	assert.NotEqual(t, 1, extra.BBIndex)
@@ -298,13 +304,13 @@ func TestBeginHand_AShortBigBlindDoesNotLowerTheBringIn(t *testing.T) {
 	state, extra := tableWithChips(1000, 1000, 30)
 	rules := &Rules{}
 
-	require.NoError(t, rules.beginHand(state, extra, 0))
+	require.NoError(t, beginHand(state, extra, 0))
 
 	require.Equal(t, 0, state.CurrentTurn, "the seat after the big blind is under the gun")
-	assert.Equal(t, uint(30), extra.PlayerBets["p2"], "the short blind posts what it has")
-	assert.True(t, extra.PlayersAllIn["p2"], "and is all-in for it")
+	assert.Equal(t, uint(30), extra.Seats["p2"].Bet, "the short blind posts what it has")
+	assert.True(t, extra.Seats["p2"].AllIn, "and is all-in for it")
 	assert.Equal(t, DefaultBigBlind, extra.CurrentBet, "the bring-in is still a full big blind")
-	assert.Equal(t, DefaultBigBlind, ToCall(extra, "p0"))
+	assert.Equal(t, DefaultBigBlind, extra.ToCall("p0"))
 
 	require.ErrorContains(t, rules.ValidateAction(state, ActionRaiseTo{Amount: 99}),
 		"minimum raise is 50", "a raise under a full blind on top of the bring-in is not one")
@@ -320,7 +326,7 @@ func TestValidateAction_RaiseIsCappedByTheLargestOpponentStack(t *testing.T) {
 	state, extra := tableWithChips(1000, 20, 300)
 	rules := &Rules{}
 
-	require.NoError(t, rules.beginHand(state, extra, 0))
+	require.NoError(t, beginHand(state, extra, 0))
 	require.Equal(t, 0, state.CurrentTurn)
 
 	// p2 posted the big blind of 50 out of 300, so 300 is the most it can ever have out.
@@ -329,4 +335,13 @@ func TestValidateAction_RaiseIsCappedByTheLargestOpponentStack(t *testing.T) {
 		"no opponent can call more than 300")
 	// Shoving stays legal: the uncalled part is refunded rather than staged.
 	require.NoError(t, rules.ValidateAction(state, ActionAllIn{}))
+}
+
+func standingIDs(engine *game.Engine) []string {
+	standings := engine.Standings()
+	ids := make([]string, len(standings))
+	for i, s := range standings {
+		ids[i] = s.Player.ID
+	}
+	return ids
 }

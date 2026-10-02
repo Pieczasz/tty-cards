@@ -45,15 +45,27 @@ press Ready. Ranked tables move Elo; casual tables only record history.
 Seat limits come from each game's `MinPlayers`/`MaxPlayers`
 (`internal/game/*/rules.go`); the lobby clamps its own capacity to them.
 
+Where the tables differ from the rules you may know: Crazy Eights deals seven
+cards at every table size; Uno ranks the other seats by fewest cards left and has
+no "UNO" call; Gin Rummy scores the gin and undercut bonuses (25 each) and nothing
+else - no big gin, no box or game bonus. In Hearts one seat leaving ends the match
+for everyone: only the leaver's rating moves, and only down.
+
 ### Rules that apply at every table
 
 - **30 seconds a turn** (`game.DefaultTurnTimeout`). When it runs out the rules
-  play a safe move for you - poker checks or folds, Uno and Crazy Eights draw,
-  Hearts plays its first legal card, Gin Rummy sheds its priciest deadwood.
-- **Three consecutive misses loses the seat** (`game.MaxMissedTurns`). Acting
+  play a safe move for you - poker checks, or calls when nobody can bet more than
+  you already have in, and otherwise folds; Uno and Crazy Eights draw; Hearts
+  passes its most dangerous cards and plays its first legal card; Gin Rummy knocks
+  when it holds gin and otherwise sheds its priciest deadwood. A turn that carries
+  on - Gin's draw then discard, an Uno skip that comes back to you - keeps its
+  clock, with at least 10 seconds left.
+- **Three missed turns in a row loses the seat** (`game.MaxMissedTurns`). Acting
   clears the count; a move the rules *reject* does not.
+- **esc asks before you forfeit.** Mid-game, esc shows "Leave and forfeit this
+  game?" and only `y` leaves; any other key keeps you playing.
 - **A dropped connection holds your seat for 90 seconds**
-  (`lobby.DisconnectGrace`). Reconnect inside that and you land back at the
+  (`disconnectGrace` in `internal/lobby`). Reconnect inside that and you land back at the
   table mid-hand. A waiting-lobby seat leaves at once.
 - **One live session per account.** A second connection displaces the first and
   closes it, so a half-open TCP session cannot lock you out of your own seat.
@@ -126,7 +138,7 @@ go test -race -run 'TestX/subtest_name' ./internal/lobby/
 
 Fuzz targets (8 of them: `FuzzBestMeldSplit`, `FuzzClassifyHand`,
 `FuzzEvaluateHand`, `FuzzJoinLobbyByCode`, `FuzzNetKey`, `FuzzToUint32`,
-`FuzzPile_DrawNCards`, `FuzzValidateUsername`) run as ordinary tests over their
+`FuzzPile_DrawN`, `FuzzValidateUsername`) run as ordinary tests over their
 seed corpus; to actually fuzz one:
 
 ```bash
@@ -136,12 +148,16 @@ go test -run='^$' -fuzz=FuzzBestMeldSplit -fuzztime=60s ./internal/game/ginrummy
 Benchmarks (rendering, evaluator, broadcaster, Elo, rate limiter):
 
 ```bash
-go test -run='^$' -bench=. -benchmem ./internal/tui/views/game/poker/
+go test -run='^$' -bench=. -benchmem ./internal/tui/views/gameview/poker/
 ```
 
 `make loadtest` drives N concurrent SSH sessions at a **running** server and
 prints connect / first-frame latency percentiles. It asserts nothing; it is a
-measurement tool. Point it at your own server, never a public one.
+measurement tool. Point it at your own server, never a public one. Every session
+registers a fresh account, and the server allows only `REGISTRATION_LIMIT` (5) new
+accounts per network per `REGISTRATION_WINDOW` (1h), so start the server under test
+with `REGISTRATION_LIMIT=10000`, and give each run on the same database a new
+`PREFIX`.
 
 ## Layout
 
@@ -176,13 +192,15 @@ Full list with comments in [`.env.example`](.env.example).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ENV` | `development` | `production` requires `DB_PASSWORD` |
-| `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969` |
+| `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD` |
+| `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969`; an IPv6 literal host (`::`) binds |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
+| `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
 | `MAX_CONNECTIONS` | `1000` | concurrent TCP connections |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
-| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW_MS` | `5` / `1000` | SSH **auth attempts** per client network |
-| `DB_*` | see `.env.example` | Postgres; `DB_SSLMODE` is `require` in production |
+| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`); the old `RATE_LIMIT_WINDOW_MS` fails the boot |
+| `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network; raise for `make loadtest` |
+| `DB_*` | see `.env.example` | Postgres; in production `DB_SSLMODE` defaults to `require` and must be `require`, `verify-ca` or `verify-full` unless the host is internal or `ALLOW_INSECURE_DB=true` |
 | `DB_MAX_OPEN_CONNS` | `25` | pool size, independent of the SSH cap |
 | `API_PORT` | `6970` | stats API; reached only through nginx `/api/` |
 | `API_REQUESTS_PER_MINUTE` | `120` | per client network |
@@ -190,9 +208,16 @@ Full list with comments in [`.env.example`](.env.example).
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | logs, metrics, traces |
 | `LOG_LEVEL` | `INFO` | stderr and OTLP both |
 
-New accounts are separately capped at 5 per hour per client network
-(`registrationLimit` in `internal/ssh/server.go`); returning players never spend
-that budget.
+Boolean variables (`PROXY_PROTOCOL`, `API_TRUST_PROXY`, `ALLOW_INSECURE_DB`,
+`OTEL_EXPORTER_OTLP_INSECURE`) take what Go's `strconv.ParseBool` does: `1`, `t`,
+`true`, `0`, `f`, `false` (also `True`/`TRUE`). Anything else - `yes`, `off` - fails
+the boot rather than meaning one or the other, and the error lists every invalid
+variable at once.
+
+New accounts are separately capped at `REGISTRATION_LIMIT` per
+`REGISTRATION_WINDOW` per client network; returning players never spend that
+budget, and neither does a name that fails validation - that player is told why.
+Usernames are unique regardless of case.
 
 ## Observability
 
@@ -207,14 +232,16 @@ Retention is explicit: **logs 14 days** (`internal/config/loki/loki.yaml`),
 
 ## Self-hosting
 
-1. A VM with Docker. 12 GB / 6 cores is what `compose.yaml` is sized against; the
-   stack itself wants 5.5 GiB.
+1. A VM with Docker, with IPv6 enabled for user-defined networks (the `edge`
+   network sets `enable_ipv6: true`, so an IPv6 player keeps their own address).
+   12 GB / 6 cores is what `compose.yaml` is sized against; the stack itself wants
+   5.5 GiB.
 2. Move the host's own `sshd` off port 22 (`Port 2222` in `/etc/ssh/sshd_config`)
    and reconnect there - the game proxy owns 22.
 3. Firewall: allow 22 and 80, plus your admin SSH port from trusted addresses
    only. Do not open Postgres, Grafana, `6969` or `6970`.
-4. `cp .env.example .env` and set `DB_PASSWORD`.
-   Compose sets `ENV=production` on the backend.
+4. `cp .env.example .env` and set `DB_PASSWORD`; compose refuses to start
+   without it. Compose sets `ENV=production` on the backend.
 5. `docker compose up -d --build`.
 6. Optional: install `zstd` and cron `./scripts/backup.sh` (see its header).
    Protect `backups/`.
@@ -227,7 +254,14 @@ Notes worth reading before you deploy:
   community put it behind a firewall, a VPN or an allowlist -
   [`docs/SECURITY.md`](docs/SECURITY.md).
 - Compose sets `DB_SSLMODE=disable` for the internal Postgres network. For an
-  external managed database set `DB_SSLMODE=require` and supply CA-trusted TLS.
+  external managed database set `DB_SSLMODE=require` (or `verify-ca` /
+  `verify-full`) and supply CA-trusted TLS; production refuses anything weaker for
+  a non-internal host.
+- The `edge` network's subnets (`172.29.69.0/24`, `fd6b:1e37:9a52:6969::/64`) are
+  what the backend's `PROXY_TRUSTED_CIDRS` trusts. If they collide with a network
+  on your host, change both in `compose.yaml` together.
+- Grafana answers only to `Host: localhost` (DNS-rebinding protection): tunnel
+  with `ssh -L 3000:127.0.0.1:3000 <host>` and open `http://localhost:3000`.
 
 ## Docs
 

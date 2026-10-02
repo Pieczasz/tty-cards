@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// User is a player account.
+//
 // Nothing calls AutoMigrate - internal/db/migrations owns the schema - so
 // uniqueIndex/not null/default/check/type tags would be decoration that reads like
 // enforcement, and one of them had already drifted from the SQL. They are gone; the
@@ -20,7 +22,7 @@ import (
 // uses to build queries. TestSchemaNullabilityMatchesStructs derives what the SQL must
 // guarantee from these structs, so the drift is caught by CI rather than by a tag.
 type User struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid;default:uuidv7()"`
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	DeletedAt  gorm.DeletedAt
@@ -30,6 +32,7 @@ type User struct {
 	Rankings   []Ranking
 }
 
+// BeforeCreate assigns a UUIDv7 id when the caller did not.
 func (u *User) BeforeCreate(_ *gorm.DB) error {
 	if u.ID == uuid.Nil() {
 		u.ID = uuid.NewV7()
@@ -37,6 +40,7 @@ func (u *User) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// PublicKey is one SSH key an account signs in with, by its SHA256 fingerprint.
 type PublicKey struct {
 	gorm.Model
 	Fingerprint string
@@ -46,6 +50,7 @@ type PublicKey struct {
 	User        User      `gorm:"foreignKey:UserID"`
 }
 
+// Ranking is one account's rating in one game.
 type Ranking struct {
 	UserID uuid.UUID `gorm:"primaryKey;serializer:stduuid"`
 	GameID uint      `gorm:"primaryKey"`
@@ -65,10 +70,10 @@ type Ranking struct {
 	DeletedAt gorm.DeletedAt
 }
 
-// MaxUsernameLength is the chosen-name cap ValidateUsername enforces. The column is
+// maxUsernameLength is the chosen-name cap ValidateUsername enforces. The column is
 // wider so AnonymisedUsername (deleted_ + 32 hex) still fits; the CHECK refuses any
 // other 17-40 character string.
-const MaxUsernameLength = 16
+const maxUsernameLength = 16
 
 const anonymisedUsernameLength = 40 // deleted_ + 32 hex
 
@@ -76,19 +81,23 @@ const anonymisedUsernameLength = 40 // deleted_ + 32 hex
 // the column CHECK - charset, and either <=16 chars or deleted_ plus 32 hex - because
 // the row stays: other players' match history still points at it.
 func AnonymisedUsername(userID uuid.UUID) string {
-	return anonymisedPrefix + hex.EncodeToString(userID[:])
+	return AnonymisedPrefix + hex.EncodeToString(userID[:])
 }
 
-const anonymisedPrefix = "deleted_"
+// AnonymisedPrefix starts every AnonymisedUsername. ValidateUsername refuses it, so a
+// name carrying it is an erased account and never a chosen one.
+const AnonymisedPrefix = "deleted_"
 
+// ValidateUsername is the chosen-name rule: at most 16 of [A-Za-z0-9_], and not the
+// erasure prefix.
 func ValidateUsername(username string) error {
-	if len(username) > MaxUsernameLength {
-		return fmt.Errorf("username cannot exceed %d characters", MaxUsernameLength)
+	if len(username) > maxUsernameLength {
+		return fmt.Errorf("username cannot exceed %d characters", maxUsernameLength)
 	}
 	if !usernamePattern.MatchString(username) {
 		return errors.New("username can only contain English letters, numbers, and underscores")
 	}
-	if strings.HasPrefix(username, anonymisedPrefix) {
+	if strings.HasPrefix(username, AnonymisedPrefix) {
 		return errors.New("username is reserved")
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Game is one row per catalog game, keyed by Slug.
 type Game struct {
 	gorm.Model
 	// Slug is the identity a rating hangs off - catalog.Entry.Slug, the same value the

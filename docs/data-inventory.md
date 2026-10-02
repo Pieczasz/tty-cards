@@ -15,7 +15,7 @@ published port. Schema is `internal/db/migrations/`.
 
 | Table.column | What it is | Why it exists |
 |---|---|---|
-| `users.username` | chosen names are 1-16 chars, `[A-Za-z0-9_]`, **publicly displayed** on the in-game leaderboard and on the website. After erasure it reads `deleted_` plus 32 hex digits of the UUID (`db.AnonymisedUsername`, 40 chars) | identity |
+| `users.username` | chosen names are 1-16 chars, `[A-Za-z0-9_]`, unique case-insensitively (`idx_users_username_lower`, migration `000006`; the display case is kept), **publicly displayed** on the in-game leaderboard and on the website. After erasure it reads `deleted_` plus 32 hex digits of the UUID (`db.AnonymisedUsername`, 40 chars) | identity |
 | `users.id` | UUIDv7 primary key (`uuidv7()`); **this is also the `player_id` that appears in logs** (`internal/lobby/player.go`). Time-ordered, not a sequence. | joins |
 | `users.last_seen_at` | last connection timestamp | activity |
 | `users.created_at` / `updated_at` / `deleted_at` | account lifecycle; `deleted_at` is a GORM **soft** delete | lifecycle |
@@ -40,8 +40,8 @@ Two things to say plainly in a notice:
 They go when the account is erased. Match history is kept, anonymised: other
 players at those tables still have a name to resolve.
 
-**Erasure: `db.UserRepository.DeleteAccount(ctx, userID)`**, implemented by
-`eraseUserLocked` in `internal/repository/user.go`, one transaction. Reached from the
+**Erasure: `db.Profiles.DeleteAccount(ctx, userID)`**, implemented by
+`eraseUser` in `internal/repository/user.go`, one transaction. Reached from the
 Profile screen with `x` and a typed `DELETE`; refused while the player is seated at a
 table, and the session ends afterwards.
 
@@ -57,19 +57,27 @@ remove the person from other players' match history, only their name from it; an
 leaderboard cache is cleared wholesale on deletion, because its 5-minute TTL would
 otherwise be five more minutes of an erased name on screen.
 
+A ranking is never re-created for an erased account. The erasure takes the same
+per-seat advisory lock a ranked finalize holds, and a finalize that ran alongside it
+skips the anonymised seat (`unerasedSeats`, `internal/repository/match.go`): that
+seat's participant row is written with a delta of 0 and no ranking. The cache also
+carries a generation the erasure bumps, so a leaderboard read that started before it
+cannot store the erased name again. The `users` update is `Unscoped`, so an account an
+operator soft-deleted is anonymised too.
+
 ## 2. Processed transiently - never written to disk
 
 | Item | Where | Lifetime |
 |---|---|---|
-| Client IP, as a rate-limit key | `internal/ratelimit` - an in-memory map, IPv6 collapsed to its /64 by `NetKey` | one window: 1s for SSH auth, **1 hour for new-account registration** (`registrationWindow`, `internal/ssh/server.go`), 60s for the API. Swept every 64 calls, capped at 10 000 keys |
+| Client IP, as a rate-limit key | `internal/ratelimit` - an in-memory map, IPv6 collapsed to its /64 by `NetKey` | one window: 1s for SSH auth, **1 hour for new-account registration** (`REGISTRATION_WINDOW`, `internal/config/config.go`), 60s for the API. Swept every 64 calls, capped at 10 000 keys |
 | Client IP, from the PROXY protocol header | `cmd/server` -> `github.com/pires/go-proxyproto` | the TCP connection |
-| Client IP, from `X-Forwarded-For` | `internal/httpapi` `clientIPFunc`, only when `API_TRUST_PROXY=true` | the request |
+| Client IP, from `X-Forwarded-For` | `internal/httpapi` `clientIPFunc`, only when `API_TRUST_PROXY=true`, and with `PROXY_TRUSTED_CIDRS` set only from a peer inside it | the request |
 
 Nothing here is persisted or exported. The limiter's map is the whole of it.
 
 ## 3. Reaches the observability stack
 
-Everything below is in the one Docker network; none of these services publishes a
+Everything below is on the compose networks; none of these services publishes a
 port (`docker compose config` - only `proxy` 22/80 and Grafana on `127.0.0.1:3000`).
 
 ### Logs -> Loki. **14 days** (`internal/config/loki/loki.yaml`, `retention_period: 336h`, compactor retention enabled)
@@ -95,18 +103,25 @@ Personal data in those logs today:
   routine path does not.
 - **`client_version`** alongside both - the SSH client string, a weak fingerprinting
   signal.
-- **`player_id` = `users.id`**, at INFO and above, across `internal/lobby/manager.go`
-  (disconnect, grace, resume), `internal/game/turnclock.go`, `internal/game/shed.go`,
-  `internal/elo/elo.go`, `internal/tui/views/...`, and per-hand summaries in
-  `internal/game/hearts/trick.go` and `internal/game/ginrummy/rules.go`.
-- **Lobby codes** in `internal/lobby/finalize.go` and `lobby.go` - a live join code
-  for a private room, which is a secret more than it is personal data.
+- **`player_id` = `users.id`**, at INFO and above, across `internal/lobby/disconnect.go`
+  (disconnect, grace, resume), `internal/game/turnclock.go`, `internal/elo/elo.go`,
+  `internal/tui/views/gameview/session.go` and `internal/tui/views/lobby/lobby.go`, and as
+  map keys in the per-hand summaries in `internal/game/hearts/trick.go` and
+  `internal/game/ginrummy/rules.go`.
+- **Lobby codes** in `internal/lobby/finalize.go`, `manager.go` and `watch.go` - a live
+  join code for a private room, which is a secret more than it is personal data.
 - **Not logged anywhere: the SSH fingerprint and the username.** `internal/ssh/auth.go`
   logs neither, including on its failure paths.
 
-nginx no longer contributes: `internal/config/nginx.conf` sets a `log_format privacy`
-that omits `$remote_addr` and the User-Agent (the compiled-in default was `combined`,
-which has both), and the `stream` block states `access_log off`.
+nginx's access logs carry no address: `internal/config/nginx.conf` sets a
+`log_format privacy` that omits `$remote_addr` and the User-Agent (the compiled-in
+default was `combined`, which has both), and the `stream` block states
+`access_log off`. Its **error log** does name the client on every line
+(`client: 203.0.113.7`). It goes to stderr at `error` and above only (`error_log stderr
+error`); the `limit_*` rejections, the one high-volume source of such lines, are
+logged at `warn`, below that threshold; and Alloy rewrites the `client:` field on the
+proxy's lines to `redacted` before they reach Loki (`stage.replace`,
+`internal/config/alloy/config.alloy`). What is left is which upstream failed and how.
 
 ### Traces -> Tempo. **48 hours** (`internal/config/tempo/tempo.yaml`, `block_retention: 48h`)
 
@@ -120,12 +135,21 @@ comment in `startSession` states the reason.
 What remains: the username on `ssh.session` for 48h, and `user_id` on repository spans
 (`internal/repository/user.go`, including `db.DeleteAccount`).
 
+**The stats API makes no spans at all** (`internal/httpapi/httpapi.go`: `otelhttp` runs
+with a noop tracer provider). Every website visitor polls it, and a span per request
+put each visitor's address and User-Agent into Tempo. `internal/httpapi/telemetry_test.go`
+`TestHandler_ProducesNoSpans` asserts it.
+
 ### Metrics -> Prometheus. **30 days** (`compose.yaml`, `--storage.tsdb.retention.time=30d`, plus an 8GB size cap)
 
 **No personal data**, and that is enforced rather than asserted:
 `internal/observability/metrics_test.go` collects every instrument and fails if any
 attribute key is outside `{outcome, limiter, game_type, ranked, reason, stream}`.
-Alloy's host exporter adds machine metrics only.
+otelhttp's `http.server.*` metrics for the stats API get the same treatment in
+`internal/httpapi/telemetry_test.go`: only the method, status, route, scheme and
+protocol keys and `server.address`, which `otelhttp.WithServerName("stats-api:80")`
+pins to `stats-api` rather than the client's `Host` header, with no `server.port`
+series from it either. Alloy's host exporter adds machine metrics only.
 
 ### Docker's own log files
 
@@ -167,6 +191,7 @@ per-user endpoint, no writes, no auth.
 | Traces | Tempo | **48 hours** | `internal/config/tempo/tempo.yaml` (`block_retention: 48h`) |
 | Metrics | Prometheus | **30 days**, 8 GB cap | `compose.yaml` (`--storage.tsdb.retention.time=30d`) |
 | Container stdout on disk | Docker json-file | 3 × 10 MB, size-bound not time-bound | `compose.yaml` `x-logging` |
+| Database backups (optional) | the host's `backups/` | **14 days** (`RETENTION_DAYS`), written `0600` (`umask 077`), never in the image build context | `scripts/backup.sh`, `.dockerignore` |
 | Rate-limit counters | process memory | one window (1s SSH auth, 1h registration, 60s API) | `internal/ratelimit` |
 | Live session and table state | process memory | until disconnect / match end | - |
 
@@ -176,7 +201,7 @@ per-user endpoint, no writes, no auth.
    days. It survives account deletion, because the `users` row does. Correlating it
    back to a person needs database access, so this is a lower-grade identifier than
    what was here before - but it is still one. (lobby / game)
-2. **Lobby codes at INFO** - `internal/lobby/finalize.go`, `lobby.go`. A live join code
+2. **Lobby codes at INFO** - `internal/lobby/finalize.go`, `manager.go`, `watch.go`. A live join code
    for a private room is a secret more than it is personal data. (lobby)
 3. **The username on the `ssh.session` span** for 48h. Nothing joins it to an address
    any more, so this is the weakest of the three and may be worth keeping. (ssh)

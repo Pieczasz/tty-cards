@@ -161,38 +161,41 @@ func TestBoxSizes_ExactInsets(t *testing.T) {
 	assert.Equal(t, 40, styles.InnerWidth(50))
 }
 
-// One caller banners the player's own username, and anyone may register one, so the
-// banner cache is keyed partly on attacker-supplied text. It has to stop growing.
+// The cache is keyed by text and font, never by size: a banner's size does not depend
+// on the box it has to fit, so one title across every terminal size is at most one
+// entry per font. Keying on the size made every resize mint entries until a cap hid it.
 //
 //nolint:paralleltest // mutates the package-wide banner cache
-func TestRenderFigureASCII_CacheIsCapped(t *testing.T) {
+func TestRenderFigureASCII_CachesPerFontNotPerSize(t *testing.T) {
 	styles.ResetFigureCacheForTest()
 
-	for i := range 2000 {
-		got := styles.RenderFigureASCII(fmt.Sprintf("user%d", i), 80, 10)
-		require.NotEmpty(t, got)
+	for w := 60; w <= 120; w++ {
+		for h := 5; h <= 10; h++ {
+			require.NotEmpty(t, styles.RenderFigureASCII("Terminal Cards", w, h))
+		}
 	}
 
-	assert.LessOrEqual(t, styles.FigureCacheLenForTest(), 512,
-		"a cache keyed on usernames must not grow with every account seen")
+	assert.LessOrEqual(t, styles.FigureCacheLenForTest(), 3,
+		"one title at 61x6 sizes is at most one entry per font")
 }
 
-// Capped or not, the banner itself must stay correct: a cache that starts returning
-// something different once it is full is worse than no cache.
+// A cached banner must pick the same font a fresh render would: a smaller box has to
+// fall through to a smaller font even when the bigger one is already cached.
 //
 //nolint:paralleltest // mutates the package-wide banner cache
-func TestRenderFigureASCII_StaysCorrectPastTheCap(t *testing.T) {
-	styles.ResetFigureCacheForTest()
-
-	want := styles.RenderFigureASCII("Terminal Cards", 80, 10)
-	for i := range 1000 {
-		styles.RenderFigureASCII(fmt.Sprintf("filler%d", i), 80, 10)
+func TestRenderFigureASCII_CachedAnswerMatchesAFreshOne(t *testing.T) {
+	sizes := [][2]int{{120, 10}, {40, 10}, {120, 3}, {120, 1}, {80, 5}}
+	fresh := make([]string, 0, len(sizes))
+	for _, size := range sizes {
+		styles.ResetFigureCacheForTest()
+		fresh = append(fresh, styles.RenderFigureASCII("Join Game", size[0], size[1]))
 	}
 
-	assert.Equal(t, want, styles.RenderFigureASCII("Terminal Cards", 80, 10), "cached entry")
-	uncached := styles.RenderFigureASCII("Join Game", 80, 10)
-	assert.Equal(t, uncached, styles.RenderFigureASCII("Join Game", 80, 10),
-		"and one past the cap still renders consistently")
+	styles.ResetFigureCacheForTest()
+	for i, size := range sizes {
+		assert.Equal(t, fresh[i], styles.RenderFigureASCII("Join Game", size[0], size[1]),
+			"%dx%d", size[0], size[1])
+	}
 }
 
 // The banner is decoration. On a short terminal it has to give way to plain text so

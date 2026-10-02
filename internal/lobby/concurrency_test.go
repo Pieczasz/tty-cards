@@ -1,8 +1,8 @@
 package lobby
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,7 +19,7 @@ import (
 // unlimitedJoins swaps the per-player join rate limiter for one that never
 // throttles, so a fan-out of concurrent joins is not masked by rate limiting.
 func unlimitedJoins(m *Manager) {
-	m.joinLimiter = ratelimit.NewSlidingWindowLimiter(1_000_000, time.Hour)
+	m.joinLimiter = ratelimit.New(1_000_000, time.Hour)
 }
 
 // runWithTimeout runs fn in a goroutine and fails the test loudly if it does not
@@ -60,7 +60,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
 	require.NoError(t, err)
 
 	guests := make([]*guestRef, joiners)
@@ -81,12 +81,12 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		go func(g *guestRef) {
 			defer wg.Done()
 			<-start // release all goroutines together to maximise contention
-			err := m.JoinLobbyByCode(l.Code(), g.p)
+			err := joinErr(m.JoinLobbyByCode(l.Code(), g.p))
 			switch {
 			case err == nil:
 				g.joined = true
 				successes.Add(1)
-			case strings.Contains(err.Error(), "full"):
+			case errors.Is(err, ErrLobbyFull):
 				fullErrs.Add(1)
 			default:
 				otherErrs.Add(1)
@@ -133,15 +133,11 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(players), WithCardGame("TestGame"))
+	all := testutil.Players(players)
+	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("TestGame"))
 	require.NoError(t, err)
-
-	all := []*game.Player{leader}
-	for i := 1; i < players; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
-		all = append(all, g)
+	for _, g := range all[1:] {
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
 	require.Equal(t, players, l.CurrentPlayers())
 
@@ -165,7 +161,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	// Lobby must be gone from the manager entirely.
 	_, err = m.FindLobbyByCode(l.Code())
-	require.ErrorContains(t, err, "lobby not found", "empty lobby must be removed")
+	require.ErrorIs(t, err, ErrLobbyNotFound, "empty lobby must be removed")
 
 	// No ghost membership: the manager's playerLobby map is the authoritative
 	// membership index, and no player may still resolve to a lobby through it.
@@ -192,7 +188,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			unlimitedJoins(m)
 
 			leader := mockPlayer(fmt.Sprintf("leader-%d", i), testutil.UID(uint64(2*i+1)))
-			l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
+			l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
 			code := l.Code()
 
@@ -207,7 +203,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				joinErr = m.JoinLobbyByCode(code, joiner)
+				_, joinErr = m.JoinLobbyByCode(code, joiner)
 			}()
 			go func() {
 				defer wg.Done()
@@ -252,23 +248,18 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(members), WithCardGame("NeverStarts"))
+	roster := testutil.Players(members)
+	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members), WithCardGame("NeverStarts"))
 	require.NoError(t, err)
-
-	roster := []*game.Player{leader}
-	for i := 1; i < members; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
-		roster = append(roster, g)
+	for _, g := range roster[1:] {
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
 
 	// Rules requiring far more players than present: an all-ready roster fails to
 	// start, so the lobby stays in Waiting and the ready map keeps churning.
-	registry := game.NewRegistry()
 	mockRules := new(MockRules)
 	mockRules.On("MinPlayers").Return(members + 100)
-	registerGame(registry, "NeverStarts", mockRules)
+	registry := gameRegistry("NeverStarts", mockRules)
 
 	var (
 		start = make(chan struct{})
@@ -296,7 +287,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	// The lobby never had enough players to start, so it must still be Waiting,
 	// with an intact roster and every ready flag a well-defined bool.
-	assert.True(t, l.IsWaiting(), "lobby must remain in Waiting; a start should never have succeeded")
+	assert.True(t, isWaiting(l), "lobby must remain in Waiting; a start should never have succeeded")
 	assert.Equal(t, members, l.CurrentPlayers(), "roster must be unchanged")
 	for _, p := range roster {
 		_ = l.IsReady(p) // must not race or panic
@@ -319,7 +310,7 @@ func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int)
 	// than emptying it - so the state, not the slice, is what says whether a seat
 	// exists. The manager's index is the authoritative membership record either way.
 	l.mu.RLock()
-	seated := l.state != Closed && l.hasPlayerLocked(p)
+	seated := l.state != closed && l.hasPlayerLocked(p)
 	l.mu.RUnlock()
 
 	assert.False(t, pending, "iter %d: a grace timer is still armed after both paths settled", iter)
@@ -497,11 +488,11 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			target := mockPlayer("target", testutil.UID(2))
 			other := mockPlayer("other", testutil.UID(3))
 
-			table, err := m.New(host, WithMaxPlayers(4), WithCardGame("TestGame"))
+			table, err := m.CreateLobby(host, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
-			elsewhere, err := m.New(other, WithMaxPlayers(4), WithCardGame("TestGame"))
+			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("TestGame"))
 			require.NoError(t, err)
-			require.NoError(t, m.JoinLobbyByCode(table.Code(), target))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
 
 			var (
 				wg   sync.WaitGroup
@@ -510,7 +501,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			wg.Add(3)
 			go func() { defer wg.Done(); <-gate; _ = m.Kick(host, target) }()
 			go func() { defer wg.Done(); <-gate; m.LeaveLobby(target) }()
-			go func() { defer wg.Done(); <-gate; _ = m.JoinLobbyByCode(elsewhere.Code(), target) }()
+			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(elsewhere.Code(), target)) }()
 			close(gate)
 			wg.Wait()
 
@@ -555,7 +546,7 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range tables {
-			_, err := m.New(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
+			_, err := m.CreateLobby(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
 				WithPrivate(false), WithCardGame("TestGame"))
 			assert.NoError(t, err)
 		}

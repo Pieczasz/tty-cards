@@ -1,3 +1,4 @@
+// Package home is the landing screen every session starts on.
 package home
 
 import (
@@ -13,38 +14,35 @@ type model struct {
 	global router.GlobalContext
 }
 
+// New builds the home screen.
 func New(global router.GlobalContext) tea.Model {
-	return model{global: global}
+	return &model{global: global}
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
 	}
 
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q":
-			return m, tea.Quit
-		case "n":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobbyCreate} }
-		case "f":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobbyJoin} }
-		case "p":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteProfile} }
-		case "t":
-			return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLeaderboard} }
-		}
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	// q quits rather than going "back": home is where back leads.
+	if key.String() == "q" {
+		return m, tea.Quit
+	}
+	if route, ok := views.GlobalRoute(key.String()); ok {
+		return m, router.Navigate(route, nil)
 	}
 	return m, nil
 }
 
-func (m model) View() tea.View {
+func (m *model) View() tea.View {
 	welcomeName := "Player"
 	if m.global.User != nil {
 		welcomeName = m.global.User.Username

@@ -13,10 +13,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	crazyeightview "github.com/Pieczasz/terminal-card/internal/tui/views/game/crazyeight"
-	ginrummyview "github.com/Pieczasz/terminal-card/internal/tui/views/game/ginrummy"
-	heartsview "github.com/Pieczasz/terminal-card/internal/tui/views/game/hearts"
-	unoview "github.com/Pieczasz/terminal-card/internal/tui/views/game/uno"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -43,7 +40,7 @@ func TestGameViews_RenderInsideTheTerminal(t *testing.T) {
 	handSizes := []int{7, 13, 25}
 
 	for _, entry := range All {
-		rules := entry.Rules()
+		rules := entry.Factory()
 		for seats := rules.MinPlayers(); seats <= min(rules.MaxPlayers(), 6); seats++ {
 			for _, size := range sizes {
 				for _, handSize := range handSizes {
@@ -78,7 +75,7 @@ func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 		t.Run(entry.Slug, func(t *testing.T) {
 			t.Parallel()
 
-			rules := entry.Rules()
+			rules := entry.Factory()
 			engine, m := seatedEngineAndView(t, entry, rules.MinPlayers(), 120, 40)
 
 			hero := heroHand(t, engine, testutil.SeatID(1))
@@ -107,12 +104,10 @@ func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 }
 
 // cardGlyphs is the rank-and-suit pair a card is recognisable by in a rendered frame:
-// the compact strip and the mini cards both print exactly this.
+// the compact strip and the mini cards both print exactly this, so it is read off a
+// mini card with its brackets and padding trimmed.
 func cardGlyphs(c deck.Card) string {
-	suits := map[deck.Suit]string{
-		deck.Hearts: "♥", deck.Diamonds: "♦", deck.Clubs: "♣", deck.Spades: "♠",
-	}
-	return components.RankLabel(c.Rank) + suits[c.Suit]
+	return strings.Trim(tuitest.StripANSI(components.RenderMiniCard(styles.NewTheme(true), c)), "[ ]")
 }
 
 func containsCard(hand []deck.Card, card deck.Card) bool {
@@ -140,25 +135,18 @@ func seatedView(t *testing.T, entry Entry, seats, width, height int) tea.Model {
 func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*game.Engine, tea.Model) {
 	t.Helper()
 
-	players := make([]*game.Player, 0, seats)
-	for i := range seats {
-		players = append(players, &game.Player{
-			ID: testutil.SeatID(i + 1), UserID: testutil.UID(i + 1),
-			Name: fmt.Sprintf("player%d", i+1),
-		})
-	}
-	rules := entry.Rules()
-	engine := game.NewEngine(rules, players, deck.StandardDeck())
+	rules := entry.Factory()
+	engine := game.NewEngine(rules, testutil.Players(seats), deck.Standard())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{
-		User:   &db.User{ID: testutil.UID(1), Username: "player1"},
+		User:   &db.User{ID: testutil.UID(1), Username: "p1"},
 		Theme:  styles.NewTheme(true),
 		Width:  width,
 		Height: height,
 	}
-	model := entry.View(global, engine)
+	model := entry.View(global, engine, entry.Slug)
 	requireSameGame(t, rules, model)
 	return engine, model
 }
@@ -167,7 +155,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 // belong to different games. Copy the Hearts entry, change only Rules, and every
 // other test still passes: the view renders a table it has no state for, so it prints
 // almost nothing and asserts nothing. The packages are named for the game on both
-// sides of the tree (internal/game/<g> and internal/tui/views/game/<g>), so comparing
+// sides of the tree (internal/game/<g> and internal/tui/views/gameview/<g>), so comparing
 // the leaf is enough - and it is the convention a new game has to follow anyway.
 func requireSameGame(t *testing.T, rules game.Rules, model tea.Model) {
 	t.Helper()
@@ -180,18 +168,13 @@ func requireSameGame(t *testing.T, rules game.Rules, model tea.Model) {
 
 // setHand overwrites the hand the view has cached, which is the only way to render a
 // size the rules never deal. Poker holds its hole cards in its seat rows rather than
-// the shared base state, so it keeps the hand it was dealt.
+// the shared base state, so it keeps the hand it was dealt. The views' model types are
+// unexported, so the embedded Session's Base is reached by name.
 func setHand(m tea.Model, hand []deck.Card) {
-	switch v := m.(type) {
-	case *crazyeightview.Model:
-		v.Base.Hand = hand
-	case *unoview.Model:
-		v.Base.Hand = hand
-	case *heartsview.Model:
-		v.Base.Hand = hand
-	case *ginrummyview.Model:
-		v.Base.Hand = hand
+	if path.Base(reflect.TypeOf(m).Elem().PkgPath()) == "poker" {
+		return
 	}
+	reflect.ValueOf(m).Elem().FieldByName("Base").FieldByName("Hand").Set(reflect.ValueOf(hand))
 }
 
 // longHand is n distinct cards, cycling suits so the hand is as wide as a real one.

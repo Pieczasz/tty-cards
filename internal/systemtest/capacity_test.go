@@ -1,11 +1,11 @@
 package systemtest
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
 
+	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 
@@ -39,8 +39,8 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	// A real repository, not nil: a nil db.MatchRepository is a shape the server can
 	// never have, so measuring against one measures something that does not exist -
 	// and any path that starts touching it turns this into a nil dereference.
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	registry := catalog.NewRegistry()
 
 	warm := openTable(t, manager, registry, 0, seatsPerTable)
 	require.NotNil(t, warm)
@@ -64,7 +64,7 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, idx, n int) *lobby.Lobby {
 	t.Helper()
 	leader := benchPlayer(idx, 0)
-	l, err := manager.New(leader,
+	l, err := manager.CreateLobby(leader,
 		lobby.WithCardGame("Poker"),
 		lobby.WithMaxPlayers(9),
 		lobby.WithPrivate(false),
@@ -75,7 +75,7 @@ func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, id
 	guests := make([]*game.Player, 0, n-1)
 	for i := 1; i < n; i++ {
 		g := benchPlayer(idx, i)
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
 		guests = append(guests, g)
 	}
 

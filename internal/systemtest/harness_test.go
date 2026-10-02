@@ -2,11 +2,11 @@ package systemtest
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/game/poker"
@@ -16,6 +16,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// joinErr keeps the join-and-assert call sites one line: they only care whether the
+// join was refused.
+func joinErr(_ *lobby.Lobby, err error) error { return err }
 
 type finalizedMatch struct {
 	gameName string
@@ -71,7 +75,7 @@ func (r *rankedFinalizeRecorder) FinalizeRankedMatch(
 	r.mu.Lock()
 	r.finalized = append(r.finalized, finalizedMatch{
 		gameName: ref.Name,
-		userIDs:  append([]uuid.UUID(nil), orderedUserIDs...),
+		userIDs:  slices.Clone(orderedUserIDs),
 	})
 	r.mu.Unlock()
 
@@ -87,19 +91,10 @@ func (r *rankedFinalizeRecorder) calls() []finalizedMatch {
 	for i, call := range r.finalized {
 		calls[i] = finalizedMatch{
 			gameName: call.gameName,
-			userIDs:  append([]uuid.UUID(nil), call.userIDs...),
+			userIDs:  slices.Clone(call.userIDs),
 		}
 	}
 	return calls
-}
-
-func realRegistry(t *testing.T) *game.Registry {
-	t.Helper()
-	registry := game.NewRegistry()
-	for _, entry := range catalog.All {
-		registry.RegisterModule(entry.Module())
-	}
-	return registry
 }
 
 func newPlayer(id uuid.UUID, name string) *game.Player {
@@ -118,9 +113,8 @@ func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
 			if event.Type != lobby.EventGameStarted {
 				continue
 			}
-			engine, ok := event.Payload.(*game.Engine)
-			require.True(t, ok, "GAME_STARTED payload must carry the engine")
-			return engine
+			require.NotNil(t, event.Engine, "GAME_STARTED must carry the engine")
+			return event.Engine
 		case <-deadline:
 			t.Fatal("timed out waiting for the game to start")
 		}
@@ -133,9 +127,9 @@ func chipsInPlay(t *testing.T, engine *game.Engine) uint {
 	engine.WithState(func(state *game.State) {
 		extra, ok := state.Extra.(*poker.State)
 		require.True(t, ok)
-		total = extra.MainPool
-		for _, chips := range extra.PlayerChips {
-			total += chips
+		total = extra.Pool
+		for _, seat := range extra.Seats {
+			total += seat.Chips
 		}
 	})
 	return total

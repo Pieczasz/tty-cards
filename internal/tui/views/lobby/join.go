@@ -1,7 +1,6 @@
 package lobby
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -46,10 +45,13 @@ func listLayout(contentHeight int) (rows int, compact bool) {
 	return min(max(contentHeight-chrome, 1), maxVisibleRows), compact
 }
 
-type refreshMsg time.Time
+// refreshMsg names the screen that armed it. The router builds a new join screen on
+// every visit, and a tick in flight from the last one would otherwise re-arm itself
+// here and run a second chain.
+type refreshMsg struct{ owner *joinModel }
 
-func refreshTick() tea.Cmd {
-	return tea.Tick(browseRefresh, func(t time.Time) tea.Msg { return refreshMsg(t) })
+func (m *joinModel) refreshTick() tea.Cmd {
+	return tea.Tick(browseRefresh, func(time.Time) tea.Msg { return refreshMsg{owner: m} })
 }
 
 type joinModel struct {
@@ -74,6 +76,7 @@ type joinModel struct {
 	lastView string
 }
 
+// NewJoin is the join screen: the public lobby browser and the join-by-code prompt.
 func NewJoin(global router.GlobalContext) tea.Model {
 	ti := textinput.New()
 	ti.Placeholder = "8-character code"
@@ -93,7 +96,7 @@ func NewJoin(global router.GlobalContext) tea.Model {
 }
 
 func (m *joinModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, refreshTick())
+	return tea.Batch(textinput.Blink, m.refreshTick())
 }
 
 // refresh re-reads the list and keeps the cursor on a real row. Tables appear and
@@ -102,15 +105,17 @@ func (m *joinModel) Init() tea.Cmd {
 func (m *joinModel) refresh() {
 	m.entries = m.global.LobbyManager.BrowseLobbies(views.SessionPlayer(m.global), m.filter)
 	m.games = m.global.LobbyManager.GameNames()
-	if m.cursor >= len(m.entries) {
-		m.cursor = max(len(m.entries)-1, 0)
-	}
+	m.cursor = components.StepCursor(m.cursor, 0, len(m.entries)-1)
 }
 
 func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(refreshMsg); ok {
+	if tick, ok := msg.(refreshMsg); ok {
+		if tick.owner != m {
+			return m, nil
+		}
 		m.refresh()
-		return m, refreshTick()
+		next := m.refreshTick()
+		return m, next
 	}
 
 	// The shared handler claims resizes, the theme switch and ctrl+c, and nothing
@@ -230,19 +235,15 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	if code == "" {
 		return m, nil
 	}
-	if err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global)); err != nil {
+	joined, err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global))
+	if err != nil {
 		m.err = err
 		// The table may have filled or started while the list was on screen, so show
 		// the player what is actually joinable now instead of a stale row.
 		m.refresh()
 		return m, nil
 	}
-	joined, err := m.global.LobbyManager.FindLobbyByCode(code)
-	if err != nil || joined == nil {
-		m.err = errors.New("joined lobby but failed to open it")
-		return m, nil
-	}
-	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: joined} }
+	return m, router.Navigate(router.RouteLobby, joined)
 }
 
 // modeLabel names the current mode filter for the status line.

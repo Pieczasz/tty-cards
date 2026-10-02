@@ -1,3 +1,7 @@
+// Command server runs terminal-card: the ssh game server on SERVER_PORT and the
+// read-only stats API on API_PORT, sharing one database, lobby manager and session
+// tracker. With -healthcheck it instead probes a running server's /healthz and exits
+// with its verdict, for the container healthcheck.
 package main
 
 import (
@@ -10,13 +14,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/Pieczasz/terminal-card/internal/catalog"
 	"github.com/Pieczasz/terminal-card/internal/config"
 	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/httpapi"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/observability"
@@ -41,15 +45,20 @@ func main() {
 		os.Exit(healthcheck())
 	}
 	if err := run(); err != nil {
-		// A config or OTel failure happens before the slog handler is installed, so
-		// stderr is the only place it can still be seen.
-		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
 }
 
+// fatal reports a failure from before OTel is up. slog's stderr copy of a record is
+// dropped by the log pipeline as a duplicate of its OTLP copy, and there is no OTLP
+// copy yet, so a plain line is the only one that reaches Loki.
+func fatal(err error) error {
+	fmt.Fprintln(os.Stderr, "fatal:", err)
+	return err
+}
+
 func healthcheck() int {
-	port := cmp.Or(os.Getenv("API_PORT"), "6970")
+	port := cmp.Or(os.Getenv("API_PORT"), strconv.Itoa(config.DefaultAPIPort))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	target := "http://127.0.0.1:" + port + "/healthz"
@@ -86,7 +95,7 @@ func run() (err error) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
+		return fatal(fmt.Errorf("load configuration: %w", err))
 	}
 	logLevel.Set(cfg.LogLevel)
 
@@ -96,16 +105,20 @@ func run() (err error) {
 	// This defer chain is LIFO and load-bearing; do not reorder it.
 	otelCleanup, err := setupOTel(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("setup OpenTelemetry: %w", err)
+		return fatal(err)
 	}
 	defer otelCleanup()
+	// Every later failure is reported here, once, and before the flush above.
 	defer func() {
 		if err != nil {
 			slog.ErrorContext(ctx, "server exited with error", "error", err)
 		}
 	}()
 
-	database, err := db.Connect(cfg)
+	database, err := repository.Connect(cfg.DSN(), repository.Pool{
+		MaxOpenConns: cfg.DBMaxOpenConnections,
+		Verbose:      cfg.IsDevelopment(),
+	})
 	if err != nil {
 		return fmt.Errorf("setup database: %w", err)
 	}
@@ -126,14 +139,25 @@ func run() (err error) {
 	matchRepo := repository.NewMatchRepository(database)
 	lobbyManager := lobby.NewManager(ctx, matchRepo)
 
-	defer waitForFinalizers(lobbyManager)
+	defer waitForFinalizers(ctx, lobbyManager)
 
-	server, tracker, err := newSSHServer(cfg, userRepo, lobbyManager)
+	// MaxConnections is the player-visible session cap: the tracker refuses the
+	// overflow with a message, while the TCP LimitListener in serve only backstops
+	// handshake floods at twice that, so a full server says so instead of hanging.
+	// The stats api shares it to count who is online.
+	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, tracker)
 	if err != nil {
 		return err
 	}
+	if err := observability.RegisterSessionGauge(tracker.Count); err != nil {
+		slog.ErrorContext(ctx, "failed to register the session gauge", "error", err)
+	}
 
-	stopAPI, apiErr := startStatsAPI(cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
+	stopAPI, apiErr, err := startStatsAPI(ctx, cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
+	if err != nil {
+		return err
+	}
 	defer stopAPI()
 
 	return serve(ctx, serveDeps{
@@ -155,6 +179,8 @@ func installLogging() *slog.LevelVar {
 	return level
 }
 
+// levelGate holds the OTLP handler to the same live level as the stderr one, which
+// the bridge does not do for itself.
 type levelGate struct {
 	slog.Handler
 	level slog.Leveler
@@ -171,7 +197,7 @@ func (g levelGate) WithGroup(name string) slog.Handler {
 }
 
 func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
-	shutdown, err := observability.SetupOTel(ctx, cfg)
+	shutdown, err := observability.Setup(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("setup otel: %w", err)
 	}
@@ -202,72 +228,68 @@ func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
 //
 // So the residual risk is stated rather than removed: a match that finishes in the
 // last seconds of a deploy, whose write then blocks for 30s, is lost from history.
-func waitForFinalizers(lobbyManager *lobby.Manager) {
+func waitForFinalizers(ctx context.Context, lobbyManager *lobby.Manager) {
 	if lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
 		return
 	}
-	slog.Warn("match finalizers exceeded their deadline; giving them one more window",
+	slog.WarnContext(ctx, "match finalizers exceeded their deadline; giving them one more window",
 		"timeout", finalizeDrainTimeout)
 	if !lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
-		slog.Error("abandoning match finalizers; a finished match may be missing from history",
+		slog.ErrorContext(ctx, "abandoning match finalizers; a finished match may be missing from history",
 			"timeout", finalizeDrainTimeout)
 	}
 }
 
-// The tracker comes back because the stats api shares it to count who is online.
 func newSSHServer(
 	cfg *config.Config,
 	userRepo db.UserRepository,
 	lobbyManager *lobby.Manager,
-) (*charmssh.Server, *ssh.SessionTracker, error) {
-	// MaxConnections is the player-visible session cap: the tracker refuses the
-	// overflow with a message, while the TCP LimitListener below only backstops
-	// handshake floods at twice that, so a full server says so instead of hanging.
-	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := ssh.SetupServer(ssh.ServerDependencies{
-		Config:         cfg,
-		UserRepository: userRepo,
-		LobbyManager:   lobbyManager,
-		GameRegistry:   buildRegistry(),
-		Tracker:        tracker,
+	tracker *ssh.SessionTracker,
+) (*charmssh.Server, error) {
+	server, err := ssh.NewServer(ssh.Deps{
+		Config:       cfg,
+		Auth:         userRepo,
+		Profiles:     userRepo,
+		Leaderboard:  userRepo,
+		LobbyManager: lobbyManager,
+		GameRegistry: catalog.NewRegistry(),
+		Tracker:      tracker,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("setup ssh server: %w", err)
+		return nil, fmt.Errorf("setup ssh server: %w", err)
 	}
-	return server, tracker, nil
+	return server, nil
 }
 
-// buildRegistry turns the catalog into the registry. catalog.All is the only place a
-// game is declared, so this cannot drift from what the TUI routes to.
-func buildRegistry() *game.Registry {
-	registry := game.NewRegistry()
-	for _, e := range catalog.All {
-		registry.RegisterModule(e.Module())
-	}
-	return registry
-}
-
+// startStatsAPI takes interfaces, not the concrete tracker and manager: a nil
+// *SessionTracker in an interface is not nil, and would pass NewServer's check.
 func startStatsAPI(
+	ctx context.Context,
 	cfg *config.Config,
-	tracker *ssh.SessionTracker,
-	lobbyManager *lobby.Manager,
-	userRepo db.UserRepository,
+	sessions httpapi.SessionCounter,
+	lobbies httpapi.LobbyCounter,
+	users db.Leaderboard,
 	health func(ctx context.Context) error,
-) (func(), <-chan error) {
-	addr := fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.APIPort)
-	srv := httpapi.Serve(addr, httpapi.Handler(httpapi.Deps{
-		Sessions:          tracker,
-		Lobbies:           lobbyManager,
-		Users:             userRepo,
+) (func(), <-chan error, error) {
+	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.APIPort))
+	srv, err := httpapi.NewServer(addr, httpapi.Deps{
+		Sessions:          sessions,
+		Lobbies:           lobbies,
+		Users:             users,
 		AllowOrigin:       cfg.APIAllowOrigin,
 		RequestsPerMinute: cfg.APIRequestsPerMinute,
 		TrustedProxy:      cfg.APITrustProxy,
-		Health:            health,
-	}))
+		// Same networks the PROXY header is trusted from: in compose, exactly nginx's.
+		TrustedProxyNetworks: cfg.ProxyTrustedCIDRs,
+		Health:               health,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("setup stats api: %w", err)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.Info("starting stats api", "address", addr)
+		slog.InfoContext(ctx, "starting stats api", "address", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- fmt.Errorf("stats api stopped: %w", err)
 		}
@@ -277,9 +299,9 @@ func startStatsAPI(
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), apiDrainTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("stats api shutdown was not clean", "error", err)
+			slog.WarnContext(shutdownCtx, "stats api shutdown was not clean", "error", err)
 		}
-	}, serveErr
+	}, serveErr, nil
 }
 
 type sshServer interface {
@@ -299,19 +321,16 @@ type serveDeps struct {
 
 func serve(ctx context.Context, d serveDeps) error {
 	cfg, server := d.config, d.sshServer
-	addr := fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort)
+	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.ServerPort))
 	lc := net.ListenConfig{}
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("create tcp listener: %w", err)
 	}
-	limitListener := netutil.LimitListener(listener, 2*cfg.MaxConnections)
-	// proxyproto defaults to REQUIRE: every connection must open with a PROXY header,
-	// which is right behind nginx and is why 6969 must never be published - any peer's
-	// header is honored. PROXY_PROTOCOL=false is the local escape hatch for bare ssh.
-	acceptListener := limitListener
-	if cfg.ProxyProtocol {
-		acceptListener = &proxyproto.Listener{Listener: limitListener, ReadHeaderTimeout: 10 * time.Second}
+	acceptListener, err := proxyListener(netutil.LimitListener(listener, 2*cfg.MaxConnections), cfg)
+	if err != nil {
+		_ = listener.Close()
+		return err
 	}
 	defer func() {
 		if err := acceptListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -334,23 +353,45 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
+	// Every way out drains, and a failure's teardown ends live matches the same way a
+	// deploy does, so they must not be rated either.
+	defer drainServer(d.onShutdown, server)
 	select {
 	case err := <-serveErr:
-		drainServer(d.onShutdown, server)
 		if err != nil {
 			return fmt.Errorf("ssh accept loop failed: %w", err)
 		}
 		return errors.New("ssh server stopped accepting connections unexpectedly")
 	case err := <-d.apiErr:
-		// This teardown ends live matches the same way a deploy does, so they
-		// must not be rated either.
-		drainServer(d.onShutdown, server)
 		return err
 	case <-d.signals:
+		return nil
 	}
+}
 
-	drainServer(d.onShutdown, server)
-	return nil
+// proxyListener puts the PROXY protocol in front of the ssh listener. proxyproto
+// defaults to REQUIRE: every connection must open with a PROXY header, which is right
+// behind nginx. Without PROXY_TRUSTED_CIDRS any peer's header is honored, which is why
+// 6969 must never be published; with it, a connection from anywhere else is dropped
+// before its header is read. PROXY_PROTOCOL=false is the local escape hatch for bare
+// ssh.
+func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error) {
+	if !cfg.ProxyProtocol {
+		return inner, nil
+	}
+	listener := &proxyproto.Listener{Listener: inner, ReadHeaderTimeout: 10 * time.Second}
+	if len(cfg.ProxyTrustedCIDRs) > 0 {
+		ranges := make([]string, len(cfg.ProxyTrustedCIDRs))
+		for i, prefix := range cfg.ProxyTrustedCIDRs {
+			ranges[i] = prefix.String()
+		}
+		policy, err := proxyproto.TrustProxyHeaderFromRanges(ranges)
+		if err != nil {
+			return nil, fmt.Errorf("proxy trusted cidrs: %w", err)
+		}
+		listener.ConnPolicy = policy
+	}
+	return listener, nil
 }
 
 func drainServer(onShutdown func(), server sshServer) {
@@ -375,6 +416,6 @@ func stopServer(server sshServer) {
 	}
 	// Shutdown waits, Close is what lets go, so it runs on both paths.
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-		slog.Warn("failed to close ssh server", "error", err)
+		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
 	}
 }

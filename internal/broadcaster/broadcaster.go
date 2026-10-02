@@ -1,5 +1,6 @@
-// Package broadcaster has implementation for subscribing and unsubscribing
-// from broadcasting channel to receive live updates for lobby/game state.
+// Package broadcaster is an in-process, latest-wins fan-out: every subscriber gets its
+// own buffered channel, and a full one drops its oldest message rather than blocking
+// the sender. Lobbies and game engines publish their live updates through it.
 package broadcaster
 
 import (
@@ -14,7 +15,9 @@ const defaultMaxSubscribers = 64
 const subscriberBuffer = 256
 
 var (
-	ErrClosed     = errors.New("broadcaster is closed")
+	// ErrClosed is Subscribe on a broadcaster Close already ended.
+	ErrClosed = errors.New("broadcaster is closed")
+	// ErrAtCapacity is Subscribe past the cap New was given.
 	ErrAtCapacity = errors.New("broadcaster is at subscriber capacity")
 )
 
@@ -33,23 +36,29 @@ type Broadcaster[T any] struct {
 	// messages from each other and from the subscriber. Exclusive sends also make
 	// Unsubscribe's close-from-the-receiver-side safe by construction.
 	mu             sync.Mutex
-	subscribers    map[int]*subscriber[T]
+	subscribers    map[<-chan T]*subscriber[T]
 	nextID         int
 	closed         bool
 	maxSubscribers int
 	dropped        atomic.Int64
 }
 
+// New makes a broadcaster that admits at most maxSubscribers at once; zero or less
+// means the default of 64. The cap bounds subscribers, not the per-subscriber buffer,
+// which is fixed.
 func New[T any](maxSubscribers int) *Broadcaster[T] {
 	if maxSubscribers <= 0 {
 		maxSubscribers = defaultMaxSubscribers
 	}
 	return &Broadcaster[T]{
-		subscribers:    make(map[int]*subscriber[T], maxSubscribers),
+		subscribers:    make(map[<-chan T]*subscriber[T], maxSubscribers),
 		maxSubscribers: maxSubscribers,
 	}
 }
 
+// Subscribe returns a fresh channel that receives every later Broadcast until
+// Unsubscribe or Close closes it. It fails with ErrClosed or ErrAtCapacity rather than
+// hand back a channel nothing will ever send on.
 func (b *Broadcaster[T]) Subscribe() (<-chan T, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -62,24 +71,27 @@ func (b *Broadcaster[T]) Subscribe() (<-chan T, error) {
 	}
 
 	ch := make(chan T, subscriberBuffer)
-	b.subscribers[b.nextID] = &subscriber[T]{ch: ch, id: b.nextID}
+	b.subscribers[ch] = &subscriber[T]{ch: ch, id: b.nextID}
 	b.nextID++
 	return ch, nil
 }
 
+// Unsubscribe closes ch and frees its slot. An unknown or already-closed channel is a
+// no-op, so it is safe after Close.
 func (b *Broadcaster[T]) Unsubscribe(ch <-chan T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for id, subscriber := range b.subscribers {
-		if subscriber.ch == ch {
-			delete(b.subscribers, id)
-			close(subscriber.ch)
-			return
-		}
+	sub, ok := b.subscribers[ch]
+	if !ok {
+		return
 	}
+	delete(b.subscribers, ch)
+	close(sub.ch)
 }
 
+// Broadcast delivers msg to every subscriber without blocking: a full channel loses its
+// oldest message instead. A no-op after Close.
 func (b *Broadcaster[T]) Broadcast(msg T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -115,6 +127,7 @@ func (b *Broadcaster[T]) Broadcast(msg T) {
 	}
 }
 
+// Close closes every subscriber's channel and refuses new ones. Safe to call repeatedly.
 func (b *Broadcaster[T]) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -124,12 +137,13 @@ func (b *Broadcaster[T]) Close() {
 	}
 	b.closed = true
 
-	for id, sub := range b.subscribers {
+	for _, sub := range b.subscribers {
 		close(sub.ch)
-		delete(b.subscribers, id)
 	}
+	clear(b.subscribers)
 }
 
+// Len is the number of live subscribers.
 func (b *Broadcaster[T]) Len() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()

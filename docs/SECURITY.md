@@ -72,9 +72,9 @@ closed as "working as intended":
 - **Anyone can register.** Any SSH public key is accepted and the first
   connection claims a username (`internal/ssh/auth.go`). That is the point of a
   public demo. Running a private instance? Put it behind a firewall, a VPN, or an
-  allowlist. A separate limiter caps new accounts at 5 per hour per client
-  network (`registrationLimit` / `registrationWindow` in
-  `internal/ssh/server.go`), so this is a rate problem, not an open door.
+  allowlist. A separate limiter caps new accounts at `REGISTRATION_LIMIT` per
+  `REGISTRATION_WINDOW` (5 per hour by default) per client network, so this is a
+  rate problem, not an open door.
 - **The SSH key fingerprint is the only credential.** Lose the key, lose the
   account. There is no password reset and no second factor.
 - **Usernames are public**, on the in-game leaderboard and through
@@ -102,15 +102,45 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
   `API_TRUST_PROXY=true`: nginx sets `X-Forwarded-For` from `$remote_addr`, not
   from `$proxy_add_x_forwarded_for`, so a client cannot prepend its own value -
   but only while the client cannot reach the port.
+- **Keep `PROXY_TRUSTED_CIDRS` matched to the proxy's network.** With it set, the
+  backend honors a PROXY header only from those networks and refuses every other
+  connection, and believes `X-Forwarded-For` only from them, so another container
+  on the network cannot forge a client address either. Compose sets it to the
+  `edge` subnets, where only nginx and the backend sit; change the list and the
+  subnets together.
 - **The only ports the stack publishes to the world are 22 and 80**, both on
   nginx. Grafana is the single exception and is bound to `127.0.0.1:3000`; reach
   it with `ssh -L 3000:127.0.0.1:3000 <host>` and never bind it wider.
 - **Grafana has no login at all** - anonymous Admin, login form off. That is safe
   only because the port is published on loopback and CI asserts it stays there:
   reaching it means an SSH session on the host, which already owns everything.
-  Widening the binding without adding authentication is a vulnerability.
-- **Set a strong, unique `DB_PASSWORD`.** With `ENV=production` the server
-  refuses to boot without one.
+  Widening the binding without adding authentication is a vulnerability. It
+  answers only to `Host: localhost` (`GF_SERVER_ENFORCE_DOMAIN`), which is what
+  stops a DNS-rebinding page in the operator's browser from reaching it through
+  the tunnel; open it as `http://localhost:3000`.
+- **Set a strong, unique `DB_PASSWORD`.** Compose refuses to start without one,
+  and with `ENV=production` the server refuses to boot without one. `ENV` itself
+  must be `production`, `staging` or `development`; a typo fails the boot rather
+  than running with every production check off. Boolean settings are parsed as
+  strictly (`true`/`false`, `1`/`0`, `t`/`f`), so a mistyped `PROXY_PROTOCOL` or
+  `API_TRUST_PROXY` - `off`, `yes` - fails the boot instead of quietly meaning one
+  or the other. In production `DB_SSLMODE` must
+  be `require`, `verify-ca` or `verify-full` for any host outside the compose
+  network.
+- **Do not mount the Docker socket into anything.** Alloy reads container logs
+  through `docker-socket-proxy`, which answers GET only for containers and
+  networks, on an internal network it shares with Alloy alone: `:ro` on a socket
+  restricts nothing, and container inspect includes every container's
+  environment, `DB_PASSWORD` among it.
+- **Keep the container restrictions.** Every service runs with
+  `no-new-privileges`; the backend is `FROM scratch`, `read_only` and
+  `cap_drop: [ALL]`; nginx keeps only the four capabilities its master process
+  needs. Images are pinned by digest and CI actions by commit SHA, with the CI
+  token read-only and Dependabot moving the pins.
+- **Protect your backups.** `scripts/backup.sh` writes each dump `0600`, keeps
+  `RETENTION_DAYS` (14) days of them, reads only the keys it needs from `.env`
+  rather than sourcing it, and `backups/` never enters the image build context. A
+  dump is the whole user base, fingerprints included.
 - **Keep the host's own `sshd` off port 22** (the game proxy owns it) and keep
   your admin SSH port firewalled to trusted addresses.
 - **Keep the `ssh-keys` volume** across redeploys, or every client sees a

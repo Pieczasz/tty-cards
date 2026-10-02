@@ -25,7 +25,7 @@ func BenchmarkLeaderboardView_Render(b *testing.B) {
 	}
 	// filters is not optional: View reads the current one for its footer, so a
 	// literal without it panics where the real view, built by New, never can.
-	m := model{
+	m := &model{
 		global:   router.GlobalContext{Width: 120, Height: 40, Theme: styles.NewTheme(true)},
 		rankings: rankings,
 		filters:  []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},

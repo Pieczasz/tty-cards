@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
 	"uuid"
@@ -25,11 +26,12 @@ import (
 
 var errQuery = errors.New("query failed")
 
-func loaded(t *testing.T, msg profileLoadedMsg) model {
+func loaded(t *testing.T, msg profileLoadedMsg) *model {
 	t.Helper()
-	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40}
+	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40,
+		GameRegistry: catalog.NewRegistry()}
 	updated, _ := New(global).Update(msg)
-	m, ok := updated.(model)
+	m, ok := updated.(*model)
 	require.True(t, ok)
 	return m
 }
@@ -49,7 +51,7 @@ func TestUpdate_AFailedHistoryKeepsTheProfile(t *testing.T) {
 	m := loaded(t, profileLoadedMsg{user: alice(), historyErr: errQuery})
 
 	require.NotNil(t, m.userProfile, "the profile query succeeded")
-	out := stripANSI(m.renderContent(20))
+	out := tuitest.StripANSI(m.renderContent(20))
 
 	assert.Contains(t, out, "Profile for: alice")
 	assert.Contains(t, out, "Poker", "the rankings came back with the profile")
@@ -71,7 +73,7 @@ func TestRenderContent_SaysWhenThereAreNoMatchesRatherThanAnError(t *testing.T) 
 	t.Parallel()
 	m := loaded(t, profileLoadedMsg{user: alice()})
 
-	out := stripANSI(m.renderContent(20))
+	out := tuitest.StripANSI(m.renderContent(20))
 	assert.Contains(t, out, "No matches for this filter.")
 	assert.NotContains(t, out, "Unable to load match history.")
 }
@@ -102,30 +104,14 @@ func TestRenderContent_FilterDoesNotResizeLayout(t *testing.T) {
 	}
 	m := loaded(t, profileLoadedMsg{user: alice(), history: history})
 
-	base := stripANSI(m.renderContent(20))
+	base := tuitest.StripANSI(m.renderContent(20))
 	m.gameFilterIdx = slices.Index(m.gameFilters, "Crazy Eights")
 	require.NotEqual(t, -1, m.gameFilterIdx)
 	m.resultIdx = slices.Index(m.resultFilters, filterLosses)
-	filtered := stripANSI(m.renderContent(20))
+	filtered := tuitest.StripANSI(m.renderContent(20))
 
 	assert.Equal(t, lg.Width(base), lg.Width(filtered),
 		"cycling game/result filters must not change the profile width")
-}
-
-func stripANSI(s string) string {
-	var out strings.Builder
-	inEscape := false
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEscape = true
-		case inEscape && (r == 'm' || r == 'K' || r == 'H'):
-			inEscape = false
-		case !inEscape:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
 }
 
 // The profile is a full-screen view, so it has to fit the screen at every size the
@@ -147,57 +133,50 @@ func TestView_FitsTheTerminal(t *testing.T) {
 		})
 	}
 
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			global := router.GlobalContext{
-				Theme: styles.NewTheme(true), Width: size.w, Height: size.h,
+				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
 				// The delete confirmation names the account it would anonymise, so the
 				// widest id is what the line has to fit.
 				User: &db.User{ID: testutil.UID(99), Username: "alice"},
 			}
 			updated, _ := New(global).Update(profileLoadedMsg{user: user, history: history})
-			m, ok := updated.(model)
+			m, ok := updated.(*model)
 			require.True(t, ok)
 
 			// Every state the screen can be in, not only the table: the erasure
 			// confirmation is the tallest of them and would be the one to overflow.
-			states := map[string]model{"tables": m}
-			refused := m
+			states := map[string]*model{"tables": m}
+			refused := *m
 			refused.notice = "Leave your table before deleting your account."
-			states["refused"] = refused
-			confirming := m
+			states["refused"] = &refused
+			confirming := *m
 			confirming.phase = deleteConfirming
-			states["confirming"] = confirming
+			states["confirming"] = &confirming
 			typo := confirming
 			typo.typed = "DELETEDEL"
 			typo.notice = "Type DELETE exactly, then press enter."
-			states["confirming with a notice"] = typo
-			done := m
+			states["confirming with a notice"] = &typo
+			running := *m
+			running.phase = deleteRunning
+			states["deleting"] = &running
+			done := *m
 			done.phase = deleteDone
-			states["deleted"] = done
+			states["deleted"] = &done
 
 			for name, state := range states {
 				out := state.View().Content
-				assert.LessOrEqual(t, lg.Height(out), size.h, "%s is taller than the terminal", name)
-				assert.LessOrEqual(t, lg.Width(out), size.w, "%s is wider than the terminal", name)
+				assert.LessOrEqual(t, lg.Height(out), size.Height, "%s is taller than the terminal", name)
+				assert.LessOrEqual(t, lg.Width(out), size.Width, "%s is wider than the terminal", name)
 			}
 		})
 	}
 }
 
-// fakeUsers stands in for the repository. Only the two profile queries are reachable
-// from this view; the embedded interface turns any other call into a loud nil panic
-// rather than a quietly passing test.
+// fakeUsers stands in for the repository's profile queries.
 type fakeUsers struct {
-	db.UserRepository
 	profile       func(ctx context.Context, userID uuid.UUID) (*db.User, error)
 	history       func(ctx context.Context, userID uuid.UUID, limit int) ([]db.MatchParticipant, error)
 	deleteAccount func(ctx context.Context, userID uuid.UUID) error
@@ -303,7 +282,7 @@ func TestInit(t *testing.T) {
 		}
 		user := alice()
 
-		cmd := New(router.GlobalContext{User: user, UserRepository: repo}).Init()
+		cmd := New(router.GlobalContext{User: user, Profiles: repo}).Init()
 		require.NotNil(t, cmd)
 		_, ok := cmd().(profileLoadedMsg)
 
@@ -320,15 +299,15 @@ func TestUpdate_CyclesFilters(t *testing.T) {
 	require.Equal(t, 0, m.gameFilterIdx)
 
 	for i := 1; i <= len(m.gameFilters); i++ {
-		next, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-		m = next.(model)
+		next, cmd := m.Update(tuitest.Key("g"))
+		m = next.(*model)
 		assert.Nil(t, cmd, "cycling a filter is local; it must not re-query")
 		assert.Equal(t, i%len(m.gameFilters), m.gameFilterIdx)
 	}
 
 	for i := 1; i <= len(m.resultFilters); i++ {
-		next, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		m = next.(model)
+		next, _ := m.Update(tuitest.Key("r"))
+		m = next.(*model)
 		assert.Equal(t, i%len(m.resultFilters), m.resultIdx)
 	}
 }
@@ -340,7 +319,7 @@ func TestUpdate_KeysTheViewDoesNotOwn(t *testing.T) {
 		t.Parallel()
 		m := loaded(t, profileLoadedMsg{user: alice()})
 
-		_, cmd := m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+		_, cmd := m.Update(tuitest.Key("t"))
 
 		require.NotNil(t, cmd)
 		msg, ok := cmd().(router.ChangeViewMsg)
@@ -352,10 +331,10 @@ func TestUpdate_KeysTheViewDoesNotOwn(t *testing.T) {
 		t.Parallel()
 		m := loaded(t, profileLoadedMsg{user: alice()})
 
-		next, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+		next, cmd := m.Update(tuitest.Key("z"))
 
 		assert.Nil(t, cmd)
-		assert.Equal(t, m.gameFilterIdx, next.(model).gameFilterIdx)
+		assert.Zero(t, next.(*model).gameFilterIdx)
 	})
 
 	// A resize has to land on the view's own copy of the context, or the profile
@@ -367,8 +346,8 @@ func TestUpdate_KeysTheViewDoesNotOwn(t *testing.T) {
 		next, cmd := m.Update(tea.WindowSizeMsg{Width: 130, Height: 60})
 
 		assert.Nil(t, cmd)
-		assert.Equal(t, 130, next.(model).global.Width)
-		assert.Equal(t, 60, next.(model).global.Height)
+		assert.Equal(t, 130, next.(*model).global.Width)
+		assert.Equal(t, 60, next.(*model).global.Height)
 	})
 }
 
@@ -396,7 +375,7 @@ func TestRankingRows_TruncatesInsideItsBudget(t *testing.T) {
 		rows := m.rankingRows(3)
 		assert.Len(t, rows, 4, "one header plus two rankings plus the truncation line")
 		assert.Equal(t, "... and more", rows[len(rows)-1])
-		assert.Contains(t, stripANSI(rows[1]), "Poker")
+		assert.Contains(t, tuitest.StripANSI(rows[1]), "Poker")
 	})
 
 	// A player who has never played still gets a table, not a bare header.
@@ -424,8 +403,8 @@ func TestHistoryRows_TruncatesInsideItsBudget(t *testing.T) {
 
 	assert.Len(t, rows, 5, "one header plus three matches plus the truncation line")
 	assert.Equal(t, "... and more", rows[len(rows)-1])
-	assert.Contains(t, stripANSI(rows[1]), "1st place")
-	assert.Contains(t, stripANSI(rows[3]), "3rd place")
+	assert.Contains(t, tuitest.StripANSI(rows[1]), "1st place")
+	assert.Contains(t, tuitest.StripANSI(rows[3]), "3rd place")
 }
 
 func TestFilteredHistory(t *testing.T) {
@@ -504,19 +483,13 @@ func TestPlacementPlain(t *testing.T) {
 	}
 }
 
-// key builds the key press for a single character, which is what the confirmation
-// state machine reads - it accumulates msg.Text, not the key code.
-func key(r rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: r, Text: string(r)}
-}
-
-func typeWord(t *testing.T, m model, word string) model {
+func typeWord(t *testing.T, m *model, word string) *model {
 	t.Helper()
 	for _, r := range word {
-		next, cmd := m.Update(key(r))
+		next, cmd := m.Update(tuitest.Key(string(r)))
 		assert.Nil(t, cmd, "typing into the confirmation must not issue a command")
 		var ok bool
-		m, ok = next.(model)
+		m, ok = next.(*model)
 		require.True(t, ok)
 	}
 	return m
@@ -524,7 +497,7 @@ func typeWord(t *testing.T, m model, word string) model {
 
 // deletingModel is a profile sitting on a loaded account, with a repository whose
 // DeleteAccount reports err.
-func deletingModel(t *testing.T, err error) (model, *int) {
+func deletingModel(t *testing.T, err error) (*model, *int) {
 	t.Helper()
 	calls := 0
 	repo := fakeUsers{deleteAccount: func(_ context.Context, id uuid.UUID) error {
@@ -534,10 +507,10 @@ func deletingModel(t *testing.T, err error) (model, *int) {
 	}}
 	global := router.GlobalContext{
 		Theme: styles.NewTheme(true), Width: 100, Height: 40,
-		User: alice(), UserRepository: repo,
+		User: alice(), Profiles: repo,
 	}
 	updated, _ := New(global).Update(profileLoadedMsg{user: alice()})
-	m, ok := updated.(model)
+	m, ok := updated.(*model)
 	require.True(t, ok)
 	return m, &calls
 }
@@ -552,13 +525,13 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
 
-		next, cmd := m.Update(key('x'))
-		m, ok := next.(model)
+		next, cmd := m.Update(tuitest.Key("x"))
+		m, ok := next.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "opening the confirmation asks the database nothing")
 		assert.Equal(t, deleteConfirming, m.phase)
-		out := stripANSI(m.renderContent(20))
+		out := tuitest.StripANSI(m.renderContent(20))
 		assert.Contains(t, out, "SSH keys removed")
 		assert.Contains(t, out, "ratings removed")
 		assert.Contains(t, out, db.AnonymisedUsername(alice().ID), "the name past matches will show")
@@ -572,8 +545,8 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	t.Run("the confirmation swallows the view's other keys", func(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, nil)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), "gr")
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), "gr")
 
 		assert.Equal(t, "gr", m.typed)
 		assert.Zero(t, m.gameFilterIdx, "a typed letter must not cycle the game filter")
@@ -583,11 +556,11 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	t.Run("the wrong word does not delete anything", func(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), "delete")
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), "delete")
 
-		after, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		m, ok := after.(model)
+		after, cmd := m.Update(tuitest.Key("enter"))
+		m, ok := after.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "a mistyped confirmation must not reach the repository")
@@ -599,11 +572,11 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	t.Run("backspace corrects a typo", func(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, nil)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), "DELETX")
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), "DELETX")
 
-		after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		m, ok := after.(model)
+		after, _ := m.Update(tuitest.Key("backspace"))
+		m, ok := after.(*model)
 		require.True(t, ok)
 		m = typeWord(t, m, "E")
 
@@ -613,14 +586,14 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	t.Run("the exact word deletes and ends the session", func(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 
-		after, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		after, cmd := m.Update(tuitest.Key("enter"))
 		require.NotNil(t, cmd, "the confirmed word has to issue the delete")
-		m, ok := after.(model)
+		m, ok := after.(*model)
 		require.True(t, ok)
-		assert.Equal(t, deleteConfirming, m.phase, "still confirming until the query answers")
+		assert.Equal(t, deleteRunning, m.phase, "running until the query answers")
 
 		msg, ok := cmd().(accountDeletedMsg)
 		require.True(t, ok)
@@ -628,12 +601,12 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		assert.Equal(t, 1, *calls)
 
 		done, quit := m.Update(msg)
-		m, ok = done.(model)
+		m, ok = done.(*model)
 		require.True(t, ok)
 		assert.Equal(t, deleteDone, m.phase)
 		require.NotNil(t, quit)
 		assert.IsType(t, tea.QuitMsg{}, quit(), "the session ends through the normal quit path")
-		assert.Contains(t, stripANSI(m.renderContent(20)), "deleted")
+		assert.Contains(t, tuitest.StripANSI(m.renderContent(20)), "deleted")
 	})
 
 	// A failed delete leaves the player where they were, told so, rather than quitting
@@ -641,13 +614,13 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	t.Run("a failed delete keeps the session", func(t *testing.T) {
 		t.Parallel()
 		m, _ := deletingModel(t, errQuery)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), deleteConfirmWord)
-		after, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), deleteConfirmWord)
+		after, cmd := m.Update(tuitest.Key("enter"))
 		require.NotNil(t, cmd)
 
-		done, quit := after.(model).Update(cmd())
-		m, ok := done.(model)
+		done, quit := after.(*model).Update(cmd())
+		m, ok := done.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, quit, "a failed erasure must not end the session")
@@ -656,21 +629,45 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 		assert.Empty(t, m.typed, "the word is retyped rather than resubmitted by accident")
 	})
 
+	// Once the delete is issued the player cannot back out of it, navigate away and
+	// keep playing on an account that is being erased, or issue it a second time.
+	t.Run("the running delete swallows every key until it answers", func(t *testing.T) {
+		t.Parallel()
+		m, calls := deletingModel(t, nil)
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), deleteConfirmWord)
+		after, cmd := m.Update(tuitest.Key("enter"))
+		require.NotNil(t, cmd)
+		m = after.(*model)
+
+		for _, k := range []tea.KeyPressMsg{tuitest.Key("esc"), tuitest.Key("q"), tuitest.Key("t"), tuitest.Key("enter")} {
+			after, swallowed := m.Update(k)
+			m = after.(*model)
+			assert.Nil(t, swallowed, "%q must not act while the delete runs", k.String())
+		}
+		assert.Equal(t, deleteRunning, m.phase)
+		assert.Zero(t, *calls, "nothing issued a second delete")
+
+		done, quit := m.Update(cmd())
+		assert.Equal(t, deleteDone, done.(*model).phase)
+		require.NotNil(t, quit)
+	})
+
 	t.Run("esc cancels", func(t *testing.T) {
 		t.Parallel()
 		m, calls := deletingModel(t, nil)
-		next, _ := m.Update(key('x'))
-		m = typeWord(t, next.(model), deleteConfirmWord)
+		next, _ := m.Update(tuitest.Key("x"))
+		m = typeWord(t, next.(*model), deleteConfirmWord)
 
-		after, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		m, ok := after.(model)
+		after, cmd := m.Update(tuitest.Key("esc"))
+		m, ok := after.(*model)
 		require.True(t, ok)
 
 		assert.Nil(t, cmd, "esc out of the confirmation is not navigation")
 		assert.Equal(t, deleteIdle, m.phase)
 		assert.Empty(t, m.typed, "a cancelled confirmation does not remember the word")
 		assert.Zero(t, *calls)
-		assert.Contains(t, stripANSI(m.renderContent(20)), "Profile for: alice")
+		assert.Contains(t, tuitest.StripANSI(m.renderContent(20)), "Profile for: alice")
 	})
 }
 
@@ -681,24 +678,24 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil)
-	_, err := manager.New(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.All[0].Name))
+	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.All[0].Name))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 
-	next, cmd := m.Update(key('x'))
-	m, ok := next.(model)
+	next, cmd := m.Update(tuitest.Key("x"))
+	m, ok := next.(*model)
 	require.True(t, ok)
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, deleteIdle, m.phase, "the confirmation must not even open")
 	assert.Zero(t, *calls)
-	out := stripANSI(m.renderContent(20))
+	out := tuitest.StripANSI(m.renderContent(20))
 	assert.Contains(t, out, "Leave your table")
 	assert.Contains(t, out, "Profile for: alice", "the refusal is a line, not a screen")
 
 	// The refusal clears on the next key, so it cannot outlive the seat it describes.
-	after, _ := m.Update(key('g'))
-	assert.Empty(t, after.(model).notice)
+	after, _ := m.Update(tuitest.Key("g"))
+	assert.Empty(t, after.(*model).notice)
 }
 
 // The footer advertises the key, so the key has to be there - and a footer entry
@@ -707,7 +704,7 @@ func TestView_AdvertisesTheDeleteKey(t *testing.T) {
 	t.Parallel()
 	m, _ := deletingModel(t, nil)
 
-	assert.Contains(t, stripANSI(m.View().Content), "x - Delete account")
+	assert.Contains(t, tuitest.StripANSI(m.View().Content), "x - Delete account")
 }
 
 // At the declared minimum the full warning is taller than the rows the frame has, and
@@ -720,11 +717,11 @@ func TestRenderConfirm_KeepsThePromptAtTheMinimumSize(t *testing.T) {
 		Theme: styles.NewTheme(true), Width: styles.MinWidth, Height: styles.MinHeight,
 		User: &db.User{ID: testutil.UID(99)},
 	}
-	m, ok := New(global).(model)
+	m, ok := New(global).(*model)
 	require.True(t, ok)
 	m.phase = deleteConfirming
 
-	out := stripANSI(m.View().Content)
+	out := tuitest.StripANSI(m.View().Content)
 
 	assert.Contains(t, out, deleteConfirmWord, "the word to type must be on screen")
 	assert.Contains(t, out, "esc to cancel", "so must the way out")

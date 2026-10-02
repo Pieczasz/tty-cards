@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 )
 
 type MockModel struct {
@@ -29,7 +31,7 @@ func TestRouter_RegistrationAndRouting(t *testing.T) {
 	cmd := r.Goto("mock", nil)
 	assert.Nil(t, cmd)
 	assert.NotNil(t, r.active)
-	assert.Equal(t, "mock", r.activeKey)
+	assert.Equal(t, Route("mock"), r.activeKey)
 }
 
 func TestRouter_UpdatePropagation(t *testing.T) {
@@ -42,7 +44,7 @@ func TestRouter_UpdatePropagation(t *testing.T) {
 
 	r.Goto("mock", nil)
 
-	keyMsg := tea.KeyPressMsg{Code: rune("a"[0]), Text: "a"}
+	keyMsg := tuitest.Key("a")
 	newModel, _ := r.Update(keyMsg)
 
 	assert.Equal(t, keyMsg, newModel.(*Router).active.(MockModel).handledMsg)
@@ -69,7 +71,7 @@ func TestRouter_ChangeViewMsg(t *testing.T) {
 	msg := ChangeViewMsg{ViewName: "mock"}
 	r.Update(msg)
 
-	assert.Equal(t, "mock", r.activeKey)
+	assert.Equal(t, Route("mock"), r.activeKey)
 }
 
 // closableModel records teardown so the router's release contract is observable.

@@ -62,8 +62,12 @@ prometheus.remote_write "default" {
 // Container stdout/stderr into Loki. Without this, everything that bypasses the
 // OTLP log path - panic dumps, the Postgres and nginx logs, anything a library
 // writes straight to stderr - exists only in `docker logs`.
+//
+// Through docker-socket-proxy, never the socket itself: read access to
+// /var/run/docker.sock is root on the host (it can start a privileged container),
+// and this needs only to list containers and networks and read their logs.
 discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
+  host = "tcp://docker-socket-proxy:2375"
 }
 
 discovery.relabel "containers" {
@@ -84,7 +88,7 @@ discovery.relabel "containers" {
 }
 
 loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
+  host       = "tcp://docker-socket-proxy:2375"
   targets    = discovery.relabel.containers.output
   forward_to = [loki.process.containers.receiver]
   labels     = { source = "docker" }
@@ -105,5 +109,19 @@ loki.process "containers" {
   stage.drop {
     expression          = "^\\{\"time\":\".*\",\"level\":"
     drop_counter_reason = "duplicate_of_otlp_log"
+  }
+
+  // nginx's error log names the client on every line ("client: 203.0.113.7,
+  // server: ..."). The rest of the line - which upstream failed, and how - is what
+  // an operator needs from it, so only the address goes. The rate-limit rejections,
+  // the one high-volume source of such lines, are kept below nginx's log threshold
+  // in nginx.conf; this is for the errors that remain.
+  stage.match {
+    selector = "{compose_service=\"proxy\"}"
+
+    stage.replace {
+      expression = "client: ([^,\\s]+)"
+      replace    = "redacted"
+    }
   }
 }

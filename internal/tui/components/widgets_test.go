@@ -7,6 +7,7 @@ import (
 
 	"github.com/Pieczasz/terminal-card/internal/deck"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,7 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 				// Worst case: the picked-out card is in the middle of the hand, where
 				// it keeps its own closing border.
 				for _, selected := range []int{-1, 0, n / 2, n - 1} {
-					fan := RenderFan(theme, hand, selected, tuck)
+					fan := RenderFan(theme, hand, Selection(selected), tuck)
 					assert.LessOrEqualf(t, lg.Width(fan), width,
 						"a fan with card %d picked out overran its budget", selected)
 				}
@@ -57,12 +58,12 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 func TestFanTuck_NeverHidesTheSuit(t *testing.T) {
 	t.Parallel()
 
-	assert.GreaterOrEqual(t, minTuckWidth, CentreColumn+1,
+	assert.GreaterOrEqual(t, minTuckWidth, centreColumn+1,
 		"the tightest tuck still has to show the centre pip column")
 
 	theme := styles.NewTheme(true)
 	ace := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
-	fan := stripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, -1, minTuckWidth))
+	fan := tuitest.StripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, nil, minTuckWidth))
 	assert.Equal(t, 3, strings.Count(fan, "♠"), "every card in the fan shows its suit")
 }
 
@@ -77,7 +78,7 @@ func TestRenderStrip_NamesEveryCardAndWrapsToWidth(t *testing.T) {
 		{Rank: deck.Ace, Suit: deck.Spades},
 		{Rank: deck.King, Suit: deck.Clubs},
 	}
-	out := stripANSI(RenderStrip(theme, hand, nil, 1, 8))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, nil, 1, 8))
 
 	assert.Contains(t, out, "10")
 	assert.Contains(t, out, "A")
@@ -125,7 +126,7 @@ func TestGridPicker_RendersEveryChoiceAndMarksTheCursor(t *testing.T) {
 	out := p.Render(theme)
 
 	for _, label := range p.Labels {
-		assert.Contains(t, stripANSI(out), label)
+		assert.Contains(t, tuitest.StripANSI(out), label)
 	}
 	// Moving the cursor has to change what is drawn, or the highlight is not there.
 	p.Cursor = 0
@@ -150,7 +151,7 @@ func TestTable_RowsAreAllTheSameWidth(t *testing.T) {
 		tbl.Cells("a name far too long to fit", "42"),
 	})
 
-	lines := strings.Split(stripANSI(out), "\n")
+	lines := strings.Split(tuitest.StripANSI(out), "\n")
 	require.Len(t, lines, 1+1+4, "header, rule, and PadTo data rows")
 	for i, line := range lines {
 		assert.Equalf(t, tbl.Width(), lg.Width(line), "row %d is a different width", i)

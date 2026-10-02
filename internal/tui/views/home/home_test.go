@@ -1,11 +1,13 @@
 package home
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Pieczasz/terminal-card/internal/db"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
 	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -20,7 +22,7 @@ func TestHome_Update_Navigation(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
-		want string
+		want router.Route
 	}{
 		{name: "new game", key: "n", want: router.RouteLobbyCreate},
 		{name: "join game", key: "f", want: router.RouteLobbyJoin},
@@ -36,7 +38,7 @@ func TestHome_Update_Navigation(t *testing.T) {
 			// this tree has since moved to pointer receivers.
 			m := New(router.GlobalContext{})
 
-			_, cmd := m.Update(tea.KeyPressMsg{Code: rune(tt.key[0]), Text: tt.key})
+			_, cmd := m.Update(tuitest.Key(tt.key))
 
 			require.NotNil(t, cmd, "%q must navigate", tt.key)
 			msg, ok := cmd().(router.ChangeViewMsg)
@@ -52,7 +54,7 @@ func TestHome_Update_QuitsOnQ(t *testing.T) {
 	t.Parallel()
 	m := New(router.GlobalContext{})
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.Update(tuitest.Key("q"))
 
 	require.NotNil(t, cmd)
 	_, isChange := cmd().(router.ChangeViewMsg)
@@ -63,7 +65,7 @@ func TestHome_Update_IgnoresUnboundKeys(t *testing.T) {
 	t.Parallel()
 	m := New(router.GlobalContext{})
 
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	_, cmd := m.Update(tuitest.Key("z"))
 
 	assert.Nil(t, cmd, "an unbound key does nothing")
 }
@@ -81,25 +83,18 @@ func TestHome_Init(t *testing.T) {
 func TestHome_View_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
 
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{"the declared minimum", styles.MinWidth, styles.MinHeight},
-		{"a stock terminal", 80, 24},
-		{"a tall terminal", 120, 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := New(router.GlobalContext{
 				User:  &db.User{ID: testutil.UID(1), Username: "alice"},
-				Theme: styles.NewTheme(true), Width: size.w, Height: size.h,
+				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
 			})
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
 }
@@ -133,33 +128,24 @@ func TestHome_View_Greeting(t *testing.T) {
 // The banner word is the fixed string "Welcome"; the username is styled text beside
 // it. Baking the name into the figlet keyed the banner cache on a user-controlled
 // string, so any account could mint entries, fill the cap, and push every real
-// screen title back to re-parsing the whole figlet font on every frame.
-//
-// Not parallel, and deliberately self-contained: ResetFigureCacheForTest clears
-// package-global state that every other render in this package shares.
-//
-//nolint:paralleltest // shares the package-global banner cache; see above.
+// screen title back to re-parsing the whole figlet font on every frame. Two players
+// with names of one length therefore see the same screen but for the name itself.
 func TestHome_View_BannerIsNotKeyedOnTheUsername(t *testing.T) {
-	styles.ResetFigureCacheForTest()
+	t.Parallel()
 
-	render := func(username string) {
+	render := func(username string) string {
 		m := New(router.GlobalContext{
 			User:  &db.User{Username: username},
 			Theme: styles.NewTheme(true), Width: 120, Height: 50,
 		})
-		_ = m.View()
+		return strings.Replace(m.View().Content, username, "<name>", 1)
 	}
 
-	render("alice")
-	afterFirst := styles.FigureCacheLenForTest()
-	require.Positive(t, afterFirst, "the fixed titles are cached, or this test proves nothing")
-
-	for _, username := range []string{"bob", "carol", "dave", "eve", "mallory"} {
-		render(username)
+	alice := render("alice")
+	require.Contains(t, alice, "<name>", "the name is on screen, or this test proves nothing")
+	for _, username := range []string{"bobby", "carol", "david", "eve12"} {
+		assert.Equal(t, alice, render(username), "%s changed more than the name line", username)
 	}
-
-	assert.Equal(t, afterFirst, styles.FigureCacheLenForTest(),
-		"a new username must not mint a banner cache entry")
 }
 
 // The shared handler runs first, so a resize has to be swallowed here rather than
@@ -171,6 +157,6 @@ func TestHome_Update_HandlesCommonMessages(t *testing.T) {
 	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 50})
 
 	assert.Nil(t, cmd)
-	assert.Equal(t, 120, updated.(model).global.Width)
-	assert.Equal(t, 50, updated.(model).global.Height)
+	assert.Equal(t, 120, updated.(*model).global.Width)
+	assert.Equal(t, 50, updated.(*model).global.Height)
 }

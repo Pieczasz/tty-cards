@@ -1,3 +1,5 @@
+// Package hearts is four-handed Hearts played to 100 points: the three-card
+// pass, trick play with broken hearts and the queen of spades, and shooting the moon.
 package hearts
 
 import (
@@ -10,6 +12,7 @@ import (
 	"github.com/Pieczasz/terminal-card/internal/game"
 )
 
+// Rules implements Hearts. It is strictly four-handed, so a leave ends the match.
 type Rules struct{}
 
 var (
@@ -23,21 +26,24 @@ var (
 func (r *Rules) MinPlayers() int { return playerCount }
 func (r *Rules) MaxPlayers() int { return playerCount }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.StandardDeck() }
+func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 func (r *Rules) InitialDealCount() int    { return 0 }
 
+// ActionPassCards hands exactly three cards to the seat PassDirection names.
 type ActionPassCards struct {
 	Cards []deck.Card
 }
 
 func (a ActionPassCards) Name() string { return "hearts.PassCards" }
 
+// ActionPlayCard plays Card to the trick on the table.
 type ActionPlayCard struct {
 	Card deck.Card
 }
 
 func (a ActionPlayCard) Name() string { return "hearts.PlayCard" }
 
+// ActionNextHand deals the next hand; only the incoming dealer may submit it.
 type ActionNextHand struct{}
 
 func (a ActionNextHand) Name() string { return "hearts.NextHand" }
@@ -51,46 +57,44 @@ func (r *Rules) OnGameStart(state *game.State) error {
 		CumulativeScores: make(map[string]int, n),
 		HandPoints:       make(map[string]int, n),
 		TrickCards:       make(map[string]deck.Card, n),
-		TargetScore:      DefaultTargetScore,
+		TargetScore:      targetScore,
 	}
 	for _, p := range state.Players {
 		extra.CumulativeScores[p.ID] = 0
 	}
 	state.Extra = extra
-	return r.beginHand(state, extra, state.CurrentTurn)
+	return beginHand(state, extra, state.CurrentTurn)
 }
 
-func (r *Rules) beginHand(state *game.State, extra *State, dealer int) error {
+func beginHand(state *game.State, extra *State, dealer int) error {
 	resetHandState(extra)
 	extra.HandNumber++
 	extra.DealerIndex = dealer
 
-	state.Deck = deck.New(deck.StandardDeck())
+	state.Deck = deck.New(deck.Standard())
 	state.Deck.Shuffle()
 	for _, p := range state.Players {
-		cards, ok := state.Deck.DrawNCards(cardsPerHand)
+		cards, ok := state.Deck.DrawN(cardsPerHand)
 		if !ok {
-			return errors.New("not enough cards to deal")
+			return errNotEnoughCards
 		}
 		p.Cards = cards
 	}
 
-	extra.PassDirection = PassDirection((extra.HandNumber - 1) % 4) //nolint:gosec // G115: a value in 0..3 always fits
+	extra.PassDirection = PassDirection((extra.HandNumber - 1) % passDirectionCount) //nolint:gosec // G115: a value in 0..3 always fits
 	if extra.PassDirection == PassNone {
-		extra.Stage = StageTrickPlay
-		leader := findTwoOfClubs(state)
-		state.CurrentTurn = leader
-		state.OverrideNextTurn = &leader
+		extra.Phase = PhaseTrickPlay
+		state.SetTurn(findTwoOfClubs(state))
 		return nil
 	}
 
-	extra.Stage = StagePassing
+	extra.Phase = PhasePassing
 	extra.PendingPasses = make(map[string][]deck.Card, playerCount)
-	extra.Passed = make(map[string]bool, playerCount)
-	state.CurrentTurn = dealer
-	state.OverrideNextTurn = &dealer
+	state.SetTurn(dealer)
 	return nil
 }
+
+var errNotEnoughCards = errors.New("not enough cards to deal")
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)
@@ -99,23 +103,18 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	}
 
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
-		if extra.Stage != StageHandOver {
-			return errors.New("the hand is still being played")
-		}
-		if extra.MatchComplete {
-			return errors.New("the match is over")
-		}
-		return nil
+		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
+		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)
 	}
 
-	switch extra.Stage {
-	case StagePassing:
+	switch extra.Phase {
+	case PhasePassing:
 		return validatePass(state, extra, action)
-	case StageTrickPlay:
+	case PhaseTrickPlay:
 		return validatePlay(state, extra, action)
-	default:
-		return errors.New("hand is over")
+	case PhaseHandOver:
 	}
+	return game.ErrHandOver
 }
 
 func validatePass(state *game.State, extra *State, action game.Action) error {
@@ -127,7 +126,7 @@ func validatePass(state *game.State, extra *State, action game.Action) error {
 		return fmt.Errorf("must pass exactly %d cards", cardsToPass)
 	}
 	p := state.Players[state.CurrentTurn]
-	if extra.Passed[p.ID] {
+	if extra.passed(p.ID) {
 		return errors.New("you already passed this hand")
 	}
 	seen := make(map[deck.Card]bool, cardsToPass)
@@ -194,7 +193,6 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		// applyAllPasses delivers them, and a caller that retains its slice must
 		// not be able to rewrite another seat's incoming cards.
 		extra.PendingPasses[p.ID] = slices.Clone(a.Cards)
-		extra.Passed[p.ID] = true
 	case ActionPlayCard:
 		p := state.Players[state.CurrentTurn]
 		extra.startTrick()
@@ -220,37 +218,33 @@ func (r *Rules) AfterAction(state *game.State, action game.Action) error {
 	}
 	switch action.(type) {
 	case ActionPassCards:
-		return r.afterPass(state, extra)
+		afterPass(state, extra)
 	case ActionPlayCard:
-		return r.afterPlay(state, extra)
+		afterPlay(state, extra)
 	case ActionNextHand:
-		return r.beginHand(state, extra, state.CurrentTurn)
+		return beginHand(state, extra, state.CurrentTurn)
 	}
 	return nil
 }
 
-func (r *Rules) afterPass(state *game.State, extra *State) error {
-	if len(extra.Passed) < len(state.Players) {
-		next := nextUnpassedSeat(state, extra, state.CurrentTurn)
-		state.OverrideNextTurn = &next
-		return nil
+func afterPass(state *game.State, extra *State) {
+	if len(extra.PendingPasses) < len(state.Players) {
+		state.OverrideTurn(nextUnpassedSeat(state, extra, state.CurrentTurn))
+		return
 	}
 	applyAllPasses(state, extra)
-	extra.Stage = StageTrickPlay
+	extra.Phase = PhaseTrickPlay
 	extra.PendingPasses = nil
-	extra.Passed = nil
-	leader := findTwoOfClubs(state)
-	state.CurrentTurn = leader
-	state.OverrideNextTurn = &leader
-	return nil
+	state.SetTurn(findTwoOfClubs(state))
 }
 
-func (r *Rules) afterPlay(state *game.State, extra *State) error {
+func afterPlay(state *game.State, extra *State) {
 	if len(extra.TrickCards) < len(state.Players) {
-		return nil
+		return
 	}
 
-	winnerID, winnerSeat := trickWinner(state, extra)
+	winnerSeat := trickWinner(state, extra)
+	winnerID := state.Players[winnerSeat].ID
 	extra.HandPoints[winnerID] += trickPoints(extra.TrickCards)
 	extra.LastTrickWinner = winnerID
 	extra.TricksPlayed++
@@ -259,25 +253,20 @@ func (r *Rules) afterPlay(state *game.State, extra *State) error {
 	extra.TrickComplete = true
 
 	if extra.TricksPlayed < cardsPerHand {
-		state.CurrentTurn = winnerSeat
-		state.OverrideNextTurn = &winnerSeat
-		return nil
+		state.SetTurn(winnerSeat)
+		return
 	}
 
 	scoreHand(extra, state.Players)
-	extra.Stage = StageHandOver
-	extra.HandComplete = true
+	extra.Phase = PhaseHandOver
 
 	if game.AnyScoreAtLeast(extra.CumulativeScores, extra.TargetScore) {
 		extra.MatchComplete = true
 		state.OverrideNextTurn = nil
-		return nil
+		return
 	}
 
-	nextDealer := (extra.DealerIndex + 1) % len(state.Players)
-	state.CurrentTurn = nextDealer
-	state.OverrideNextTurn = &nextDealer
-	return nil
+	state.SetTurn(game.SeatAt(extra.DealerIndex+1, len(state.Players)))
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
@@ -301,47 +290,48 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 	if !ok {
 		return nil
 	}
-	switch extra.Stage {
-	case StageHandOver:
+	switch extra.Phase {
+	case PhaseHandOver:
 		if extra.MatchComplete {
 			return nil
 		}
 		return ActionNextHand{}
-	case StagePassing:
+	case PhasePassing:
 		p := state.Players[state.CurrentTurn]
-		return ActionPassCards{Cards: threeLowestCards(p.Cards)}
-	case StageTrickPlay:
+		return ActionPassCards{Cards: threeMostDangerous(p.Cards)}
+	case PhaseTrickPlay:
 		p := state.Players[state.CurrentTurn]
 		if card, ok := firstLegalCard(extra, p); ok {
 			return ActionPlayCard{Card: card}
 		}
-		return nil
-	default:
-		return nil
 	}
+	return nil
 }
 
-func (r *Rules) TurnTimeout(state *game.State) time.Duration {
+func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	extra, ok := state.Extra.(*State)
 	if !ok {
 		return 0
 	}
-	switch extra.Stage {
-	case StagePassing:
-		return passTurnTimeout
-	case StageHandOver:
+	switch extra.Phase {
+	case PhasePassing:
+		return passTurnDuration
+	case PhaseHandOver:
 		// The between-hands prompt is a decision, not a play, and it needs longer
-		// than a turn. Every other stage returns zero, which means "engine default"
+		// than a turn. Every other phase returns zero, which means "engine default"
 		// rather than "no clock".
-		return handOverTurnTimeout
-	default:
-		return 0
+		return handOverTurnDuration
+	case PhaseTrickPlay:
 	}
+	return 0
 }
 
+// OnPlayerLeave ends the match: hearts does not play three-handed. Interrupted tells
+// the engine, and through it finalize, that the seats still playing did not finish it.
 func (r *Rules) OnPlayerLeave(state *game.State, _ string) {
 	if extra, ok := state.Extra.(*State); ok {
 		extra.MatchComplete = true
+		state.Interrupted = true
 	}
 }
 
@@ -356,12 +346,8 @@ func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
 	if !ok {
 		return 0
 	}
-	if extra.HandComplete {
+	if extra.HandComplete() {
 		return extra.CumulativeScores[p.ID]
 	}
 	return extra.CumulativeScores[p.ID] + extra.HandPoints[p.ID]
 }
-
-// Compile-time proof of the optional hook: without it, deleting StandingScore still
-// compiles and the engine silently splits every draw by seat order.
-var _ game.StandingScorer = (*Rules)(nil)

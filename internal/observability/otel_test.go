@@ -30,7 +30,7 @@ func (m *mockLogsService) Export(_ context.Context, req *collogpb.ExportLogsServ
 	return &collogpb.ExportLogsServiceResponse{}, nil
 }
 
-// SetupOTel exports traces and metrics as well as logs, and all three have to
+// Setup exports traces and metrics as well as logs, and all three have to
 // survive shutdown: a signal that only flushes one of them loses the other two on
 // every deploy, which is exactly when the interesting telemetry is produced.
 type mockTraceService struct {
@@ -72,7 +72,7 @@ func metricNames(reqs []*colmetricpb.ExportMetricsServiceRequest) []string {
 	return out
 }
 
-// SetupOTel installs process-global providers (otel.SetTracerProvider,
+// Setup installs process-global providers (otel.SetTracerProvider,
 // global.SetLoggerProvider), so this test cannot share the process with a parallel
 // one that also reads or writes them.
 //
@@ -101,8 +101,8 @@ func TestOTel_Integration(t *testing.T) {
 		Env:          "development",
 	}
 
-	ctx := context.Background()
-	shutdown, err := SetupOTel(ctx, cfg)
+	ctx := t.Context()
+	shutdown, err := Setup(ctx, cfg)
 	require.NoError(t, err)
 
 	logger := global.Logger("test-logger")
@@ -132,17 +132,15 @@ func TestOTel_Integration(t *testing.T) {
 
 	require.NotEmpty(t, mockMetrics.requests, "shutdown did not flush the metric reader")
 	names := metricNames(mockMetrics.requests)
-	assert.Contains(t, names, "terminalcard.ssh.sessions.active",
-		"registerAppMetrics never observed its gauge")
 	assert.Contains(t, names, "go.memory.used", "runtime.Start was not wired to this provider")
 }
 
-// The one failure SetupOTel can actually hit at boot, and the reason main prints to
-// stderr: nothing has a slog handler yet when it happens.
+// The one failure Setup can actually hit at boot, and the reason cmd/server reports it
+// as a plain stderr line: there is no OTLP pipeline yet to carry a log record.
 //
-//nolint:paralleltest // SetupOTel touches process-global providers
+//nolint:paralleltest // Setup touches process-global providers
 func TestOTel_UnusableEndpointIsAFatalError(t *testing.T) {
-	shutdown, err := SetupOTel(context.Background(), &config.Config{
+	shutdown, err := Setup(t.Context(), &config.Config{
 		OTelEndpoint: "%%%",
 		OTelInsecure: true,
 		Env:          "production",

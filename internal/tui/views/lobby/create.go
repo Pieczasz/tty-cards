@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/Pieczasz/terminal-card/internal/game"
 	"github.com/Pieczasz/terminal-card/internal/lobby"
 	"github.com/Pieczasz/terminal-card/internal/tui/components"
 	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 	"github.com/Pieczasz/terminal-card/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
@@ -43,7 +45,7 @@ func NewCreate(global router.GlobalContext) tea.Model {
 		cursor:      0,
 		isPrivate:   true,
 		isRanked:    false, // casual default - matches lobby.setupDefaultOptions
-		maxPlayers:  4,
+		maxPlayers:  defaultMaxPlayers,
 		gameOptions: gameOptions,
 		gameIndex:   0,
 	}
@@ -101,8 +103,8 @@ func (m *createModel) adjustSetting(delta int) {
 	case createCursorMode:
 		m.isRanked = !m.isRanked
 	case createCursorPlayers:
-		if next := m.maxPlayers + delta; next >= 2 && next <= m.gameMaxPlayers() {
-			m.maxPlayers = next
+		if minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame()); m.maxPlayers+delta >= minP && m.maxPlayers+delta <= maxP {
+			m.maxPlayers += delta
 		}
 	case createCursorSubmit:
 		// The submitted row has no left/right adjustment.
@@ -128,7 +130,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	l, err := m.global.LobbyManager.New(views.SessionPlayer(m.global),
+	l, err := m.global.LobbyManager.CreateLobby(views.SessionPlayer(m.global),
 		lobby.WithCardGame(name),
 		lobby.WithMaxPlayers(m.maxPlayers),
 		lobby.WithPrivate(m.isPrivate),
@@ -138,56 +140,76 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
-	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: l} }
+	return m, router.Navigate(router.RouteLobby, l)
 }
 
-func (m *createModel) gameMaxPlayers() int {
-	rules, err := m.global.GameRegistry.Create(m.selectedGame())
-	if err != nil {
-		return 8
+// defaultMaxPlayers is the seat count a lobby opens with, the same as
+// lobby.setupDefaultOptions.
+const defaultMaxPlayers = 4
+
+// The seat range for a game the registry cannot build. One pair for both screens, so
+// the create form and the lobby cannot disagree about how far the setting may travel.
+const (
+	fallbackMinPlayers = 2
+	fallbackMaxPlayers = 6
+)
+
+// gamePlayerBounds is gameName's seat range, or the fallback range for a game the
+// registry cannot build.
+func gamePlayerBounds(registry *game.Registry, gameName string) (minP, maxP int) {
+	if registry == nil {
+		return fallbackMinPlayers, fallbackMaxPlayers
 	}
-	return rules.MaxPlayers()
+	rules, err := registry.Create(gameName)
+	if err != nil {
+		return fallbackMinPlayers, fallbackMaxPlayers
+	}
+	return rules.MinPlayers(), rules.MaxPlayers()
 }
 
 func (m *createModel) clampMaxPlayers() {
-	maxP := m.gameMaxPlayers()
-	minP := 2
-	if rules, err := m.global.GameRegistry.Create(m.selectedGame()); err == nil {
-		minP = rules.MinPlayers()
-	}
+	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
 	// minP is applied last so it wins if a game's bounds ever cross.
 	m.maxPlayers = max(min(m.maxPlayers, maxP), minP)
 }
 
-func (m *createModel) View() tea.View {
-	renderOption := func(idx int, label, value string) string {
-		cursor := "  "
-		if m.cursor == idx {
-			cursor = "> "
-			label = m.global.Theme.PlayerItemSelected.Render(label)
-			value = m.global.Theme.PlayerItemSelected.Render(value)
-		}
-		return fmt.Sprintf("%s%s: < %s >", cursor, label, value)
+// renderOption is one "label: < value >" settings row, marked when the cursor is on it.
+func renderOption(t styles.Theme, selected bool, label, value string) string {
+	cursor := "  "
+	if selected {
+		cursor = "> "
+		label = t.PlayerItemSelected.Render(label)
+		value = t.PlayerItemSelected.Render(value)
 	}
+	return fmt.Sprintf("%s%s: < %s >", cursor, label, value)
+}
 
+// visibilityLabel and modeLabel are padded to one width, so toggling a row cannot
+// shift the "<" and ">" around it.
+func visibilityLabel(private bool) string {
+	if private {
+		return "Private"
+	}
+	return "Public "
+}
+
+func modeLabel(ranked bool) string {
+	if ranked {
+		return "Ranked "
+	}
+	return "Casual "
+}
+
+func (m *createModel) View() tea.View {
+	t := m.global.Theme
 	gameName := m.selectedGame()
 	if gameName == "" {
 		gameName = "none available"
 	}
-	gameStr := renderOption(createCursorGame, "Game", gameName)
-	playersStr := renderOption(createCursorPlayers, "Max Players", strconv.Itoa(m.maxPlayers))
-
-	vis := fmt.Sprintf("%-7s", "Public")
-	if m.isPrivate {
-		vis = fmt.Sprintf("%-7s", "Private")
-	}
-	visStr := renderOption(createCursorVisibility, "Visibility", vis)
-
-	mode := fmt.Sprintf("%-7s", "Casual")
-	if m.isRanked {
-		mode = fmt.Sprintf("%-7s", "Ranked")
-	}
-	modeStr := renderOption(createCursorMode, "Mode", mode)
+	gameStr := renderOption(t, m.cursor == createCursorGame, "Game", gameName)
+	playersStr := renderOption(t, m.cursor == createCursorPlayers, "Max Players", strconv.Itoa(m.maxPlayers))
+	visStr := renderOption(t, m.cursor == createCursorVisibility, "Visibility", visibilityLabel(m.isPrivate))
+	modeStr := renderOption(t, m.cursor == createCursorMode, "Mode", modeLabel(m.isRanked))
 
 	submitCursor := "  "
 	submitText := "[ Create Lobby ]"

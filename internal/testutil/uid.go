@@ -1,3 +1,5 @@
+// Package testutil holds the fixtures tests across the server share: stable ids and
+// seats, and (behind the integration tag) a migrated Postgres per test.
 package testutil
 
 import (

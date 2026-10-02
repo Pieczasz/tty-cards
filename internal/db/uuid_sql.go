@@ -31,8 +31,10 @@ func (uuidSerializer) Value(_ context.Context, _ *schema.Field, _ reflect.Value,
 	case uuid.UUID:
 		return v.String(), nil
 	case *uuid.UUID:
+		// An absent id is NULL. The nil UUID's string would satisfy NOT NULL and read
+		// back as a real-looking id.
 		if v == nil {
-			return uuid.Nil().String(), nil
+			return nil, nil //nolint:nilnil // a nil driver value is SQL NULL, not a missing result
 		}
 		return v.String(), nil
 	default:

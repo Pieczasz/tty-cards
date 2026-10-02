@@ -27,7 +27,7 @@ func BenchmarkProfileView_Render(b *testing.B) {
 	// The filter lists are not optional: renderContent reads the current entry of
 	// each for its filter line, so a literal without them panics where the real
 	// view, built by New, never can.
-	m := model{
+	m := &model{
 		global:        router.GlobalContext{User: user, Width: 120, Height: 40, Theme: styles.NewTheme(true)},
 		userProfile:   user,
 		history:       history,
