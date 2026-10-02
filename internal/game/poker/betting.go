@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // canAct is a seat with a decision still to make this hand: in it, not all-in, and

@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/config"
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/httpapi"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/config"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/httpapi"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 
 	charmssh "charm.land/ssh"
 	"github.com/stretchr/testify/assert"

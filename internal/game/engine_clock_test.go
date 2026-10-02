@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

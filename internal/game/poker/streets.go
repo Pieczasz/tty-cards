@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // owesAction is a seat that can act and has not yet acted on, or not yet matched, the

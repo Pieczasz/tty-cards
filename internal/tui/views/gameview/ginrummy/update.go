@@ -1,9 +1,9 @@
 package ginrummy
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/game"
-	logic "github.com/Pieczasz/terminal-card/internal/game/ginrummy"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	logic "github.com/Pieczasz/tty-cards/internal/game/ginrummy"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
 )

@@ -3,7 +3,7 @@ package game
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/broadcaster"
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

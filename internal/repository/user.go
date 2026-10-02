@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/db"
 
 	"uuid"
 

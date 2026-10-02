@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/observability"
-	"github.com/Pieczasz/terminal-card/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"

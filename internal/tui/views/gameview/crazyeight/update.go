@@ -1,9 +1,9 @@
 package crazyeight
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	logic "github.com/Pieczasz/terminal-card/internal/game/crazyeight"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	logic "github.com/Pieczasz/tty-cards/internal/game/crazyeight"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
 )

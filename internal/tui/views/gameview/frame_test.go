@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"

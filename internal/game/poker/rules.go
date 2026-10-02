@@ -7,8 +7,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // The stack every player sits down with and the blinds, which stay fixed for the

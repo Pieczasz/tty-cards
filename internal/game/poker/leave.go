@@ -3,7 +3,7 @@ package poker
 import (
 	"log/slog"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // OnPlayerLeave folds the departing player. Turn and seat resolution runs in

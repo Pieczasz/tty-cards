@@ -3,7 +3,7 @@ package testutil
 import (
 	"fmt"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // Players is n seats as lobby.NewPlayer would seat accounts UID(1) through UID(n),

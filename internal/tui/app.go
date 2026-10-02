@@ -5,17 +5,17 @@ package tui
 import (
 	"context"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/views"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/home"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/leaderboard"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/lobby"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/profile"
+	"github.com/Pieczasz/tty-cards/internal/catalog"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/leaderboard"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/profile"
 
-	internallobby "github.com/Pieczasz/terminal-card/internal/lobby"
+	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
 
 	tea "charm.land/bubbletea/v2"
 )

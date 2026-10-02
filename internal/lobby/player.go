@@ -1,8 +1,8 @@
 package lobby
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // NewPlayer seats a database user. It is the only place a db.User becomes a

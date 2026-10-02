@@ -4,8 +4,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // BaseState is the engine state every game view renders from.

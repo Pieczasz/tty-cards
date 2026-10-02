@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"

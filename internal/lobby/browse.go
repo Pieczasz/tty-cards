@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 const (

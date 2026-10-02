@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"

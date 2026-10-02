@@ -3,11 +3,11 @@ package ginrummy
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	logic "github.com/Pieczasz/terminal-card/internal/game/ginrummy"
-	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/gameview"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	logic "github.com/Pieczasz/tty-cards/internal/game/ginrummy"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
 
 	"github.com/stretchr/testify/assert"
 )

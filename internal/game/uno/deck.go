@@ -1,6 +1,6 @@
 package uno
 
-import "github.com/Pieczasz/terminal-card/internal/deck"
+import "github.com/Pieczasz/tty-cards/internal/deck"
 
 // Color aliases map Uno colors onto the four deck suits. Wilds use NoSuit.
 const (

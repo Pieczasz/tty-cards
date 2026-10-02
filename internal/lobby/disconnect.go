@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // graceTimers holds mid-game seats after a dropped session. Caller must hold

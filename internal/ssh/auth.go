@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/db"
 
 	"charm.land/ssh"
 	gossh "golang.org/x/crypto/ssh"

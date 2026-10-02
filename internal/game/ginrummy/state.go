@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // Phase is where the turn, or the hand, is. The zero value is PhaseAwaitingDraw, the

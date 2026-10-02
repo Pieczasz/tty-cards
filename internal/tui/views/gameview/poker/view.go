@@ -5,11 +5,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	logic "github.com/Pieczasz/terminal-card/internal/game/poker"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/gameview"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"

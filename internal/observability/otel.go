@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Pieczasz/terminal-card/internal/config"
+	"github.com/Pieczasz/tty-cards/internal/config"
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"

@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 )
 
 type MockModel struct {

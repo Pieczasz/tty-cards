@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	lg "charm.land/lipgloss/v2"
 )

@@ -8,8 +8,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // reshuffleDiscardIntoStock moves the discard pile, except the card in play, back into
