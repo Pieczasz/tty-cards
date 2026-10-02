@@ -21,10 +21,9 @@ const colSep = " | "
 // Table is the header, the rule under it and the fixed height that the leaderboard,
 // the profile and the join list all draw around their rows.
 //
-// The rows themselves stay with the caller. Each of the three screens styles
-// individual cells - the viewer's own rank, a ranked table's mode - and a component
-// that could express all three would be longer than the three call sites together.
-// Cells is here for the rows that are plain text.
+// Cells lays out a row of plain text. A row that styles a cell - the viewer's own
+// rank, a ranked table's mode - fits each cell itself and joins them with Row: a
+// styled cell cannot be padded afterwards without counting its escape sequence as text.
 type Table struct {
 	Cols []Column
 	// Lead is printed before every row, header included: the join list's cursor gutter.
@@ -56,7 +55,13 @@ func (tb Table) Cells(values ...string) string {
 		}
 		cells = append(cells, styles.PadTruncate(value, c.Width))
 	}
-	return tb.Lead + strings.Join(cells, colSep)
+	return tb.Lead + tb.Row(cells...)
+}
+
+// Row joins cells already fitted to their columns. Lead is left to the caller, whose
+// cursor usually takes its place.
+func (tb Table) Row(cells ...string) string {
+	return strings.Join(cells, colSep)
 }
 
 // Header is the column titles and the rule under them, two lines.

@@ -74,13 +74,13 @@ func (p GridPicker) Render(t styles.Theme) string {
 
 	rows := make([]string, 0, (len(cells)+gridCols-1)/gridCols)
 	for start := 0; start < len(cells); start += gridCols {
-		rows = append(rows, lg.JoinHorizontal(lg.Center, cells[start:min(start+gridCols, len(cells))]...))
+		rows = append(rows, styles.JoinHorizontal(lg.Center, cells[start:min(start+gridCols, len(cells))]...))
 	}
 
-	return t.PickerBox.Render(lg.JoinVertical(lg.Center,
+	return t.PickerBox.Render(styles.JoinVertical(lg.Center,
 		lg.NewStyle().Bold(true).Foreground(t.Selection).Render(p.Title),
 		"",
-		lg.JoinVertical(lg.Center, rows...),
+		styles.JoinVertical(lg.Center, rows...),
 	))
 }
 

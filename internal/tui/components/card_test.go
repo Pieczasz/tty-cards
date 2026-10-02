@@ -99,7 +99,7 @@ func TestFaceCells_PipCountMatchesTheRank(t *testing.T) {
 func TestFaceCells_EveryRowIsFaceWidth(t *testing.T) {
 	t.Parallel()
 
-	for _, c := range deck.Standard() {
+	for _, c := range append(deck.Standard(), deck.Card{Rank: deck.Joker}) {
 		suit, _ := suitStyle(styles.NewTheme(true), c.Suit)
 		rows := faceCells(c, suit)
 		require.Lenf(t, rows, FaceHeight, "%v row count", c)
@@ -107,6 +107,23 @@ func TestFaceCells_EveryRowIsFaceWidth(t *testing.T) {
 			assert.Lenf(t, row, FaceWidth, "%v row %d", c, i)
 		}
 	}
+}
+
+// A card with no suit - the Joker - draws no pip rather than a stray glyph, and its
+// face keeps the same footprint as any other card's.
+func TestRenderCard_AnUnsuitedCardDrawsNoPip(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+
+	joker := tuitest.StripANSI(RenderCard(theme, deck.Card{Rank: deck.Joker}, false))
+	spade := tuitest.StripANSI(RenderCard(theme, deck.Card{Rank: deck.Joker, Suit: deck.Spades}, false))
+
+	assert.Contains(t, spade, "♠")
+	for _, glyph := range []string{"♠", "♥", "♦", "♣"} {
+		assert.NotContains(t, joker, glyph)
+	}
+	assert.Equal(t, lg.Width(spade), lg.Width(joker))
+	assert.Equal(t, lg.Height(spade), lg.Height(joker))
 }
 
 // Court cards get a portrait rather than a letter in a box.
@@ -176,5 +193,39 @@ func TestRankLabels_CoversAllDeckRanks(t *testing.T) {
 		prev, dup := seen[label]
 		assert.Falsef(t, dup, "ranks %d and %d both render as %q", prev, rank, label)
 		seen[label] = rank
+	}
+}
+
+// A trick or a board slot must not change size when its card lands.
+func TestEmptyCardSlot_HasACardsFootprint(t *testing.T) {
+	t.Parallel()
+	th := styles.NewTheme(true)
+	card := RenderCard(th, deck.Card{Rank: deck.Queen, Suit: deck.Spades}, false)
+	slot := EmptyCardSlot(th)
+	assert.Equal(t, lg.Width(card), lg.Width(slot))
+	assert.Equal(t, lg.Height(card), lg.Height(slot))
+}
+
+// Every rank has a face: the art rows, and the rank in both corners. Uno's own ranks
+// had no pip layout and no portrait, so a Skip or a Wild rendered as a blank card with
+// one corner label and no idea what it was.
+func TestFaceCells_EveryRankHasAFullFace(t *testing.T) {
+	t.Parallel()
+	for _, rank := range deck.AllRanks {
+		rows := faceCells(deck.Card{Rank: rank, Suit: deck.Hearts}, "♥")
+		require.Lenf(t, rows, FaceHeight, "%s has a face of %d rows", rankLabels[rank], len(rows))
+
+		label := rankLabels[rank]
+		assert.Truef(t, strings.HasPrefix(strings.Join(rows[0], ""), label), "%s: no top-left label", label)
+		assert.Truef(t, strings.HasSuffix(strings.Join(rows[FaceHeight-1], ""), label), "%s: no bottom-right label", label)
+
+		var art strings.Builder
+		for _, row := range rows[1 : FaceHeight-1] {
+			art.WriteString(strings.Join(row, ""))
+		}
+		assert.NotEmptyf(t, strings.TrimSpace(art.String()), "%s has a blank face", label)
+		for _, row := range rows {
+			assert.Lenf(t, row, FaceWidth, "%s: a row is not %d cells", label, FaceWidth)
+		}
 	}
 }
