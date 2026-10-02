@@ -12,10 +12,9 @@ import (
 )
 
 type model struct {
-	gameview.Session
+	gameview.ShedTable
 
 	currentSuit deck.Suit
-	suit        gameview.ChoicePicker
 }
 
 // suitPicker is the picker an eight opens, closed. Each model takes its own copy.
@@ -29,12 +28,18 @@ var suitPicker = gameview.ChoicePicker{
 	},
 }
 
+var moves = gameview.ShedMoves{
+	Wild: func(c deck.Card) bool { return c.Rank == deck.Eight },
+	Play: func(c deck.Card, suit deck.Suit) game.Action { return logic.ActionPlayCard{Card: c, ChosenSuit: suit} },
+	Draw: logic.ActionDrawCard{},
+}
+
 // New creates a new Crazy Eights TUI view bound to the session player; slug is its catalog
 // slug, the game_type its metrics carry.
-func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
+func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, slug)
-	m := &model{Session: session, suit: suitPicker}
+	session, _ := gameview.NewSession(global, table, slug)
+	m := &model{Session: session, Picker: suitPicker}
 	m.syncState()
 	return m
 }
@@ -45,10 +50,4 @@ func (m *model) syncState() {
 			m.currentSuit = s.CurrentSuit
 		}
 	})
-	// The picker only means anything while the hero is the one to act, so a turn
-	// lost to the clock takes it down rather than leaving it over the table with
-	// nothing left to confirm.
-	if !m.Base.MyTurn {
-		m.suit.Open = false
-	}
 }

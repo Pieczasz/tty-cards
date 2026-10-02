@@ -64,9 +64,9 @@ type model struct {
 
 // New creates a Hold'em TUI view bound to the session player; slug is its catalog
 // slug, the game_type its metrics carry.
-func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
+func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model {
 	// A subscribe failure is kept on the Session's ActionErr, which the hero band shows.
-	session, _ := gameview.NewSession(global, engine, slug)
+	session, _ := gameview.NewSession(global, table, slug)
 	m := &model{Session: session}
 	m.syncState()
 	return m

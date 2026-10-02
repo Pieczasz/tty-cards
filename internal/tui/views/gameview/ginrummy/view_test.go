@@ -56,7 +56,6 @@ func TestView_HandOverWallBanner(t *testing.T) {
 		},
 		Base:             gameview.BaseState{Phase: game.Playing, Seats: aliceAndBob},
 		phase:            logic.PhaseHandOver,
-		handComplete:     true,
 		handNumber:       2,
 		lastHandResult:   &logic.HandResult{Outcome: logic.OutcomeWall},
 		cumulativeScores: map[string]int{"1": 10, "2": 5},
@@ -109,8 +108,8 @@ func TestView_FitsTheTerminal(t *testing.T) {
 	screens := map[string]func(*model){
 		"the table":        func(*model) {},
 		"awaiting a draw":  func(m *model) { m.phase = logic.PhaseAwaitingDraw },
-		"the hand summary": func(m *model) { m.handComplete = true; m.lastHandResult = knockResult() },
-		"a gin":            func(m *model) { m.handComplete = true; m.lastHandResult = ginResult() },
+		"the hand summary": func(m *model) { m.phase = logic.PhaseHandOver; m.lastHandResult = knockResult() },
+		"a gin":            func(m *model) { m.phase = logic.PhaseHandOver; m.lastHandResult = ginResult() },
 		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
@@ -195,11 +194,11 @@ func TestRenderMeldGroups_LabelsSetsAndRuns(t *testing.T) {
 	t.Parallel()
 	m := viewAt(120, 50)
 
-	out := m.renderMeldGroups("knocker melds", knockResult().KnockerMelds, false)
+	out := m.renderMeldGroups("knocker melds", knockResult().KnockerMelds)
 	assert.Contains(t, out, "SET")
 	assert.Contains(t, out, "RUN")
 
-	assert.Contains(t, m.renderMeldGroups("knocker melds", nil, false), "knocker melds: -",
+	assert.Contains(t, m.renderMeldGroups("knocker melds", nil), "knocker melds: -",
 		"an empty group says so rather than leaving a gap")
 }
 

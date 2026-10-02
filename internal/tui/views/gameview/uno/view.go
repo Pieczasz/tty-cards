@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
-	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/uno"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -16,50 +15,28 @@ import (
 )
 
 func (m *model) View() tea.View {
-	if screen, ok := m.LeaveConfirmScreen(); ok {
-		return tea.NewView(screen)
-	}
-	if m.Base.Phase != game.Playing {
-		return tea.NewView(gameview.RenderWaitingScreen(m.Global, m.Base.Phase, m.Base.WinnerName))
-	}
-
-	// Seat art is the first thing to go: it costs seven rows per seat, and a name
-	// with a hand count says everything a player reads off somebody else's seat.
-	minimalSeats := gameview.IsCompact(m.Global.Width, m.Global.Height)
-	top := gameview.RenderOpponentTop(m.Global.Theme, m.Base, m.Global.Width, minimalSeats)
-
-	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), gameview.HandKeyHints,
-		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
-}
-
-func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
-	centerStack := m.color.Render(m.Global.Theme)
-	if !m.color.Open {
-		centerStack = m.renderCenterTable()
-	}
-
-	left, right := gameview.RenderOpponentSides(m.Global.Theme, m.Base, height, minimalSeats)
-
-	return gameview.RenderTableRow(m.Global.Width, height,
-		left, lg.NewStyle().MarginTop(1).Render(centerStack), right)
+	colorRow := m.renderHandColorRow(gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
+	return m.RenderTable(m.renderCenterTable(), colorRow)
 }
 
 func (m *model) renderCenterTable() string {
-	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
-	return lg.JoinVertical(lg.Center,
-		discardView,
+	discard := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
+	return styles.JoinVertical(lg.Center,
+		gameview.RenderPiles(m.Global.Theme, m.Base.DeckSize, discard),
 		m.renderCurrentColorIndicator(),
 		m.renderDirectionIndicator(),
 	)
 }
 
+// renderCurrentColorIndicator names the colour to follow the way the picker does, so
+// the colour a player picked reads back the same on the table.
 func (m *model) renderCurrentColorIndicator() string {
-	label, fg := colorLabel(m.Global.Theme, m.currentColor)
-	if label == "" {
+	c, ok := colorPicker.Lookup(m.currentColor)
+	if !ok {
 		return ""
 	}
 	return m.Global.Theme.Muted.Render("Color: ") +
-		lg.NewStyle().Bold(true).Foreground(fg).Render(label)
+		lg.NewStyle().Bold(true).Foreground(c.Tone(m.Global.Theme)).Render(c.Label)
 }
 
 func (m *model) renderDirectionIndicator() string {
@@ -68,34 +45,6 @@ func (m *model) renderDirectionIndicator() string {
 		dir = "⟲ Counterclockwise"
 	}
 	return m.Global.Theme.Dim.Render(dir)
-}
-
-func colorLabel(t styles.Theme, s deck.Suit) (string, color.Color) {
-	switch s {
-	case logic.ColorRed:
-		return "Red", t.UnoRed
-	case logic.ColorYellow:
-		return "Yellow", t.UnoYellow
-	case logic.ColorGreen:
-		return "Green", t.UnoGreen
-	case logic.ColorBlue:
-		return "Blue", t.UnoBlue
-	default:
-		return "", t.TextMuted
-	}
-}
-
-func (m *model) renderPlayerSection() string {
-	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
-	handWidth, handRows := gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height)
-	colorRow := m.renderHandColorRow(handWidth, handRows)
-	cursor := m.Selected
-	if m.color.Open {
-		cursor = -1 // the picker has the keys, so no card is lifted
-	}
-	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, cursor, nil, handWidth, handRows)
-
-	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, colorRow, handView)
 }
 
 // renderHandColorRow paints a Uno color glyph above each card so four colors stay
@@ -111,10 +60,7 @@ func (m *model) renderHandColorRow(maxWidth, maxRows int) string {
 		return ""
 	}
 	tuck := components.FanTuck(n, maxWidth)
-	selected := components.Selection(m.Selected)
-	if m.color.Open {
-		selected = nil
-	}
+	selected := components.Selection(m.HandCursor())
 	parts := make([]string, 0, n)
 	for i, c := range hand {
 		w := components.CardSlotWidth(i, n, tuck, selected)
@@ -126,19 +72,11 @@ func (m *model) renderHandColorRow(maxWidth, maxRows int) string {
 }
 
 func colorGlyph(t styles.Theme, c deck.Card) (string, color.Color) {
-	if c.Rank == logic.Wild || c.Rank == logic.WildDrawFour {
+	if logic.IsWild(c) {
 		return "★", t.TextMuted
 	}
-	switch c.Suit {
-	case logic.ColorRed:
-		return "●", t.UnoRed
-	case logic.ColorYellow:
-		return "●", t.UnoYellow
-	case logic.ColorGreen:
-		return "●", t.UnoGreen
-	case logic.ColorBlue:
-		return "●", t.UnoBlue
-	default:
-		return "·", t.TextMuted
+	if choice, ok := colorPicker.Lookup(c.Suit); ok {
+		return "●", choice.Tone(t)
 	}
+	return "·", t.TextMuted
 }

@@ -159,3 +159,43 @@ func TestFinalizeInterruptedMatchNeverPaysALeaver(t *testing.T) {
 	assert.Less(t, rankingOf(t, gormDB, ids[1], gameID).Elo, uint32(1900))
 	assert.Equal(t, uint32(1500), rankingOf(t, gormDB, ids[0], gameID).Elo)
 }
+
+// An interrupted match whose leaver cannot be charged (not at the table, or erased)
+// still moves no seated rating: the scope is loss-only whoever is left to charge.
+func TestFinalizeInterruptedMatchWithNobodyToChargeMovesNoRating(t *testing.T) {
+	t.Parallel()
+	gormDB := testutil.SetupTestDB(t)
+	gameID, ids := antiFarmTable(t, gormDB, seat{elo: 1600, played: 10}, seat{elo: 1400, played: 10})
+
+	require.NoError(t, repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
+		t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()}))
+
+	for id, was := range map[uuid.UUID]uint32{ids[0]: 1600, ids[1]: 1400} {
+		r := rankingOf(t, gormDB, id, gameID)
+		assert.Equal(t, was, r.Elo, "a seated rating moved")
+		assert.Equal(t, uint64(10), r.MatchesPlayed, "a seated player was counted for an unfinished match")
+	}
+	assert.Equal(t, map[uuid.UUID]int{ids[0]: 0, ids[1]: 0}, lastMatchDeltas(t, gormDB),
+		"the history is still written, with nothing paid")
+
+	var match db.Match
+	require.NoError(t, gormDB.Order("id DESC").First(&match).Error)
+	assert.False(t, match.Ranked, "a match that moved no rating is not ranked history")
+}
+
+// Ranked history is what the 24h pairing cap counts, so a match that rated nobody
+// must not spend the budget of the players who stayed.
+func TestFinalizeInterruptedMatchWithNobodyToChargeDoesNotDampTheNextMatch(t *testing.T) {
+	t.Parallel()
+	gormDB := testutil.SetupTestDB(t)
+	repo := repository.NewMatchRepository(gormDB)
+	gameID, ids := antiFarmTable(t, gormDB, seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10})
+
+	for range 3 {
+		require.NoError(t, repo.FinalizeInterruptedMatch(
+			t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()}))
+	}
+	require.NoError(t, repo.FinalizeRankedMatch(t.Context(), gameRef(antiFarmGame), ids, nil))
+
+	assert.Greater(t, rankingOf(t, gormDB, ids[0], gameID).Elo, uint32(1500), "the winner was damped")
+}

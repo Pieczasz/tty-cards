@@ -183,6 +183,21 @@ func TestRenderWaitingScreen_FitsTheTerminal(t *testing.T) {
 	}
 }
 
+// A seated player's menu shortcuts all lead back to the table, so the notice
+// screens must not advertise them.
+func TestRenderWaitingScreen_OffersOnlyQuit(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []game.Phase{game.Waiting, game.Finished} {
+		out := tuitest.StripANSI(RenderWaitingScreen(testContext(120, 40), phase, "alice"))
+
+		assert.Contains(t, out, "ctrl+c - Quit")
+		for _, global := range []string{"New Game", "Join Game", "Profile", "Leaderboard"} {
+			assert.NotContains(t, out, global, "phase %v", phase)
+		}
+	}
+}
+
 func TestClockTick_StartsBeforeADeadlineIsKnown(t *testing.T) {
 	t.Parallel()
 	s := &Session{}
@@ -280,4 +295,28 @@ func BenchmarkRenderBands(b *testing.B) {
 	for b.Loop() {
 		_ = RenderBands(g, top, hand, HandKeyHints, func(int) string { return mid })
 	}
+}
+
+// The stock is drawn face down with what is left in it, and a spent stock keeps its
+// footprint so the discard beside it does not move.
+func TestRenderPiles_ShowsTheStockBesideTheDiscard(t *testing.T) {
+	t.Parallel()
+	th := styles.NewTheme(true)
+	discard := components.RenderCard(th, deck.Card{Rank: deck.Four, Suit: deck.Diamonds}, false)
+
+	full := RenderPiles(th, 31, discard)
+	assert.Contains(t, tuitest.StripANSI(full), "stock 31")
+	assert.Contains(t, tuitest.StripANSI(full), "░", "a stock with cards is drawn face down")
+
+	spent := RenderPiles(th, 0, discard)
+	assert.Contains(t, tuitest.StripANSI(spent), "stock 0")
+	assert.NotContains(t, tuitest.StripANSI(spent), "░", "an empty stock is an empty slot, not a back")
+	assert.Equal(t, lg.Width(full), lg.Width(spent), "the discard moved when the stock ran out")
+}
+
+func TestInterruptedTitle_NamesWhoLeft(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "MATCH ENDED EARLY", InterruptedTitle(nil))
+	assert.Equal(t, "MATCH ENDED EARLY - dave left the table", InterruptedTitle([]string{"dave"}))
+	assert.Equal(t, "MATCH ENDED EARLY - carol, dave left the table", InterruptedTitle([]string{"carol", "dave"}))
 }

@@ -13,23 +13,23 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	AnonymisedPrefix         = "deleted_"
+	anonymisedUsernameLength = 40 // deleted_ + 32 hex
+
+	maxUsernameLength = 16
+)
+
 // User is a player account.
-//
-// Nothing calls AutoMigrate - internal/db/migrations owns the schema - so
-// uniqueIndex/not null/default/check/type tags would be decoration that reads like
-// enforcement, and one of them had already drifted from the SQL. They are gone; the
-// tags that remain (primaryKey, foreignKey, autoIncrement) are the ones GORM actually
-// uses to build queries. TestSchemaNullabilityMatchesStructs derives what the SQL must
-// guarantee from these structs, so the drift is caught by CI rather than by a tag.
 type User struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  gorm.DeletedAt
-	LastSeenAt time.Time
-	Username   string
-	PublicKeys []PublicKey
-	Rankings   []Ranking
+	ID            uuid.UUID `gorm:"type:uuid;primaryKey;serializer:stduuid"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     gorm.DeletedAt
+	LastSeenAt    time.Time
+	Username      string
+	PublicSSHKeys []PublicSSHKey
+	Rankings      []Ranking
 }
 
 // BeforeCreate assigns a UUIDv7 id when the caller did not.
@@ -40,8 +40,8 @@ func (u *User) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
-// PublicKey is one SSH key an account signs in with, by its SHA256 fingerprint.
-type PublicKey struct {
+// PublicSSHKey is one SSH key an account signs in with, by its SHA256 fingerprint.
+type PublicSSHKey struct {
 	gorm.Model
 	Fingerprint string
 	Name        string
@@ -50,16 +50,15 @@ type PublicKey struct {
 	User        User      `gorm:"foreignKey:UserID"`
 }
 
+// TableName keeps the table migration 000001 created; the Go name is not the schema.
+func (PublicSSHKey) TableName() string { return "public_keys" }
+
 // Ranking is one account's rating in one game.
 type Ranking struct {
 	UserID uuid.UUID `gorm:"primaryKey;serializer:stduuid"`
 	GameID uint      `gorm:"primaryKey"`
 
-	Elo uint32
-
-	// MatchesPlayed is the ranked track record this row has earned. Below
-	// repository.provisionalMatches the account is provisional and beating it pays
-	// nobody - a free SSH keypair is a free 1500-rated opponent otherwise.
+	Elo           uint32
 	MatchesPlayed uint64
 
 	User User `gorm:"foreignKey:UserID"`
@@ -70,26 +69,15 @@ type Ranking struct {
 	DeletedAt gorm.DeletedAt
 }
 
-// maxUsernameLength is the chosen-name cap ValidateUsername enforces. The column is
-// wider so AnonymisedUsername (deleted_ + 32 hex) still fits; the CHECK refuses any
-// other 17-40 character string.
-const maxUsernameLength = 16
-
-const anonymisedUsernameLength = 40 // deleted_ + 32 hex
-
-// AnonymisedUsername is the name an erased account is left under. It has to satisfy
-// the column CHECK - charset, and either <=16 chars or deleted_ plus 32 hex - because
-// the row stays: other players' match history still points at it.
+// AnonymisedUsername is the name an erased account is left under.
 func AnonymisedUsername(userID uuid.UUID) string {
 	return AnonymisedPrefix + hex.EncodeToString(userID[:])
 }
 
-// AnonymisedPrefix starts every AnonymisedUsername. ValidateUsername refuses it, so a
-// name carrying it is an erased account and never a chosen one.
-const AnonymisedPrefix = "deleted_"
-
-// ValidateUsername is the chosen-name rule: at most 16 of [A-Za-z0-9_], and not the
-// erasure prefix.
+// ValidateUsername is the chosen-name rule: at most 16 of [A-Za-z0-9_], not the
+// erasure prefix and not a reserved name, both in any case - names are unique
+// case-insensitively, so "Admin" is the same claim as "admin". It only gates
+// registration: an existing account keeps its name.
 func ValidateUsername(username string) error {
 	if len(username) > maxUsernameLength {
 		return fmt.Errorf("username cannot exceed %d characters", maxUsernameLength)
@@ -97,10 +85,19 @@ func ValidateUsername(username string) error {
 	if !usernamePattern.MatchString(username) {
 		return errors.New("username can only contain English letters, numbers, and underscores")
 	}
-	if strings.HasPrefix(username, AnonymisedPrefix) {
+	folded := strings.ToLower(username)
+	if strings.HasPrefix(folded, AnonymisedPrefix) || reservedUsernames[folded] {
 		return errors.New("username is reserved")
 	}
 	return nil
 }
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// reservedUsernames read as staff or as the server itself on a public leaderboard.
+// Exact names only, lower case: admin_fan impersonates nobody.
+var reservedUsernames = map[string]bool{
+	"admin": true, "administrator": true, "root": true, "mod": true, "moderator": true,
+	"system": true, "support": true, "staff": true, "tty_cards": true, "ttycards": true,
+	"server": true, "official": true,
+}

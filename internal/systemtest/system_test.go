@@ -1,5 +1,5 @@
-// Package systemtest drives the server's real components end to end - catalog,
-// registry, lobby manager, and game engine - through their public APIs only.
+// Package systemtest drives the server's real components e2e: catalog,
+// registry, lobby manager, and game engine, through their public APIs.
 package systemtest
 
 import (
@@ -39,14 +39,14 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, leader, l.Leader())
 
-	require.NoError(t, l.SetMaxPlayers(leader, 4, 2, 9))
+	require.NoError(t, l.SetMaxPlayers(leader, 4, registry))
 	require.NoError(t, l.SetPrivate(leader, false))
 	require.NoError(t, l.SetRanked(leader, true))
 	assert.Equal(t, 4, l.MaxPlayers())
 	assert.False(t, l.IsPrivate())
 	assert.True(t, l.IsRanked())
 
-	require.Error(t, l.SetMaxPlayers(guests[0], 9, 2, 9), "only the leader may change settings")
+	require.Error(t, l.SetMaxPlayers(guests[0], 9, registry), "only the leader may change settings")
 
 	for _, g := range guests {
 		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)), "guest %s should join", g.ID)
@@ -63,7 +63,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 		require.NoError(t, l.ToggleReady(p, registry))
 	}
 
-	engine := awaitGameStart(t, events)
+	engine := awaitGameStart(t, l, events)
 	require.NotNil(t, engine)
 	assert.NotNil(t, l.ActiveGame(), "a started lobby is in game")
 	assert.NotContains(t, browseCodes(manager, leader), l.Code(),

@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
-
 	"github.com/Pieczasz/tty-cards/internal/testutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -18,29 +18,29 @@ type MockUserRepository struct {
 	mock.Mock
 }
 
-func (m *MockUserRepository) LoadUserByFingerprint(ctx context.Context, fingerprint string) (*db.User, *db.PublicKey, error) {
+func (m *MockUserRepository) LoadUserByFingerprint(ctx context.Context, fingerprint string) (*db.User, *db.PublicSSHKey, error) {
 	args := m.Called(ctx, fingerprint)
 	if args.Get(0) == nil && args.Get(1) == nil {
 		return nil, nil, args.Error(2)
 	}
 	if args.Get(0) == nil {
-		return nil, args.Get(1).(*db.PublicKey), args.Error(2)
+		return nil, args.Get(1).(*db.PublicSSHKey), args.Error(2)
 	}
 	if args.Get(1) == nil {
 		return args.Get(0).(*db.User), nil, args.Error(2)
 	}
-	return args.Get(0).(*db.User), args.Get(1).(*db.PublicKey), args.Error(2)
+	return args.Get(0).(*db.User), args.Get(1).(*db.PublicSSHKey), args.Error(2)
 }
 
-func (m *MockUserRepository) RegisterUserWithKey(ctx context.Context, username, fingerprint string) (*db.User, *db.PublicKey, error) {
+func (m *MockUserRepository) RegisterUserWithSSHKey(ctx context.Context, username, fingerprint string) (*db.User, *db.PublicSSHKey, error) {
 	args := m.Called(ctx, username, fingerprint)
 	if args.Get(0) == nil && args.Get(1) == nil {
 		return nil, nil, args.Error(2)
 	}
-	return args.Get(0).(*db.User), args.Get(1).(*db.PublicKey), args.Error(2)
+	return args.Get(0).(*db.User), args.Get(1).(*db.PublicSSHKey), args.Error(2)
 }
 
-func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, user *db.User, key *db.PublicKey) error {
+func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, user *db.User, key *db.PublicSSHKey) error {
 	return m.Called(ctx, user, key).Error(0)
 }
 
@@ -64,7 +64,7 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	t.Parallel()
 	repo := new(MockUserRepository)
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
-	repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("reg error"))
+	repo.On("RegisterUserWithSSHKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("reg error"))
 
 	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
 	assert.ErrorIs(t, err, ErrRegistrationFailed)
@@ -102,7 +102,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 			t.Parallel()
 			repo := new(MockUserRepository)
 			repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
-			repo.On("RegisterUserWithKey", mock.Anything, "user", "fp").Return(nil, nil, tt.cause)
+			repo.On("RegisterUserWithSSHKey", mock.Anything, "user", "fp").Return(nil, nil, tt.cause)
 
 			_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
 
@@ -144,7 +144,7 @@ func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing
 			require.ErrorIs(t, err, db.ErrInvalidUsername)
 			require.ErrorContains(t, err, tt.wantText)
 			assert.Zero(t, asked, "an invalid name spent the registration budget")
-			repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
+			repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
 		})
 	}
 }
@@ -164,7 +164,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 			func() bool { return false })
 
 		require.ErrorIs(t, err, ErrTooManyRegistrations)
-		repo.AssertNotCalled(t, "RegisterUserWithKey", mock.Anything, mock.Anything, mock.Anything)
+		repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("a returning player never spends the budget", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		fresh := &db.User{ID: testutil.UID(2), Username: "new"}
 		repo := new(MockUserRepository)
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
-		repo.On("RegisterUserWithKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicKey{}, nil)
+		repo.On("RegisterUserWithSSHKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicSSHKey{}, nil)
 
 		user, err := LoadOrRegisterUser(t.Context(), repo, "new", "fp",
 			func() bool { return true })
@@ -196,4 +196,19 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, fresh, user)
 	})
+}
+
+// A stale last-seen timestamp is cosmetic; refusing a returning player over it is not.
+func TestLoadOrRegisterUser_ActivityUpdateFailureDoesNotBlockLogin(t *testing.T) {
+	t.Parallel()
+	existing := &db.User{ID: testutil.UID(3), Username: "known"}
+	repo := new(MockUserRepository)
+	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(existing, &db.PublicSSHKey{}, nil)
+	repo.On("UpdateUserActivity", mock.Anything, existing, mock.Anything).Return(errors.New("deadlock detected"))
+
+	user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, existing, user)
+	repo.AssertExpectations(t)
 }

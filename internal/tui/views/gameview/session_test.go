@@ -7,10 +7,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/game/crazyeight"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -200,7 +202,7 @@ func startedSession(t *testing.T) (*game.Engine, Session) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
-	s, err := NewSession(global, engine, "crazy_eights")
+	s, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")
 	require.NoError(t, err)
 	return engine, s
 }
@@ -481,7 +483,7 @@ func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 
 	// The hero is the third seat, so their left is the fourth and the order wraps.
 	global := router.GlobalContext{User: &db.User{ID: testutil.UID(3)}}
-	s, err := NewSession(global, engine, "crazy_eights")
+	s, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	s.Sync(nil)
@@ -493,4 +495,21 @@ func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 	assert.Equal(t, []string{testutil.SeatID(4), testutil.SeatID(1), testutil.SeatID(2)}, ids)
 	assert.Equal(t, []string{testutil.SeatID(1), testutil.SeatID(2), testutil.SeatID(3), testutil.SeatID(4)},
 		s.Base.SeatOrder(), "Seats stays in engine order")
+}
+
+// A refused move is shown until the turn moves on: left up after it, a complaint about
+// a move the player can no longer make reads as if the table were still refusing them.
+func TestSession_ARefusalClearsWhenTheTurnMovesOn(t *testing.T) {
+	t.Parallel()
+	engine, s := startedSession(t)
+	s.Sync(nil)
+	onTurn := s.Base.CurrentPlayerID
+
+	require.Error(t, s.Submit(gametest.ForeignAction{}), "a move the table does not know is refused")
+	s.Sync(nil)
+	require.Error(t, s.ActionErr, "the refusal stays while the same seat is on turn")
+
+	require.NoError(t, engine.SubmitAction(onTurn, crazyeight.ActionDrawCard{}))
+	s.Sync(nil)
+	assert.NoError(t, s.ActionErr, "the refusal outlived the turn it was about")
 }

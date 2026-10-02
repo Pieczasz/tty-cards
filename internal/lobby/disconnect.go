@@ -38,10 +38,15 @@ func (d *graceTimers) arm(id string, wait time.Duration, fire func()) {
 
 // beginExpire moves a pending leave into the expiring set. False if there was
 // nothing to expire (already resumed or cleared).
+//
+// The timer is stopped because releaseHeldSeats claims holds early: left running, it
+// fires at the old deadline into whatever hold the player's next drop armed.
 func (d *graceTimers) beginExpire(id string) bool {
-	if _, ok := d.pending[id]; !ok {
+	t, ok := d.pending[id]
+	if !ok {
 		return false
 	}
+	t.Stop()
 	delete(d.pending, id)
 	d.expiring[id] = struct{}{}
 	return true

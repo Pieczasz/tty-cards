@@ -56,12 +56,14 @@ func setupTestEnvironment(t *testing.T) testEnv {
 
 	deps := Deps{
 		Config: &config.Config{
-			ServerPort:         listener.Addr().(*net.TCPAddr).Port,
-			SSHKeyPath:         t.TempDir() + "/id_ed25519",
-			RateLimitCount:     5,
-			RateLimitWindow:    time.Second,
-			RegistrationLimit:  5,
-			RegistrationWindow: time.Hour,
+			ServerPort:              listener.Addr().(*net.TCPAddr).Port,
+			SSHKeyPath:              t.TempDir() + "/id_ed25519",
+			RateLimitCount:          5,
+			RateLimitWindow:         time.Second,
+			RegistrationLimit:       5,
+			RegistrationWindow:      time.Hour,
+			RegistrationLimitWide:   5,
+			RegistrationGlobalLimit: 5,
 		},
 		Auth:         userRepo,
 		Profiles:     userRepo,
@@ -125,7 +127,7 @@ func TestServer_NewUserConnection(t *testing.T) {
 	require.NoError(t, err)
 
 	var user *db.User
-	var key *db.PublicKey
+	var key *db.PublicSSHKey
 	require.Eventually(t, func() bool {
 		user, key, _ = env.userRepo.LoadUserByFingerprint(t.Context(), gossh.FingerprintSHA256(signer.PublicKey()))
 		return user != nil

@@ -108,6 +108,12 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 		{name: "the last seconds of your own turn tick in tenths", remaining: 2 * time.Second, onTurn: true, want: tenthTickInterval},
 		{name: "whole seconds tick once a second", remaining: 30 * time.Second, onTurn: true, want: time.Second},
 		{name: "somebody else's last seconds tick once a second", remaining: 2 * time.Second, want: time.Second},
+		// Three seats in four watch a clock that is not theirs; while it has time left it
+		// reads in steps of five, so they re-render when the step changes, not each second.
+		{name: "somebody else's clock ticks when its step changes", remaining: 30 * time.Second, want: 5 * time.Second},
+		{name: "part way through a step", remaining: 28300 * time.Millisecond, want: 3300 * time.Millisecond},
+		{name: "the step ends where the last seconds begin", remaining: 12 * time.Second, want: 2 * time.Second},
+		{name: "somebody else's last ten seconds tick once a second", remaining: 10 * time.Second, want: time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,4 +132,21 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 
 func testTheme() styles.Theme {
 	return styles.NewTheme(true)
+}
+
+// The clock on somebody else's seat reads in steps of five until its last ten
+// seconds, rounded up like every clock here so it never claims less time than is left.
+func TestFormatTurnClock_SomebodyElsesClockReadsInSteps(t *testing.T) {
+	t.Parallel()
+	for remaining, want := range map[time.Duration]string{
+		30 * time.Second:         "0:30",
+		28300 * time.Millisecond: "0:30",
+		25 * time.Second:         "0:25",
+		12 * time.Second:         "0:15",
+		10 * time.Second:         "0:10",
+		7 * time.Second:          "0:07",
+		90 * time.Second:         "1:30",
+	} {
+		assert.Equal(t, want, formatTurnClock(remaining, false), "%v", remaining)
+	}
 }

@@ -5,16 +5,15 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
-
-	"uuid"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
-	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -178,6 +177,38 @@ func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
 	ran := false
 	assert.False(t, tracker.ReleaseWith(user, gen, func() { ran = true }), "a stale generation freed the slot")
 	assert.False(t, ran, "and ran its teardown against the live session's seat")
+}
+
+// Count is what the public stats API reads on every poll. ReleaseWith holds the
+// tracker lock across a teardown that goes all the way down to a table's engine, so
+// a Count that took that lock left /v1/stats waiting on the slowest disconnect.
+func TestSessionTracker_CountDoesNotWaitForATeardown(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(0)
+	gen, err := tracker.Connect(testutil.UID(31), nil)
+	require.NoError(t, err)
+	_, err = tracker.Connect(testutil.UID(32), nil)
+	require.NoError(t, err)
+
+	inTeardown, finish := make(chan struct{}), make(chan struct{})
+	released := make(chan struct{})
+	go func() {
+		tracker.ReleaseWith(testutil.UID(31), gen, func() { close(inTeardown); <-finish })
+		close(released)
+	}()
+	<-inTeardown
+
+	counted := make(chan int, 1)
+	go func() { counted <- tracker.Count() }()
+	select {
+	case n := <-counted:
+		assert.Equal(t, 2, n, "the slot being torn down is still held until the teardown ends")
+	case <-time.After(time.Second):
+		t.Fatal("Count waited for the teardown holding the tracker lock")
+	}
+	close(finish)
+	<-released
+	assert.Equal(t, 1, tracker.Count())
 }
 
 // panicModel panics from whichever method the test asks for.

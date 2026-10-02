@@ -41,17 +41,27 @@ import (
 // ctxKey namespaces ssh.Context values to avoid collision with other middleware.
 type ctxKey int
 
-// ctxKeyChannelCount is the only thing that belongs on the ssh.Context: charm ssh
-// hands one Context per TCP connection to every channel opened on it, which is
-// exactly the scope a per-connection counter wants. Everything else a session needs
-// lives in sessionState, keyed by the session itself.
-const ctxKeyChannelCount ctxKey = iota
+// Only per-connection facts belong on the ssh.Context: charm ssh hands one Context
+// per TCP connection to every channel opened on it (and to its auth callbacks).
+// Everything a session needs lives in sessionState, keyed by the session itself.
+const (
+	ctxKeyChannelCount ctxKey = iota
+	// ctxKeyAuthRefused marks a connection already counted as refused at auth.
+	ctxKeyAuthRefused
+)
 
 const (
-	handshakeTimeout  = 20 * time.Second
-	connIdleTimeout   = 30 * time.Minute
-	maxTerminalWidth  = 2000
-	maxTerminalHeight = 600
+	handshakeTimeout = 20 * time.Second
+	connIdleTimeout  = 30 * time.Minute
+	// sessionFPS caps each session's renderer ticks. bubbletea's default is 60, and
+	// every tick compares the whole frame with the last one even when nothing
+	// changed, so an idle session costs in proportion to fps x terminal cells. A card
+	// table changes at human speed; 20 adds at most 50ms to a redraw. Measured with
+	// cmd/loadtest, 1000 sessions (400 playing, 600 browsing at 120x40) on compose's
+	// 3 cores: at 60, CPU p95 310% and 125 sessions lost; at 20, p95 174%, none lost,
+	// p95 move round-trip 60ms. 10 was measured too, and rejected: 8% less CPU for a
+	// median move round-trip of 60ms instead of 31ms.
+	sessionFPS = 20
 	// maxSessionsPerConnection bounds concurrent session channels on one connection.
 	// Every channel loads the user with three preloads against a small connection
 	// pool, so an unbounded client could exhaust the database from a single TCP
@@ -75,6 +85,18 @@ type sessionState struct {
 	model    router.Closer
 	gen      uint64
 	panicked bool
+	// outcome is set by a refusal; finishSession falls back to how the session ended.
+	outcome string
+	input   *inputGuard
+	size    sessionSize
+	// program is set before the program runs, for the retier sweep to nudge.
+	program atomic.Pointer[tea.Program]
+}
+
+// filter is the session's bubbletea message filter: the input guard's bookkeeping and
+// rules, then the terminal size budget.
+func (st *sessionState) filter(m tea.Model, msg tea.Msg) tea.Msg {
+	return st.size.filter(st.input.filter(m, msg))
 }
 
 // sessionRegistry maps a live ssh.Session to its state. sessionLifecycle creates the
@@ -83,6 +105,7 @@ type sessionState struct {
 // in one process (every test that starts one) cannot see each other's sessions.
 type sessionRegistry struct {
 	states sync.Map
+	sizes  sizeBudget
 }
 
 func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
@@ -122,6 +145,10 @@ var ErrNoTracker = errors.New("ssh server needs a session tracker")
 // NewServer builds the ssh server, creating its host key on first run. The caller
 // owns the listener and calls Serve on it.
 func NewServer(deps Deps) (*ssh.Server, error) {
+	return newServer(deps, newSessionRegistry(cellBudget, extraCellBudget))
+}
+
+func newServer(deps Deps, reg *sessionRegistry) (*ssh.Server, error) {
 	if deps.Tracker == nil {
 		return nil, ErrNoTracker
 	}
@@ -139,13 +166,12 @@ func NewServer(deps Deps) (*ssh.Server, error) {
 		return nil, err
 	}
 
-	reg := &sessionRegistry{}
 	rateLimiter := ratelimit.New(deps.Config.RateLimitCount, deps.Config.RateLimitWindow)
 	// Registration gets its own, far tighter budget than authentication. The auth
 	// limiter is sized so an ssh-agent offering every key it holds still gets in;
 	// minting an account is nothing like that, and each one is a permanent users row
 	// plus a session slot, so a stranger must not be able to do it in a loop.
-	registerLimiter := ratelimit.New(deps.Config.RegistrationLimit, deps.Config.RegistrationWindow)
+	registerBudget := newRegistrationBudget(deps.Config)
 
 	// No wish.WithAddress: cmd/server builds the listener itself (LimitListener, and
 	// PROXY protocol in front of it) and calls Serve on it, so an address here is
@@ -153,16 +179,14 @@ func NewServer(deps Deps) (*ssh.Server, error) {
 	server, err := wish.NewServer(
 		wish.WithHostKeyPEM(key.RawPrivateKey()),
 		wish.WithIdleTimeout(connIdleTimeout),
-		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter, func(_ ssh.Context, _ ssh.PublicKey) bool {
-			return true
-		})),
-		boundedPty(),
+		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter, ratelimit.New(1, authRefusalLogEvery),
+			func(_ ssh.Context, _ ssh.PublicKey) bool { return true })),
 		// wish runs the last middleware first, so this slice is in reverse execution
 		// order. Connect/disconnect logging is sessionLifecycle's job rather than
 		// wish's logging middleware: that one writes through the charm logger, which
 		// bypasses slog and so never reaches the OTLP handler.
 		wish.WithMiddleware(
-			bm.MiddlewareWithProgramHandler(sessionProgram(deps, reg, registerLimiter)),
+			bm.MiddlewareWithProgramHandler(sessionProgram(deps, reg, registerBudget)),
 			activeterm.Middleware(),
 			sessionLifecycle(deps, reg),
 		),
@@ -192,11 +216,11 @@ func ensureHostKeyPermissions(path string) error {
 	return nil
 }
 
-// netKeyFor is the limiter key for a remote address: the /64 for IPv6, the address
-// itself for IPv4. An address that will not split cannot be keyed on - "host:port"
-// gives every attempt its own bucket, which silently disables the limit - so callers
-// get ok=false and must refuse rather than admit an unlimited client.
-func netKeyFor(addr net.Addr) (string, bool) {
+// clientHost is the host part of a remote address, for the limiter keys. An address
+// that will not split cannot be keyed on - "host:port" gives every attempt its own
+// bucket, which silently disables the limit - so callers get ok=false and must refuse
+// rather than admit an unlimited client.
+func clientHost(addr net.Addr) (string, bool) {
 	if addr == nil {
 		return "", false
 	}
@@ -204,22 +228,35 @@ func netKeyFor(addr net.Addr) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return ratelimit.NetKey(host), true
+	return host, true
 }
 
-func rateLimitAuth(limiter *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
+// authRefusalLogEvery is how often one /48's throttled attempts reach the log at
+// warn. Each offered key is an attempt, so a flood was a warn line per key, each with
+// an address, in a store kept 14 days; the rest go to debug and the counter.
+const authRefusalLogEvery = time.Minute
+
+func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
 	return func(ctx ssh.Context, key ssh.PublicKey) bool {
-		host, ok := netKeyFor(ctx.RemoteAddr())
+		host, ok := clientHost(ctx.RemoteAddr())
 		if !ok {
-			observability.SSHSession(ctx, "rejected_ratelimit")
-			slog.WarnContext(ctx, "refusing ssh connection with an unkeyable remote address",
-				"remote_addr", addrString(ctx.RemoteAddr()))
+			if firstAuthRefusal(ctx) {
+				observability.SSHAuthReject(ctx, "unkeyable")
+				slog.WarnContext(ctx, "refusing ssh connection with an unkeyable remote address",
+					"remote_addr", addrString(ctx.RemoteAddr()))
+			}
 			return false
 		}
-		if !limiter.Allow(host) {
+		if !limiter.Allow(ratelimit.NetKey(host)) {
 			observability.RateLimitReject(ctx, "ssh")
-			observability.SSHSession(ctx, "rejected_ratelimit")
-			slog.WarnContext(ctx, "rate limited ssh connection",
+			if firstAuthRefusal(ctx) {
+				observability.SSHAuthReject(ctx, "ratelimit")
+			}
+			level := slog.LevelDebug
+			if warned.Allow(ratelimit.WideKey(host)) {
+				level = slog.LevelWarn
+			}
+			slog.Log(ctx, level, "rate limited ssh connection",
 				"remote_addr", addrString(ctx.RemoteAddr()), "session_id", ctx.SessionID())
 			return false
 		}
@@ -227,11 +264,15 @@ func rateLimitAuth(limiter *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) 
 	}
 }
 
-func (reg *sessionRegistry) sessionTraceContext(s ssh.Session) context.Context {
-	if st, ok := reg.load(s); ok && st.traceCtx != nil {
-		return st.traceCtx
+// firstAuthRefusal reports whether this is the connection's first refused auth
+// attempt: an ssh-agent offers every key it holds, each a call of its own, and the
+// counter is for connections. One connection's auth callbacks run one at a time.
+func firstAuthRefusal(ctx ssh.Context) bool {
+	if ctx.Value(ctxKeyAuthRefused) != nil {
+		return false
 	}
-	return s.Context()
+	ctx.SetValue(ctxKeyAuthRefused, true)
+	return true
 }
 
 // failSessionf reports a refusal on the session span as well as to the client, so a
@@ -239,6 +280,7 @@ func (reg *sessionRegistry) sessionTraceContext(s ssh.Session) context.Context {
 func (reg *sessionRegistry) failSessionf(s ssh.Session, outcome string, err error, format string, args ...any) {
 	var ctx context.Context = s.Context()
 	if st, ok := reg.load(s); ok {
+		st.outcome = outcome
 		if st.traceCtx != nil {
 			ctx = st.traceCtx
 		}
@@ -252,24 +294,34 @@ func (reg *sessionRegistry) failSessionf(s ssh.Session, outcome string, err erro
 }
 
 func sessionModel(
-	deps Deps, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindow,
+	deps Deps, reg *sessionRegistry, registerBudget registrationBudget,
 ) func(ssh.Session) tea.Model {
 	return func(s ssh.Session) tea.Model {
-		traceCtx := reg.sessionTraceContext(s)
+		// Checked first: a session with no state has no teardown to release what it
+		// claims, and must not register an account on its way to being refused.
+		st, ok := reg.load(s)
+		if !ok {
+			err := errors.New("session state missing before the model was installed")
+			slog.ErrorContext(s.Context(), "refusing a session whose state was already torn down",
+				"error", err, "remote_addr", addrString(s.RemoteAddr()))
+			reg.failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
+			return nil
+		}
+		traceCtx := st.traceCtx
 		fingerprint, err := SessionFingerprint(s)
 		if err != nil {
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
 		}
 		user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
-			func() bool { return allowRegistration(traceCtx, registerLimiter, s) })
+			func() bool { return allowRegistration(traceCtx, registerBudget, s) })
 		if err != nil {
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
 		}
-		// Built before the slot is claimed: a panic in here, or a session whose state
-		// has already been torn down, would otherwise strand a tracker slot that
-		// nothing releases - and that account cannot connect again until a restart.
+		// Built before the slot is claimed: a panic in here would otherwise strand a
+		// tracker slot that nothing releases - and that account cannot connect again
+		// until a restart.
 		model := tui.New(tui.Deps{
 			SessionCtx:   traceCtx,
 			User:         *user,
@@ -278,29 +330,14 @@ func sessionModel(
 			LobbyManager: deps.LobbyManager,
 			GameRegistry: deps.GameRegistry,
 		})
-		st, ok := reg.load(s)
-		if !ok {
-			err := errors.New("session state missing before the model was installed")
-			slog.ErrorContext(traceCtx, "refusing a session whose state was already torn down",
-				"error", err, "remote_addr", addrString(s.RemoteAddr()))
-			model.Close()
-			reg.failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
-			return nil
-		}
-
 		// The connection, not the session: closing a channel leaves the socket and any
 		// other channel on it up until the peer notices.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
 		gen, err := deps.Tracker.Connect(user.ID, conn)
-		switch {
-		case errors.Is(err, ErrServerFull):
+		if err != nil { // ErrServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
 				"The server is full right now - please try again in a few minutes.\n")
-			return nil
-		case err != nil:
-			model.Close()
-			reg.failSessionf(s, "rejected", err, "%v\n", err)
 			return nil
 		}
 		observability.SSHSession(traceCtx, "accepted")
@@ -377,43 +414,71 @@ func notifySessionPanic(s ssh.Session) {
 	}
 }
 
-func boundedPty() ssh.Option {
-	return func(srv *ssh.Server) error {
-		srv.PtyCallback = func(_ ssh.Context, req ssh.Pty) bool {
-			return req.Window.Width <= maxTerminalWidth && req.Window.Height <= maxTerminalHeight
-		}
-		return nil
-	}
-}
-
 func sessionProgram(
-	deps Deps, reg *sessionRegistry, registerLimiter *ratelimit.SlidingWindow,
+	deps Deps, reg *sessionRegistry, registerBudget registrationBudget,
 ) bm.ProgramHandler {
-	newModel := sessionModel(deps, reg, registerLimiter)
+	newModel := sessionModel(deps, reg, registerBudget)
 	return func(s ssh.Session) *tea.Program {
 		model := newModel(s)
 		if model == nil {
 			return nil
 		}
-		return tea.NewProgram(model, append(bm.MakeOptions(s), tea.WithFilter(filterSessionMsg))...)
+		st, _ := reg.load(s) // sessionModel refuses a session without state
+		// The session is the input only because charm ssh emulates the pty: an
+		// allocated one would make MakeOptions read from its slave instead.
+		st.input = newInputGuard(s, func() {
+			slog.WarnContext(st.traceCtx, "closing ssh session: input over budget",
+				"client_net", clientNet(s.RemoteAddr()))
+			if w := s.Stderr(); w != nil {
+				_, _ = io.WriteString(w, inputLimitNotice)
+			}
+		})
+		pty, _, _ := s.Pty()
+		// The renderer sizes its cell buffers from this and never passes it through
+		// the filter, so it is granted here as well as there.
+		size, moved := st.size.start(&reg.sizes, termSize{pty.Window.Width, pty.Window.Height})
+		program := tea.NewProgram(model, append(bm.MakeOptions(s),
+			tea.WithInput(st.input),
+			tea.WithWindowSize(size.w, size.h),
+			tea.WithFPS(sessionFPS),
+			tea.WithFilter(st.filter))...)
+		st.program.Store(program)
+		if moved {
+			go reg.retier()
+		}
+		return program
 	}
 }
 
 // filterSessionMsg makes bubbletea's messages safe for a remote terminal. A suspend
 // sends SIGTSTP to the server's own process group, stopping every player's session
-// on a machine nobody is at to resume it, so it is answered as if already resumed. A
-// resize is clamped to what boundedPty accepts at pty-req, which a window-change
-// request after it is not held to.
+// on a machine nobody is at to resume it, so it is answered as if already resumed.
+// A resize is sessionSize.filter's.
 func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
-	switch msg := msg.(type) {
-	case tea.SuspendMsg:
+	if _, ok := msg.(tea.SuspendMsg); ok {
 		return tea.ResumeMsg{}
-	case tea.WindowSizeMsg:
-		msg.Width = min(msg.Width, maxTerminalWidth)
-		msg.Height = min(msg.Height, maxTerminalHeight)
-		return msg
 	}
 	return msg
+}
+
+// retier nudges every session the tier now sizes differently to take its new size.
+// It runs on a goroutine of its own, once per tier change: each Send waits for that
+// session's event loop, and a session's start or end must not wait for all of them.
+// Overlapping sweeps are harmless, as each nudge is granted against the tier as it
+// is when the session reads it.
+func (reg *sessionRegistry) retier() {
+	tier := sizeTiers[reg.sizes.tier.Load()]
+	slog.Info("terminal size tier changed", "tier_width", tier.w, "tier_height", tier.h)
+	reg.states.Range(func(_, v any) bool {
+		st, _ := v.(*sessionState)
+		// A program is stored only once its size has started. Send returns when the
+		// program ends: wish runs every program activeterm lets through, and a run
+		// cancels the program's context however it ends.
+		if p := st.program.Load(); p != nil && st.size.stale() {
+			p.Send(retierMsg{})
+		}
+		return true
+	})
 }
 
 // limitSessionChannels enforces the per-connection channel cap where the channel is
@@ -457,7 +522,7 @@ type envCappedChannel struct {
 func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
 	ch, reqs, err := c.NewChannel.Accept()
 	if err != nil {
-		return ch, reqs, fmt.Errorf("accept session channel: %w", err)
+		return nil, nil, fmt.Errorf("accept session channel: %w", err)
 	}
 	out := make(chan *gossh.Request)
 	go func() {
@@ -486,6 +551,7 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			defer reg.recoverSession(s)
 			defer reg.releaseSession(s, deps)
 			defer reg.closeSessionModel(s)
+			defer reg.leaveSizes(s)
 
 			sh(s)
 		}
@@ -494,7 +560,7 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 
 func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
 	pty, _, _ := s.Pty()
-	tracer := otel.Tracer("terminal-card/ssh")
+	tracer := otel.Tracer("tty-cards/ssh")
 	//nolint:spancheck // the span outlives this function: finishSession ends it as the last deferred step
 	ctx, span := tracer.Start(s.Context(), "ssh.session",
 		trace.WithAttributes(
@@ -519,9 +585,14 @@ func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
 func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
 	defer reg.delete(s)
 
-	outcome := "normal"
-	if st.panicked {
+	outcome := st.outcome
+	switch {
+	case st.panicked:
 		outcome = "panic"
+	case st.input != nil && st.input.tripped.Load():
+		outcome = "input_limit"
+	case outcome == "":
+		outcome = "normal"
 	}
 	elapsed := time.Since(st.started)
 
@@ -571,6 +642,18 @@ func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
 	)
 }
 
+// leaveSizes gives the session's cells back. It runs after the program has ended, so
+// held is no longer the event loop's.
+func (reg *sessionRegistry) leaveSizes(s ssh.Session) {
+	st, ok := reg.load(s)
+	if !ok || st.program.Load() == nil {
+		return
+	}
+	if st.size.budget.leave(st.size.held) {
+		go reg.retier()
+	}
+}
+
 func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
 	if st, ok := reg.load(s); ok && st.model != nil {
 		st.model.Close()
@@ -594,18 +677,49 @@ func (reg *sessionRegistry) releaseSession(s ssh.Session, deps Deps) {
 	})
 }
 
+// registrationBudget is what a new account spends, narrowest first: its /64, its /48
+// (a free tunnel is 65,536 /64s) and the server as a whole, for an attacker with more
+// networks than any per-network budget can see. Returning players spend none of it.
+type registrationBudget struct {
+	net, wide, global *ratelimit.SlidingWindow
+}
+
+func newRegistrationBudget(cfg *config.Config) registrationBudget {
+	return registrationBudget{
+		net:    ratelimit.New(cfg.RegistrationLimit, cfg.RegistrationWindow),
+		wide:   ratelimit.New(cfg.RegistrationLimitWide, cfg.RegistrationWindow),
+		global: ratelimit.New(cfg.RegistrationGlobalLimit, cfg.RegistrationWindow),
+	}
+}
+
 // allowRegistration answers whether this network may mint another account. An
 // address that cannot be keyed is refused: registration is the one path where
 // admitting an unmeterable client is worse than turning a real player away.
-func allowRegistration(
-	ctx context.Context, limiter *ratelimit.SlidingWindow, s ssh.Session,
-) bool {
-	key, ok := netKeyFor(s.RemoteAddr())
+func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Session) bool {
+	host, ok := clientHost(s.RemoteAddr())
 	if !ok {
 		return false
 	}
-	if !limiter.Allow(key) {
-		observability.RateLimitReject(ctx, "ssh_register")
+	spends := []struct {
+		limiter *ratelimit.SlidingWindow
+		key     string
+		name    string
+	}{
+		{budget.net, ratelimit.NetKey(host), "ssh_register"},
+		{budget.wide, ratelimit.WideKey(host), "ssh_register_wide"},
+		{budget.global, "", "ssh_register_global"},
+	}
+	for i, spend := range spends {
+		if spend.limiter.Allow(spend.key) {
+			continue
+		}
+		// Refused, so the account is never made: the narrower budgets get back what
+		// they just admitted, or a flood filling the global ceiling would also lock
+		// every real player who retried out of their own network's budget.
+		for _, admitted := range spends[:i] {
+			admitted.limiter.Refund(admitted.key)
+		}
+		observability.RateLimitReject(ctx, spend.name)
 		return false
 	}
 	return true
@@ -617,8 +731,8 @@ func allowRegistration(
 // a store with a retention policy. Warn-level refusals keep the full address; those
 // are the events an operator investigates.
 func clientNet(addr net.Addr) string {
-	if key, ok := netKeyFor(addr); ok {
-		return key
+	if host, ok := clientHost(addr); ok {
+		return ratelimit.NetKey(host)
 	}
 	return "unknown"
 }

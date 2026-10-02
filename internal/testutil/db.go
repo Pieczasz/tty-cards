@@ -130,10 +130,13 @@ func PostgresDSN(t *testing.T) string {
 		tcpostgres.WithDatabase("test"),
 		tcpostgres.WithUsername("user"),
 		tcpostgres.WithPassword("password"),
+		// The log line can precede the host port mapping under load, and then
+		// ConnectionString fails with "port not found".
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
 				WithStartupTimeout(time.Second*60),
+			wait.ForListeningPort("5432/tcp").WithStartupTimeout(time.Second*60),
 		),
 	)
 	requireContainer(t, err)

@@ -63,7 +63,7 @@ func viewAt(width, height int, opponents ...string) *model {
 		},
 		currentColor: logic.ColorRed,
 		direction:    1,
-		color:        colorPicker,
+		Picker:       colorPicker,
 	}
 }
 
@@ -85,7 +85,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				m := viewAt(size.Width, size.Height, opponents...)
 
 				for _, picking := range []bool{false, true} {
-					m.color.Open = picking
+					m.Picker.Open = picking
 					out := m.View().Content
 					assert.LessOrEqual(t, lg.Width(out), size.Width, "picker=%v overran the width", picking)
 					assert.LessOrEqual(t, lg.Height(out), size.Height, "picker=%v overran the height", picking)
@@ -139,7 +139,7 @@ func TestRenderHandColorRow_DropsTheSelectionBehindThePicker(t *testing.T) {
 	m.Selected = 4
 	handWidth, handRows := gameview.HandWidth(120), gameview.HandRows(50)
 
-	m.color.Open = true
+	m.Picker.Open = true
 	withPicker := m.renderHandColorRow(handWidth, handRows)
 	unselected := gameview.RenderHand(m.Global.Theme, m.Base.Hand, -1, nil, handWidth, handRows)
 
@@ -214,10 +214,10 @@ func TestRenderColorPicker_OffersEveryColour(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 50, "bob")
-	assert.Empty(t, m.color.Render(m.Global.Theme), "closed, the picker draws nothing")
+	assert.Empty(t, m.Picker.Render(m.Global.Theme), "closed, the picker draws nothing")
 
-	m.color.Open = true
-	out := m.color.Render(m.Global.Theme)
+	m.Picker.Open = true
+	out := m.Picker.Render(m.Global.Theme)
 	for _, c := range colorPicker.Choices {
 		assert.Contains(t, out, c.Label)
 	}

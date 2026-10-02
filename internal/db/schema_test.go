@@ -23,7 +23,7 @@ func TestSchemaNullabilityMatchesStructs(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
 
-	models := []any{&db.User{}, &db.PublicKey{}, &db.Game{}, &db.Ranking{}, &db.Match{}, &db.MatchParticipant{}}
+	models := []any{&db.User{}, &db.PublicSSHKey{}, &db.Game{}, &db.Ranking{}, &db.Match{}, &db.MatchParticipant{}}
 	checked := 0
 	for _, model := range models {
 		table, columns := scalarColumns(t, database, model)

@@ -2,6 +2,7 @@ package gameview
 
 import (
 	"image/color"
+	"slices"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
@@ -49,6 +50,16 @@ func (p *ChoicePicker) Pick() (deck.Suit, bool) {
 	}
 	p.Open = false
 	return p.Choices[p.Cursor].Suit, true
+}
+
+// Lookup is the choice that stands for suit, so the table can name a suit in play the
+// way the picker offered it.
+func (p *ChoicePicker) Lookup(suit deck.Suit) (Choice, bool) {
+	i := slices.IndexFunc(p.Choices, func(c Choice) bool { return c.Suit == suit })
+	if i < 0 {
+		return Choice{}, false
+	}
+	return p.Choices[i], true
 }
 
 // Render draws the open picker, or nothing while it is closed.

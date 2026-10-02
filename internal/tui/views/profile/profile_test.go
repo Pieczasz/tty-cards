@@ -678,7 +678,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil)
-	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.All[0].Name))
+	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.Games[0].Name))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 
@@ -727,4 +727,39 @@ func TestRenderConfirm_KeepsThePromptAtTheMinimumSize(t *testing.T) {
 	assert.Contains(t, out, "esc to cancel", "so must the way out")
 	assert.Contains(t, out, "> ", "and the line being typed into")
 	assert.Contains(t, out, db.AnonymisedUsername(testutil.UID(99)), "and the name that replaces theirs")
+}
+
+// A narrow but tall terminal cannot hold the two tables side by side, and has the
+// height to stack both rather than dropping the rankings.
+func TestRenderContent_StacksBothTablesOnANarrowTallTerminal(t *testing.T) {
+	t.Parallel()
+	m := loaded(t, profileLoadedMsg{user: alice()})
+	m.global.Width, m.global.Height = styles.MinWidth, 50
+
+	out := tuitest.StripANSI(m.View().Content)
+
+	rankings, history := strings.Index(out, "1600"), strings.Index(out, "Place")
+	require.NotEqual(t, -1, rankings, "the rankings are still on screen")
+	require.NotEqual(t, -1, history, "and so is the match history")
+	assert.Less(t, rankings, history, "the rankings sit above the history")
+	assert.LessOrEqual(t, lg.Width(out), m.global.Width)
+}
+
+func TestView_SaysItIsLoadingUntilTheProfileArrives(t *testing.T) {
+	t.Parallel()
+	m := New(router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40})
+
+	assert.Contains(t, m.View().Content, "Loading profile...")
+}
+
+// A session whose user is not known yet has no account to erase.
+func TestUpdate_DeleteNeedsASignedInUser(t *testing.T) {
+	t.Parallel()
+	m := loaded(t, profileLoadedMsg{user: alice()})
+	m.global.User = nil
+
+	_, cmd := m.Update(tuitest.Key("x"))
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, deleteIdle, m.phase)
 }

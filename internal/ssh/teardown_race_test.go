@@ -8,7 +8,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
-	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,7 @@ import (
 func startedTable(t *testing.T, manager *lobby.Manager, host, guest *game.Player) *lobby.Lobby {
 	t.Helper()
 	registry := catalog.NewRegistry()
-	table, err := manager.CreateLobby(host, lobby.WithCardGame(catalog.All[0].Name), lobby.WithMaxPlayers(2))
+	table, err := manager.CreateLobby(host, lobby.WithCardGame(catalog.Games[0].Name), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
 	_, err = manager.JoinLobbyByCode(table.Code(), guest)
 	require.NoError(t, err)
@@ -57,7 +56,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		fresh := &stubSession{addr: stubAddr{"10.0.0.1:2"}, pubKey: testPublicKey(t)}
 		freshState := &sessionState{traceCtx: t.Context()}
 		reg.store(fresh, freshState)
-		newModel := sessionModel(deps, reg, ratelimit.New(100, 1))
+		newModel := sessionModel(deps, reg, testBudget(100, 100, 100))
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})
@@ -97,7 +96,7 @@ func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	reg := &sessionRegistry{}
 	reg.store(s, &sessionState{traceCtx: t.Context()})
 
-	model := sessionModel(deps, reg, ratelimit.New(100, 1))(s)
+	model := sessionModel(deps, reg, testBudget(100, 100, 100))(s)
 	require.Nil(t, model, "the full server admitted the session")
 
 	// BeginShutdown gives up every seat still on a grace timer.

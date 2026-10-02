@@ -32,7 +32,7 @@ func RenderBands(g router.GlobalContext, top, player, hints string, mid func(hei
 	botBand := renderBottomBand(g, player, hints)
 	midHeight := max(g.Height-lg.Height(topBand)-lg.Height(botBand), 0)
 
-	return styles.Clamp(g.Width, g.Height, lg.JoinVertical(lg.Left,
+	return styles.Clamp(g.Width, g.Height, styles.JoinVertical(lg.Left,
 		styles.PadCenter(g.Width, topBand),
 		styles.Clamp(g.Width, midHeight, mid(midHeight)),
 		styles.PadCenter(g.Width, botBand),
@@ -46,7 +46,7 @@ func renderTopBand(g router.GlobalContext, top string) string {
 	if isSuperCompact(g.Width, g.Height) {
 		return styles.Clamp(g.Width, 0, top)
 	}
-	return styles.Clamp(g.Width, 0, lg.NewStyle().MarginTop(1).Render(top))
+	return styles.Clamp(g.Width, 0, styles.MarginTop(1, top))
 }
 
 // The key hints survive every size. A small terminal loses the margins around them,
@@ -61,10 +61,10 @@ func renderBottomBand(g router.GlobalContext, player, hints string) string {
 
 	var band string
 	if IsCompact(g.Width, g.Height) {
-		band = lg.JoinVertical(lg.Center, player, hintLine)
+		band = styles.JoinVertical(lg.Center, player, hintLine)
 	} else {
 		band = lg.NewStyle().MarginBottom(1).Render(
-			lg.JoinVertical(lg.Center, player, lg.NewStyle().MarginTop(1).Render(hintLine)),
+			styles.JoinVertical(lg.Center, player, styles.MarginTop(1, hintLine)),
 		)
 	}
 	return styles.Clamp(g.Width, 0, band)
@@ -78,7 +78,7 @@ func RenderTableRow(width, height int, left, center, right string) string {
 	side := min(max(lg.Width(left), lg.Width(right)), width/3)
 	centerWidth := max(width-2*side, 0)
 
-	return lg.JoinHorizontal(lg.Top,
+	return styles.JoinHorizontal(lg.Top,
 		styles.Place(side, height, lg.Left, lg.Center, styles.Clamp(side, height, left)),
 		styles.Place(centerWidth, height, lg.Center, lg.Center, styles.Clamp(centerWidth, height, center)),
 		styles.Place(side, height, lg.Right, lg.Center, styles.Clamp(side, height, right)),

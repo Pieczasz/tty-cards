@@ -140,8 +140,8 @@ func TestBoardAndHolePlaceholdersMatchCardFootprint(t *testing.T) {
 	t.Parallel()
 	th := styles.NewTheme(true)
 	card := components.RenderCard(th, deck.Card{Rank: deck.Ace, Suit: deck.Spades}, false)
-	empty := renderEmptySlot(th)
-	back := renderFacedownCard(th)
+	empty := components.EmptyCardSlot(th)
+	back := components.FaceDownCard(th)
 
 	assert.Equal(t, lg.Width(card), lg.Width(empty), "board placeholder width")
 	assert.Equal(t, lg.Height(card), lg.Height(empty), "board placeholder height")
@@ -278,9 +278,9 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		t.Parallel()
 		m := tableOf(120, 50, 3)
 		bar := m.renderActionBar()
-		assert.Contains(t, bar, "f fold")
-		assert.Contains(t, bar, "c call 50")
-		assert.NotContains(t, bar, "c check")
+		assert.Contains(t, bar, "f: fold")
+		assert.Contains(t, bar, "c: call 50")
+		assert.NotContains(t, bar, "c: check")
 	})
 
 	t.Run("checked to", func(t *testing.T) {
@@ -288,9 +288,9 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		m := tableOf(120, 50, 3)
 		m.toCall, m.currentBet = 0, 0
 		bar := m.renderActionBar()
-		assert.Contains(t, bar, "c check")
-		assert.Contains(t, bar, "r raise")
-		assert.Contains(t, bar, "a all-in")
+		assert.Contains(t, bar, "c: check")
+		assert.Contains(t, bar, "r: raise")
+		assert.Contains(t, bar, "a: all-in")
 	})
 
 	t.Run("off turn", func(t *testing.T) {
@@ -306,8 +306,8 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		m.seats[0].Chips, m.seats[0].Bet = 0, 0
 		m.raiseOK = false // what logic.RaiseBounds reports for an empty stack
 		bar := m.renderActionBar()
-		assert.NotContains(t, bar, "r raise")
-		assert.NotContains(t, bar, "a all-in")
+		assert.NotContains(t, bar, "r: raise")
+		assert.NotContains(t, bar, "a: all-in")
 	})
 
 	t.Run("the hand is over", func(t *testing.T) {
@@ -331,7 +331,7 @@ func TestRenderRaisePrompt_ShowsTheAmountItsBoundsAndTheRack(t *testing.T) {
 	out := m.renderActionBar()
 	assert.Contains(t, out, "RAISE TO 250")
 	assert.Contains(t, out, "min 100")
-	assert.Contains(t, out, "enter confirm")
+	assert.Contains(t, out, "enter: confirm")
 	for _, d := range chipDenoms {
 		assert.Contains(t, out, d.Glyph, "the rack doubles as the legend for the seat stacks")
 	}

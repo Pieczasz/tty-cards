@@ -64,7 +64,7 @@ func RenderOpponentTop(t styles.Theme, base BaseState, width int, compact bool) 
 	}
 	// Names are not budgeted the way the art is - a seat is drawn as wide as its
 	// player named themselves - so the row is cut to the width it was given.
-	return styles.Clamp(width, 0, lg.JoinHorizontal(lg.Bottom, parts...))
+	return styles.Clamp(width, 0, styles.JoinHorizontal(lg.Bottom, parts...))
 }
 
 // RenderOpponentSides fits each side stack into height rows, which is the middle band's
@@ -105,7 +105,7 @@ func renderOpponentStack(
 		// Two of the seat's rows go to its name and hand count.
 		parts = append(parts, renderOpponentSeat(t, base, o, orientation, budget-2, minimal))
 	}
-	return lg.JoinVertical(lg.Center, parts...)
+	return styles.JoinVertical(lg.Center, parts...)
 }
 
 // Smallest budget one card of art fits in. Below it the seat is drawn minimally: art cut

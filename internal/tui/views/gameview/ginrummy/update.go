@@ -46,7 +46,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.handComplete && !m.matchComplete {
+	if m.phase == logic.PhaseHandOver && !m.matchComplete {
 		if m.Base.MyTurn {
 			return m.submit(logic.ActionNextHand{})
 		}

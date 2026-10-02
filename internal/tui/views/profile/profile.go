@@ -8,15 +8,14 @@ import (
 	"log/slog"
 	"strconv"
 
+	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
-
-	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/tui/router"
-	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	"uuid"
 )
@@ -138,33 +137,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.historyErr = msg.historyErr
 		if msg.err != nil {
-			slog.Error("database error while loading user profile", "error", msg.err)
+			slog.ErrorContext(m.global.RequestContext(), "database error while loading user profile", "error", msg.err)
 		}
 		if msg.historyErr != nil {
-			slog.Error("database error while loading match history", "error", msg.historyErr)
+			slog.ErrorContext(m.global.RequestContext(), "database error while loading match history", "error", msg.historyErr)
 		}
 	case tea.KeyPressMsg:
-		switch m.phase {
-		case deleteConfirming:
-			return m.confirmKey(msg)
-		case deleteRunning, deleteDone:
-			return m, nil
-		case deleteIdle:
-		}
-		m.notice = ""
-		switch msg.String() {
-		case "x":
-			return m.openConfirm()
-		case "g":
-			m.gameFilterIdx = components.CycleIndex(m.gameFilterIdx, 1, len(m.gameFilters))
-			return m, nil
-		case "r":
-			m.resultIdx = components.CycleIndex(m.resultIdx, 1, len(m.resultFilters))
-			return m, nil
-		}
-		if cmd, ok := views.NavigateOn(msg.String()); ok {
-			return m, cmd
-		}
+		return m.handleKey(msg)
+	}
+	return m, nil
+}
+
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch m.phase {
+	case deleteConfirming:
+		return m.confirmKey(msg)
+	case deleteRunning, deleteDone:
+		return m, nil
+	case deleteIdle:
+	}
+	m.notice = ""
+	switch msg.String() {
+	case "x":
+		return m.openConfirm()
+	case "g":
+		m.gameFilterIdx = components.CycleIndex(m.gameFilterIdx, 1, len(m.gameFilters))
+	case "r":
+		m.resultIdx = components.CycleIndex(m.resultIdx, 1, len(m.resultFilters))
+	default:
+		cmd, _ := views.NavigateOn(msg.String())
+		return m, cmd
 	}
 	return m, nil
 }
@@ -207,24 +209,24 @@ func (m *model) renderContent(contentHeight int) string {
 	// the match history, which is what a player opens this screen for.
 	if stacked && contentHeight < twoTableMinHeight {
 		items := max(contentHeight-4, 1) // the two labels and the 2-line header
-		return lg.JoinVertical(lg.Left, userInfo, filters,
-			lg.JoinVertical(lg.Left, m.historyRows(items)...))
+		return styles.JoinVertical(lg.Left, userInfo, filters,
+			styles.JoinVertical(lg.Left, m.historyRows(items)...))
 	}
 
 	rankingsStyle := lg.NewStyle().Align(lg.Left).Width(rankingsTable.Width())
 	if !stacked {
 		rankingsStyle = rankingsStyle.MarginRight(tableGap)
 	}
-	rankingsCol := rankingsStyle.Render(lg.JoinVertical(lg.Left, m.rankingRows(rankItems)...))
+	rankingsCol := rankingsStyle.Render(styles.JoinVertical(lg.Left, m.rankingRows(rankItems)...))
 	historyCol := lg.NewStyle().Align(lg.Left).Width(historyTable.Width()).
-		Render(lg.JoinVertical(lg.Left, m.historyRows(histItems)...))
+		Render(styles.JoinVertical(lg.Left, m.historyRows(histItems)...))
 
-	tables := lg.JoinHorizontal(lg.Top, rankingsCol, historyCol)
+	tables := styles.JoinHorizontal(lg.Top, rankingsCol, historyCol)
 	if stacked {
-		tables = lg.JoinVertical(lg.Left, rankingsCol, "", historyCol)
+		tables = styles.JoinVertical(lg.Left, rankingsCol, "", historyCol)
 	}
 
-	return lg.JoinVertical(lg.Left, userInfo, "", filters, "", tables)
+	return styles.JoinVertical(lg.Left, userInfo, "", filters, "", tables)
 }
 
 // tableBudget decides whether the two tables sit side by side or stacked, and how many
@@ -410,7 +412,7 @@ func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		slog.Error("database error while deleting account", "error", msg.err)
+		slog.ErrorContext(m.global.RequestContext(), "database error while deleting account", "error", msg.err)
 		m.phase = deleteConfirming
 		m.typed = ""
 		m.notice = "Could not delete the account. Please try again."
@@ -444,5 +446,5 @@ func (m *model) renderConfirm() string {
 	if m.notice != "" {
 		lines = append(lines, m.global.Theme.ErrorText.Render(m.notice))
 	}
-	return lg.JoinVertical(lg.Left, lines...)
+	return styles.JoinVertical(lg.Left, lines...)
 }

@@ -312,6 +312,25 @@ func TestRenderScreen_ShowsLocalAndGlobalActions(t *testing.T) {
 
 // RenderCenteredLayout is what places the framed box on the screen. A zero size is
 // the window every session opens in, before the first WindowSizeMsg arrives.
+// A seated player's menus all lead back to their table, so their screen offers the
+// view's own keys and quit, and none of the global shortcuts.
+func TestRenderSeatedScreen_OffersOnlyLocalActionsAndQuit(t *testing.T) {
+	t.Parallel()
+
+	g := router.GlobalContext{Theme: styles.NewTheme(true), Width: 120, Height: 50}
+	out := views.RenderSeatedScreen(g, "Lobby", []string{"r - Ready"}, func(int) string { return "body" })
+
+	assert.Contains(t, out, "r - Ready")
+	assert.Contains(t, out, "body")
+	for _, action := range views.GlobalFooter {
+		if action == "ctrl+c - Quit" {
+			assert.Contains(t, out, action)
+			continue
+		}
+		assert.NotContains(t, out, action)
+	}
+}
+
 func TestRenderCenteredLayout(t *testing.T) {
 	t.Parallel()
 

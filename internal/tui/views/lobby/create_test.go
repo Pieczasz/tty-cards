@@ -311,8 +311,8 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	change, ok := cmd().(router.ChangeViewMsg)
 	require.True(t, ok)
 	assert.Equal(t, router.RouteLobby, change.ViewName)
-	created, ok := change.Context.(*lobby.Lobby)
-	require.True(t, ok, "the lobby view is handed the lobby that was just made")
+	created := change.Payload.Lobby
+	require.NotNil(t, created, "the lobby view is handed the lobby that was just made")
 	assert.Equal(t, m.selectedGame(), created.GameName())
 	assert.Equal(t, 5, created.MaxPlayers())
 	assert.False(t, created.IsPrivate())
@@ -398,4 +398,16 @@ func TestCreateView_FitsTheTerminal(t *testing.T) {
 			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
+}
+
+// Toggling a setting must not shift the "<" and ">" around it, so each label reads the
+// same width in both states - on the create form and in the lobby alike.
+func TestSettingLabels_KeepOneWidth(t *testing.T) {
+	t.Parallel()
+
+	// Toggling a row must not move its own "<" and ">": each option's labels share a
+	// width. The rows start at different columns, so they need not share one another's.
+	assert.Equal(t, "Ranked", modeLabel(true))
+	assert.Len(t, visibilityLabel(false), len(visibilityLabel(true)))
+	assert.Len(t, modeLabel(false), len(modeLabel(true)))
 }

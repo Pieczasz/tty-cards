@@ -2,16 +2,21 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
 
+	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -28,7 +33,7 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 	r := router.New(router.GlobalContext{})
 	registerGameViews(r)
 
-	for _, e := range catalog.All {
+	for _, e := range catalog.Games {
 		assert.Truef(t, r.HasRoute(router.GameRoute(e.Slug)),
 			"%s (slug %q) has no registered route", e.Name, e.Slug)
 	}
@@ -89,11 +94,11 @@ func TestModel_ASeatedPlayerIsBouncedBackToTheirLobby(t *testing.T) {
 			t.Parallel()
 			r, manager, user := sessionModel(t)
 
-			l, err := manager.CreateLobby(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.All[0].Name))
+			l, err := manager.CreateLobby(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.Games[0].Name))
 			require.NoError(t, err)
 			t.Cleanup(func() { manager.LeaveLobby(internallobby.NewPlayer(user)) })
 
-			r.Goto(route, nil)
+			r.Goto(route, router.Payload{})
 			t.Cleanup(r.Close)
 
 			assert.Contains(t, r.View().Content, l.Code(), "the lobby view names the code; home does not")
@@ -106,77 +111,122 @@ func TestModel_AnUnseatedPlayerGetsTheOrdinaryScreens(t *testing.T) {
 	r, _, _ := sessionModel(t)
 	t.Cleanup(r.Close)
 
-	r.Goto(router.RouteHome, nil)
-	assert.Contains(t, r.View().Content, "alice", "home greets the player by name")
+	r.Goto(router.RouteHome, router.Payload{})
+	assert.True(t, greets(r.View().Content, "alice"), "home greets the player by name")
 }
 
-// The context a route is handed comes from another view, so a mistyped one must land
-// somewhere usable rather than panicking or rendering an empty screen.
-func TestModel_AWrongContextFallsBackToHome(t *testing.T) {
+// The payload a route is handed comes from another view, so a missing one - or a seat
+// bound to some other player - must land somewhere usable rather than panicking,
+// rendering an empty screen or letting this session play another seat.
+func TestModel_AWrongPayloadFallsBackToHome(t *testing.T) {
 	t.Parallel()
 
+	e := catalog.Games[0]
+	rules := e.Factory()
+	engine := game.NewEngine(rules, testutil.Players(rules.MinPlayers()), rules.InitialDeck())
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+
 	for _, tc := range []struct {
-		name  string
-		route router.Route
+		name    string
+		route   router.Route
+		payload router.Payload
 	}{
 		{name: "the lobby route without a lobby", route: router.RouteLobby},
-		{name: "a game route without an engine", route: router.GameRoute(catalog.All[0].Slug)},
+		{name: "a game route without a seat", route: router.GameRoute(e.Slug)},
+		{
+			name:    "a game route with another player's seat",
+			route:   router.GameRoute(e.Slug),
+			payload: router.Payload{Table: game.Bind(engine, testutil.SeatID(2))},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			r, _, _ := sessionModel(t)
 			t.Cleanup(r.Close)
 
-			r.Goto(tc.route, "not the context this route expects")
-			assert.Contains(t, r.View().Content, "alice", "home is what a bad context falls back to")
+			r.Goto(tc.route, tc.payload)
+			assert.True(t, greets(r.View().Content, "alice"), "home is what a bad payload falls back to")
 		})
 	}
 }
 
 // A player who reconnects inside the disconnect grace still holds a seat at a match
 // already in play, so the session has to open at their lobby - which routes onward
-// into the game. A home screen would pretend nothing is happening while the engine
-// auto-plays their hand.
-func TestModel_AReconnectingPlayerStartsAtTheirLobby(t *testing.T) {
+// into the game, seated as this session's player. A home screen would pretend nothing
+// is happening while the engine auto-plays their hand.
+//
+// The router's first commands include its idle tick, so this runs in a synctest bubble
+// where running that tick costs no real time.
+func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		manager := internallobby.NewManager(t.Context(), nil)
+		registry := catalog.NewRegistry()
 
-	manager := internallobby.NewManager(t.Context(), nil)
-	registry := catalog.NewRegistry()
+		user := &db.User{ID: testutil.UID(1), Username: "alice"}
+		host := internallobby.NewPlayer(user)
+		l, err := manager.CreateLobby(host,
+			internallobby.WithCardGame(catalog.Games[0].Name),
+			internallobby.WithMaxPlayers(2),
+		)
+		require.NoError(t, err)
+		// Closing the table closes its engine, which is what ends the lobby's watcher.
+		t.Cleanup(func() { manager.RemoveLobby(l.Code()) })
 
-	user := &db.User{ID: testutil.UID(1), Username: "alice"}
-	host := internallobby.NewPlayer(user)
-	l, err := manager.CreateLobby(host,
-		internallobby.WithCardGame(catalog.All[0].Name),
-		internallobby.WithMaxPlayers(2),
-	)
-	require.NoError(t, err)
-	// Closing the table closes its engine, which is what ends the lobby's watcher.
-	t.Cleanup(func() { manager.RemoveLobby(l.Code()) })
+		guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
+		_, err = manager.JoinLobbyByCode(l.Code(), guest)
+		require.NoError(t, err)
+		require.NoError(t, l.ToggleReady(host, registry))
+		require.NoError(t, l.ToggleReady(guest, registry))
+		require.NotNil(t, l.Seat(host.ID), "the match has to be under way for the seat to survive")
 
-	guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
-	_, err = manager.JoinLobbyByCode(l.Code(), guest)
-	require.NoError(t, err)
-	require.NoError(t, l.ToggleReady(host, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
-	require.NotNil(t, l.ActiveGame(), "the match has to be under way for the seat to survive")
+		// The grace window is what keeps the seat; without it the drop is a forfeit.
+		manager.DisconnectPlayer(host)
 
-	// The grace window is what keeps the seat; without it the drop is a forfeit.
-	manager.DisconnectPlayer(host)
+		r := New(Deps{
+			SessionCtx:   t.Context(),
+			User:         *user,
+			LobbyManager: manager,
+			GameRegistry: registry,
+		})
+		r.Global.Width, r.Global.Height = 120, 50
+		ResumeSeat(r)
+		t.Cleanup(r.Close)
 
-	r := New(Deps{
-		SessionCtx:   t.Context(),
-		User:         *user,
-		LobbyManager: manager,
-		GameRegistry: registry,
+		change := navigationIn(t, r.Init())
+		assert.Equal(t, router.GameRoute(catalog.Games[0].Slug), change.ViewName)
+		require.NotNil(t, change.Payload.Table)
+		assert.Equal(t, host.ID, change.Payload.Table.PlayerID(), "the seat is this session's and nobody else's")
+
+		r.Update(change)
+		out := r.View().Content
+		assert.NotContains(t, out, l.Code(), "the session is back at the table, not the roster")
+		assert.Contains(t, out, "bob", "the table shows the opponent")
 	})
-	r.Global.Width, r.Global.Height = 120, 50
-	ResumeSeat(r)
-	r.Init()
-	t.Cleanup(r.Close)
+}
 
-	// The lobby view's own Init routes straight on into the running game, so what is
-	// on screen is the table - not the home banner a lost seat would have shown.
-	assert.NotContains(t, r.View().Content, "Welcome", "a resumed session never opens at home")
+// navigationIn runs cmd, unpacking batches, and returns the one ChangeViewMsg it sends.
+func navigationIn(t *testing.T, cmd tea.Cmd) router.ChangeViewMsg {
+	t.Helper()
+	var found []router.ChangeViewMsg
+	var walk func(tea.Cmd)
+	walk = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch msg := c().(type) {
+		case tea.BatchMsg:
+			for _, inner := range msg {
+				walk(inner)
+			}
+		case router.ChangeViewMsg:
+			found = append(found, msg)
+		}
+	}
+	walk(cmd)
+	require.Len(t, found, 1)
+	return found[0]
 }
 
 // Every route the session registers has to build a view that renders inside the
@@ -200,7 +250,7 @@ func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 				r, _, _ := sessionModel(t)
 				r.Global.Width, r.Global.Height = size.Width, size.Height
 
-				r.Goto(route, nil)
+				r.Goto(route, router.Payload{})
 				t.Cleanup(r.Close)
 
 				out := r.View().Content
@@ -217,7 +267,7 @@ func TestModel_EveryRouteRendersInsideTheTerminal(t *testing.T) {
 func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 	t.Parallel()
 
-	for _, e := range catalog.All {
+	for _, e := range catalog.Games {
 		t.Run(e.Slug, func(t *testing.T) {
 			t.Parallel()
 
@@ -228,7 +278,7 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 			t.Cleanup(engine.Close)
 
 			r, _, _ := sessionModel(t)
-			r.Goto(router.GameRoute(e.Slug), engine)
+			r.Goto(router.GameRoute(e.Slug), router.Payload{Table: game.Bind(engine, views.SessionPlayerID(r.Global))})
 			t.Cleanup(r.Close)
 
 			out := r.View().Content
@@ -237,4 +287,15 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 			assert.LessOrEqual(t, lg.Height(out), r.Global.Height)
 		})
 	}
+}
+
+// greets reports whether screen is home greeting name, which it draws as a banner.
+func greets(screen, name string) bool {
+	plain := tuitest.StripANSI(screen)
+	for row := range strings.Lines(styles.RenderFigureUncached(name, 200, 20)) {
+		if row = strings.TrimRight(row, " \n"); strings.TrimSpace(row) != "" && !strings.Contains(plain, row) {
+			return false
+		}
+	}
+	return true
 }

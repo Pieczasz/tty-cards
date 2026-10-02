@@ -14,13 +14,14 @@ import (
 // up, register it on first sight, and stamp the login.
 type Authenticator interface {
 	// LoadUserByFingerprint returns the account owning the key, with its rankings and
-	// their games loaded. A key nobody owns yields nil, nil, nil.
-	LoadUserByFingerprint(ctx context.Context, fingerprint string) (*User, *PublicKey, error)
-	// RegisterUserWithKey creates an account and its first key. A refusal the player
+	// their games loaded. A key nobody owns, or whose account is soft-deleted, yields
+	// nil, nil, nil.
+	LoadUserByFingerprint(ctx context.Context, fingerprint string) (*User, *PublicSSHKey, error)
+	// RegisterUserWithSSHKey creates an account and its first key. A refusal the player
 	// can act on wraps ErrInvalidUsername, ErrUsernameTaken or ErrKeyAlreadyRegistered.
-	RegisterUserWithKey(ctx context.Context, username, fingerprint string) (*User, *PublicKey, error)
+	RegisterUserWithSSHKey(ctx context.Context, username, fingerprint string) (*User, *PublicSSHKey, error)
 	// UpdateUserActivity stamps the account's last-seen and the key's last-used times.
-	UpdateUserActivity(ctx context.Context, user *User, key *PublicKey) error
+	UpdateUserActivity(ctx context.Context, user *User, key *PublicSSHKey) error
 }
 
 // Profiles is one player's own data: what the profile screen shows, and erasing it.
@@ -41,10 +42,11 @@ type Profiles interface {
 
 // Leaderboard is the public ranking read.
 type Leaderboard interface {
-	// BestPlayers returns the top rankings by Elo. An empty gameSlug means every
-	// game; a non-empty slug filters to that games.slug (unknown slugs yield empty).
-	// Results are cached per gameSlug and may be up to 5 minutes stale, so a caller
-	// that has just written a ranking will not see it here.
+	// BestPlayers returns the top rankings by Elo, skipping any whose user or game is
+	// soft-deleted. An empty gameSlug means every game; a non-empty slug filters to
+	// that games.slug (unknown slugs yield empty). Results are cached per gameSlug and
+	// may be up to 5 minutes stale, so a caller that has just written a ranking will
+	// not see it here.
 	BestPlayers(ctx context.Context, gameSlug string, limit int) ([]Ranking, error)
 }
 
@@ -72,7 +74,9 @@ type MatchRepository interface {
 	// with the leavers already ranked last, but only a leaver's loss is written: every
 	// other seat keeps its rating and its matches_played, so a friend quitting cannot
 	// bank a lead, and a losing player cannot quit for free. leavers are user ids from
-	// orderedUserIDs; anything else is ignored.
+	// orderedUserIDs; anything else is ignored. With no leaver left to charge (erased,
+	// or not at the table) the match is recorded as casual: it moved no rating, so it
+	// must not count toward the 24h pairing cap.
 	FinalizeInterruptedMatch(
 		ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
 	) error

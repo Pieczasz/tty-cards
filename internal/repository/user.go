@@ -65,14 +65,14 @@ func NewUserRepository(conn *gorm.DB) *UserRepository {
 	}
 }
 
-// LoadUserByFingerprint is the account a key belongs to; see db.Authenticator.
+// LoadUserByFingerprint implements db.Authenticator.
 func (q *UserRepository) LoadUserByFingerprint(
 	ctx context.Context, fingerprint string,
-) (_ *db.User, _ *db.PublicKey, err error) {
+) (_ *db.User, _ *db.PublicSSHKey, err error) {
 	ctx, span := tracer.Start(ctx, "db.LoadUserByFingerprint")
 	defer func() { recordSpanResult(span, err); span.End() }()
 
-	var dbKey db.PublicKey
+	var dbKey db.PublicSSHKey
 	err = q.db.WithContext(ctx).Where("fingerprint = ?", fingerprint).
 		Preload("User.Rankings.Game").
 		First(&dbKey).Error
@@ -92,11 +92,11 @@ func (q *UserRepository) LoadUserByFingerprint(
 	return &dbKey.User, &dbKey, nil
 }
 
-// RegisterUserWithKey creates an account and its first key in one transaction.
-func (q *UserRepository) RegisterUserWithKey(
+// RegisterUserWithSSHKey creates an account and its first key in one transaction.
+func (q *UserRepository) RegisterUserWithSSHKey(
 	ctx context.Context, username, fingerprint string,
-) (_ *db.User, _ *db.PublicKey, err error) {
-	ctx, span := tracer.Start(ctx, "db.RegisterUserWithKey")
+) (_ *db.User, _ *db.PublicSSHKey, err error) {
+	ctx, span := tracer.Start(ctx, "db.RegisterUserWithSSHKey")
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	if err := db.ValidateUsername(username); err != nil {
@@ -104,7 +104,7 @@ func (q *UserRepository) RegisterUserWithKey(
 	}
 
 	var user *db.User
-	var key *db.PublicKey
+	var key *db.PublicSSHKey
 	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		user, key, err = registerUser(tx, username, fingerprint)
@@ -116,8 +116,8 @@ func (q *UserRepository) RegisterUserWithKey(
 	return user, key, nil
 }
 
-// registerUser is RegisterUserWithKey inside its transaction.
-func registerUser(tx *gorm.DB, username, fingerprint string) (*db.User, *db.PublicKey, error) {
+// registerUser is RegisterUserWithSSHKey inside its transaction.
+func registerUser(tx *gorm.DB, username, fingerprint string) (*db.User, *db.PublicSSHKey, error) {
 	// Case-folded, matching idx_users_username_lower (decision D-4), which is also
 	// what catches a concurrent registration this read cannot see. Unscoped: the
 	// index covers soft-deleted rows too, so a hidden one still owns its name.
@@ -128,7 +128,7 @@ func registerUser(tx *gorm.DB, username, fingerprint string) (*db.User, *db.Publ
 	if taken {
 		return nil, nil, db.ErrUsernameTaken
 	}
-	registered, err := exists(tx.Where("fingerprint = ?", fingerprint), &db.PublicKey{})
+	registered, err := exists(tx.Where("fingerprint = ?", fingerprint), &db.PublicSSHKey{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("check fingerprint: %w", err)
 	}
@@ -147,7 +147,7 @@ func registerUser(tx *gorm.DB, username, fingerprint string) (*db.User, *db.Publ
 		return nil, nil, fmt.Errorf("create user: %w", err)
 	}
 
-	key := db.PublicKey{
+	key := db.PublicSSHKey{
 		Fingerprint: fingerprint,
 		Name:        "auto-generated key",
 		UserID:      user.ID,
@@ -184,13 +184,10 @@ func (q *UserRepository) cachedBestPlayers(gameSlug string, limit int) ([]db.Ran
 	return slices.Clone(entry.rankings[:min(limit, len(entry.rankings))]), q.bestPlayersGen, true
 }
 
-// BestPlayers is the leaderboard, served from a per-game cache; see db.Leaderboard.
-func (q *UserRepository) BestPlayers(
-	ctx context.Context, gameSlug string, limit int,
-) (_ []db.Ranking, err error) {
-	ctx, span := tracer.Start(ctx, "db.BestPlayers", trace.WithAttributes(attribute.Int("limit", limit)))
-	defer func() { recordSpanResult(span, err); span.End() }()
-
+// BestPlayers implements db.Leaderboard; the staleness bound is bestPlayersCacheTTL.
+// Only the query on a miss is spanned: every website visitor polls this, and a span
+// per cache hit was a trace per poll.
+func (q *UserRepository) BestPlayers(ctx context.Context, gameSlug string, limit int) ([]db.Ranking, error) {
 	limit = max(limit, 0)
 
 	// An entry holds at most bestPlayersCacheSize rows, so a larger ask cannot be served
@@ -222,36 +219,43 @@ func (q *UserRepository) BestPlayers(
 		return nil, fmt.Errorf("get best players: %w", err)
 	}
 	rankings, _ := shared.([]db.Ranking)
-	span.SetAttributes(attribute.Int("rows", len(rankings)))
 	return slices.Clone(rankings[:min(limit, len(rankings))]), nil
 }
 
 // fetchBestPlayers is one leaderboard query. The rows it returns are shared by every
 // caller of the flight, so they are only ever cloned from, never handed out.
-func (q *UserRepository) fetchBestPlayers(ctx context.Context, gameSlug string, fetch int) ([]db.Ranking, error) {
+func (q *UserRepository) fetchBestPlayers(ctx context.Context, gameSlug string, fetch int) (_ []db.Ranking, err error) {
+	ctx, span := tracer.Start(ctx, "db.BestPlayers", trace.WithAttributes(attribute.Int("limit", fetch)))
+	defer func() { recordSpanResult(span, err); span.End() }()
+
 	// Provisional accounts stay on the board: a player's first ranked win should show
 	// up, and hiding it made the board empty on a young server. The anti-farm rules
 	// live in the finalize path, and they bound a pumped account rather than rule it
 	// out: an established player gains nothing from a fresh alt, but alts that have
 	// played their five provisional matches among themselves are established too, and
-	// each still pays up to maxSamePairingPerDay wins a day. The ceiling is linear in
+	// each still pays up to rating.MaxSamePairingPerDay wins a day. The ceiling is linear in
 	// the graduated alts someone is willing to run (decision #10).
 	//
 	// user_id breaks the tie: equal Elo is common at the starting rating, and without
 	// it Postgres is free to return those rows in a different order every time the
 	// cache expires, so the board visibly reshuffles between refreshes.
+	//
+	// The joins drop a soft-deleted owner's rows. A Preload applies deleted_at only to
+	// the association, so the ranking stayed on the public board with no name.
 	query := q.db.WithContext(ctx).Preload("User").Preload("Game").
+		Joins("JOIN users ON users.id = rankings.user_id AND users.deleted_at IS NULL").
+		Joins("JOIN games ON games.id = rankings.game_id AND games.deleted_at IS NULL").
 		Order("rankings.elo desc, rankings.user_id").
 		Limit(fetch)
 	if gameSlug != "" {
-		query = query.Joins("JOIN games ON games.id = rankings.game_id AND games.deleted_at IS NULL").
-			Where("games.slug = ?", gameSlug)
+		query = query.Where("games.slug = ?", gameSlug)
 	}
 
 	var rankings []db.Ranking
 	if err := query.Find(&rankings).Error; err != nil {
 		return nil, fmt.Errorf("query rankings: %w", err)
 	}
+	span.SetAttributes(attribute.Int("rows", len(rankings)))
 	return rankings, nil
 }
 
@@ -278,7 +282,7 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	var user db.User
-	err = q.db.WithContext(ctx).Preload("PublicKeys").
+	err = q.db.WithContext(ctx).Preload("PublicSSHKeys").
 		Preload("Rankings.Game").
 		Where("id = ?", userID.String()).
 		First(&user).Error
@@ -293,7 +297,7 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 // UpdateUserActivity stamps both last-seen fields; the caller decides whether a stale
 // timestamp matters.
 func (q *UserRepository) UpdateUserActivity(
-	ctx context.Context, user *db.User, key *db.PublicKey,
+	ctx context.Context, user *db.User, key *db.PublicSSHKey,
 ) (err error) {
 	ctx, span := tracer.Start(ctx, "db.UpdateUserActivity")
 	defer func() { recordSpanResult(span, err); span.End() }()
@@ -376,7 +380,7 @@ func eraseUser(tx *gorm.DB, userID uuid.UUID) error {
 	// Unscoped, not a soft delete: the fingerprint column is unique, so a lingering
 	// key row would keep the returning player from ever registering again - and a
 	// soft-deleted ranking still holds the (user_id, game_id) primary key.
-	if err := tx.Unscoped().Where("user_id = ?", userID.String()).Delete(&db.PublicKey{}).Error; err != nil {
+	if err := tx.Unscoped().Where("user_id = ?", userID.String()).Delete(&db.PublicSSHKey{}).Error; err != nil {
 		return fmt.Errorf("delete public keys: %w", err)
 	}
 	if err := tx.Unscoped().Where("user_id = ?", userID.String()).Delete(&db.Ranking{}).Error; err != nil {

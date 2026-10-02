@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"uuid"
 )
@@ -24,15 +25,18 @@ type trackedSession struct {
 type SessionTracker struct {
 	mu     sync.Mutex
 	active map[uuid.UUID]trackedSession
-	next   uint64
+	// live mirrors len(active), written only under mu. Count reads it without the
+	// lock because ReleaseWith holds mu across a teardown that reaches a table's
+	// engine, and the public stats API must not queue behind that.
+	live atomic.Int64
+	next uint64
 	// maxSessions is the player-visible capacity: Connect refuses beyond it with a
 	// message, unlike the TCP-level LimitListener, which silently stops accepting.
 	// Zero means unlimited.
 	maxSessions int
 }
 
-// NewSessionTracker returns a tracker refusing sessions past maxSessions (zero is
-// unlimited).
+// NewSessionTracker returns a tracker refusing sessions past maxSessions.
 func NewSessionTracker(maxSessions int) *SessionTracker {
 	return &SessionTracker{
 		active:      make(map[uuid.UUID]trackedSession),
@@ -58,6 +62,7 @@ func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, erro
 		return 0, ErrServerFull
 	}
 	t.active[userID] = trackedSession{gen: gen, conn: conn}
+	t.live.Store(int64(len(t.active)))
 	t.mu.Unlock()
 
 	// Outside the lock: Close writes to the network, and a wedged peer must not hold
@@ -71,9 +76,7 @@ func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, erro
 
 // Count is the number of accounts with a live session.
 func (t *SessionTracker) Count() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return len(t.active)
+	return int(t.live.Load())
 }
 
 // ReleaseWith runs fn and then frees the slot, both under the tracker lock, only if
@@ -89,5 +92,6 @@ func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bo
 	}
 	fn()
 	delete(t.active, userID)
+	t.live.Store(int64(len(t.active)))
 	return true
 }

@@ -19,7 +19,7 @@ func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
-	if m.handComplete || m.matchComplete || m.phase == logic.PhaseHandOver {
+	if m.phase == logic.PhaseHandOver || m.matchComplete {
 		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
@@ -43,17 +43,16 @@ func (m *model) keyHints() string {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
 	case logic.PhaseAwaitingDiscard:
-		return "<-/h left | ->/l right | enter: discard | k: knock | esc: leave"
+		return "<-/h: left | ->/l: right | enter: discard | k: knock | esc: leave"
 	default:
 		return "esc: leave"
 	}
 }
 
 func (m *model) renderMiddleLayer(height int) string {
-	discardView := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
-	stockLabel := m.Global.Theme.Muted.Render(fmt.Sprintf("stock %d", m.Base.DeckSize))
-	scores := m.renderScoreLine()
-	center := lg.JoinVertical(lg.Center, discardView, stockLabel, scores)
+	discard := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
+	center := styles.JoinVertical(lg.Center,
+		gameview.RenderPiles(m.Global.Theme, m.Base.DeckSize, discard), m.renderScoreLine())
 
 	return styles.Place(m.Global.Width, height, lg.Center, lg.Center, center)
 }
@@ -76,16 +75,17 @@ func (m *model) renderPlayerSection() string {
 
 func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
-		Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
-		Body:  m.renderHandResult(),
-		Hint:  "enter: deal next hand | esc: leave",
+		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
+		Body:   m.renderHandResult(),
+		Header: fmt.Sprintf("%-12s  %9s", "player", "total"),
+		Hint:   "enter: deal next hand | esc: leave",
 	}
 	if m.matchComplete || m.Base.Phase == game.Finished {
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
 	}
 
 	for _, seat := range m.Base.Seats {
-		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  total %3d",
+		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  %9d",
 			styles.PadTruncate(seat.Name, 12), m.cumulativeScores[seat.ID])))
 	}
 	return gameview.RenderHandOver(m.Global, h)
@@ -112,17 +112,17 @@ func (m *model) renderHandResult() string {
 	winnerName := m.Base.SeatNames()[r.Winner]
 	delta := m.Global.Theme.SuccessText.Render(fmt.Sprintf("+%d -> %s", r.ScoreDelta, winnerName))
 
-	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds, false)
+	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds)
 	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false)
 	laidOff := ""
 	if len(r.LaidOffCards) > 0 {
 		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true)
 	}
 
-	return lg.JoinVertical(lg.Center, banner, delta, "", knockerMelds, oppDead, laidOff)
+	return styles.JoinVertical(lg.Center, banner, delta, "", knockerMelds, oppDead, laidOff)
 }
 
-func (m *model) renderMeldGroups(label string, melds [][]deck.Card, laidOff bool) string {
+func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 	if len(melds) == 0 {
 		return m.Global.Theme.Dim.Render(label + ": -")
 	}
@@ -134,15 +134,15 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card, laidOff bool
 		}
 		cards := make([]string, 0, len(meld))
 		for _, card := range meld {
-			cards = append(cards, components.RenderCard(m.Global.Theme, card, laidOff))
+			cards = append(cards, components.RenderCard(m.Global.Theme, card, false))
 		}
-		box := lg.JoinHorizontal(lg.Top, cards...)
+		box := styles.JoinHorizontal(lg.Top, cards...)
 		groups = append(groups, m.Global.Theme.MeldBox.Render(
-			lg.JoinVertical(lg.Left, m.Global.Theme.Dim.Render(kind), box)))
+			styles.JoinVertical(lg.Left, m.Global.Theme.Dim.Render(kind), box)))
 	}
-	return lg.JoinVertical(lg.Left,
+	return styles.JoinVertical(lg.Left,
 		m.Global.Theme.Muted.Render(label),
-		lg.JoinHorizontal(lg.Top, groups...),
+		styles.JoinHorizontal(lg.Top, groups...),
 	)
 }
 
@@ -154,8 +154,8 @@ func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool) s
 	for _, card := range cards {
 		parts = append(parts, components.RenderCard(m.Global.Theme, card, highlight))
 	}
-	return lg.JoinVertical(lg.Left,
+	return styles.JoinVertical(lg.Left,
 		m.Global.Theme.Muted.Render(label),
-		lg.JoinHorizontal(lg.Top, parts...),
+		styles.JoinHorizontal(lg.Top, parts...),
 	)
 }

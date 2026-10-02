@@ -24,9 +24,9 @@ func (bogusAction) Name() string { return "bogus" }
 // game three ways between them. Both now label it with the catalog slug.
 //
 //nolint:paralleltest // reads the process-wide meter provider TestMain installed
-func TestAll_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
+func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 	registry := NewRegistry()
-	for _, entry := range All {
+	for _, entry := range Games {
 		t.Run(entry.Slug, func(t *testing.T) {
 			m := lobby.NewManager(t.Context(), nil)
 			players := testutil.Players(entry.Factory().MinPlayers())
@@ -40,11 +40,11 @@ func TestAll_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 			for _, p := range players {
 				require.NoError(t, l.ToggleReady(p, registry))
 			}
-			engine := l.ActiveGame()
-			require.NotNil(t, engine, "the game did not start")
+			seat := l.Seat(players[0].ID)
+			require.NotNil(t, seat, "the game did not start")
 
 			global := router.GlobalContext{User: &db.User{ID: players[0].UserID, Username: players[0].Name}}
-			view := entry.View(global, engine, entry.Slug)
+			view := entry.View(global, seat, entry.Slug)
 			t.Cleanup(view.(router.Closer).Close)
 			submitter, ok := view.(interface{ Submit(game.Action) error })
 			require.True(t, ok, "every game view embeds gameview.Session")
@@ -54,13 +54,13 @@ func TestAll_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, testMetrics.Collect(t.Context(), &rm))
-	want := make([]string, 0, len(All))
-	for _, e := range All {
+	want := make([]string, 0, len(Games))
+	for _, e := range Games {
 		want = append(want, e.Slug)
 	}
 	slices.Sort(want)
-	require.Equal(t, want, gameTypes(rm, "terminalcard.games.started"), "the lobby's label")
-	require.Equal(t, want, gameTypes(rm, "terminalcard.game.action.rejected"), "the view's label")
+	require.Equal(t, want, gameTypes(rm, "ttycards.games.started"), "the lobby's label")
+	require.Equal(t, want, gameTypes(rm, "ttycards.game.action.rejected"), "the view's label")
 }
 
 // gameTypes is the sorted set of game_type values recorded on the named counter.

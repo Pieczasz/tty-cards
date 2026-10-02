@@ -39,7 +39,7 @@ func TestGameViews_RenderInsideTheTerminal(t *testing.T) {
 	}
 	handSizes := []int{7, 13, 25}
 
-	for _, entry := range All {
+	for _, entry := range Games {
 		rules := entry.Factory()
 		for seats := rules.MinPlayers(); seats <= min(rules.MaxPlayers(), 6); seats++ {
 			for _, size := range sizes {
@@ -68,7 +68,7 @@ func TestGameViews_RenderInsideTheTerminal(t *testing.T) {
 func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 	t.Parallel()
 
-	for _, entry := range All {
+	for _, entry := range Games {
 		if entry.Slug == "poker" {
 			continue // showdown reveals by design; poker tests that reveal itself
 		}
@@ -146,7 +146,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 		Width:  width,
 		Height: height,
 	}
-	model := entry.View(global, engine, entry.Slug)
+	model := entry.View(global, game.Bind(engine, testutil.SeatID(1)), entry.Slug)
 	requireSameGame(t, rules, model)
 	return engine, model
 }

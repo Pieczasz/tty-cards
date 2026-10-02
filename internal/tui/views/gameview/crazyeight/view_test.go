@@ -53,7 +53,7 @@ func viewAt(width, height int, opponents ...string) *model {
 			TurnRemaining:     12 * time.Second,
 		},
 		currentSuit: deck.Hearts,
-		suit:        suitPicker,
+		Picker:      suitPicker,
 	}
 }
 
@@ -76,7 +76,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				m := viewAt(size.Width, size.Height, opponents...)
 
 				for _, picking := range []bool{false, true} {
-					m.suit.Open = picking
+					m.Picker.Open = picking
 					out := m.View().Content
 					assert.LessOrEqual(t, lg.Width(out), size.Width, "picker=%v overran the width", picking)
 					assert.LessOrEqual(t, lg.Height(out), size.Height, "picker=%v overran the height", picking)
@@ -161,28 +161,13 @@ func TestRenderSuitPicker_OffersEverySuit(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 40, "bob")
-	assert.Empty(t, m.suit.Render(m.Global.Theme), "closed, the picker draws nothing")
+	assert.Empty(t, m.Picker.Render(m.Global.Theme), "closed, the picker draws nothing")
 
-	m.suit.Open = true
-	m.suit.Cursor = 2
-	out := m.suit.Render(m.Global.Theme)
+	m.Picker.Open = true
+	m.Picker.Cursor = 2
+	out := m.Picker.Render(m.Global.Theme)
 	for _, c := range suitPicker.Choices {
 		assert.Contains(t, out, c.Label)
 	}
 	assert.Contains(t, out, "Pick a suit")
-}
-
-// Selection is suppressed, not just unhighlighted: while the picker is open the hand
-// cursor is frozen, and a highlight on a card the player cannot move reads as live.
-func TestRenderPlayerSection_ThePickerDropsTheHandHighlight(t *testing.T) {
-	t.Parallel()
-
-	m := viewAt(120, 50, "bob")
-	m.Selected = 3
-	m.suit.Open = true
-	picking := m.renderPlayerSection()
-
-	m.suit.Open = false
-	m.Selected = -1
-	assert.Equal(t, m.renderPlayerSection(), picking)
 }

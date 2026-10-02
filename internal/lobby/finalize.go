@@ -42,9 +42,6 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 	}
 	parentCtx := m.shutdownCtx()
 
-	if !req.startedAt.IsZero() {
-		observability.GameFinished(parentCtx, req.game.Slug, req.isRanked, reason.String(), time.Since(req.startedAt))
-	}
 	if req.game.Slug == "" {
 		// Every other bail-out says so; this one used to drop a finished match in
 		// silence. A lobby cannot start a game the registry does not hold, so an empty
@@ -67,8 +64,14 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 // decided who was left holding cards. Rules errors are the same class - half-applied
 // state must not move the ladder. So is a table every seat left: standings are then
 // reverse leave order, so rating it pays the last to quit.
+//
+// An unknown reason is an end the watcher never saw announced (see handleGameEvents):
+// it may have been an interrupted match, whose finishers must not be rated, so it is
+// not rated at all.
 func unratedReason(reason game.EndReason, shuttingDown bool) string {
 	switch {
+	case reason == game.EndReasonUnknown:
+		return "the match ended without announcing why; recording without Elo"
 	case reason == game.EndReasonRulesError:
 		return "rules error ended the match; recording without Elo"
 	case reason == game.EndReasonAbandoned:
@@ -123,7 +126,7 @@ func (m *Manager) persistFinishedMatch(
 	// An interrupted match stays rated, but only against its leavers: see
 	// recordFinishedMatch.
 	rated := req.isRanked
-	if why := unratedReason(reason, m.isShuttingDown()); rated && why != "" {
+	if why := unratedReason(reason, m.shuttingDown.Load()); rated && why != "" {
 		rated = false
 		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
 	}
@@ -197,10 +200,6 @@ func (m *Manager) BeginShutdown() {
 	for _, p := range held {
 		m.LeaveLobby(p)
 	}
-}
-
-func (m *Manager) isShuttingDown() bool {
-	return m.shuttingDown.Load()
 }
 
 // WaitForFinalizers stops accepting finished-match writes, then blocks until all

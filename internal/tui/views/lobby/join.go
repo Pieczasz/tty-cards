@@ -243,7 +243,7 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
-	return m, router.Navigate(router.RouteLobby, joined)
+	return m, router.NavigateToLobby(joined)
 }
 
 // modeLabel names the current mode filter for the status line.
@@ -291,30 +291,24 @@ var browseTable = components.Table{
 	Lead: " ",
 }
 
-// renderRow lays the cells out itself rather than through Table.Cells: the mode cell
-// is styled, and a styled cell cannot be padded by rune count afterwards without
-// counting the escape sequence as text.
 func (m *joinModel) renderRow(entry lobby.BrowseEntry, selected bool) string {
 	theme := m.global.Theme
 
-	mode := styles.PadTruncate("casual", colMode)
-	modeRendered := theme.Muted.Render(mode)
+	mode := theme.Muted.Render(styles.PadTruncate("casual", colMode))
 	if entry.Ranked {
-		modeRendered = theme.Accented.Render(styles.PadTruncate("ranked", colMode))
+		mode = theme.Accented.Render(styles.PadTruncate("ranked", colMode))
 	}
-
-	cells := fmt.Sprintf("%s | %s | %s | %s",
-		styles.PadTruncate(entry.GameName, colGame),
-		styles.PadTruncate(fmt.Sprintf("%d/%d", entry.Players, entry.MaxPlayers), colSeats),
-		modeRendered,
-		styles.PadTruncate(strconv.FormatUint(uint64(entry.AvgElo), 10), colRating),
-	)
 
 	marker := " "
 	if selected {
 		marker = theme.PlayerItemSelected.Render(">")
 	}
-	return marker + cells
+	return marker + browseTable.Row(
+		styles.PadTruncate(entry.GameName, colGame),
+		styles.PadTruncate(fmt.Sprintf("%d/%d", entry.Players, entry.MaxPlayers), colSeats),
+		mode,
+		styles.PadTruncate(strconv.FormatUint(uint64(entry.AvgElo), 10), colRating),
+	)
 }
 
 // visibleWindow is the slice of rows on screen, scrolled to keep the cursor in view.
@@ -366,7 +360,7 @@ func (m *joinModel) renderContent(contentHeight int) string {
 		parts = []string{m.filterLine(), m.renderList(rows),
 			m.global.Theme.Muted.Render(codeInputStr), m.textInput.View()}
 	}
-	content := lg.JoinVertical(lg.Left, parts...)
+	content := styles.JoinVertical(lg.Left, parts...)
 
 	if m.err != nil {
 		content += m.global.Theme.ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))

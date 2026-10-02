@@ -14,9 +14,9 @@ import (
 // A disconnect never runs a view's esc/enter paths, so Close is the only thing that
 // releases the engine subscription. A view that skips it parks a listener goroutine
 // and holds a broadcaster slot for every dropped player until the engine closes.
-func TestAll_CloseReleasesTheEngineSubscription(t *testing.T) {
+func TestGames_CloseReleasesTheEngineSubscription(t *testing.T) {
 	t.Parallel()
-	for _, entry := range All {
+	for _, entry := range Games {
 		for _, engineFirst := range []bool{false, true} {
 			name := entry.Slug
 			if engineFirst {

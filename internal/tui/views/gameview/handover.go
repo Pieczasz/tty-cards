@@ -1,6 +1,8 @@
 package gameview
 
 import (
+	"strings"
+
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
@@ -16,6 +18,8 @@ type HandOver struct {
 	Subtitle string
 	// Body is an optional game-specific block between the headlines and the rows.
 	Body string
+	// Header is an optional column heading over Rows, aligned with them.
+	Header string
 	// Rows are the standings, one pre-styled line per seat, drawn left-aligned.
 	Rows []string
 	Hint string
@@ -33,10 +37,20 @@ func MatchOverTitle(winner string) string {
 	return "MATCH COMPLETE - " + winner + " wins"
 }
 
+// InterruptedTitle is the headline of a match a leave ended early for everyone. It
+// names who left rather than a winner: the seats still at the table are tied on
+// wherever the hand had got to, and a winner on those scores reads as a result.
+func InterruptedTitle(leavers []string) string {
+	if len(leavers) == 0 {
+		return "MATCH ENDED EARLY"
+	}
+	return "MATCH ENDED EARLY - " + strings.Join(leavers, ", ") + " left the table"
+}
+
 // RenderHandOver draws h centred on the whole screen and clamped to it.
 func RenderHandOver(g router.GlobalContext, h HandOver) string {
 	t := g.Theme
-	parts := []string{t.Accented.Render(h.Title)}
+	parts := []string{t.Accented.Bold(true).Render(h.Title)}
 	if h.Subtitle != "" {
 		parts = append(parts, t.Accented.Render(h.Subtitle))
 	}
@@ -44,8 +58,14 @@ func RenderHandOver(g router.GlobalContext, h HandOver) string {
 	if h.Body != "" {
 		parts = append(parts, h.Body, "")
 	}
-	parts = append(parts, lg.JoinVertical(lg.Left, h.Rows...), "", t.Dim.Render(h.Hint))
+	rows := h.Rows
+	if h.Header != "" {
+		rows = append([]string{t.SectionHeading.Render(h.Header)}, rows...)
+	}
+	parts = append(parts, styles.JoinVertical(lg.Left, rows...), "", t.Dim.Render(h.Hint))
 
-	content := lg.JoinVertical(lg.Center, parts...)
+	// The menus' box, so a result reads as a screen of its own rather than a few lines
+	// floating in an empty terminal.
+	content := t.Box.Render(styles.JoinVertical(lg.Center, parts...))
 	return styles.Clamp(g.Width, g.Height, styles.Place(g.Width, g.Height, lg.Center, lg.Center, content))
 }

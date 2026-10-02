@@ -34,11 +34,11 @@ var (
 // SessionFingerprint is the SHA256 fingerprint of the key the session authenticated
 // with, which is the account's identity.
 func SessionFingerprint(s ssh.Session) (string, error) {
-	publicKey := s.PublicKey()
-	if publicKey == nil {
+	key := s.PublicKey()
+	if key == nil {
 		return "", ErrNoPublicKey
 	}
-	return gossh.FingerprintSHA256(publicKey), nil
+	return gossh.FingerprintSHA256(key), nil
 }
 
 // LoadOrRegisterUser resolves a fingerprint to an account, registering one on first
@@ -71,9 +71,15 @@ func LoadOrRegisterUser(
 		slog.WarnContext(ctx, "refused new account registration: network over its budget")
 		return nil, ErrTooManyRegistrations
 	}
-	user, _, err = userRepo.RegisterUserWithKey(ctx, sshUsername, fingerprint)
+	user, _, err = userRepo.RegisterUserWithSSHKey(ctx, sshUsername, fingerprint)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to register new user", "error", err)
+		// A taken name or a key registered by a racing connection is the player's
+		// situation, not a server failure.
+		level := slog.LevelError
+		if errors.Is(err, db.ErrUsernameTaken) || errors.Is(err, db.ErrKeyAlreadyRegistered) {
+			level = slog.LevelInfo
+		}
+		slog.Log(ctx, level, "failed to register new user", "error", err)
 		return nil, mapRegisterError(err)
 	}
 	return user, nil

@@ -15,7 +15,8 @@ func TestValidateUsername_Valid(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		gen := rapid.StringMatching(`^[A-Za-z0-9_]{1,16}$`).Filter(func(s string) bool {
-			return !strings.HasPrefix(s, AnonymisedPrefix)
+			folded := strings.ToLower(s)
+			return !strings.HasPrefix(folded, AnonymisedPrefix) && !reservedUsernames[folded]
 		})
 		username := gen.Draw(t, "username")
 
@@ -63,6 +64,8 @@ func FuzzValidateUsername(f *testing.F) {
 	f.Add("dash-not-allowed")
 	f.Add("deleted_1")
 	f.Add("deleted_")
+	f.Add("Deleted_x")
+	f.Add("ADMIN")
 
 	f.Fuzz(func(t *testing.T, name string) {
 		if ValidateUsername(name) != nil {
@@ -70,8 +73,9 @@ func FuzzValidateUsername(f *testing.F) {
 		}
 		assert.NotEmpty(t, name, "an accepted username must not be empty")
 		assert.LessOrEqual(t, len(name), maxUsernameLength, "an accepted username must fit the chosen-name cap")
-		assert.False(t, strings.HasPrefix(name, AnonymisedPrefix),
+		assert.False(t, strings.HasPrefix(strings.ToLower(name), AnonymisedPrefix),
 			"the erasure prefix is not a player-chosen name")
+		assert.False(t, reservedUsernames[strings.ToLower(name)], "a reserved name was accepted")
 		for _, r := range name {
 			isAllowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 				(r >= '0' && r <= '9') || r == '_'
@@ -82,8 +86,35 @@ func FuzzValidateUsername(f *testing.F) {
 
 func TestValidateUsername_RejectsAnonymisedPrefix(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"deleted_", "deleted_1", "deleted_42"} {
+	for _, name := range []string{"deleted_", "deleted_1", "deleted_42", "Deleted_bob", "DELETED_1"} {
 		assert.ErrorContains(t, ValidateUsername(name), "username is reserved", name)
+	}
+}
+
+// A name that reads as staff or as the server itself is an impersonation vector on a
+// public leaderboard, whatever its case. The refusal is the same fixed text for every
+// reserved name, so it says nothing about which accounts exist.
+func TestValidateUsername_RejectsImpersonationNames(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		"admin", "Admin", "ADMINISTRATOR", "root", "mod", "Moderator", "system", "support",
+		"staff", "tty_cards", "TTY_Cards", "ttycards", "server", "official",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateUsername(name)
+			require.Error(t, err)
+			assert.Equal(t, "username is reserved", err.Error())
+		})
+	}
+}
+
+// Only the exact names are reserved: a player called admin_fan or rooty is not
+// impersonating anyone.
+func TestValidateUsername_AllowsNamesThatOnlyContainAReservedWord(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"admin_fan", "rooty", "modest", "my_server", "deleted", "deletedX"} {
+		assert.NoError(t, ValidateUsername(name), name)
 	}
 }
 

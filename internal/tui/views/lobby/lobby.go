@@ -10,6 +10,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -48,39 +49,34 @@ func listenToLobbyBroadcaster(ch <-chan lobby.Event) tea.Cmd {
 	return views.ListenOn(ch, func(ev lobby.Event) tea.Msg { return lobbyMsg{Event: ev, src: ch} })
 }
 
-// New returns a new lobby model. We pass the current active lobby through Context.
+// New is the waiting room for activeLobby, subscribed to its feed. A nil lobby is a
+// view that goes straight home.
 func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
+	m := &model{global: global, currentLobby: activeLobby}
+	if activeLobby == nil {
+		return m
+	}
+	m.syncSettings()
 	playerID := views.SessionPlayerID(global)
-	var ch <-chan lobby.Event
-	var subErr error
-	if activeLobby != nil {
-		ch, subErr = activeLobby.Subscribe(playerID)
-		if subErr != nil {
-			// Without the feed this screen would never see another player join or the
-			// game start, so the player is told instead of being left staring at a
-			// roster that silently stops updating.
-			slog.Error("lobby view could not subscribe to events", "error", subErr, "player_id", playerID)
-			subErr = fmt.Errorf("live updates unavailable, rejoin the lobby: %w", subErr)
-		}
+	ch, err := activeLobby.Subscribe(playerID)
+	if err != nil {
+		// Without the feed this screen would never see another player join or the
+		// game start, so the player is told instead of being left staring at a
+		// roster that silently stops updating.
+		ctx := global.RequestContext()
+		slog.ErrorContext(ctx, "lobby view could not subscribe to events", "error", err, "player_id", playerID)
+		observability.SubscribeFailure(ctx, "lobby_view")
+		m.actionErr = fmt.Errorf("live updates unavailable, rejoin the lobby: %w", err)
 	}
-	isPrivate := true
-	isRanked := false
-	maxPlayers := defaultMaxPlayers
-	if activeLobby != nil {
-		isPrivate = activeLobby.IsPrivate()
-		isRanked = activeLobby.IsRanked()
-		maxPlayers = activeLobby.MaxPlayers()
-	}
-	return &model{
-		global:       global,
-		currentLobby: activeLobby,
-		lobbyChan:    ch,
-		cursor:       0,
-		isPrivate:    isPrivate,
-		isRanked:     isRanked,
-		maxPlayers:   maxPlayers,
-		actionErr:    subErr,
-	}
+	m.lobbyChan = ch
+	return m
+}
+
+// syncSettings copies the lobby's settings onto the form.
+func (m *model) syncSettings() {
+	m.isPrivate = m.currentLobby.IsPrivate()
+	m.isRanked = m.currentLobby.IsRanked()
+	m.maxPlayers = m.currentLobby.MaxPlayers()
 }
 
 func (m *model) Init() tea.Cmd {
@@ -88,27 +84,14 @@ func (m *model) Init() tea.Cmd {
 	// the table if their seat survived the disconnect grace. A seat the engine took
 	// (idle removal) stays here and sees the roster instead.
 	if m.currentLobby != nil {
-		if engine := m.currentLobby.ActiveGame(); engine != nil && m.seatedIn(engine) {
+		if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
 			if mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName()); ok {
 				m.unsubscribe()
-				return router.Navigate(router.GameRoute(mod.Slug), engine)
+				return router.NavigateToGame(mod.Slug, table)
 			}
 		}
 	}
 	return listenToLobbyBroadcaster(m.lobbyChan)
-}
-
-// seatedIn is a seat at a live table. A finished engine still lists its seats, and the
-// lobby reopens on its own goroutine, so ActiveGame can hand one back for a moment:
-// routing there shows a game-over screen whose esc lands straight back here.
-func (m *model) seatedIn(engine *game.Engine) bool {
-	if engine.IsFinished() {
-		return false
-	}
-	me := views.SessionPlayerID(m.global)
-	return slices.ContainsFunc(engine.Snapshot().Players, func(p game.PlayerSnapshot) bool {
-		return p.ID == me
-	})
 }
 
 // rating comes from the ratings the player was seated with, which are the snapshot
@@ -165,20 +148,15 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	self := views.SessionPlayer(m.global)
-
-	// Leaving via a global shortcut has to release the lobby subscription first.
-	if route, ok := views.GlobalRoute(msg.String()); ok {
-		m.unsubscribe()
-		return m, router.Navigate(route, nil)
-	}
-
 	switch msg.String() {
 	case "esc", "x", "q":
 		m.showLeaveConfirm = true
 	case "r":
+		// Debug, not Error: nearly every refusal here is the player's own (no seat, too
+		// few players) and is already on their screen, so a held key would flood the log.
 		m.actionErr = m.currentLobby.ToggleReady(self, m.global.GameRegistry)
 		if m.actionErr != nil {
-			slog.Error("failed to toggle ready or start game engine", "error", m.actionErr)
+			slog.DebugContext(m.global.RequestContext(), "ready refused", "error", m.actionErr)
 		}
 	default:
 		if m.currentLobby.IsLeader(self) {
@@ -202,9 +180,7 @@ func (m *model) handleLeaderKey(self *game.Player, key string) {
 	case "enter":
 		guests := m.currentLobby.Guests()
 		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(guests) {
-			if err := m.global.LobbyManager.Kick(self, guests[i]); err != nil {
-				slog.Error("failed to kick player", "error", err)
-			}
+			m.actionErr = m.global.LobbyManager.Kick(self, guests[i])
 		}
 	}
 }
@@ -217,7 +193,7 @@ func (m *model) goHome() tea.Cmd {
 		return nil
 	}
 	m.leaving = true
-	return router.Navigate(router.RouteHome, nil)
+	return router.Navigate(router.RouteHome)
 }
 
 func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
@@ -233,38 +209,34 @@ func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// adjustSetting changes the highlighted setting, and the form follows only once the
+// lobby has accepted it.
 func (m *model) adjustSetting(self *game.Player, delta int) {
+	var err error
 	switch m.cursor {
 	case cursorMaxPlayers:
 		rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.GameName())
 		next := m.maxPlayers + delta
-		if delta < 0 && (next < rulesMin || next < m.currentLobby.CurrentPlayers()) {
+		if next < max(rulesMin, m.currentLobby.CurrentPlayers()) || next > rulesMax {
 			return
 		}
-		if delta > 0 && next > rulesMax {
-			return
-		}
-		m.maxPlayers = next
-		if err := m.currentLobby.SetMaxPlayers(self, m.maxPlayers, rulesMin, rulesMax); err != nil {
-			m.maxPlayers -= delta
-			slog.Error("failed to set max players", "error", err)
+		if err = m.currentLobby.SetMaxPlayers(self, next, m.global.GameRegistry); err == nil {
+			m.maxPlayers = next
 		}
 	case cursorVisibility:
-		m.isPrivate = !m.isPrivate
-		if err := m.currentLobby.SetPrivate(self, m.isPrivate); err != nil {
+		if err = m.currentLobby.SetPrivate(self, !m.isPrivate); err == nil {
 			m.isPrivate = !m.isPrivate
-			slog.Error("failed to set privacy", "error", err)
 		}
 	case cursorMode:
-		m.isRanked = !m.isRanked
-		if err := m.currentLobby.SetRanked(self, m.isRanked); err != nil {
+		if err = m.currentLobby.SetRanked(self, !m.isRanked); err == nil {
 			m.isRanked = !m.isRanked
-			slog.Error("failed to set ranked mode", "error", err)
 		}
 	default:
 		// cursorGame and the guest rows: the game is fixed once a lobby exists and a
 		// guest row has no left/right adjustment, so both rows ignore it.
+		return
 	}
+	m.actionErr = err
 }
 
 func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
@@ -274,9 +246,9 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 		cmd := m.goHome()
 		return m, cmd
 	case lobby.EventGameStarted:
-		engine := msg.Engine
-		if engine == nil {
-			slog.Error("GAME_STARTED carried no game engine")
+		table := msg.Seat(views.SessionPlayerID(m.global))
+		if table == nil {
+			slog.ErrorContext(m.global.RequestContext(), "GAME_STARTED carried no game engine")
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
 		mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName())
@@ -284,11 +256,12 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			// Keep the listener armed: an unregistered game is no reason to eject
 			// the player, and returning a nil command would leave this view deaf to
 			// every later lobby event while still holding its subscriber slot.
-			slog.Error("game not registered, cannot route to its view", "game", m.currentLobby.GameName())
+			slog.ErrorContext(m.global.RequestContext(), "game not registered, cannot route to its view",
+				"game", m.currentLobby.GameName())
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
 		m.unsubscribe()
-		return m, router.Navigate(router.GameRoute(mod.Slug), engine)
+		return m, router.NavigateToGame(mod.Slug, table)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
 		self := views.SessionPlayer(m.global)
 		if !m.currentLobby.Leader().Equal(self) && !slices.ContainsFunc(m.currentLobby.Guests(), self.Equal) {
@@ -296,9 +269,7 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			cmd := m.goHome()
 			return m, cmd
 		}
-		m.isPrivate = m.currentLobby.IsPrivate()
-		m.isRanked = m.currentLobby.IsRanked()
-		m.maxPlayers = m.currentLobby.MaxPlayers()
+		m.syncSettings()
 		m.cursor = components.StepCursor(m.cursor, 0, m.maxCursor())
 	}
 	return m, listenToLobbyBroadcaster(m.lobbyChan)
@@ -310,7 +281,7 @@ func (m *model) View() tea.View {
 	}
 
 	actions := []string{"x - Leave Lobby", "r - Ready"}
-	return tea.NewView(views.RenderScreen(m.global, "Lobby", actions, func(height int) string {
+	return tea.NewView(views.RenderSeatedScreen(m.global, "Lobby", actions, func(height int) string {
 		if m.showLeaveConfirm {
 			redYes := m.global.Theme.ErrorText.Bold(true).Render("Yes")
 			return fmt.Sprintf("Are you sure you want to leave the lobby?\n\n[y] %s   [n] No", redYes)
@@ -325,7 +296,7 @@ func (m *model) View() tea.View {
 		// and a budget that assumed one puts the form back over the frame.
 		errText := m.global.Theme.ErrorText.Width(innerWidth).Render(m.actionErr.Error())
 		form := m.renderForm(isLeader, innerWidth, height-lg.Height(errText)-1)
-		return lg.JoinVertical(lg.Center, form, "", errText)
+		return styles.JoinVertical(lg.Center, form, "", errText)
 	}))
 }
 
@@ -333,6 +304,11 @@ func (m *model) View() tea.View {
 // the four option rows. The roster is the only part of this screen that grows, so it
 // is the part that gives when the terminal cannot hold both.
 const settingsRows = 6
+
+// columnGap is the blank columns between the side-by-side settings and roster. The fit
+// check and the layout both use it: checked narrower than laid out, a roster row that
+// did not fit was set beside the settings anyway and lipgloss wrapped its tail.
+const columnGap = 6
 
 // stackedGap is the blank rows between the stacked columns. It is the first thing the
 // roster takes back on a terminal too short for both.
@@ -345,22 +321,22 @@ func (m *model) renderForm(isLeader bool, innerWidth, maxHeight int) string {
 	settingsStack := m.renderSettings(isLeader)
 	rows := m.renderPlayerList(isLeader)
 
-	if lg.Width(settingsStack)+lg.Width(lg.JoinVertical(lg.Left, rows...))+4 > innerWidth {
+	if lg.Width(settingsStack)+columnGap+lg.Width(styles.JoinVertical(lg.Left, rows...)) > innerWidth {
 		// Stacked: the settings take their rows first and the roster gets the rest.
 		gap := stackedGap
 		if maxHeight-settingsRows-gap < 2 {
 			gap = 0
 		}
-		players := lg.JoinVertical(lg.Left, capRoster(rows, maxHeight-settingsRows-gap)...)
+		players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight-settingsRows-gap)...)
 		settingsCol := lg.NewStyle().Align(lg.Left).Render(settingsStack)
 		playersCol := lg.NewStyle().Align(lg.Left).MarginTop(gap).Render(players)
-		return lg.JoinVertical(lg.Left, settingsCol, playersCol)
+		return styles.JoinVertical(lg.Left, settingsCol, playersCol)
 	}
 	// Side by side, so the roster has the whole height to itself.
-	players := lg.JoinVertical(lg.Left, capRoster(rows, maxHeight)...)
-	settingsCol := lg.NewStyle().Align(lg.Left).MarginRight(6).Render(settingsStack)
+	players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight)...)
+	settingsCol := lg.NewStyle().Align(lg.Left).MarginRight(columnGap).Render(settingsStack)
 	playersCol := lg.NewStyle().Align(lg.Left).Render(players)
-	return lg.NewStyle().Align(lg.Center).Render(lg.JoinHorizontal(lg.Top, settingsCol, playersCol))
+	return lg.NewStyle().Align(lg.Center).Render(styles.JoinHorizontal(lg.Top, settingsCol, playersCol))
 }
 
 // capRoster trims the player list to the rows it was given and says how many seats it
@@ -380,7 +356,7 @@ func capRoster(rows []string, maxRows int) []string {
 func (m *model) renderSettings(isLeader bool) string {
 	t := m.global.Theme
 	on := func(row int) bool { return isLeader && m.cursor == row }
-	return lg.JoinVertical(lg.Left,
+	return styles.JoinVertical(lg.Left,
 		"  "+t.SectionHeading.Render("Settings"),
 		"  Lobby Code: "+t.LobbyCode.Render(m.currentLobby.Code()),
 		renderOption(t, on(cursorGame), "Game", m.currentLobby.GameName()),

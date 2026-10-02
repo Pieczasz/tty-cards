@@ -31,16 +31,17 @@ type model struct {
 	cumulativeScores map[string]int
 	handNumber       int
 	passDirection    logic.PassDirection
-	handComplete     bool
 	matchComplete    bool
-	lastTrickWinner  string
+	// interrupted is a match a leave ended early; leavers are who left, by name.
+	interrupted bool
+	leavers     []string
 }
 
 // New creates a Hearts TUI view bound to the session player; slug is its catalog
 // slug, the game_type its metrics carry.
-func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
+func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, slug)
+	session, _ := gameview.NewSession(global, table, slug)
 	m := &model{
 		Session:          session,
 		passSelected:     map[deck.Card]struct{}{},
@@ -62,9 +63,12 @@ func (m *model) syncState() {
 			m.cumulativeScores = maps.Clone(s.CumulativeScores)
 			m.handNumber = s.HandNumber
 			m.passDirection = s.PassDirection
-			m.handComplete = s.HandComplete()
 			m.matchComplete = s.MatchComplete
-			m.lastTrickWinner = s.LastTrickWinner
+		}
+		m.interrupted = state.Interrupted
+		m.leavers = m.leavers[:0]
+		for _, p := range state.LeftPlayers {
+			m.leavers = append(m.leavers, p.Name)
 		}
 	})
 	m.prunePassSelection()
@@ -74,7 +78,6 @@ func (m *model) syncState() {
 // staging outright once the pass is over.
 func (m *model) prunePassSelection() {
 	if m.phase != logic.PhasePassing {
-
 		m.passSelected = map[deck.Card]struct{}{}
 		return
 	}

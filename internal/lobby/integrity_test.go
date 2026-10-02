@@ -27,10 +27,12 @@ func isWaiting(l *Lobby) bool {
 func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 	t.Parallel()
 
-	changes := map[string]func(l *Lobby, leader *game.Player) error{
-		"ranked":      func(l *Lobby, leader *game.Player) error { return l.SetRanked(leader, true) },
-		"private":     func(l *Lobby, leader *game.Player) error { return l.SetPrivate(leader, false) },
-		"max_players": func(l *Lobby, leader *game.Player) error { return l.SetMaxPlayers(leader, 3, 0, 0) },
+	changes := map[string]func(l *Lobby, leader *game.Player, registry *game.Registry) error{
+		"ranked":  func(l *Lobby, leader *game.Player, _ *game.Registry) error { return l.SetRanked(leader, true) },
+		"private": func(l *Lobby, leader *game.Player, _ *game.Registry) error { return l.SetPrivate(leader, false) },
+		"max_players": func(l *Lobby, leader *game.Player, registry *game.Registry) error {
+			return l.SetMaxPlayers(leader, 3, registry)
+		},
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
@@ -43,7 +45,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 
 			ch, err := l.Subscribe("watcher")
 			require.NoError(t, err)
-			require.NoError(t, change(l, leader))
+			require.NoError(t, change(l, leader, registry))
 
 			assert.False(t, l.IsReady(guest), "the guest's ready survived a setting change")
 			assert.Contains(t, drainEventTypes(ch), EventPlayersUpdated, "the rosters were not told")

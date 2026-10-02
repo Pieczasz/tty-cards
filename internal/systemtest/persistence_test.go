@@ -33,7 +33,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 
 	players := make([]*game.Player, 0, 3)
 	for _, name := range []string{"alice", "bob", "carol"} {
-		user, _, err := userRepo.RegisterUserWithKey(ctx, name, "fingerprint-"+name)
+		user, _, err := userRepo.RegisterUserWithSSHKey(ctx, name, "fingerprint-"+name)
 		require.NoError(t, err)
 		players = append(players, lobby.NewPlayer(user))
 	}
@@ -56,7 +56,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	for _, p := range players {
 		require.NoError(t, l.ToggleReady(p, registry))
 	}
-	engine := awaitGameStart(t, events)
+	engine := awaitGameStart(t, l, events)
 
 	playOutMatch(t, engine)
 
@@ -103,7 +103,7 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 
 	players := make([]*game.Player, 0, 2)
 	for _, name := range []string{"dave", "erin"} {
-		user, _, err := userRepo.RegisterUserWithKey(ctx, name, "fingerprint-"+name)
+		user, _, err := userRepo.RegisterUserWithSSHKey(ctx, name, "fingerprint-"+name)
 		require.NoError(t, err)
 		players = append(players, lobby.NewPlayer(user))
 	}
@@ -122,7 +122,7 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	for _, p := range players {
 		require.NoError(t, l.ToggleReady(p, registry))
 	}
-	engine := awaitGameStart(t, events)
+	engine := awaitGameStart(t, l, events)
 
 	playOutMatch(t, engine)
 

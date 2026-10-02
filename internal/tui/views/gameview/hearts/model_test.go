@@ -2,6 +2,7 @@ package hearts
 
 import (
 	"slices"
+	"uuid"
 
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
@@ -38,7 +40,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 		Width:        80,
 		Height:       40,
 	}
-	m, ok := New(global, engine, "hearts").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "hearts").(*model)
 	require.True(t, ok)
 	return engine, m
 }
@@ -237,4 +239,84 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 	assert.NotNil(t, m.Init())
+}
+
+// tableOnTurn seats the view as whichever player the engine put on turn, so the test
+// does not depend on where the deal landed.
+func tableOnTurn(t *testing.T) (*game.Engine, *model) {
+	t.Helper()
+	engine, _ := startedTable(t)
+
+	id, err := uuid.Parse(engine.CurrentPlayerID())
+	require.NoError(t, err)
+	global := router.GlobalContext{
+		User:         &db.User{ID: id, Username: "hero"},
+		LobbyManager: lobby.NewManager(t.Context(), nil),
+		Width:        80,
+		Height:       40,
+	}
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "hearts").(*model)
+	require.True(t, ok)
+	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
+	return engine, m
+}
+
+// Three staged cards and enter is the pass. An accepted one clears the staging, or the
+// markers would sit over the cards the next hand deals into those positions.
+func TestSubmitPass_SendsTheThreeStagedCards(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t)
+	require.Equal(t, logic.PhasePassing, m.phase)
+
+	var staged []deck.Card
+	for i := range 3 {
+		m.Selected = i
+		staged = append(staged, m.Base.Hand[i])
+		_, _ = m.Update(tuitest.Key("space"))
+	}
+	_, _ = m.Update(tuitest.Key("enter"))
+
+	require.NoError(t, m.ActionErr)
+	assert.Empty(t, m.passSelected, "an accepted pass clears the staging")
+	engine.WithState(func(state *game.State) {
+		s, ok := state.Extra.(*logic.State)
+		require.True(t, ok)
+		assert.ElementsMatch(t, staged, s.PendingPasses[m.Bound.PlayerID()])
+	})
+}
+
+func TestHandleEnter_PlaysTheCardUnderTheCursor(t *testing.T) {
+	t.Parallel()
+	_, m := tableOnTurn(t)
+	m.phase = logic.PhaseTrickPlay
+	card := m.Base.Hand[0]
+	m.Selected = 0
+
+	_, _ = m.Update(tuitest.Key("enter"))
+
+	// The engine is still passing, so it refuses the play: the refusal is the proof the
+	// card reached it, and it has to come back as a message rather than vanish.
+	require.Error(t, m.ActionErr)
+	assert.Contains(t, m.Base.Hand, card, "a refused card stays in the hand")
+}
+
+func TestHandleEnter_TheSeatOnTurnDealsTheNextHand(t *testing.T) {
+	t.Parallel()
+	_, m := tableOnTurn(t)
+	m.phase = logic.PhaseHandOver
+
+	_, _ = m.Update(tuitest.Key("enter"))
+
+	// The engine's hand is not over, so the deal is refused - but it was asked for.
+	assert.Error(t, m.ActionErr)
+}
+
+func TestUpdate_IgnoresWhatIsNotAKey(t *testing.T) {
+	t.Parallel()
+	_, m := startedTable(t)
+	before := m.Selected
+
+	_, cmd := m.Update(struct{}{})
+	assert.Nil(t, cmd)
+	assert.Equal(t, before, m.Selected)
 }
