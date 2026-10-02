@@ -49,8 +49,8 @@ Named here so you recognise them on sight, not as an inventory.
 | Elm architecture (Model/Update/View) | every `internal/tui/views/**` model |
 | Fan-out broadcaster (observer) | `internal/broadcaster.Broadcaster[T]` - latest-wins, per-subscriber buffered channel |
 | Strategy | `game.Rules`, implemented by all five rules packages; the engine calls rules, never the reverse |
-| Factory + single registration point | `internal/catalog.All` -> `game.Registry` |
-| Functional options | `lobby.Option` (`WithCardGame`, `WithMaxPlayers`, `WithPrivate`, `WithRanked`), `game.EngineOption` (`WithTurnTimeout`) |
+| Factory + single registration point | `internal/catalog.Games` -> `game.Registry` |
+| Functional options | `lobby.Option` (`WithCardGame`, `WithMaxPlayers`, `WithPrivate`, `WithRanked`), `game.EngineOption` (`WithLogger`; `WithTurnTimeout` in tests) |
 | Facade | `game.BoundEngine` via `game.Bind(engine, playerID)` - nil-safe throughout |
 | Embedded base type | `gameview.Session` in every game view's model; `shed.State` in the crazy eights and uno `Extra` |
 | Repository | `db.Authenticator` / `db.Profiles` / `db.Leaderboard` (their union is `db.UserRepository`) and `db.MatchRepository`, declared in `internal/db`, implemented in `internal/repository` - each consumer takes the smallest one it calls |
@@ -74,7 +74,7 @@ correctness tool in `cmd/server/main.go`; `goleak` `TestMain` in 26 packages.
 ## 2. The tree
 
 ```
-terminal-card/
+tty-cards/
 ├── cmd/
 │   ├── server/
 │   │   ├── main.go             process entry: logging -> config -> OTel -> DB -> repos
@@ -85,19 +85,22 @@ terminal-card/
 │   ├── broadcaster/
 │   │   └── broadcaster.go      Broadcaster[T], latest-wins, ErrClosed/ErrAtCapacity
 │   ├── catalog/
-│   │   └── catalog.go          `All` - the ONLY place a game is declared; NewRegistry
+│   │   └── catalog.go          `Games` - the ONLY place a game is declared; NewRegistry
 │   ├── config/
-│   │   ├── config.go           env loading, Validate(), DSN(), String() (redacts pw)
-│   │   ├── nginx.conf          stream{} SSH proxy w/ PROXY protocol + http{} site+API
+│   │   ├── config.go           Load, Validate, DSN; env_resolver.go, secret.go (redacts)
+│   │   ├── nginx.conf          stream{} SSH proxy w/ PROXY protocol + http{} :80, :443 API
 │   │   ├── alloy/config.alloy  Grafana Alloy pipeline (OTLP in, LGTM out)
 │   │   ├── loki/loki.yaml      14-day retention + compactor
 │   │   ├── tempo/tempo.yaml    48-hour block retention
-│   │   ├── prometheus/         prometheus.yml, alerts.yml
+│   │   ├── prometheus/         prometheus.yml, alerts.yml, alerts-pipeline.yml (+ tests)
+│   │   ├── alertmanager/       routes alerts to Telegram
+│   │   ├── certbot/renew.sh    apex certificate: issue, renew, copy into proxy-tls
+│   │   ├── postgres/           pg_hba.conf: no plaintext TCP
 │   │   └── grafana/            provisioning (datasources, dashboards) + 4 dashboards
 │   ├── db/                     GORM models AND the repository interfaces
 │   │   ├── repository.go       Authenticator, Profiles, Leaderboard (UserRepository
 │   │   │                       is their union), MatchRepository  ← the contract
-│   │   ├── users.go            User, PublicKey, Ranking, ValidateUsername
+│   │   ├── users.go            User, PublicSSHKey, Ranking, ValidateUsername
 │   │   ├── games.go            Game, GameRef (slug + display name)
 │   │   ├── matches.go          Match, MatchParticipant
 │   │   ├── uuid_sql.go         the `stduuid` GORM serializer for stdlib uuid.UUID
@@ -185,12 +188,15 @@ terminal-card/
 │   ├── privacy.md / terms.md   mirrors of the published policies
 │   └── changelog.md            what changed, for players and operators
 ├── web/                        Astro static site (separate toolchain, pnpm)
-├── scripts/                    backup.sh (pg_dump + zstd), dev-session.sh (tmux x3)
+├── scripts/                    backup.sh (pg_dump -Fc + host key tar, optional rclone),
+│                               restore.sh, restore-drill.sh, dev-session.sh (tmux x3)
 ├── .github/workflows/          test.yml (test · integration · lint · vulncheck ·
 │                               deadcode · image · compose), web.yml
-├── compose.yaml                migrate, backend, db, proxy, alloy, loki, tempo,
-│                               prometheus, grafana
-├── Makefile                    ci = fmt fix lint test build
+├── compose.yaml                db-certs, migrate, backend, db, proxy-certs, proxy,
+│                               certbot, rclone (backup profile), alloy,
+│                               docker-socket-proxy, loki, tempo, prometheus,
+│                               alertmanager, grafana
+├── Makefile                    ci = fmt fix lint deadcode semgrep cover build
 ├── .golangci.yml               the enabled linters, the size gates, depguard
 ├── README.md                   orientation, commands, configuration
 ├── CLAUDE.md / AGENTS.md       terse briefs for coding agents
@@ -257,10 +263,11 @@ Migrations run automatically (the `migrate` service) before the backend starts.
 SSH host keys persist in the `ssh-keys` volume - keep it across redeploys or every
 client sees a host-key change, which is indistinguishable from an attack.
 
-Exactly two ports reach the world: **22** and **80**, both on nginx. Grafana is on
-`127.0.0.1:3000`; reach it with `ssh -L 3000:127.0.0.1:3000 <host>`. Every
-service carries an explicit `mem_limit` and they add up to 5632 MiB, sized for a
-12 GB / 6-core VPS - the arithmetic is in the header comment of `compose.yaml`.
+Exactly three ports reach the world: **22**, **80** and **443**, all on nginx. Grafana
+is on `127.0.0.1:3000`; reach it with `ssh -L 3000:127.0.0.1:3000 <host>`. Every
+long-running service carries an explicit `mem_limit` and they add up to 7936 MiB
+(~7.75 GiB) and 4 cores of a 12 GB / 6-core VPS - the arithmetic is in the header
+comment of `compose.yaml`.
 
 ### 3.4 Tests
 
@@ -322,7 +329,7 @@ are things a reader coming from a real-time game server would reasonably expect.
 | **A matchmaking queue** | None. Tables are found by browsing an Elo-proximity-ranked list capped at 20, or by 8-character code |
 | **Collision detection / spatial logic** | Not applicable. Move legality is `Rules.ValidateAction` |
 | **Mimir** | Not deployed. Metrics land in Prometheus' own TSDB via remote write |
-| **Alloy scraping the Go process** | Inverted: the app **pushes** OTLP to Alloy. Alloy scrapes only the host, via `prometheus.exporter.unix` |
+| **Alloy scraping the Go process** | Inverted: the app **pushes** OTLP to Alloy, and nothing scrapes it. Alloy exports only the host (`prometheus.exporter.unix`); Prometheus scrapes the pipeline itself (Alloy, Loki, Tempo, Alertmanager) so a dead one reads `up == 0` |
 | **Frame-render-time metrics** | Not instrumented. There are counters and four histograms (session duration, game duration, lobby time-to-start), but nothing times a render |
 | **Tracing across game events** | Only `ssh.session` and ten `db.*` spans; the stats API is deliberately untraced. `game`, `lobby` and `tui` are untraced |
 | **`tea.Every` subscription loops** | Not used. Periodic work is self-rescheduling `tea.Tick`, which is what lets the countdown change rate mid-turn |

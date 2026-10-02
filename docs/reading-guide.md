@@ -220,7 +220,7 @@ seat goes early and the clock stops being a clock.
 
 **Test.** `internal/game/crazyeight/helpers_test.go`
 `TestSoak_TimeoutActionIsAlwaysLegal` - a `rapid`-driven soak
-(`gametest.SoakTimeoutIsAlwaysLegal`, `internal/game/gametest/shed.go`, 284) that
+(`gametest.SoakTimeoutIsAlwaysLegal`, `internal/game/gametest/shed.go`, 342) that
 plays random tables and asserts the auto-play move at every reachable state. Four
 of the five games have one; poker has the deterministic equivalent
 `TestRules_TimeoutAction_IsAcceptedByValidateAction`. `TestShedContract` in the
@@ -456,10 +456,11 @@ the view's named, testable job.
 
 ## 8. The SSH server
 
-**Files.** `internal/ssh/auth.go` (93) first, then `internal/ssh/tracker.go` (93)
-for `SessionTracker`, then `internal/ssh/server.go` (633) in this order:
+**Files.** `internal/ssh/auth.go` (99) first, then `internal/ssh/tracker.go` (97)
+for `SessionTracker`, then `internal/ssh/server.go` (701) in this order:
 `NewServer` -> `limitSessionChannels` -> `sessionLifecycle` -> `sessionModel` ->
-`releaseSession` -> `recoverSession` / `reportingModel`.
+`sessionProgram` -> `releaseSession` -> `recoverSession` / `reportingModel`, and
+last `internal/ssh/input.go` (104), the input guard.
 
 **Understand.**
 
@@ -468,7 +469,9 @@ for `SessionTracker`, then `internal/ssh/server.go` (633) in this order:
 it. The SSH login name becomes the username on first connect only.
 `allowRegister` is consulted **only** on the `user == nil` branch, after
 `db.ValidateUsername`, so neither a returning player nor a typo spends the
-registration budget (`REGISTRATION_LIMIT` / `REGISTRATION_WINDOW`).
+registration budget (`registrationBudget`: `REGISTRATION_LIMIT` per /64,
+`REGISTRATION_LIMIT_WIDE` per /48, `REGISTRATION_GLOBAL_LIMIT` server-wide, each per
+`REGISTRATION_WINDOW`).
 
 *"Taken" is uninformative on purpose.* `mapRegisterError` folds
 `db.ErrUsernameTaken` into `ErrNameUnavailable`, because a distinguishable message
@@ -489,6 +492,12 @@ before `Accept`.
 *A second session displaces the first* and closes its connection, outside the
 tracker lock - a wedged peer must not hold every other account's `Connect` behind
 it. Only the owning generation may free the slot and the seat.
+
+*A session's size and input are budgets.* bubbletea is told at most 120x40, at
+start and on every resize, because its renderer holds ~260 B per cell for the
+session's life; `inputGuard` closes a session sending more than 1 KiB/s after a
+16 KiB burst, or 32 KiB without a pause, because bubbletea's decoder buffers an
+unterminated paste without bound.
 
 **Invariant to check.** `releaseSession` gives up the lobby seat and the tracker
 slot as one step under the tracker lock (`ReleaseWith`), and `tui.ResumeSeat` runs
@@ -533,7 +542,7 @@ and reports every bad variable at once. The session gauge reads
 **Test.** `internal/observability/metrics_test.go` collects every instrument and
 fails if any attribute key falls outside a fixed allow-list - enforced, not
 asserted. `internal/catalog/metrics_test.go`
-`TestAll_LobbyAndViewShareOneGameTypeLabel` pins the `game_type` label to the
+`TestGames_LobbyAndViewShareOneGameTypeLabel` pins the `game_type` label to the
 catalog slug ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)).
 Then `internal/ratelimit/netkey_test.go`
 `TestNetKey_AdjacentAllocationsDoNotShareAKey`.
@@ -544,7 +553,7 @@ Then `internal/ratelimit/netkey_test.go`
 
 **Files.** `internal/catalog/catalog.go` (74), then `cmd/server/main.go` (421).
 
-**Understand.** `catalog.All` is the only place a game is declared, and each
+**Understand.** `catalog.Games` is the only place a game is declared, and each
 entry embeds a `game.Module` (name, slug, rules `Factory`) **and** carries the
 TUI view constructor, which is handed the slug. `catalog.NewRegistry` builds the
 `game.Registry` from it; `internal/tui/app.go` registers routes from it. `main.go`
@@ -558,10 +567,10 @@ closing the DB handle they write through.
 `catalog_test.go`; but copying an entry and changing only the rules **does**
 compile, so the pair is kept in lockstep by hand.
 
-**Test.** `internal/catalog/catalog_test.go` `TestAll_EntriesComplete`,
-`TestAll_NamesArePersistedAndFrozen` and `TestAll_SlugsMatchTheMigrationBackfill`;
-then `close_test.go` `TestAll_CloseReleasesTheEngineSubscription`, one table over
-`catalog.All` that proves every view gives its subscriber slot back.
+**Test.** `internal/catalog/catalog_test.go` `TestGames_EntriesComplete`,
+`TestGames_NamesArePersistedAndFrozen` and `TestGames_SlugsMatchTheMigrationBackfill`;
+then `close_test.go` `TestGames_CloseReleasesTheEngineSubscription`, one table over
+`catalog.Games` that proves every view gives its subscriber slot back.
 
 ---
 
@@ -570,14 +579,16 @@ then `close_test.go` `TestAll_CloseReleasesTheEngineSubscription`, one table ove
 **Files.** `compose.yaml`, `internal/config/nginx.conf`,
 `internal/config/alloy/config.alloy`, `internal/config/loki/loki.yaml`,
 `internal/config/tempo/tempo.yaml`, `internal/config/prometheus/prometheus.yml`,
+`internal/config/alertmanager/alertmanager.yml`, `internal/config/certbot/renew.sh`,
 `internal/config/grafana/provisioning/**`.
 
-**Understand.** Exactly two ports are published to the world, 22 and 80, both on
-nginx; Grafana is the single exception on `127.0.0.1:3000`. The comments in
+**Understand.** Exactly three ports are published to the world, 22, 80 and 443,
+all on nginx; Grafana is the single exception on `127.0.0.1:3000`. The comments in
 `compose.yaml` and `nginx.conf` state why each one is what it is - PROXY
-protocol, the `$client_net` map duplicated across `stream` and `http` because the
-two contexts cannot share one, the `log_format privacy` with no `$remote_addr`,
-and the commented-out `443` block with the reason TLS is not terminated yet.
+protocol, the `$client_net` and `$client_net48` maps duplicated across `stream` and
+`http` because the two contexts cannot share one, the `log_format privacy` with no
+`$remote_addr`, port 80 as only a way in (ACME challenge, liveness, redirect), and
+the TLS bootstrap: a `proxy-certs` placeholder, then `certbot` over the webroot.
 
 **Invariant to check.** `:6969` and `:6970` are `expose`, never `ports`.
 
@@ -623,16 +634,17 @@ go list -deps ./cmd/server | sort -u   # everything the binary pulls in
 go list -f '{{.ImportPath}} {{.Imports}}' ./... | grep lobby
 ```
 
-### GitNexus
+### code-review-graph
 
-[GitNexus](https://github.com/abhigyanpatwari/GitNexus) indexes the repo into a
-local knowledge graph and exposes it over MCP, so an agent can ask "what calls
-`finalizeFinishedGame`?" instead of grepping.
+code-review-graph indexes the repo into a local graph and exposes it over MCP
+(`.mcp.json`), so an agent can ask "what calls `finalizeFinishedGame`?" instead of
+grepping.
 
 ```bash
-node .gitnexus/run.cjs analyze --index-only     # re-index after a large merge
-node .gitnexus/run.cjs impact finalizeFinishedGame --direction upstream --repo .
-node .gitnexus/run.cjs context DisconnectPlayer --repo .
+uvx code-review-graph update                              # re-index after a large merge
+uvx code-review-graph query callers_of finalizeFinishedGame
+uvx code-review-graph query tests_for DisconnectPlayer
+uvx code-review-graph impact                              # blast radius of the working tree
 ```
 
 **Two seams it cannot see.** Channel receives and `time.AfterFunc` do not become
@@ -667,7 +679,7 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | Who writes Elo? | `lobby/finalize.go` -> `repository/match.go` |
 | Why did Elo not move? | shutdown / `EndReasonRulesError` / `EndReasonAbandoned` / `EndReasonInterrupted` (only leavers move) / pairing damp / provisional |
 | Soft-deleted ranking broke finalize? | `seedRankingRows` revive |
-| How is a game registered? | `catalog/catalog.go` `All`; `game.NewRegistry` panics on a duplicate |
+| How is a game registered? | `catalog/catalog.go` `Games`; `game.NewRegistry` panics on a duplicate |
 | What do crazy eights and Uno share? | `game/shed/shed.go`; their shared tests in `game/gametest/shed.go` |
 | Who acts next? | `game/engine.go` `advanceTurnLocked` / `settleTurnLocked`; rules set it with `State.SetTurn` / `OverrideTurn` (`game/turn.go`) |
 | Turn auto-play / idle kick? | `game/turnclock.go` (`armTurnTimerLocked`, `resolveTurnTimeout`, `timeoutOutcome`) |
@@ -677,8 +689,8 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | Where is state redacted for the screen? | `views/gameview/poker/model.go` `buildSeats` |
 | Browse list sorting? | `lobby/browse.go` |
 | Lock order? | tracker -> manager -> lobby -> engine; `State` has no lock |
-| Rate limiting on IPv6? | `ratelimit/netkey.go`; fail-closed in `ssh.netKeyFor` |
-| Why can I not register? | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` (`config/config.go`), `ssh.allowRegistration`; `db.ValidateUsername`; `mapRegisterError` |
+| Rate limiting on IPv6? | `ratelimit/netkey.go` (`NetKey` /64, `WideKey` /48); fail-closed in `ssh.clientHost` |
+| Why can I not register? | `REGISTRATION_LIMIT`, `_WIDE`, `REGISTRATION_GLOBAL_LIMIT` / `REGISTRATION_WINDOW` (`config/config.go`), `ssh.allowRegistration`; `db.ValidateUsername`; `mapRegisterError` |
 | Add a migration? | `make migrate-create`, files under `db/migrations/` |
 | Why is the game row keyed on a slug? | `db/games.go` `GameRef`, migration `000005` |
 | Why are account ids UUIDs? | `db/users.go`, `db/uuid_sql.go`, migration `000001` |
