@@ -1,6 +1,6 @@
 // Package broadcaster is an in-process, latest-wins fan-out: every subscriber gets its
-// own buffered channel, and a full one drops its oldest message rather than blocking
-// the sender. Lobbies and game engines publish their live updates through it.
+// own buffered channel, and a full one drops its oldest message. Lobbies and game engines
+// publish their live updates through it.
 package broadcaster
 
 import (
@@ -15,26 +15,16 @@ const defaultMaxSubscribers = 64
 const subscriberBuffer = 256
 
 var (
-	// ErrClosed is Subscribe on a broadcaster Close already ended.
-	ErrClosed = errors.New("broadcaster is closed")
-	// ErrAtCapacity is Subscribe past the cap New was given.
+	ErrClosed     = errors.New("broadcaster is closed")
 	ErrAtCapacity = errors.New("broadcaster is at subscriber capacity")
 )
-
-type subscriber[T any] struct {
-	id      int
-	ch      chan T
-	dropped int
-}
 
 // Broadcaster is built for the single-node deployment.
 // Horizontal scaling across servers would need a shared pub/sub (e.g., Watermill
 // over Redis); revisit only if the app runs multi-node.
 type Broadcaster[T any] struct {
-	// Broadcast takes the write lock: it may drain a subscriber's channel on a full
-	// buffer, and two concurrent broadcasts draining the same channel would steal
-	// messages from each other and from the subscriber. Exclusive sends also make
-	// Unsubscribe's close-from-the-receiver-side safe by construction.
+	// Every send happens under mu, which is what makes Unsubscribe's close from the
+	// receiving side safe and stops two broadcasts draining the same full channel.
 	mu             sync.Mutex
 	subscribers    map[<-chan T]*subscriber[T]
 	nextID         int
@@ -43,9 +33,14 @@ type Broadcaster[T any] struct {
 	dropped        atomic.Int64
 }
 
-// New makes a broadcaster that admits at most maxSubscribers at once; zero or less
-// means the default of 64. The cap bounds subscribers, not the per-subscriber buffer,
-// which is fixed.
+type subscriber[T any] struct {
+	id      int
+	ch      chan T
+	dropped int
+}
+
+// New makes a broadcaster that admits at most maxSubscribers at once. The cap bounds
+// subscribers, not the per-subscriber buffer, which is fixed.
 func New[T any](maxSubscribers int) *Broadcaster[T] {
 	if maxSubscribers <= 0 {
 		maxSubscribers = defaultMaxSubscribers
@@ -57,8 +52,7 @@ func New[T any](maxSubscribers int) *Broadcaster[T] {
 }
 
 // Subscribe returns a fresh channel that receives every later Broadcast until
-// Unsubscribe or Close closes it. It fails with ErrClosed or ErrAtCapacity rather than
-// hand back a channel nothing will ever send on.
+// Unsubscribe or Close closes it.
 func (b *Broadcaster[T]) Subscribe() (<-chan T, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -104,10 +98,6 @@ func (b *Broadcaster[T]) Broadcast(msg T) {
 		select {
 		case sub.ch <- msg:
 		default:
-			// Buffer full: drop the oldest and enqueue the newest (latest-wins)
-			// so slow subscribers don't get stuck on stale state. Logged once per
-			// subscriber and counted, not logged per message - a stuck subscriber
-			// would otherwise turn every broadcast into a log write under the lock.
 			b.dropped.Add(1)
 			sub.dropped++
 			if sub.dropped == 1 {
@@ -118,10 +108,6 @@ func (b *Broadcaster[T]) Broadcast(msg T) {
 			case <-sub.ch:
 			default:
 			}
-			// This send cannot block. Broadcast is the only sender and it holds the
-			// lock, so nothing refills the slot the receive above freed - and if that
-			// receive found nothing, the subscriber had just drained the buffer
-			// itself, which leaves even more room.
 			sub.ch <- msg
 		}
 	}
@@ -150,9 +136,7 @@ func (b *Broadcaster[T]) Len() int {
 	return len(b.subscribers)
 }
 
-// Dropped is the total number of messages discarded across all subscribers since
-// construction. Owners surface it as a metric; a rising count means a subscriber
-// is not keeping up.
+// Dropped is how many messages full subscribers have lost, across all of them.
 func (b *Broadcaster[T]) Dropped() int64 {
 	return b.dropped.Load()
 }

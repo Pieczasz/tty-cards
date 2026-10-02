@@ -6,8 +6,7 @@ import (
 	"slices"
 )
 
-// Pile is an ordered stack of cards - a stock or a discard - drawn from the top, the
-// end of the slice.
+// Pile is an ordered stack of cards.
 type Pile struct {
 	cards []Card
 }
@@ -21,9 +20,7 @@ func New(cards []Card) *Pile {
 
 // Shuffle is a uniform permutation from a stdlib shuffle seeded once per call from
 // crypto/rand, so the order is unpredictable to a player who has seen every previous
-// deal. It cannot fail: since Go 1.24 crypto/rand.Read never returns an error (it
-// aborts the process on an OS failure), so the error every caller used to plumb
-// through was an unreachable branch dressed as resilience.
+// deal.
 func (p *Pile) Shuffle() {
 	var seed [32]byte
 	_, _ = rand.Read(seed[:])
