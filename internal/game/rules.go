@@ -38,9 +38,7 @@ type Rules interface {
 
 	ValidateAction(state *State, action Action) error
 	AfterAction(state *State, action Action) error
-	// ApplyAction mutates state for an action ValidateAction accepted. An error means
-	// the state may be half-applied and the engine finishes the game, so anything
-	// checkable up front belongs in ValidateAction.
+
 	ApplyAction(state *State, action Action) error
 	CheckWinCondition(state *State) bool
 	Standings(state *State) []*Player

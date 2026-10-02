@@ -2,7 +2,6 @@ package poker
 
 import (
 	"errors"
-	"log/slog"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -50,7 +49,7 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 		return err
 	}
 	if state.Deck.Size() < minDeckAfterDeal {
-		slog.Error("poker deck too small to run the board",
+		state.Logger().Error("poker deck too small to run the board",
 			"hand", extra.HandNumber, "size", state.Deck.Size(), "want", minDeckAfterDeal)
 		return errors.New("not enough cards to run the board")
 	}
@@ -59,8 +58,8 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	// short stack would otherwise make a full table look heads-up.
 	headsUp := fundedSeats(state, extra) == 2
 	setBlinds(state, extra, dealer, headsUp)
-	extra.postBlind(extra.Seats[state.Players[extra.SBIndex].ID], extra.SmallBlind)
-	extra.postBlind(extra.Seats[state.Players[extra.BBIndex].ID], extra.BigBlind)
+	extra.commitTo(extra.Seats[state.Players[extra.SBIndex].ID], extra.SmallBlind)
+	extra.commitTo(extra.Seats[state.Players[extra.BBIndex].ID], extra.BigBlind)
 	// A blind too short to post in full is all-in for less; the bring-in stays at the
 	// full big blind and the shortfall is dead money, so the opening bet is the blind
 	// rather than what was actually posted. Following the posted amount would drop the
@@ -106,7 +105,7 @@ func dealHoleCards(state *game.State, extra *State) error {
 		}
 		cards, ok := state.Deck.DrawN(HoleCards)
 		if !ok {
-			slog.Error("poker deck empty dealing hole cards",
+			state.Logger().Error("poker deck empty dealing hole cards",
 				"hand", extra.HandNumber, "player", p.ID, "dealt", funded)
 			return errors.New("not enough cards to deal")
 		}
@@ -114,7 +113,7 @@ func dealHoleCards(state *game.State, extra *State) error {
 		funded++
 	}
 	if funded < 2 {
-		slog.Error("poker cannot deal a hand", "hand", extra.HandNumber, "funded", funded)
+		state.Logger().Error("poker cannot deal a hand", "hand", extra.HandNumber, "funded", funded)
 		return errors.New("not enough funded players to deal a hand")
 	}
 	return nil
@@ -179,7 +178,7 @@ func nextFundedSeat(state *game.State, extra *State, from int) int {
 // deals the following hand with ActionNextHand.
 func finishHand(state *game.State, extra *State) {
 	extra.Phase = PhaseShowdown
-	checkChipConservation(extra)
+	checkChipConservation(state, extra)
 	recordBustouts(state, extra)
 	if extra.HandNumber >= extra.HandsTotal || fundedSeats(state, extra) <= 1 {
 		extra.MatchComplete = true
@@ -198,9 +197,9 @@ func finishHand(state *game.State, extra *State) {
 // The pool is checked separately because the total cannot see it: chipsInPlay counts
 // Pool, so a hand that ends without paying a pot out balances, and the next
 // resetForHand quietly zeroes the stranded chips.
-func checkChipConservation(extra *State) {
+func checkChipConservation(state *game.State, extra *State) {
 	if extra.Pool != 0 {
-		slog.Error("poker hand finished with chips still in the pot",
+		state.Logger().Error("poker hand finished with chips still in the pot",
 			"hand", extra.HandNumber,
 			"phase", extra.Phase.String(),
 			"pool", extra.Pool,
@@ -213,20 +212,9 @@ func checkChipConservation(extra *State) {
 	if total == extra.handStartChips {
 		return
 	}
-	slog.Error("poker chip conservation broken",
+	state.Logger().Error("poker chip conservation broken",
 		"hand", extra.HandNumber,
 		"phase", extra.Phase.String(),
 		"delta", int64(total)-int64(extra.handStartChips), //nolint:gosec // G115: chip totals are far below 2^63
 	)
-}
-
-func (s *State) postBlind(seat *Seat, amount uint) {
-	pay := min(amount, seat.Chips)
-	seat.Chips -= pay
-	seat.Bet += pay
-	seat.Contributed += pay
-	s.Pool += pay
-	if seat.Chips == 0 {
-		seat.AllIn = true
-	}
 }

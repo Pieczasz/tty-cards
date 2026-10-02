@@ -56,9 +56,6 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 		}
 		return ActionNextHand{}
 	}
-	if state.CurrentTurn < 0 || state.CurrentTurn >= len(state.Players) {
-		return nil
-	}
 	p := state.Players[state.CurrentTurn]
 	if extra.ToCall(p.ID) == 0 {
 		return ActionCheck{}

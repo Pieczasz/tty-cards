@@ -59,6 +59,27 @@ func (r *timeoutRules) appliedActions() []string {
 
 var _ TurnTimeoutHandler = (*timeoutRules)(nil)
 
+// WithTurnTimeout is for tests. It sets the default turn length; zero or less disables the clock.
+func WithTurnTimeout(d time.Duration) EngineOption {
+	return func(e *Engine) {
+		e.clock.defaultLength = d
+	}
+}
+
+// turnDeadline is for tests; views read the remaining time from Frame.
+func (e *Engine) turnDeadline() time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.clock.deadline
+}
+
+// missedTurns is for tests: the idle count is the engine's own business.
+func (e *Engine) missedTurns(playerID string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.clock.missed[playerID]
+}
+
 func fireTurnTimeout(t *testing.T, e *Engine) {
 	t.Helper()
 	e.mu.Lock()

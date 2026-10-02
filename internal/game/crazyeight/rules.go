@@ -128,7 +128,6 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		extra.RecordDraw(shed.DrawInto(state, p, 1))
 	}
 	return nil
-
 }
 
 func (r *Rules) AfterAction(_ *game.State, _ game.Action) error {

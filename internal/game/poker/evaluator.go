@@ -100,8 +100,8 @@ func normalizeCards(cards []deck.Card) []rankedCard {
 	return hand
 }
 
-// maxRankValue is the largest deck.RankValue a card can carry (ace, and joker with it),
-// so a rank indexes an array rather than hashing into a map.
+// maxRankValue is the largest deck.RankValue a card can carry (the ace), so a rank
+// indexes an array rather than hashing into a map.
 const maxRankValue = 14
 
 func rankCounts(hand []rankedCard) (quadRank, tripRank int, pairs []int) {

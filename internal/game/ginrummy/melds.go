@@ -75,10 +75,9 @@ func bestSplitBy(
 ) (melds [][]deck.Card, deadwood []deck.Card, deadwoodPts int) {
 	n := len(hand)
 	if n > maskBits {
-		// Candidate melds are uint16 index masks. A bigger hand is a caller mistake
-		// (deal is 10, hold is 11). The engine now recovers a panic on the timer
-		// goroutine, but that ends the table; treating the hand as deadwood keeps it
-		// playing instead of scoring a silently truncated search.
+		// A bigger hand is a caller mistake (deal is 10, hold is 11). Scoring it all
+		// as deadwood keeps the table playing, where a panic would end it and a
+		// truncated search would score it wrong.
 		deadwood = slices.Clone(hand)
 		return nil, deadwood, score(deadwood)
 	}

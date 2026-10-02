@@ -6,9 +6,11 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 )
 
 func createTestState() *game.State {
@@ -54,14 +56,14 @@ func TestRules_ValidateAction(t *testing.T) {
 	t.Run("check valid when nothing owed", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra(t, state).CurrentBet = 0
+		gametest.Extra[*State](t, state).CurrentBet = 0
 		assert.NoError(t, (&Rules{}).ValidateAction(state, ActionCheck{}))
 	})
 
 	t.Run("check invalid when facing a bet", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra(t, state).CurrentBet = 100
+		gametest.Extra[*State](t, state).CurrentBet = 100
 		err := (&Rules{}).ValidateAction(state, ActionCheck{})
 		assert.ErrorContains(t, err, "cannot check")
 	})
@@ -69,7 +71,7 @@ func TestRules_ValidateAction(t *testing.T) {
 	t.Run("raise below current bet rejected", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra(t, state).CurrentBet = 100
+		gametest.Extra[*State](t, state).CurrentBet = 100
 		err := (&Rules{}).ValidateAction(state, ActionRaiseTo{Amount: 50})
 		assert.ErrorContains(t, err, "above current bet")
 	})
@@ -77,19 +79,45 @@ func TestRules_ValidateAction(t *testing.T) {
 	t.Run("call valid when facing a bet", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra(t, state).CurrentBet = 100
+		gametest.Extra[*State](t, state).CurrentBet = 100
 		assert.NoError(t, (&Rules{}).ValidateAction(state, ActionCall{}))
 	})
 
 	t.Run("raise invalid if not enough chips", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.CurrentBet = 100
 		extra.Seats["p1"].Chips = 10
 		err := (&Rules{}).ValidateAction(state, ActionRaiseTo{Amount: 200})
 		assert.ErrorContains(t, err, "not enough chips")
 	})
+
+	t.Run("no betting once the hand is over", func(t *testing.T) {
+		t.Parallel()
+		state := createTestState()
+		gametest.Extra[*State](t, state).Phase = PhaseShowdown
+		assert.ErrorIs(t, (&Rules{}).ValidateAction(state, ActionFold{}), game.ErrHandOver)
+	})
+
+	t.Run("a folded seat has nothing left to decide", func(t *testing.T) {
+		t.Parallel()
+		state := createTestState()
+		gametest.Extra[*State](t, state).Seats["p1"].Folded = true
+		assert.ErrorContains(t, (&Rules{}).ValidateAction(state, ActionFold{}), "player cannot act")
+	})
+
+	t.Run("a move from another game", func(t *testing.T) {
+		t.Parallel()
+		assert.ErrorIs(t, (&Rules{}).ValidateAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
+	})
+}
+
+func TestRules_OnGameStart_RefusesAnEmptyTable(t *testing.T) {
+	t.Parallel()
+	state := game.NewState(&Rules{}, nil, nil)
+	require.ErrorContains(t, (&Rules{}).OnGameStart(state), "no players")
+	assert.Nil(t, state.Extra)
 }
 
 func TestRules_ApplyAction(t *testing.T) {
@@ -98,24 +126,24 @@ func TestRules_ApplyAction(t *testing.T) {
 	t.Run("folding marks folded", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		(&Rules{}).ApplyAction(state, ActionFold{})
-		extra := extra(t, state)
+		require.NoError(t, (&Rules{}).ApplyAction(state, ActionFold{}))
+		extra := gametest.Extra[*State](t, state)
 		assert.True(t, extra.Seats["p1"].Folded)
 	})
 
 	t.Run("check updates acted flag", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		(&Rules{}).ApplyAction(state, ActionCheck{})
-		extra := extra(t, state)
+		require.NoError(t, (&Rules{}).ApplyAction(state, ActionCheck{}))
+		extra := gametest.Extra[*State](t, state)
 		assert.True(t, extra.Seats["p1"].Acted)
 	})
 
 	t.Run("raise updates current bet and pool", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		(&Rules{}).ApplyAction(state, ActionRaiseTo{Amount: 50})
-		extra := extra(t, state)
+		require.NoError(t, (&Rules{}).ApplyAction(state, ActionRaiseTo{Amount: 50}))
+		extra := gametest.Extra[*State](t, state)
 		assert.Equal(t, uint(50), extra.CurrentBet)
 		assert.Equal(t, uint(50), extra.Pool)
 		assert.Equal(t, uint(950), extra.Seats["p1"].Chips)
@@ -132,7 +160,7 @@ func TestApplyBetIncrease_IncompleteRaiseRule(t *testing.T) {
 	t.Run("sub-minimum all-in does not reopen the round", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.CurrentBet = 100
 		extra.MinRaise = 100
 		// p2 and p3 have already acted and matched the current bet.
@@ -161,7 +189,7 @@ func TestApplyBetIncrease_IncompleteRaiseRule(t *testing.T) {
 	t.Run("full raise reopens the round and grows MinRaise", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.CurrentBet = 100
 		extra.MinRaise = 100
 		for _, id := range []string{"p2", "p3"} {
@@ -195,7 +223,7 @@ func TestRules_CheckWinCondition(t *testing.T) {
 	t.Run("complete after uncontested award", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.Pool = 150
 		extra.Seats["p2"].Folded = true
 		extra.Seats["p3"].Folded = true
@@ -212,7 +240,7 @@ func TestRules_Standings(t *testing.T) {
 	t.Run("all folded except one", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.Seats["p1"].Folded = true
 		extra.Seats["p3"].Folded = true
 		standings := (&Rules{}).Standings(state)
@@ -222,7 +250,7 @@ func TestRules_Standings(t *testing.T) {
 	t.Run("showdown ranks by EvaluateHand then stable id", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.ReachedShowdown = true
 		extra.Table = []deck.Card{
 			{Rank: deck.Ten, Suit: deck.Spades},
@@ -335,7 +363,6 @@ func TestRules_TimeoutAction(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		turn  int
 		extra *State
 		want  game.Action
 	}{
@@ -360,21 +387,14 @@ func TestRules_TimeoutAction(t *testing.T) {
 			extra: &State{Phase: PhaseShowdown, MatchComplete: true},
 			want:  nil,
 		},
-		{
-			name:  "a turn cursor outside the table yields nothing to play",
-			turn:  9,
-			extra: &State{CurrentBet: 0},
-			want:  nil,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state := &game.State{
-				Players:     []*game.Player{{ID: "hero"}, {ID: "villain"}},
-				CurrentTurn: tt.turn,
-				Extra:       tt.extra,
+				Players: []*game.Player{{ID: "hero"}, {ID: "villain"}},
+				Extra:   tt.extra,
 			}
 			assert.Equal(t, tt.want, (&Rules{}).TimeoutAction(state))
 		})
@@ -412,6 +432,47 @@ func TestRules_TimeoutAction_IsAcceptedByValidateAction(t *testing.T) {
 
 	assert.True(t, engine.IsFinished(), "auto-playing every turn has to finish the match")
 	assert.True(t, sawDeal, "and that includes dealing for an absent dealer")
+}
+
+// The timeout-only match above only ever checks, calls or folds, so it never puts an
+// absent player behind a short all-in, a raise that did not reopen the betting, or a
+// leave. Random legal moves between the checks reach those states.
+func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+
+	rapid.Check(t, func(rt *rapid.T) {
+		engine := startTable(rt, rapid.IntRange(2, 6).Draw(rt, "players"))
+		defer engine.Close()
+
+		for step := range 200 {
+			if engine.IsFinished() {
+				return
+			}
+			if ids := seatedIDs(rt, engine); len(ids) > 2 && rapid.IntRange(0, 19).Draw(rt, fmt.Sprintf("leave%d", step)) == 0 {
+				engine.RemovePlayer(rapid.SampledFrom(ids).Draw(rt, fmt.Sprintf("who%d", step)))
+				continue
+			}
+			id := engine.CurrentPlayerID()
+			var legal []game.Action
+			engine.WithState(func(s *game.State) {
+				timeout := rules.TimeoutAction(s)
+				require.NotNil(rt, timeout, "step %d: no move for %s", step, id)
+				require.NoError(rt, rules.ValidateAction(s, timeout),
+					"step %d: %s is not a legal move", step, timeout.Name())
+				legal = append(legal, timeout)
+
+				lo, hi, _ := RaiseBounds(s, id)
+				for _, m := range append(candidateActions(lo), ActionRaiseTo{Amount: hi}) {
+					if rules.ValidateAction(s, m) == nil {
+						legal = append(legal, m)
+					}
+				}
+			})
+			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
+			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
+		}
+	})
 }
 
 // Action names go into logs, metrics and the engine's event stream, so they are part

@@ -5,8 +5,7 @@ package game
 type Event struct {
 	Type     EventType
 	PlayerID string
-	// Reason qualifies EventGameEnded; every other event leaves it zero.
-	Reason EndReason
+	Reason   EndReason
 }
 
 // EventType says what happened at the table.
@@ -24,9 +23,7 @@ const (
 	EventPlayerLeft
 )
 
-// EndReason says why a game ended, so an observer can tell a win from a table the
-// rules broke or everyone walked out on - the three look identical from the event
-// type alone.
+// EndReason says why a game ended.
 type EndReason uint8
 
 // The reasons a table ends.
@@ -34,14 +31,8 @@ const (
 	EndReasonUnknown EndReason = iota
 	EndReasonWin
 	EndReasonRulesError
-	// EndReasonForfeit is last-player-standing: everyone else left mid-game.
 	EndReasonForfeit
-	// EndReasonAbandoned is a table every seat left.
 	EndReasonAbandoned
-	// EndReasonInterrupted is a match that one seat's leave ended early for everyone
-	// else (Hearts cannot continue three-handed). The seats still playing are not
-	// rated on a result nobody finished; the leaver still takes the loss, or quitting
-	// a losing match would be free.
 	EndReasonInterrupted
 )
 

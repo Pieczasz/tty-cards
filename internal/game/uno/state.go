@@ -22,12 +22,14 @@ type State struct {
 	leaverWasOnTurn bool
 }
 
-func isWild(r deck.Rank) bool {
-	return r == Wild || r == WildDrawFour
+// IsWild reports whether c is a Wild or Wild Draw Four: the cards that name a colour
+// rather than carry one.
+func IsWild(c deck.Card) bool {
+	return c.Rank == Wild || c.Rank == WildDrawFour
 }
 
 // hasColor reports whether the hand holds a playable card of the colour. Wilds sit
 // on NoSuit, so they never count: holding one is not holding the colour.
 func hasColor(hand []deck.Card, color deck.Suit) bool {
-	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !isWild(c.Rank) && c.Suit == color })
+	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !IsWild(c) && c.Suit == color })
 }

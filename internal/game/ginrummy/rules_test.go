@@ -1,6 +1,7 @@
 package ginrummy
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func startedState(t *testing.T) (*game.State, *State) {
 	players := twoPlayers()
 	state := game.NewState(rules, players, nil)
 	require.NoError(t, rules.OnGameStart(state))
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	return state, extra
 }
 
@@ -535,10 +536,31 @@ func TestRules_DrawKeepsTurn(t *testing.T) {
 	rules := &Rules{}
 	state, _ := startedState(t)
 	state.CurrentTurn = 0
-	rules.ApplyAction(state, ActionDrawStock{})
+	require.NoError(t, rules.ApplyAction(state, ActionDrawStock{}))
 	require.NotNil(t, state.OverrideNextTurn)
 	assert.Equal(t, 0, *state.OverrideNextTurn)
 	assert.Len(t, state.Players[0].Cards, 11)
+}
+
+// ValidateAction refuses a draw from a spent pile, so one reaching ApplyAction is a
+// rules bug. It is reported rather than letting the player discard a card they never
+// picked up, and the error ends the table.
+func TestRules_ApplyAction_DrawFromASpentPileIsAnError(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+
+	for _, draw := range []game.Action{ActionDrawStock{}, ActionDrawDiscard{}} {
+		t.Run(draw.Name(), func(t *testing.T) {
+			t.Parallel()
+			state, extra := startedState(t)
+			state.Deck = deck.New(nil)
+			state.Discard = deck.New(nil)
+
+			require.Error(t, rules.ApplyAction(state, draw))
+			assert.Equal(t, PhaseAwaitingDraw, extra.Phase, "no card arrived, so the turn cannot move on")
+			assert.Len(t, state.Players[state.CurrentTurn].Cards, dealCount)
+		})
+	}
 }
 
 // A hand nobody knocks in scores nothing, so the target score alone never arrives:
@@ -582,7 +604,7 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		extra.CumulativeScores["p1"] = 40
 		extra.CumulativeScores["p2"] = 40
 	})
@@ -732,14 +754,8 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 func TestRules_ValidateAction_UnknownActionIsRefused(t *testing.T) {
 	t.Parallel()
 	state, _ := startedState(t)
-	assert.ErrorContains(t, (&Rules{}).ValidateAction(state, foreignAction{}), "unknown action")
+	assert.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
 }
-
-// A move from some other game: the validator is the only thing between it and a state
-// machine that has no case for it.
-type foreignAction struct{}
-
-func (foreignAction) Name() string { return "not.AGinRummyAction" }
 
 func TestRules_NotAGinRummyState(t *testing.T) {
 	t.Parallel()
@@ -757,8 +773,8 @@ func TestRules_NotAGinRummyState(t *testing.T) {
 
 // The engine plays TimeoutAction for a seat that has gone quiet. A move ValidateAction
 // refuses is not a skipped turn: the clock re-arms and the seat is taken on the next
-// expiry, so a player is removed for a mistake the rules made. The auto-player never
-// knocks, so every hand runs to the wall and the match ends on the hand cap.
+// expiry, so a player is removed for a mistake the rules made. The auto-player only
+// knocks on gin, so most hands run to the wall and the match ends on the hand cap.
 func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
@@ -784,5 +800,54 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 			require.NoError(rt, engine.SubmitAction(id, act))
 		}
 		rt.Fatalf("a match played entirely by the clock never reached the %d-hand cap", maxHands)
+	})
+}
+
+// The timeout-only soak never draws the upcard, so it never reaches the one move
+// autoDiscard must avoid: laying that upcard straight back. Here a random legal move
+// is played between the checks, which puts every phase, taken upcard included, in
+// front of TimeoutAction.
+func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+
+	rapid.Check(t, func(rt *rapid.T) {
+		engine := game.NewEngine(rules, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
+		require.NoError(rt, engine.Start())
+		defer engine.Close()
+
+		for step := range 120 {
+			if engine.IsFinished() {
+				return
+			}
+			id := engine.CurrentPlayerID()
+			var legal []game.Action
+			engine.WithState(func(s *game.State) {
+				timeout := rules.TimeoutAction(s)
+				require.NotNil(rt, timeout, "step %d: no move for %s", step, id)
+				require.NoError(rt, rules.ValidateAction(s, timeout),
+					"step %d: %s is not a legal move", step, timeout.Name())
+				legal = append(legal, timeout)
+
+				hand := s.Players[s.CurrentTurn].Cards
+				moves := []game.Action{ActionDrawStock{}, ActionDrawDiscard{}}
+				for _, c := range hand {
+					moves = append(moves, ActionDiscard{Card: c})
+				}
+				// One knock per step: each costs a meld search, and one is enough to
+				// end hands early now and then.
+				if len(hand) > 0 {
+					knock := rapid.SampledFrom(hand).Draw(rt, fmt.Sprintf("knock%d", step))
+					moves = append(moves, ActionKnock{Discard: knock})
+				}
+				for _, m := range moves {
+					if rules.ValidateAction(s, m) == nil {
+						legal = append(legal, m)
+					}
+				}
+			})
+			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
+			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
+		}
 	})
 }

@@ -2,7 +2,6 @@ package hearts
 
 import (
 	"cmp"
-	"log/slog"
 	"slices"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -97,7 +96,8 @@ func trickPoints(cards map[string]deck.Card) int {
 	return pts
 }
 
-func scoreHand(extra *State, players []*game.Player) {
+func scoreHand(state *game.State, extra *State) {
+	players := state.Players
 	shooterID := ""
 	for _, p := range players {
 		if extra.HandPoints[p.ID] == penaltyPointsTotal {
@@ -109,7 +109,7 @@ func scoreHand(extra *State, players []*game.Player) {
 		// The moon moves a full hand of points onto three players who took nothing,
 		// so it is the one result of a hand that gets disputed. Nothing reads this
 		// back; it is the only server-side record that it happened at all.
-		slog.Info("hearts moon shot",
+		state.Logger().Info("hearts moon shot",
 			"hand", extra.HandNumber, "shooter", shooterID, "points_each", penaltyPointsTotal)
 		for _, p := range players {
 			if p.ID != shooterID {
@@ -121,7 +121,7 @@ func scoreHand(extra *State, players []*game.Player) {
 			extra.CumulativeScores[p.ID] += extra.HandPoints[p.ID]
 		}
 	}
-	slog.Info("hearts hand scored",
+	state.Logger().Info("hearts hand scored",
 		"hand", extra.HandNumber,
 		"pass_direction", extra.PassDirection.String(),
 		"hand_points", extra.HandPoints,

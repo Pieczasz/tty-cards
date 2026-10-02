@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,7 +59,7 @@ func TestStandings_LeavingForfeitsTheMatchButNotTheChipsWon(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		// p2 is well clear of the table, as if they had taken a couple of hands.
 		extra.Seats["p1"].Chips = 700
 		extra.Seats["p2"].Chips = 1600
@@ -96,7 +97,7 @@ func TestFinishHand(t *testing.T) {
 	t.Run("parks the turn on the next dealer", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.HandNumber, extra.HandsTotal = 1, HandsPerMatch
 		extra.DealerIndex = 0
 
@@ -110,7 +111,7 @@ func TestFinishHand(t *testing.T) {
 	t.Run("ends the match once the hands run out", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.HandNumber, extra.HandsTotal = HandsPerMatch, HandsPerMatch
 
 		finishHand(state, extra)
@@ -122,7 +123,7 @@ func TestFinishHand(t *testing.T) {
 	t.Run("ends the match once one player holds every chip", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.HandNumber, extra.HandsTotal = 1, HandsPerMatch
 		extra.Seats = seatsWithChips(map[string]uint{"p1": 3000, "p2": 0, "p3": 0})
 
@@ -280,7 +281,7 @@ func TestShowdown_MarksTheHandAsShownDown(t *testing.T) {
 func TestBeginHand_BustedPlayerSitsOut(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.HandsTotal = HandsPerMatch
 	extra.Seats["p2"].Chips = 0
 
@@ -344,4 +345,25 @@ func standingIDs(engine *game.Engine) []string {
 		ids[i] = s.Player.ID
 	}
 	return ids
+}
+
+// The conservation tripwire is the line an operator greps for after a chip complaint,
+// and "hand 1" alone matches every poker table on the server: it has to go through the
+// table's logger to say which one.
+func TestChipConservation_LogsThroughTheTableLogger(t *testing.T) {
+	t.Parallel()
+	sink := &gametest.LogSink{}
+	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard(),
+		game.WithLogger(sink.Logger()))
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+
+	// A chip from nowhere: the baseline stays where the deal put it.
+	withExtra(t, engine, func(extra *State) { extra.Seats["p1"].Chips++ })
+	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionFold{}))
+
+	recs := sink.Records(t)
+	require.Len(t, recs, 1)
+	assert.Equal(t, "poker chip conservation broken", recs[0]["msg"])
+	assert.Equal(t, gametest.SinkLobby, recs[0]["lobby"])
 }

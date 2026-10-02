@@ -257,7 +257,7 @@ func afterPlay(state *game.State, extra *State) {
 		return
 	}
 
-	scoreHand(extra, state.Players)
+	scoreHand(state, extra)
 	extra.Phase = PhaseHandOver
 
 	if game.AnyScoreAtLeast(extra.CumulativeScores, extra.TargetScore) {
