@@ -404,6 +404,21 @@ func TestTrustedProxy_HeaderFromOutsideTheProxyNetworksIsIgnored(t *testing.T) {
 	assert.Equal(t, http.StatusOK, code("172.29.69.2:4000", "198.51.100.1"), "nginx's header is still believed")
 }
 
+// A peer the proxy networks cannot place is not a proxy, whatever it forwards: without
+// a parseable address it keys on what the socket reported, so forged headers from it
+// all land in one budget.
+func TestTrustedProxy_UnplaceablePeerIsNotBelieved(t *testing.T) {
+	t.Parallel()
+	h := handler(t, Deps{
+		RequestsPerMinute: 1, TrustedProxy: true,
+		TrustedProxyNetworks: []netip.Prefix{netip.MustParsePrefix("172.29.69.0/24")},
+	})
+
+	require.Equal(t, http.StatusOK, send(t, h, http.MethodGet, "/v1/stats", "@", "198.51.100.1").Code)
+	assert.Equal(t, http.StatusTooManyRequests, send(t, h, http.MethodGet, "/v1/stats", "@", "198.51.100.2").Code,
+		"a fresh forwarded address from an unplaceable peer minted a new budget")
+}
+
 // A blank-ish forwarded header used to key every one of these callers to NetKey(""),
 // so they all shared one budget: an attacker could spend it and lock the rest out, or
 // ride someone else's. Falling back to the socket address is the only honest answer.

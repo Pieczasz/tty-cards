@@ -1,15 +1,19 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Pieczasz/tty-cards/internal/db"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Every visitor of the website polls this API, so a span per request put each
@@ -17,14 +21,49 @@ import (
 //
 //nolint:paralleltest // reads the process-global span recorder
 func TestNewServer_ProducesNoSpans(t *testing.T) {
-	h := handler(t, Deps{RequestsPerMinute: 10})
+	h := handler(t, Deps{RequestsPerMinute: 10, Users: &stubUsers{rankings: []db.Ranking{ranking("ana", "Poker", 1600)}}})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
-	req.RemoteAddr = "203.0.113.50:5555"
-	req.Header.Set("User-Agent", "Mozilla/5.0 (a visitor)")
-	h.ServeHTTP(httptest.NewRecorder(), req)
+	for _, target := range []string{"/v1/stats", "/v1/leaderboard", "/v1/leaderboard?limit=200", "/healthz"} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "203.0.113.50:5555"
+		req.Header.Set("User-Agent", "Mozilla/5.0 (a visitor)")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
 
 	assert.Empty(t, testSpans.Started(), "the stats API must not produce spans")
+}
+
+// ctxUsers keeps the context the leaderboard handler reached the repository with.
+type ctxUsers struct {
+	stubUsers
+	ctx context.Context //nolint:containedctx // the context under test
+}
+
+func (c *ctxUsers) BestPlayers(ctx context.Context, game string, limit int) ([]db.Ranking, error) {
+	c.ctx = ctx
+	return c.stubUsers.BestPlayers(ctx, game, limit)
+}
+
+// otelhttp extracted a visitor's traceparent into the request context even with a
+// noop tracer, so the repository's leaderboard span became a child of it and Tempo
+// stored a trace under an id the visitor chose.
+//
+//nolint:paralleltest // reads the process-global span recorder
+func TestNewServer_IgnoresAVisitorsTraceContext(t *testing.T) {
+	users := &ctxUsers{}
+	h := handler(t, Deps{Users: users})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/leaderboard", nil)
+	req.RemoteAddr = "203.0.113.52:5555"
+	req.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, users.ctx, "the leaderboard was never read")
+	assert.False(t, trace.SpanContextFromContext(users.ctx).IsValid(),
+		"the visitor's traceparent reached the repository")
+	assert.Empty(t, testSpans.Started())
 }
 
 // httpServerAttributeKeys is the whole vocabulary otelhttp's http.server.* metrics may
