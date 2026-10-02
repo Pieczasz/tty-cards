@@ -4,7 +4,7 @@
 > to `web/src/legal/privacy.md`, which is what the web page imports. If the two
 > ever disagree, the web page is the published version.
 
-**Last updated: 19 September 2026**
+**Last updated: 2 October 2026**
 
 tty.cards is an SSH server that runs card games in your terminal, plus a small static
 website. It is open source under the MIT licence, so every line that touches your data
@@ -43,6 +43,7 @@ there is none. Write to the address above.
 | Your IP address | In memory only | Rate limiting, so one network cannot flood the server | One window: 1 second for SSH auth, 1 hour for new-account registration, 60 seconds for the API |
 | Which accounts have a live session right now | In memory only | The connection cap, and letting you reconnect to your seat | Until you disconnect |
 | Server logs and traces (network prefix - full IP only when a connection is refused - player id, lobby codes; traces carry the username on the session span, not the address) | Log/trace store on the server | Diagnosing crashes and abuse | Logs 14 days, traces 48 hours |
+| Backups of the database (everything above stored in it) | Archive files on the server | Restoring the service after a disk failure or a mistake | 14 days |
 
 We do not store your email address, your real name, your SSH private key, your
 passwords (there are none), your chat messages (there is no chat), or any payment
@@ -192,6 +193,7 @@ leaves the EU.
 | Account, ratings, keys | Until you delete the account (section 10), or the service shuts down |
 | Match history | Kept after deletion, anonymised: it is the other players' history too |
 | Server logs | 14 days |
+| Database backups | 14 days: one is taken a day and the newest 14 are kept. A deleted account stays in older ones until they rotate out (section 10) |
 | Traces | 48 hours |
 | Aggregate metrics (no personal data) | 30 days |
 | Rate-limiter counters | One window in memory: 1 second SSH auth, 1 hour registration, 60 seconds API |
@@ -232,6 +234,11 @@ already won or lost, which is their data, not yours to erase. Your row is anonym
 instead of deleted: it stays attached to the renamed `deleted_<hex>` account, and
 that is what those players' profiles show from then on. Nothing left in it names you
 - no username, no key fingerprint, no rating.
+
+**Backups.** A deletion does not reach the backups taken before it: your account
+stays in those until they rotate out, at most 14 days later (section 9). Backups are
+used only to restore the service after data loss, and if one is ever restored, every
+account deleted since it was taken is deleted again.
 
 **If you can no longer log in** - key lost, account already unreachable - email
 **bartekp854@gmail.com** and say what you want done. The same address is the
