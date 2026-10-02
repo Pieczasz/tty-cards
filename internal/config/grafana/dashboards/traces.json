@@ -1,13 +1,13 @@
 {
   "annotations": {"list": []},
-  "description": "Distributed traces from Tempo for production-terminal-card-server.",
+  "description": "Distributed traces from Tempo for tty-cards-server.",
   "editable": true,
   "graphTooltip": 0,
   "schemaVersion": 39,
-  "tags": ["terminal-card", "traces"],
+  "tags": ["tty-cards", "traces"],
   "time": {"from": "now-1h", "to": "now"},
   "timezone": "browser",
-  "title": "Terminal Card - Traces",
+  "title": "tty cards - Traces",
   "uid": "tc-traces",
   "version": 1,
   "panels": [
@@ -24,7 +24,7 @@
           "refId": "A",
           "datasource": {"type": "tempo", "uid": "tempo"},
           "queryType": "traceql",
-          "query": "{ resource.service.name = \"production-terminal-card-server\" }",
+          "query": "{ resource.service.name = \"tty-cards-server\" }",
           "tableType": "traces",
           "limit": 20
         }

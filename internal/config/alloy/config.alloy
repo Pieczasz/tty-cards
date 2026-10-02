@@ -3,6 +3,11 @@ logging {
   format = "logfmt"
 }
 
+// What is lost while a backend is down: OTLP logs and traces wait in each exporter's
+// in-memory queue and retry for 5 minutes, then are dropped, and an Alloy restart
+// loses the queue too. Metrics wait in the remote_write WAL under --storage.path
+// (the alloy-data volume) and survive both. Container logs are re-read from Docker's
+// json files, so a restart resumes at the saved position instead of replaying them.
 otelcol.receiver.otlp "default" {
   grpc {
     endpoint = "0.0.0.0:4317"
@@ -12,19 +17,44 @@ otelcol.receiver.otlp "default" {
   }
 
   output {
-    logs    = [otelcol.exporter.loki.default.input]
+    logs    = [otelcol.processor.memory_limiter.default.input]
+    traces  = [otelcol.processor.memory_limiter.default.input]
+    metrics = [otelcol.processor.memory_limiter.default.input]
+  }
+}
+
+// Refuses new data (the backend's exporter retries) before a backlog pushes Alloy
+// past its 256m: GOMEMLIMIT in compose.yaml is 204MiB, this soft limit 128MiB.
+otelcol.processor.memory_limiter "default" {
+  check_interval = "1s"
+  limit          = "160MiB"
+  spike_limit    = "32MiB"
+
+  output {
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    logs    = [otelcol.exporter.otlphttp.loki.input]
     traces  = [otelcol.exporter.otlp.tempo.input]
     metrics = [otelcol.exporter.prometheus.default.input]
   }
 }
 
-otelcol.exporter.loki "default" {
-  forward_to = [loki.write.default.receiver]
-}
-
-loki.write "default" {
-  endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+// Loki's native OTLP endpoint, not otelcol.exporter.loki: that one serialises every
+// record as a JSON line carrying its trace ID and the whole resource block. Here the
+// body is the line, trace_id/span_id and attributes are structured metadata, and
+// loki.yaml decides which resource attributes become index labels.
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://loki:3100/otlp"
+  }
+  sending_queue {
+    queue_size = 100
   }
 }
 
@@ -35,16 +65,23 @@ otelcol.exporter.otlp "tempo" {
       insecure = true
     }
   }
+  sending_queue {
+    queue_size = 100
+  }
 }
 
 otelcol.exporter.prometheus "default" {
   forward_to = [prometheus.remote_write.default.receiver]
 }
 
-// Reads Alloy's own /proc and /sys. On a Linux server (shared kernel) this
-// reports real host CPU/memory/network/load; filesystem metrics are the
-// container's view. Bind-mount the host and set *fs_path for full host disk.
+// Alloy's /proc and /sys, which on a shared kernel are the host's for CPU, memory,
+// load and disk I/O. Filesystems are this container's mounts, and the alloy-data
+// volume among them is Docker's data disk - the one worth watching. The host's root
+// is deliberately not mounted: this container runs as root, and a read-only bind
+// of / still lets it connect to /var/run/docker.sock and read every volume. Network
+// counters would be this container's own interfaces, so they are off, like NFS.
 prometheus.exporter.unix "host" {
+  disable_collectors = ["nfs", "nfsd", "netdev", "netclass", "netstat", "sockstat"]
 }
 
 prometheus.scrape "host" {
@@ -60,12 +97,8 @@ prometheus.remote_write "default" {
 }
 
 // Container stdout/stderr into Loki. Without this, everything that bypasses the
-// OTLP log path - panic dumps, the Postgres and nginx logs, anything a library
-// writes straight to stderr - exists only in `docker logs`.
-//
-// Through docker-socket-proxy, never the socket itself: read access to
-// /var/run/docker.sock is root on the host (it can start a privileged container),
-// and this needs only to list containers and networks and read their logs.
+// OTLP log path - panic dumps, the Postgres and nginx logs - exists only in
+// `docker logs`. Through docker-socket-proxy, never the socket itself.
 discovery.docker "containers" {
   host = "tcp://docker-socket-proxy:2375"
 }
@@ -73,15 +106,17 @@ discovery.docker "containers" {
 discovery.relabel "containers" {
   targets = discovery.docker.containers.targets
 
+  // Loki's own name for a stream's source; without it every container is
+  // "unknown_service".
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "compose_service"
+    target_label  = "service_name"
   }
 
-  // Alloy and Loki are dropped: shipping Loki's own "received push" lines back
-  // into Loki makes every push generate the next one.
+  // Shipping Loki's own "received push" lines back into Loki makes every push
+  // generate the next one.
   rule {
-    source_labels = ["compose_service"]
+    source_labels = ["service_name"]
     regex         = "alloy|loki"
     action        = "drop"
   }
@@ -97,31 +132,42 @@ loki.source.docker "containers" {
 loki.process "containers" {
   forward_to = [loki.write.default.receiver]
 
-  // installLogging fans every slog record to stderr *and* the OTLP bridge, and the
-  // stderr copy is what Docker captures - so without this every backend log line is
-  // stored twice under two label sets, doubling retention and every LogQL rate over
-  // the backend. The OTLP copy is the one worth keeping (it carries the trace IDs),
-  // so the docker copy of a structured record goes.
-  //
-  // Only records the logger wrote match: a panic dump, a Go runtime crash and
-  // anything a library prints straight to stderr are not JSON, and those are the
-  // reason this scrape exists at all.
+  // Every slog record goes to stderr *and* OTLP, and Docker captures the stderr
+  // copy. The OTLP copy is the one kept (it carries the trace IDs); only records the
+  // logger wrote match, so a panic dump or a library's own stderr line survives.
   stage.drop {
     expression          = "^\\{\"time\":\".*\",\"level\":"
     drop_counter_reason = "duplicate_of_otlp_log"
   }
 
-  // nginx's error log names the client on every line ("client: 203.0.113.7,
-  // server: ..."). The rest of the line - which upstream failed, and how - is what
-  // an operator needs from it, so only the address goes. The rate-limit rejections,
-  // the one high-volume source of such lines, are kept below nginx's log threshold
-  // in nginx.conf; this is for the errors that remain.
+  // A Go panic is dozens of stderr lines; without this each frame is its own entry
+  // and the dump is unreadable in Loki. Anything else the backend prints joins the
+  // entry before it.
   stage.match {
-    selector = "{compose_service=\"proxy\"}"
+    selector = "{service_name=\"backend\"}"
+
+    stage.multiline {
+      firstline     = "^(panic: |fatal error: |\\{)"
+      max_wait_time = "3s"
+      max_lines     = 500
+    }
+  }
+
+  // nginx's error log names the client on every line ("client: 203.0.113.7, ...").
+  // What an operator needs is which upstream failed and how, so only the address
+  // goes; the high-volume limit_* rejections stay below nginx's log threshold.
+  stage.match {
+    selector = "{service_name=\"proxy\"}"
 
     stage.replace {
       expression = "client: ([^,\\s]+)"
       replace    = "redacted"
     }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
   }
 }

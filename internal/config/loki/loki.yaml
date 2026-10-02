@@ -1,15 +1,12 @@
 # Replaces the image's local-config.yaml, which ships no retention at all: logs there
-# are kept forever. That is the wrong default anywhere, and illegal here - these logs
-# carry client IP addresses and player IDs (see docs/data-inventory.md), and
-# GDPR storage limitation means a stated, enforced period.
+# are kept forever. These logs carry client networks and player IDs (see
+# docs/data-inventory.md), so the period has to be stated and enforced.
 auth_enabled: false
 
 server:
   http_listen_port: 3100
   grpc_listen_port: 9096
-  # The default is "info", which logs a line per push - into the very store those
-  # lines are pushed to. Alloy already drops loki's own container output for the same
-  # reason; this stops the volume at the source.
+  # The default "info" logs a line per push, into the very store it is pushed to.
   log_level: warn
 
 common:
@@ -35,16 +32,31 @@ schema_config:
         period: 24h
 
 limits_config:
-  # 14 days. The retention period the privacy notice states, enforced by the
-  # compactor below - retention_period alone only affects queries.
+  # 14 days, enforced by the compactor below - retention_period alone only affects
+  # queries.
   retention_period: 336h
-  # One misbehaving container must not be able to fill the disk or the 512MiB this
-  # service is given. Steady state for this stack is a few hundred KB/s.
-  ingestion_rate_mb: 8
-  ingestion_burst_size_mb: 16
+  # One misbehaving container must not fill the disk or this service's memory:
+  # 2 MB/s is still ~170 GB/day, so DiskFilling fires long before the cap does, and
+  # one stream (a crash-looping container) gets a quarter of it.
+  ingestion_rate_mb: 2
+  ingestion_burst_size_mb: 4
+  per_stream_rate_limit: 512KB
+  per_stream_rate_limit_burst: 1MB
   max_streams_per_user: 5000
   reject_old_samples: true
   reject_old_samples_max_age: 168h
+  # The application's logs arrive over OTLP. Only these two resource attributes
+  # become index labels - both are fixed per deployment. Everything else a record
+  # carries (trace_id, span_id, player_id, client_net, ...) is structured metadata:
+  # queryable, never an index label, so no per-player value can multiply streams.
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes: [service.name, deployment.environment.name]
+        - action: drop
+          regex: telemetry\.sdk\..*
 
 compactor:
   working_directory: /loki/compactor
@@ -52,8 +64,8 @@ compactor:
   retention_enabled: true
   delete_request_store: filesystem
 
-# Nothing in this deployment writes alerting rules, and the ruler's default is to
-# look for a remote store and log about it every cycle.
+# Nothing here writes alerting rules; without a local store the ruler looks for a
+# remote one and logs about it every cycle.
 ruler:
   storage:
     type: local

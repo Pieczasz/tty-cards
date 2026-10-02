@@ -13,22 +13,25 @@ distributor:
 
 compactor:
   compaction:
-    # 48 hours, and deliberately the shortest retention in the stack. A session span
-    # carries the username (the client address was removed so the two never sit on
-    # one record - see docs/data-inventory.md), and traces are a debugging aid
-    # for the last day or two; nothing here needs them longer, so nothing keeps them.
+    # 48 hours, deliberately the shortest retention in the stack: a session span
+    # carries the username (see docs/data-inventory.md), and traces are a debugging
+    # aid for the last day or two.
     block_retention: 48h
 
 ingester:
-  # Cut and flush blocks on a schedule rather than only on size, so the retention above
-  # is measured from roughly when the trace happened. The default 30m leaves recent
-  # traces sitting in memory, which is also the 384MiB this service is limited to.
+  # Cut blocks on a schedule, not only on size, so the retention above is measured
+  # from roughly when the trace happened and recent traces do not sit in memory.
   max_block_duration: 10m
 
+# One runaway trace, or one flood of them, must not spend the 384MiB this service
+# has: the default ingestion limit is 15 MB/s.
 overrides:
   defaults:
+    ingestion:
+      rate_limit_bytes: 2000000
+      burst_size_bytes: 4000000
+      max_traces_per_user: 5000
     global:
-      # One runaway trace must not be able to spend the ingester's whole budget.
       max_bytes_per_trace: 5000000
 
 storage:

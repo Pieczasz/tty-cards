@@ -2,12 +2,12 @@
   "annotations": {
     "list": []
   },
-  "description": "Host (Linux) metrics from node_exporter / Alloy unix exporter.",
+  "description": "Host metrics from Alloy's unix exporter: CPU, memory and load are the host's (a shared kernel); the disk is the one Docker stores volumes and container logs on.",
   "editable": true,
   "graphTooltip": 0,
   "schemaVersion": 39,
   "tags": [
-    "terminal-card",
+    "tty-cards",
     "host"
   ],
   "time": {
@@ -15,7 +15,7 @@
     "to": "now"
   },
   "timezone": "browser",
-  "title": "Terminal Card - Host (Linux)",
+  "title": "tty cards - Host (Linux)",
   "uid": "tc-host",
   "version": 1,
   "panels": [
@@ -108,7 +108,7 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Filesystem used %",
+      "title": "Docker data disk used %",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -143,60 +143,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 - (node_filesystem_avail_bytes / node_filesystem_size_bytes * 100)",
-          "legendFormat": "{{mountpoint}}"
+          "expr": "100 - (node_filesystem_avail_bytes{mountpoint=\"/var/lib/alloy/data\"} / node_filesystem_size_bytes{mountpoint=\"/var/lib/alloy/data\"} * 100)",
+          "legendFormat": "{{device}}"
         }
-      ]
-    },
-    {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Network throughput",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Bps"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(node_network_receive_bytes_total[5m])",
-          "legendFormat": "rx {{device}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(node_network_transmit_bytes_total[5m])",
-          "legendFormat": "tx {{device}}"
-        }
-      ]
+      ],
+      "description": "The filesystem under the alloy-data volume, which is Docker's data root: every volume and container log lives there. DiskFilling pages below 15% free."
     },
     {
       "id": 5,
@@ -208,9 +159,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
+        "w": 12,
+        "x": 12,
+        "y": 8
       },
       "fieldConfig": {
         "defaults": {

@@ -1,13 +1,13 @@
 {
   "annotations": {"list": []},
-  "description": "Application logs from Loki for production-terminal-card-server.",
+  "description": "Application logs (OTLP) and the backend's raw stderr from Loki.",
   "editable": true,
   "graphTooltip": 0,
   "schemaVersion": 39,
-  "tags": ["terminal-card", "logs"],
+  "tags": ["tty-cards", "logs"],
   "time": {"from": "now-1h", "to": "now"},
   "timezone": "browser",
-  "title": "Terminal Card - Logs",
+  "title": "tty cards - Logs",
   "uid": "tc-logs",
   "version": 1,
   "panels": [
@@ -20,7 +20,7 @@
       "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
-        {"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "expr": "sum by (level) (rate({service_name=\"production-terminal-card-server\"} [5m]))", "legendFormat": "{{level}}"}
+        {"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "expr": "sum by (detected_level) (rate({service_name=\"tty-cards-server\"} [5m]))", "legendFormat": "{{detected_level}}"}
       ]
     },
     {
@@ -31,7 +31,19 @@
       "gridPos": {"h": 16, "w": 24, "x": 0, "y": 8},
       "options": {"showTime": true, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending"},
       "targets": [
-        {"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "expr": "{service_name=\"production-terminal-card-server\"}"}
+        {"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "expr": "{service_name=\"tty-cards-server\"}"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Backend stderr (panics, runtime crashes)",
+      "description": "What the backend wrote outside its logger: a Go panic arrives as one entry. Structured records are dropped here - they are in Logs above.",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 24},
+      "options": {"showTime": true, "wrapLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending"},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "expr": "{service_name=\"backend\"}"}
       ]
     }
   ]
