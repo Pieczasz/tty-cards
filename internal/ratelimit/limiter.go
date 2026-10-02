@@ -72,6 +72,22 @@ func (s *SlidingWindow) Allow(key string) bool {
 	return true
 }
 
+// Refund gives back the most recent call Allow admitted for key, for a caller that
+// admits through several limiters and was refused by a later one: that call never
+// happened, so it must not spend this budget either.
+func (s *SlidingWindow) Refund(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	timestamps := s.logs[key]
+	switch len(timestamps) {
+	case 0:
+	case 1:
+		delete(s.logs, key)
+	default:
+		s.logs[key] = timestamps[:len(timestamps)-1]
+	}
+}
+
 // filterExpired drops timestamps at or before threshold in place. Both callers
 // reassign the result, so reusing the backing array costs nothing and keeps the hot
 // path allocation-free.
