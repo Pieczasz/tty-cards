@@ -238,3 +238,26 @@ func TestSlidingWindow_NewKeyAtCapacityDoesNotWalkTheTable(t *testing.T) {
 		"%d new keys against a full table: eviction must look at one key each, not scan the table", fresh)
 	assert.LessOrEqual(t, limiter.Size(), maxKeys, "and the table is still bounded")
 }
+
+// A call admitted by one limiter and refused by the next one did not happen, so the
+// first gives its slot back: a network refused by a server-wide ceiling must not come
+// out of it with its own budget spent too.
+func TestSlidingWindow_Refund(t *testing.T) {
+	t.Parallel()
+	limiter := ratelimit.New(2, time.Hour)
+
+	require.True(t, limiter.Allow("a"))
+	require.True(t, limiter.Allow("a"))
+	require.False(t, limiter.Allow("a"))
+
+	limiter.Refund("a")
+	assert.True(t, limiter.Allow("a"), "the refunded slot was not given back")
+	assert.False(t, limiter.Allow("a"), "a refund gave back more than one slot")
+
+	limiter.Refund("never-seen")
+	assert.Equal(t, 1, limiter.Size(), "refunding an unknown key created one")
+
+	require.True(t, limiter.Allow("b"))
+	limiter.Refund("b")
+	assert.Equal(t, 1, limiter.Size(), "a key refunded to nothing is still tracked")
+}
