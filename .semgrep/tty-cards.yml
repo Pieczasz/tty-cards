@@ -1,0 +1,202 @@
+# Project invariants from CLAUDE.md that golangci-lint and depguard cannot express.
+# Every rule is proven by .semgrep/tty-cards.go (`semgrep --test .semgrep/`) and
+# must stay at zero findings on the tree (`make semgrep`).
+rules:
+  - id: turn-cursor-written-by-hand
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Rules name the next actor through State.SetTurn / State.OverrideTurn, never by
+      writing CurrentTurn or OverrideNextTurn. The engine alone moves the cursor
+      (advanceTurnLocked / settleTurnLocked clamp it and arm the turn clock), and
+      OverrideTurn points at its own copy of the seat, never into Extra, which can
+      move under it. Clearing the override with nil is the one allowed write.
+    paths:
+      exclude:
+        - /internal/game/engine.go
+        - /internal/game/turn.go
+        - "*_test.go"
+    patterns:
+      - pattern-either:
+          - pattern: $S.CurrentTurn = $X
+          - pattern: $S.CurrentTurn += $X
+          - pattern: $S.CurrentTurn -= $X
+          - pattern: $S.CurrentTurn++
+          - pattern: $S.CurrentTurn--
+          - pattern: $S.OverrideNextTurn = $X
+      - pattern-not: $S.OverrideNextTurn = nil
+
+  - id: tui-uses-server-engine-api
+    languages: [go]
+    severity: ERROR
+    message: >-
+      The TUI never holds a *game.Engine: it is handed a game.BoundEngine the lobby
+      already bound to the session's own player (Lobby.Seat, Event.Seat), and views
+      reach the table through it / gameview.Session (Submit, Frame, Sync). Naming
+      game.Engine, building one (game.NewEngine), binding one (game.Bind) or reading
+      Lobby.ActiveGame from here gives a view every seat; Engine.WithState,
+      Engine.SubmitAction and the two-argument Engine.Frame are the server side's.
+      Tests are exempt: they drive the other seats.
+    paths:
+      include:
+        - /internal/tui/
+      exclude:
+        - "*_test.go"
+    pattern-either:
+      - pattern: $E.WithState(...)
+      - pattern: $E.SubmitAction(...)
+      - pattern: $E.Frame($PLAYER, $FN)
+      - pattern: $L.ActiveGame()
+      # A regex because semgrep cannot match a bare Go type; comment-only lines are
+      # skipped so the rule can still be explained where it applies.
+      - pattern-regex: (?m)^(?!\s*//).*?\bgame\.(Engine|NewEngine|Bind)\b
+
+  - id: tui-uses-lipgloss-join
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Use styles.JoinVertical, styles.JoinHorizontal and styles.MarginTop in the TUI.
+      They are lipgloss's output byte for byte (proved by a property test in
+      internal/tui/styles) at half the CPU and a third of the memory: under 1000
+      sessions lipgloss's joins were two thirds of the frame-building CPU, because they
+      grow an unsized builder over whole-screen frames and measure every line twice.
+    paths:
+      include:
+        - /internal/tui/
+      exclude:
+        - "*_test.go"
+    patterns:
+      - pattern-either:
+          - pattern: $LG.JoinVertical(...)
+          - pattern: $LG.JoinHorizontal(...)
+      - metavariable-regex:
+          metavariable: $LG
+          regex: ^(lg|lipgloss)$
+
+  - id: recover-helper-not-directly-deferred
+    languages: [go]
+    severity: ERROR
+    message: >-
+      $M calls recover(), which returns nil unless its caller is the deferred
+      function itself. Defer it directly (`defer $M(...)`); called any other way, or
+      from inside a deferred closure, the panic sails past it.
+    patterns:
+      - pattern-either:
+          - pattern: $M(...)
+          - pattern: $X.$M(...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(recover[A-Z]\w*|reportPanic)$
+      - pattern-not-inside: defer $M(...)
+      - pattern-not-inside: defer $X.$M(...)
+
+  - id: client-address-in-telemetry-attribute
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Client addresses never go on a span or a metric: the session span carries no
+      client address at all (docs/data-inventory.md), and on a metric the address is
+      unbounded cardinality as well as personal data. Log the /64 (client_net) instead.
+    paths:
+      exclude:
+        - "*_test.go"
+    pattern-either:
+      - pattern: attribute.$T($K, <... $A.RemoteAddr() ...>)
+      - pattern: attribute.$T($K, <... clientNet(...) ...>)
+      - pattern: attribute.$T($K, <... addrString(...) ...>)
+      - patterns:
+          - pattern: attribute.$T($K, ...)
+          - metavariable-regex:
+              metavariable: $K
+              regex: ^"(remote_addr|client_net|client_addr|client_ip|client\.address|net\.peer\.\w+)"$
+
+  - id: routine-log-carries-remote-addr
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Info and debug logs (connect, disconnect, every session) carry client_net, the
+      /64, not the full client address. Only warn and error logs about a specific
+      refused or broken connection record remote_addr.
+    paths:
+      exclude:
+        - "*_test.go"
+    patterns:
+      - pattern-either:
+          - pattern: slog.$F(..., "remote_addr", ...)
+          - pattern: slog.$F(..., slog.String("remote_addr", $V), ...)
+          - pattern: slog.$F(..., $A.RemoteAddr(), ...)
+          - pattern: slog.$F(..., $A.RemoteAddr().String(), ...)
+          - pattern: slog.$F(..., addrString(...), ...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(Info|Debug)(Context)?$
+
+  - id: database-credential-leaves-config
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Config.DSN() and Secret.Reveal() are the only ways to the database password in
+      clear text; a Secret itself redacts under %v, slog and JSON. A DSN or revealed
+      password handed to a logger, a print, an error message or a telemetry attribute
+      lands in log storage. Pass it to the driver only.
+    mode: taint
+    options:
+      taint_assume_safe_functions: true
+    pattern-sources:
+      - pattern: $C.DSN()
+      - pattern: $S.Reveal()
+    pattern-sinks:
+      - pattern-either:
+          - pattern: slog.$F(...)
+          - pattern: log.$F(...)
+          - pattern: fmt.Errorf(...)
+          - pattern: fmt.Print(...)
+          - pattern: fmt.Printf(...)
+          - pattern: fmt.Println(...)
+          - pattern: fmt.Fprint(...)
+          - pattern: fmt.Fprintf(...)
+          - pattern: fmt.Fprintln(...)
+          - pattern: attribute.$T(...)
+          - pattern: errors.New(...)
+
+  - id: subscribe-error-discarded
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Subscribe reports ErrAtCapacity / ErrClosed instead of handing back a
+      pre-closed channel; with the error dropped the caller holds a nil channel that
+      blocks forever, and nobody learns a view is deaf or a match result will not be
+      persisted. Handle the error.
+    pattern-either:
+      - pattern: $CH, _ := $X.Subscribe(...)
+      - pattern: $CH, _ = $X.Subscribe(...)
+      - pattern: _, _ = $X.Subscribe(...)
+
+  - id: boolean-env-compared-as-string
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Boolean environment values go through strconv.ParseBool (config's env
+      resolver), so every spelling it accepts works and anything else fails the boot
+      with the other bad variables. A string comparison silently reads `TRUE`, `1`
+      or a typo as false.
+    patterns:
+      - pattern-either:
+          - pattern: os.Getenv($K) == $V
+          - pattern: os.Getenv($K) != $V
+          - pattern: strings.EqualFold(os.Getenv($K), $V)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      $R := os.Getenv($K)
+                      ...
+                  - pattern-inside: |
+                      $R, $OK := os.LookupEnv($K)
+                      ...
+              - pattern-either:
+                  - pattern: $R == $V
+                  - pattern: $R != $V
+                  - pattern: strings.EqualFold($R, $V)
+      - metavariable-regex:
+          metavariable: $V
+          regex: (?i)^"(true|false|t|f|1|0|yes|no|y|n|on|off)"$

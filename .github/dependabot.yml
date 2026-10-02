@@ -1,5 +1,3 @@
-# Actions and images are pinned by commit SHA and digest, which nobody bumps by hand.
-# Dependabot keeps the pins moving and rewrites the version comment beside each one.
 version: 2
 updates:
   - package-ecosystem: github-actions

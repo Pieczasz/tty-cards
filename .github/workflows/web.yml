@@ -1,10 +1,5 @@
 name: Web
 
-# Builds the Astro site and publishes it to GitHub Pages.
-#
-# The path filter matters: without it every Go-only push would spend a Pages
-# deployment doing nothing. The mirror of this lives in test.yml, which carries
-# `paths-ignore: ["web/**", "**.md"]` so site commits do not run the Go matrix.
 on:
   push:
     branches: [main]
@@ -25,8 +20,6 @@ defaults:
     working-directory: web
 
 jobs:
-  # Runs on pull requests too, so a site that does not typecheck or build never
-  # reaches main in the first place.
   build:
     runs-on: ubuntu-latest
     steps:
@@ -34,9 +27,6 @@ jobs:
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
-          # There is no package.json at the repo root - this is a Go module with the
-          # site nested inside it - so the action has to be pointed at web/ or it
-          # cannot find `packageManager` and fails to resolve a pnpm version.
           package_json_file: web/package.json
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -56,8 +46,6 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # Only the main-branch run produces something to publish; PR runs stop at the
-      # build above and act purely as a gate.
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -73,8 +61,6 @@ jobs:
       pages: write # to publish a Pages deployment
       id-token: write # deploy-pages authenticates with OIDC, not a PAT
 
-    # Pages allows one deployment at a time. Queue rather than cancel, so a push
-    # that lands during a deploy still goes out instead of being dropped.
     concurrency:
       group: pages
       cancel-in-progress: false
