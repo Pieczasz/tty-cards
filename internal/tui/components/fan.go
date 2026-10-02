@@ -43,9 +43,6 @@ func FanTuck(n, maxWidth int) int {
 // Worst case, so the hand does not change width - shifting the layout - as the cursor
 // moves.
 func fanWidth(n, tuck int) int {
-	if n <= 0 {
-		return 0
-	}
 	width := (n-1)*(1+tuck) + 1 + FaceWidth + 1
 	if n > 1 {
 		width += FaceWidth + 1 - tuck

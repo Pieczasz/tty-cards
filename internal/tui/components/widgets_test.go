@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -135,6 +136,20 @@ func TestGridPicker_RendersEveryChoiceAndMarksTheCursor(t *testing.T) {
 	assert.Empty(t, GridPicker{}.Render(theme), "nothing to pick, nothing to draw")
 }
 
+// Uno's colour picker paints each cell in the colour it stands for; the suit picker
+// leaves them muted. The choices read the same either way.
+func TestGridPicker_ColorsPaintTheirCells(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+
+	plain := GridPicker{Title: "Pick a colour:", Labels: []string{"Red", "Blue"}}
+	painted := plain
+	painted.Colors = []color.Color{theme.SuitRed, theme.Selection}
+
+	assert.NotEqual(t, plain.Render(theme), painted.Render(theme))
+	assert.Equal(t, tuitest.StripANSI(plain.Render(theme)), tuitest.StripANSI(painted.Render(theme)))
+}
+
 // The whole point of fixed cells is that the rows line up whatever is in them.
 func TestTable_RowsAreAllTheSameWidth(t *testing.T) {
 	t.Parallel()
@@ -158,6 +173,22 @@ func TestTable_RowsAreAllTheSameWidth(t *testing.T) {
 	}
 	assert.Contains(t, lines[2], "1600")
 	assert.Contains(t, lines[3], "...", "a long value is elided, not allowed to push the column")
+}
+
+// A row that styles some of its cells is laid out with the header's own separator, so
+// every value sits under its title.
+func TestTable_RowOfStyledCellsLinesUpWithTheHeader(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	tbl := Table{Cols: []Column{{Title: "Game", Width: 6}, {Title: "Mode", Width: 6}}}
+
+	row := tbl.Row(styles.PadTruncate("uno", 6), theme.Accented.Render(styles.PadTruncate("ranked", 6)))
+
+	header, _, _ := strings.Cut(tuitest.StripANSI(tbl.Header(theme)), "\n")
+	plain := tuitest.StripANSI(row)
+	assert.NotEqual(t, plain, row, "the styled cell keeps its style")
+	assert.Equal(t, strings.Index(header, "Mode"), strings.Index(plain, "ranked"))
+	assert.Equal(t, tbl.Width(), lg.Width(row))
 }
 
 func TestStepCursor_StopsAtBothEnds(t *testing.T) {

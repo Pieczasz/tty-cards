@@ -38,6 +38,19 @@ var pipLayout = map[deck.Rank][pipRows]string{
 	deck.Eight: {"LR", "C", "LR", "C", "LR"},
 	deck.Nine:  {"LR", "LR", "C", "LR", "LR"},
 	deck.Ten:   {"LCR", "C", "LR", "C", "LCR"},
+	// Uno's numbers carry their colour as one pip; the corner already says which.
+	deck.Zero: {"", "", "C", "", ""},
+	deck.One:  {"", "", "C", "", ""},
+}
+
+// actionArt is what an Uno action card says in the middle of its face, between two
+// pips of its colour: a Skip or a Wild drawn as a blank card is a card nobody can read.
+var actionArt = map[deck.Rank]string{
+	deck.Skip:         "SKIP",
+	deck.Reverse:      "REV",
+	deck.DrawTwo:      "+2",
+	deck.Wild:         "WILD",
+	deck.WildDrawFour: "+4",
 }
 
 // suitMark is where the suit pip belongs inside a court card's art. It sits on the
@@ -163,6 +176,10 @@ func artRows(rank deck.Rank, suit string) [][]string {
 		return rows
 	}
 
+	if text, ok := actionArt[rank]; ok {
+		return [][]string{blankRow(), pipRow("C", suit), centredText(text), pipRow("C", suit), blankRow()}
+	}
+
 	rows := make([][]string, 0, pipRows)
 	for _, cols := range pipLayout[rank] {
 		rows = append(rows, pipRow(cols, suit))
@@ -173,9 +190,6 @@ func artRows(rank deck.Rank, suit string) [][]string {
 func artRow(line, suit string) []string {
 	cells := blankRow()
 	for i, r := range []rune(line) {
-		if i >= FaceWidth {
-			break
-		}
 		if r == suitMark {
 			cells[i] = suit
 			continue
@@ -207,6 +221,17 @@ func pipRow(cols, suit string) []string {
 		case 'R':
 			cells[rightColumn] = suit
 		}
+	}
+	return cells
+}
+
+// centredText is text on the middle of a row, one cell per character.
+func centredText(text string) []string {
+	cells := blankRow()
+	glyphs := strings.Split(text, "")
+	start := (FaceWidth - len(glyphs)) / 2
+	for i, g := range glyphs {
+		cells[start+i] = g
 	}
 	return cells
 }
@@ -252,6 +277,50 @@ func rankLabel(rank deck.Rank) string {
 // miniRankWidth is the width of the widest rank label, so a ten landing on the table
 // does not shift the cards beside it by a column.
 const miniRankWidth = 2
+
+// EmptyCardSlot is a place a card has not landed in yet, in RenderCard's footprint:
+// the same Theme.CardFrame chrome, so a board or a trick does not jump by a column
+// when the card arrives.
+func EmptyCardSlot(t styles.Theme) string {
+	return cachedChrome(chromeKey{slot: true, dark: t.Dark}, func() string {
+		blank := strings.Repeat(" ", FaceWidth)
+		inner := blank + strings.Repeat("\n"+blank, FaceHeight-1)
+		return t.CardFrame.BorderForeground(t.BorderMuted).MarginTop(1).Render(inner)
+	})
+}
+
+// chromeKey is a card place that is not a face: a back or an empty slot, per palette.
+type chromeKey struct {
+	slot bool
+	dark bool
+}
+
+// chromeCache memoises card backs and empty slots, which a shedding table draws on
+// every frame and which are the same few strings for every session.
+var chromeCache sync.Map // chromeKey -> string
+
+func cachedChrome(key chromeKey, render func() string) string {
+	if cached, ok := chromeCache.Load(key); ok {
+		s, _ := cached.(string)
+		return s
+	}
+	s := render()
+	chromeCache.Store(key, s)
+	return s
+}
+
+// FaceDownCard is a card back in RenderCard's footprint, so a hole card that is later
+// turned up, or a stock pile beside a discard, does not change size.
+func FaceDownCard(t styles.Theme) string {
+	return cachedChrome(chromeKey{dark: t.Dark}, func() string {
+		lines := make([]string, FaceHeight)
+		fill := lg.NewStyle().Foreground(t.CardBack).Render(strings.Repeat("░", FaceWidth))
+		for i := range lines {
+			lines[i] = fill
+		}
+		return t.CardFrame.MarginTop(1).Render(strings.Join(lines, "\n"))
+	})
+}
 
 // RenderMiniCard is a card in four columns, "[ A♥]", for a table with no room for a
 // face: poker's board on a short terminal, and Hearts' trick when the middle band
