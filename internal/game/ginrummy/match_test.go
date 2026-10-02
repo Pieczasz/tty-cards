@@ -5,6 +5,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,7 +132,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 
 	var scoreBefore map[string]int
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		extra.CumulativeScores["p1"] = 30
 		extra.CumulativeScores["p2"] = 12
 		scoreBefore = map[string]int{"p1": 30, "p2": 12}
@@ -144,7 +145,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 	assert.Equal(t, "p1", standings[0].Player.ID)
 
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		assert.Equal(t, scoreBefore["p1"], extra.CumulativeScores["p1"])
 		assert.Equal(t, scoreBefore["p2"], extra.CumulativeScores["p2"])
 	})
@@ -164,4 +165,31 @@ func TestMatch_FirstActorAlternates(t *testing.T) {
 	require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
 	assert.Equal(t, 1, extra.FirstActor)
 	assert.Equal(t, 1, state.CurrentTurn)
+}
+
+// "hand 7" matches every gin table on the server, so the hand's result line has to go
+// through the table's logger to say which one it is about. One line a hand, the knock
+// or the wall, is what keeps it at Info.
+func TestHandResult_LogsOnceAHandThroughTheTableLogger(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+	sink := &gametest.LogSink{}
+	engine := game.NewEngine(rules, twoPlayers(), deck.Standard(), game.WithLogger(sink.Logger()))
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+
+	handOver := func() (over bool) {
+		engine.WithState(func(s *game.State) { over = gametest.Extra[*State](t, s).Phase == PhaseHandOver })
+		return over
+	}
+	for step := 0; !handOver(); step++ {
+		require.Less(t, step, 2*(maxHandTurns+4), "a hand ends on a knock or at the wall")
+		var act game.Action
+		engine.WithState(func(s *game.State) { act = rules.TimeoutAction(s) })
+		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), act))
+	}
+
+	recs := sink.Records(t)
+	require.Len(t, recs, 1, "a hand logs its knock or its wall, nothing per turn")
+	assert.Equal(t, gametest.SinkLobby, recs[0]["lobby"], "%v", recs[0]["msg"])
 }

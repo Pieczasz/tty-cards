@@ -1,8 +1,6 @@
 package poker
 
 import (
-	"log/slog"
-
 	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
@@ -53,7 +51,7 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	// seats have shifted, so the search for the next actor starts on the cursor itself.
 	if err := resolveAfterChange(state, extra, game.SeatAt(state.CurrentTurn-1, n)); err != nil {
 		// The hook cannot report it; the hand is already unwound and closed.
-		slog.Error("poker cannot finish the hand after a leave",
+		state.Logger().Error("poker cannot finish the hand after a leave",
 			"hand", extra.HandNumber, "phase", extra.Phase.String(), "error", err)
 	}
 }

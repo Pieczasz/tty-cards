@@ -8,13 +8,14 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 )
 
-func startHeadsUp(t testingT) *game.Engine {
+func startHeadsUp(t gametest.TB) *game.Engine {
 	t.Helper()
 	return startTable(t, 2)
 }
@@ -80,7 +81,7 @@ func TestBetting_CheckThroughFlop(t *testing.T) {
 }
 
 // checkOrCall is the free action open to id: a check when nothing is owed, else a call.
-func checkOrCall(t testingT, engine *game.Engine, id string) game.Action {
+func checkOrCall(t gametest.TB, engine *game.Engine, id string) game.Action {
 	t.Helper()
 	if readExtra(t, engine, func(e *State) uint { return e.ToCall(id) }) == 0 {
 		return ActionCheck{}
@@ -258,7 +259,7 @@ func TestBuildSidePots_UncalledOvershoveReturned(t *testing.T) {
 func TestNextToAct_SkipsFolded(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.Seats["p2"].Folded = true
 	extra.Seats["p1"].Acted = true
 	extra.CurrentBet = 0
@@ -294,7 +295,7 @@ func TestLeave_MultiwayContinues(t *testing.T) {
 	engine.RemovePlayer("b")
 	assert.False(t, engine.IsFinished())
 	engine.WithState(func(s *game.State) {
-		assert.True(t, extra(t, s).Seats["b"].Folded)
+		assert.True(t, gametest.Extra[*State](t, s).Seats["b"].Folded)
 		assert.Len(t, s.Players, 2)
 	})
 }
@@ -302,7 +303,7 @@ func TestLeave_MultiwayContinues(t *testing.T) {
 func TestRaiseTo_UsesCommittedBet(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.Seats["p1"].Chips = 40
 	extra.CurrentBet = 0
 	// Apply without PreAction - commit clamps; CurrentBet must follow committed amount.
@@ -315,7 +316,7 @@ func TestRaiseTo_UsesCommittedBet(t *testing.T) {
 func TestStandings_ChopStableByID(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.Table = []deck.Card{
 		{Rank: deck.Ace, Suit: deck.Spades},
 		{Rank: deck.King, Suit: deck.Spades},
@@ -367,7 +368,7 @@ func TestSmoke_PassiveHands(t *testing.T) {
 	}
 }
 
-func startTable(t testingT, n int) *game.Engine {
+func startTable(t gametest.TB, n int) *game.Engine {
 	t.Helper()
 	players := make([]*game.Player, 0, n)
 	for i := range n {
@@ -407,7 +408,7 @@ func (l handLedger) observe(extra *State) {
 // chips nobody matched - a player can only be beaten out of what an opponent put up
 // against them - so the drop across a hand is bounded by the sum over the other
 // contributors of min(their contribution, this player's).
-func (l handLedger) checkNoUnmatchedLoss(t testingT, extra *State) {
+func (l handLedger) checkNoUnmatchedLoss(t gametest.TB, extra *State) {
 	t.Helper()
 	for id, before := range l {
 		after := extra.Seats[id].Chips
@@ -425,7 +426,7 @@ func (l handLedger) checkNoUnmatchedLoss(t testingT, extra *State) {
 	}
 }
 
-func seatedIDs(t testingT, e *game.Engine) []string {
+func seatedIDs(t gametest.TB, e *game.Engine) []string {
 	t.Helper()
 	var ids []string
 	e.WithState(func(s *game.State) {
@@ -556,7 +557,7 @@ func TestUnequalAllIns_ShortStackCannotWinSidePot(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		extra.Seats[s.Players[0].ID].Chips = 100
 		extra.Seats[s.Players[1].ID].Chips = 500
 		extra.Seats[s.Players[2].ID].Chips = 900
@@ -583,7 +584,7 @@ func TestUnequalAllIns_ShortStackCannotWinSidePot(t *testing.T) {
 
 // sidePotState builds just enough State for buildSidePots/awardPots. Options keep
 // each case's intent visible instead of restating a full literal every time.
-func sidePotState(t testingT, contributed map[string]uint, folded ...string) (*game.State, *State) {
+func sidePotState(t gametest.TB, contributed map[string]uint, folded ...string) (*game.State, *State) {
 	t.Helper()
 	players := make([]*game.Player, 0, len(contributed))
 	for id := range contributed {
@@ -724,7 +725,7 @@ func TestLeave_AllInPlayerStaysInThePot(t *testing.T) {
 	// with chips behind, so the hand carries on past the shove.
 	shover := engine.CurrentPlayerID()
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		extra.Seats[shover].Chips = 100
 		extra.handStartChips = chipsInPlay(extra)
 	})
@@ -767,7 +768,7 @@ func TestLeave_HeadsUpAllInDoesNotForfeit(t *testing.T) {
 
 	shover := engine.CurrentPlayerID()
 	engine.WithState(func(s *game.State) {
-		extra := extra(t, s)
+		extra := gametest.Extra[*State](t, s)
 		extra.Seats[shover].Chips = 100
 		extra.handStartChips = chipsInPlay(extra)
 	})
@@ -874,7 +875,7 @@ func TestStandingScore_DrawsShareAGroup(t *testing.T) {
 	t.Run("a board that plays is a three-way draw", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.Table = []deck.Card{
 			{Rank: deck.Ace, Suit: deck.Spades}, {Rank: deck.King, Suit: deck.Spades},
 			{Rank: deck.Queen, Suit: deck.Spades}, {Rank: deck.Jack, Suit: deck.Spades},
@@ -896,7 +897,7 @@ func TestStandingScore_DrawsShareAGroup(t *testing.T) {
 	t.Run("busting on the same hand is a draw, on different hands is not", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		extra.Seats = map[string]*Seat{
 			"p1": {Chips: 3000},
 			"p2": {BustedAtHand: 4},
@@ -1012,14 +1013,14 @@ func TestLeave_SeatMarkersStillAddressARealSeat(t *testing.T) {
 
 			var victim string
 			engine.WithState(func(s *game.State) {
-				victim = s.Players[markers(extra(t, s))[which]].ID
+				victim = s.Players[markers(gametest.Extra[*State](t, s))[which]].ID
 			})
 
 			engine.RemovePlayer(victim)
 
 			engine.WithState(func(s *game.State) {
 				n := len(s.Players)
-				for name, idx := range markers(extra(t, s)) {
+				for name, idx := range markers(gametest.Extra[*State](t, s)) {
 					assert.GreaterOrEqual(t, idx, 0, name)
 					assert.Less(t, idx, n, name)
 				}
@@ -1134,7 +1135,7 @@ func TestStandingScore_HandsOnlySeparateSeatedShowdowns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state := createTestState()
-			extra := extra(t, state)
+			extra := gametest.Extra[*State](t, state)
 			// Ace-high for everyone; the kickers are K, Q and J, so every hand differs.
 			extra.Table = []deck.Card{
 				{Rank: deck.Ace, Suit: deck.Hearts}, {Rank: deck.Nine, Suit: deck.Diamonds},

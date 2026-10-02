@@ -65,3 +65,25 @@ func TestEngine_TurnTimeout_PanickingStandingsDoesNotEscape(t *testing.T) {
 		"finalize reads standings on the lobby's goroutine; a panic there kills it")
 	assert.Empty(t, standings, "empty standings are what finalize drops as unrecordable")
 }
+
+// leavePanicRules panics in OnPlayerLeave, the hook RemovePlayer reaches.
+type leavePanicRules struct{ *timeoutRules }
+
+func (*leavePanicRules) OnPlayerLeave(*State, string)   { panic("rules bug in leave") }
+func (*leavePanicRules) AfterPlayerRemoved(*State, int) {}
+
+// The lobby's disconnect-grace timer calls RemovePlayer from a time.AfterFunc
+// goroutine with nothing above it to recover: a rules panic there would take every
+// table down with it.
+func TestEngine_RemovePlayer_RulesPanicEndsTheTable(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, &leavePanicRules{&timeoutRules{safe: namedAction{name: "safe"}}}, "a", "b", "c")
+	events, err := engine.Subscribe()
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() { engine.RemovePlayer("a") })
+
+	assert.True(t, engine.IsFinished())
+	assert.True(t, engine.turnDeadline().IsZero(), "a finished table must not auto-play")
+	assert.Equal(t, EndReasonRulesError, endedEvent(t, drainEvents(events)).Reason)
+}

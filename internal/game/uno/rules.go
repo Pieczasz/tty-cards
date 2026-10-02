@@ -38,7 +38,7 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	state.Extra = extra
 
 	// Official Uno never starts on a Wild; redraw until a colored card surfaces.
-	top, err := shed.OpenDiscard(state, func(c deck.Card) bool { return !isWild(c.Rank) })
+	top, err := shed.OpenDiscard(state, func(c deck.Card) bool { return !IsWild(c) })
 	if err != nil {
 		return fmt.Errorf("open the uno discard pile: %w", err)
 	}
@@ -110,7 +110,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 }
 
 func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck.Card) error {
-	if isWild(a.Card.Rank) {
+	if IsWild(a.Card) {
 		if !deck.IsSuit(a.ChosenSuit) {
 			return errors.New("must choose a valid color")
 		}
@@ -130,7 +130,7 @@ func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck
 	if a.Card.Suit == extra.CurrentColor {
 		return nil
 	}
-	if a.Card.Rank == topCard.Rank && !isWild(topCard.Rank) {
+	if a.Card.Rank == topCard.Rank && !IsWild(topCard) {
 		return nil
 	}
 	return errors.New("card doesn't match color, number, or symbol")
@@ -148,7 +148,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		state.Discard.Add(a.Card)
 		extra.Passes = 0
 
-		if isWild(a.Card.Rank) {
+		if IsWild(a.Card) {
 			extra.CurrentColor = a.ChosenSuit
 		} else {
 			extra.CurrentColor = a.Card.Suit

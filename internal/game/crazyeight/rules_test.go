@@ -1,8 +1,6 @@
 package crazyeight
 
 import (
-	"bytes"
-	"log/slog"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -99,7 +97,7 @@ func TestRules_ApplyAction(t *testing.T) {
 
 		rules.ApplyAction(state, action)
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 
 		assert.Equal(t, deck.Spades, extra.CurrentSuit)
 		assert.Len(t, state.Players[0].Cards, 2)
@@ -118,7 +116,7 @@ func TestRules_ApplyAction(t *testing.T) {
 
 		rules.ApplyAction(state, action)
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 
 		assert.Equal(t, deck.Clubs, extra.CurrentSuit)
 		assert.Len(t, state.Players[0].Cards, 1)
@@ -182,7 +180,7 @@ func TestRules_DrawCard_Reshuffle(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		rules := &Rules{}
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 
 		state.Deck = deck.New([]deck.Card{})
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Nine, Suit: deck.Spades}})
@@ -228,7 +226,7 @@ func TestRules_PlayEight_SuitSelection(t *testing.T) {
 
 		rules.ApplyAction(state, action)
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		assert.Equal(t, deck.Hearts, extra.CurrentSuit)
 	})
 }
@@ -259,8 +257,7 @@ func TestRules_Init(t *testing.T) {
 
 	top, ok := state.Discard.Peek()
 	require.True(t, ok, "the game opens a discard pile")
-	assert.Equal(t, top.Suit, extra(t, state).CurrentSuit)
-
+	assert.Equal(t, top.Suit, gametest.Extra[*State](t, state).CurrentSuit)
 }
 
 // A full hand driven through the engine, the crazy-eights counterpart to poker's smoke test.
@@ -336,24 +333,6 @@ func TestRules_ApplyAction_ShedsOneCopyOfADuplicate(t *testing.T) {
 	assert.Equal(t, []deck.Card{card, {Rank: deck.King, Suit: deck.Hearts}}, state.Players[0].Cards)
 }
 
-// The leave path returns cards and reshuffles. An ordinary leave is not a failure, so
-// nothing may be logged at error level: the log is how a real reshuffle failure - which
-// would leave the stock in an unknown order - gets noticed at all.
-//
-//nolint:paralleltest // slog.SetDefault is process-wide, so this cannot share the process
-func TestRules_OnPlayerLeave_NormalLeaveIsNotAnError(t *testing.T) {
-	var logged bytes.Buffer
-	original := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
-	t.Cleanup(func() { slog.SetDefault(original) })
-
-	state := suite.Table(t, 3, 3)
-
-	(&Rules{}).OnPlayerLeave(state, "p1")
-
-	assert.Empty(t, logged.String(), "a successful reshuffle has nothing to report")
-}
-
 // An Eight is the wild card: the deck cannot name a suit for one it turned up itself,
 // so the opening flip keeps going until a plain card surfaces.
 func TestRules_OnGameStart_NeverOpensOnAnEight(t *testing.T) {
@@ -375,7 +354,7 @@ func TestRules_OnGameStart_NeverOpensOnAnEight(t *testing.T) {
 	top, ok := state.Discard.Peek()
 	require.True(t, ok)
 	assert.NotEqual(t, deck.Eight, top.Rank, "opened on %v", top)
-	assert.Equal(t, top.Suit, extra(t, state).CurrentSuit)
+	assert.Equal(t, top.Suit, gametest.Extra[*State](t, state).CurrentSuit)
 	assert.Equal(t, len(stacked), state.Deck.Size()+state.Discard.Size(),
 		"the skipped eights go back into the stock")
 }

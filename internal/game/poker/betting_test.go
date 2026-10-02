@@ -990,3 +990,17 @@ func TestRaiseBounds(t *testing.T) {
 		})
 	}
 }
+
+// A view can ask about a seat that has just left, or read a table that is not poker
+// at all: neither has a raise to offer.
+func TestRaiseBounds_NoSuchSeat(t *testing.T) {
+	t.Parallel()
+	state, _ := seatedRound(0, seat{id: "a", chips: 1000}, seat{id: "b", chips: 1000})
+
+	_, _, ok := RaiseBounds(state, "gone")
+	assert.False(t, ok, "a player who is not seated")
+
+	state.Extra = "not poker"
+	_, _, ok = RaiseBounds(state, "a")
+	assert.False(t, ok, "a state that is not poker")
+}

@@ -7,6 +7,7 @@ package gametest
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -34,8 +35,9 @@ type Shed struct {
 	ShedState func(extra any) *shed.State
 	// Opens reports whether a card may start the discard pile.
 	Opens func(deck.Card) bool
-	// Play is the game's action for playing card with no colour or suit named.
-	Play func(card deck.Card) game.Action
+	// Play is the game's action for playing card, naming suit as the one play
+	// continues in: the Eight's or the Wild's choice, ignored for any other card.
+	Play func(card deck.Card, suit deck.Suit) game.Action
 	// Draw is the game's draw action, the one TimeoutAction has to play.
 	Draw game.Action
 }
@@ -108,6 +110,8 @@ func RunShed(t *testing.T, s Shed) {
 		{"an empty table is not a deadlock", emptyTableIsNotADeadlock},
 		{"a draw needs no discard", drawNeedsNoDiscard},
 		{"the timeout move draws", timeoutDraws},
+		{"another game's move is refused", foreignActionIsRefused},
+		{"another game's state is refused or ignored", foreignExtraIsRefused},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -234,7 +238,7 @@ func drawNeedsNoDiscard(t *testing.T, s Shed) {
 	state.Discard = deck.New(nil)
 
 	require.NoError(t, s.Rules.ValidateAction(state, s.Draw))
-	assert.Error(t, s.Rules.ValidateAction(state, s.Play(state.Players[0].Cards[0])),
+	assert.Error(t, s.Rules.ValidateAction(state, s.Play(state.Players[0].Cards[0], deck.NoSuit)),
 		"a card still needs something to match against")
 }
 
@@ -247,11 +251,35 @@ func timeoutDraws(t *testing.T, s Shed) {
 	assert.NoError(t, s.Rules.ValidateAction(state, s.Rules.TimeoutAction(state)))
 }
 
-// SoakTimeoutIsAlwaysLegal plays whole tables on nothing but TimeoutAction. The engine
-// plays it for a seat that has gone quiet, and a move ValidateAction refuses is not a
-// skipped turn: the clock re-arms and the seat is taken on the next expiry, so a player
-// is removed for a mistake the rules made. It is its own entry point, not a RunShed
-// case, so each game keeps a TestSoak_TimeoutActionIsAlwaysLegal of the usual name.
+func foreignActionIsRefused(t *testing.T, s Shed) {
+	require.ErrorIs(t, s.Rules.ValidateAction(s.Table(t, 3, 3), ForeignAction{}), game.ErrUnknownAction)
+}
+
+// Extra holding something else is a wiring bug: every hook refuses or ignores it
+// rather than acting on a table it cannot read.
+func foreignExtraIsRefused(t *testing.T, s Shed) {
+	state := s.Table(t, 3, 3)
+	state.Extra = "not this game"
+	hand := slices.Clone(state.Players[0].Cards)
+
+	require.ErrorIs(t, s.Rules.ValidateAction(state, s.Draw), game.ErrInvalidState)
+	require.ErrorIs(t, s.Rules.ApplyAction(state, s.Draw), game.ErrInvalidState)
+	assert.False(t, s.Rules.CheckWinCondition(state))
+
+	s.Rules.OnPlayerLeave(state, "p1")
+	s.Rules.AfterPlayerRemoved(state, 0)
+	assert.Equal(t, hand, state.Players[0].Cards, "a leave on a foreign state moves no cards")
+	assert.Nil(t, state.OverrideNextTurn, "nor the turn")
+}
+
+// SoakTimeoutIsAlwaysLegal plays whole tables on TimeoutAction, with random legal
+// plays for the first soakMixedSteps moves. The engine plays TimeoutAction for a seat
+// that has gone quiet, and a move ValidateAction refuses is not a skipped turn: the
+// clock re-arms and the seat is taken on the next expiry, so a player is removed for a
+// mistake the rules made. The plays, the Eight's and the Wild's choices among them, put
+// it in front of tables a clock-only game never reaches; the clock-only tail proves
+// such a table still ends. It is its own entry point, not a RunShed case, so each game
+// keeps a TestSoak_TimeoutActionIsAlwaysLegal of the usual name.
 func SoakTimeoutIsAlwaysLegal(t *testing.T, s Shed) {
 	t.Helper()
 
@@ -265,20 +293,50 @@ func SoakTimeoutIsAlwaysLegal(t *testing.T, s Shed) {
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 
-		for step := range 400 {
+		for step := range soakMixedSteps + soakDrawSteps {
 			if engine.IsFinished() {
 				return
 			}
 			id := engine.CurrentPlayerID()
-			var act game.Action
+			var legal []game.Action
 			engine.WithState(func(state *game.State) {
-				act = s.Rules.TimeoutAction(state)
+				act := s.Rules.TimeoutAction(state)
 				require.NotNil(rt, act, "step %d: no move for %s", step, id)
 				require.NoError(rt, s.Rules.ValidateAction(state, act),
 					"step %d: %s is not a legal move", step, act.Name())
+				legal = append(legal, act)
+				if step < soakMixedSteps {
+					legal = append(legal, s.legalPlays(state)...)
+				}
 			})
-			require.NoError(rt, engine.SubmitAction(id, act))
+			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
+			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
 		}
-		rt.Fatalf("a table of %d that only ever draws never ran out of cards", n)
+		rt.Fatalf("a table of %d that only draws after move %d never ran out of cards", n, soakMixedSteps)
 	})
+}
+
+// A random play recycles the discard into the stock, so a table of them need not end;
+// a table that only draws does, within a deck's worth of draws and a round of passes.
+const (
+	soakMixedSteps = 200
+	soakDrawSteps  = 400
+)
+
+// legalPlays is every play ValidateAction accepts for the seat on turn: a card that
+// needs no suit once, and a card that names one once per suit it may name.
+func (s Shed) legalPlays(state *game.State) []game.Action {
+	var out []game.Action
+	for _, c := range state.Players[state.CurrentTurn].Cards {
+		if play := s.Play(c, deck.NoSuit); s.Rules.ValidateAction(state, play) == nil {
+			out = append(out, play)
+			continue
+		}
+		for _, suit := range []deck.Suit{deck.Spades, deck.Hearts, deck.Diamonds, deck.Clubs} {
+			if play := s.Play(c, suit); s.Rules.ValidateAction(state, play) == nil {
+				out = append(out, play)
+			}
+		}
+	}
+	return out
 }

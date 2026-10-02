@@ -30,7 +30,6 @@ func initialDeck() []deck.Card {
 
 	// Uno's Zero and One are its own ranks, not the standard block's, so the number
 	// ranks are listed rather than ranged over.
-
 	numbers := []deck.Rank{One, deck.Two, deck.Three, deck.Four, deck.Five, deck.Six, deck.Seven, deck.Eight, deck.Nine}
 	for _, color := range colors {
 		cards = append(cards, deck.Card{Rank: Zero, Suit: color})

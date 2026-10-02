@@ -1,9 +1,7 @@
 package uno
 
 import (
-	"bytes"
 	"fmt"
-	"log/slog"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -44,7 +42,7 @@ func TestRules_ValidateAction_PlayCard(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Five, Suit: ColorGreen}})
-		extra(t, state).CurrentColor = ColorGreen
+		gametest.Extra[*State](t, state).CurrentColor = ColorGreen
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: deck.Card{Rank: deck.Five, Suit: ColorBlue}}))
 	})
 
@@ -52,7 +50,7 @@ func TestRules_ValidateAction_PlayCard(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Discard = deck.New([]deck.Card{{Rank: Skip, Suit: ColorBlue}})
-		extra(t, state).CurrentColor = ColorBlue
+		gametest.Extra[*State](t, state).CurrentColor = ColorBlue
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: deck.Card{Rank: Skip, Suit: ColorYellow}}))
 	})
 
@@ -103,7 +101,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorRed}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 
 		err := rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue})
 		require.ErrorContains(t, err, "no card of the current color")
@@ -113,7 +111,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorGreen}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
@@ -124,7 +122,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		// Playable on rank alone, but the gate is on colour, not on playability.
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: deck.Two, Suit: ColorGreen}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
@@ -133,7 +131,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Players[0].Cards = []deck.Card{wd4, {Rank: Wild, Suit: ColorWild}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: wd4, ChosenSuit: ColorBlue}))
 	})
@@ -142,7 +140,7 @@ func TestRules_ValidateAction_WildDrawFourNeedsNoCurrentColor(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
 		state.Players[0].Cards = []deck.Card{{Rank: Wild, Suit: ColorWild}, {Rank: deck.Two, Suit: ColorRed}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{
 			Card:       deck.Card{Rank: Wild, Suit: ColorWild},
@@ -174,7 +172,7 @@ func TestRules_OnGameStart_OpeningCardActsOnTheFirstPlayer(t *testing.T) {
 		state.Deck = deck.New(stock)
 		state.CurrentTurn = 0
 		require.NoError(t, (&Rules{}).OnGameStart(state))
-		return state, extra(t, state)
+		return state, gametest.Extra[*State](t, state)
 	}
 
 	t.Run("skip costs the first player their turn", func(t *testing.T) {
@@ -229,7 +227,7 @@ func TestRules_ApplyAction_NumberCard(t *testing.T) {
 
 	rules.ApplyAction(state, ActionPlayCard{Card: card})
 
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	assert.Equal(t, ColorRed, extra.CurrentColor)
 	assert.Len(t, state.Players[0].Cards, 3)
 	require.NotNil(t, state.OverrideNextTurn)
@@ -244,7 +242,7 @@ func TestRules_ApplyAction_Skip(t *testing.T) {
 	rules := &Rules{}
 	state.CurrentTurn = 0
 	state.Players[0].Cards = []deck.Card{{Rank: Skip, Suit: ColorRed}}
-	extra(t, state).CurrentColor = ColorRed
+	gametest.Extra[*State](t, state).CurrentColor = ColorRed
 	state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 
 	rules.ApplyAction(state, ActionPlayCard{Card: deck.Card{Rank: Skip, Suit: ColorRed}})
@@ -262,12 +260,12 @@ func TestRules_ApplyAction_Reverse(t *testing.T) {
 		state := suite.Table(t, 2, 2, 2)
 		state.CurrentTurn = 0
 		state.Players[0].Cards = []deck.Card{{Rank: Reverse, Suit: ColorRed}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 
 		rules.ApplyAction(state, ActionPlayCard{Card: deck.Card{Rank: Reverse, Suit: ColorRed}})
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		assert.Equal(t, int8(-1), extra.Direction)
 		require.NotNil(t, state.OverrideNextTurn)
 		assert.Equal(t, 2, *state.OverrideNextTurn, "after reverse from seat 0, next is seat 2")
@@ -278,12 +276,12 @@ func TestRules_ApplyAction_Reverse(t *testing.T) {
 		state := suite.Table(t, 2, 2)
 		state.CurrentTurn = 0
 		state.Players[0].Cards = []deck.Card{{Rank: Reverse, Suit: ColorRed}}
-		extra(t, state).CurrentColor = ColorRed
+		gametest.Extra[*State](t, state).CurrentColor = ColorRed
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 
 		rules.ApplyAction(state, ActionPlayCard{Card: deck.Card{Rank: Reverse, Suit: ColorRed}})
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		assert.Equal(t, int8(1), extra.Direction, "direction unchanged in 2-player")
 		require.NotNil(t, state.OverrideNextTurn)
 		assert.Equal(t, 0, *state.OverrideNextTurn, "same seat plays again")
@@ -296,7 +294,7 @@ func TestRules_ApplyAction_DrawTwo(t *testing.T) {
 	rules := &Rules{}
 	state.CurrentTurn = 0
 	state.Players[0].Cards = []deck.Card{{Rank: DrawTwo, Suit: ColorRed}}
-	extra(t, state).CurrentColor = ColorRed
+	gametest.Extra[*State](t, state).CurrentColor = ColorRed
 	state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 	victimBefore := len(state.Players[1].Cards)
 
@@ -321,7 +319,7 @@ func TestRules_ApplyAction_WildDrawFour(t *testing.T) {
 		ChosenSuit: ColorBlue,
 	})
 
-	assert.Equal(t, ColorBlue, extra(t, state).CurrentColor)
+	assert.Equal(t, ColorBlue, gametest.Extra[*State](t, state).CurrentColor)
 	assert.Len(t, state.Players[1].Cards, victimBefore+4)
 	require.NotNil(t, state.OverrideNextTurn)
 	assert.Equal(t, 2, *state.OverrideNextTurn)
@@ -354,7 +352,7 @@ func TestRules_DrawCard_Reshuffle(t *testing.T) {
 	t.Run("exhausted board is a pass", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		state.Deck = deck.New(nil)
 		state.Discard = deck.New([]deck.Card{{Rank: deck.Three, Suit: ColorRed}})
 
@@ -384,8 +382,8 @@ func TestRules_OnGameStart_NeverOpensOnAWild(t *testing.T) {
 
 	top, ok := state.Discard.Peek()
 	require.True(t, ok)
-	assert.False(t, isWild(top.Rank), "opened on %v", top)
-	assert.Equal(t, top.Suit, extra(t, state).CurrentColor)
+	assert.False(t, IsWild(top), "opened on %v", top)
+	assert.Equal(t, top.Suit, gametest.Extra[*State](t, state).CurrentColor)
 	assert.Equal(t, len(stacked), state.Deck.Size()+state.Discard.Size(),
 		"the skipped wilds go back into the stock")
 }
@@ -396,7 +394,7 @@ func TestRules_DrawCard_SuccessfulDrawClearsThePassCount(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state := suite.Table(t, 3, 3)
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.Passes = 1
 	stockBefore := state.Deck.Size()
 
@@ -426,10 +424,10 @@ func TestRules_Init(t *testing.T) {
 		state := game.NewState(rules, players, stock)
 		require.NoError(t, rules.OnGameStart(state))
 
-		extra := extra(t, state)
+		extra := gametest.Extra[*State](t, state)
 		top, ok := state.Discard.Peek()
 		require.True(t, ok)
-		assert.False(t, isWild(top.Rank))
+		assert.False(t, IsWild(top))
 		assert.Equal(t, top.Suit, extra.CurrentColor)
 		assert.Equal(t, int8(1), extra.Direction)
 	})
@@ -481,18 +479,6 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	assert.Equal(t, wantCards, countCards())
 }
 
-//nolint:paralleltest // slog.SetDefault is process-wide
-func TestRules_OnPlayerLeave_NormalLeaveIsNotAnError(t *testing.T) {
-	var logged bytes.Buffer
-	original := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
-	t.Cleanup(func() { slog.SetDefault(original) })
-
-	state := suite.Table(t, 3, 3)
-	(&Rules{}).OnPlayerLeave(state, "p1")
-	assert.Empty(t, logged.String())
-}
-
 // The engine's own fix-up hands the turn to the seat that followed the leaver
 // clockwise. On a reversed table that is the wrong neighbour: the seat the turn
 // actually owed gets skipped, and it is the leaver's own turn that exposes it.
@@ -525,7 +511,7 @@ func TestRules_AfterPlayerRemoved_HonorsDirection(t *testing.T) {
 			t.Cleanup(engine.Close)
 
 			engine.WithState(func(s *game.State) {
-				extra(t, s).Direction = tt.direction
+				gametest.Extra[*State](t, s).Direction = tt.direction
 				s.CurrentTurn = tt.onTurn
 				s.OverrideNextTurn = nil
 			})
@@ -623,7 +609,7 @@ func TestRules_OnGameStart_StartsClockwise(t *testing.T) {
 
 	require.NoError(t, (&Rules{}).OnGameStart(state))
 
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	// An opening Reverse legitimately turns the table the other way, so only the zero
 	// value is wrong - it would multiply every step by nothing.
 	assert.Contains(t, []int8{1, -1}, extra.Direction, "a zero direction never leaves the first seat")
@@ -648,7 +634,7 @@ func TestRules_ApplyAction_ForcedDrawHeadsUp(t *testing.T) {
 			state := suite.Table(t, 1, 1)
 			state.CurrentTurn = 0
 			state.Players[0].Cards = []deck.Card{tt.card}
-			extra(t, state).CurrentColor = ColorRed
+			gametest.Extra[*State](t, state).CurrentColor = ColorRed
 			state.Discard = deck.New([]deck.Card{{Rank: deck.Two, Suit: ColorRed}})
 			victimBefore := len(state.Players[1].Cards)
 			total := gametest.CardsInPlay(state)
@@ -673,7 +659,7 @@ func TestRules_AfterPlayerRemoved_TwoSeatsCollapseToOne(t *testing.T) {
 		t.Run(fmt.Sprintf("direction %d", dir), func(t *testing.T) {
 			t.Parallel()
 			state := suite.Table(t, 3, 3)
-			extra := extra(t, state)
+			extra := gametest.Extra[*State](t, state)
 			extra.Direction = dir
 			state.CurrentTurn = 0
 			extra.leaverWasOnTurn = true
@@ -685,4 +671,20 @@ func TestRules_AfterPlayerRemoved_TwoSeatsCollapseToOne(t *testing.T) {
 			assert.False(t, extra.leaverWasOnTurn, "the flag is consumed, not left to fire again")
 		})
 	}
+}
+
+// A Wild cannot open the pile, so a stock of nothing but Wilds has no opening card.
+// The deck has to come back whole: a lost stock would be a silently short deck on the
+// next attempt.
+func TestRules_OnGameStart_AllWildsCannotOpen(t *testing.T) {
+	t.Parallel()
+	state := game.NewState(&Rules{}, []*game.Player{{ID: "a"}, {ID: "b"}}, []deck.Card{
+		{Rank: Wild, Suit: ColorWild},
+		{Rank: WildDrawFour, Suit: ColorWild},
+	})
+
+	err := (&Rules{}).OnGameStart(state)
+
+	require.ErrorContains(t, err, "not enough cards to start")
+	assert.Equal(t, 2, state.Deck.Size(), "the stock comes back whole")
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ import (
 func TestTrickWinner_HighestOfLedSuit(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.LedSuit = deck.Clubs
 	extra.TrickLeader = 0
 	extra.TrickCards = map[string]deck.Card{
@@ -49,7 +50,7 @@ func TestScoreHand_ShootTheMoon(t *testing.T) {
 		},
 		CumulativeScores: map[string]int{"p1": 0, "p2": 5, "p3": 10, "p4": 0},
 	}
-	scoreHand(extra, players)
+	scoreHand(&game.State{Players: players}, extra)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
 	assert.Equal(t, 5+penaltyPointsTotal, extra.CumulativeScores["p2"])
 	assert.Equal(t, 10+penaltyPointsTotal, extra.CumulativeScores["p3"])
@@ -67,7 +68,7 @@ func TestPassRecipient(t *testing.T) {
 func TestMatch_PassDirectionCycles(t *testing.T) {
 	t.Parallel()
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.TargetScore = targetScore
 
 	want := []PassDirection{PassLeft, PassRight, PassAcross, PassNone, PassLeft}
@@ -88,9 +89,9 @@ func TestMatch_ShootTheMoon_AndTargetEnd(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state := createTestState()
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	extra.HandPoints["p1"] = penaltyPointsTotal
-	scoreHand(extra, state.Players)
+	scoreHand(state, extra)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
 	assert.Equal(t, 26, extra.CumulativeScores["p2"])
 
@@ -119,7 +120,7 @@ func TestMatch_CumulativeScoresCarry(t *testing.T) {
 		HandPoints:       map[string]int{"p1": 5, "p2": 8, "p3": 3, "p4": 10},
 		CumulativeScores: map[string]int{"p1": 20, "p2": 0, "p3": 15, "p4": 7},
 	}
-	scoreHand(extra, players)
+	scoreHand(&game.State{Players: players}, extra)
 	assert.Equal(t, 25, extra.CumulativeScores["p1"])
 	assert.Equal(t, 8, extra.CumulativeScores["p2"])
 	assert.Equal(t, 18, extra.CumulativeScores["p3"])
@@ -136,7 +137,7 @@ func TestMatch_DealerRotatesOneSeatPerHand(t *testing.T) {
 	state.CurrentTurn = 1
 	require.NoError(t, rules.OnGameStart(state))
 
-	extra := extra(t, state)
+	extra := gametest.Extra[*State](t, state)
 	require.Equal(t, 1, extra.DealerIndex, "the opening dealer is whoever is on turn")
 
 	for hand := 2; hand <= 5; hand++ {
@@ -160,5 +161,35 @@ func TestMatch_DealerRotatesOneSeatPerHand(t *testing.T) {
 		require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
 		assert.Equal(t, wantDealer, extra.DealerIndex, "hand %d", hand)
 		assert.Equal(t, hand, extra.HandNumber)
+	}
+}
+
+// "hand 7" matches every hearts table on the server, so the scoring line has to go
+// through the table's logger to say which one it is about. It is also a count: one
+// line a hand (two on a moon shot), not one a trick, which is what keeps it at Info.
+func TestScoreHand_LogsOnceAHandThroughTheTableLogger(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+	sink := &gametest.LogSink{}
+	engine := game.NewEngine(rules, fourPlayers(), deck.Standard(), game.WithLogger(sink.Logger()))
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+
+	handOver := func() (over bool) {
+		engine.WithState(func(s *game.State) { over = gametest.Extra[*State](t, s).Phase == PhaseHandOver })
+		return over
+	}
+	for step := 0; !handOver(); step++ {
+		require.Less(t, step, 100, "one hand is three passes and 52 plays")
+		var act game.Action
+		engine.WithState(func(s *game.State) { act = rules.TimeoutAction(s) })
+		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), act))
+	}
+
+	recs := sink.Records(t)
+	require.NotEmpty(t, recs)
+	assert.LessOrEqual(t, len(recs), 2, "a hand logs its score and at most a moon shot")
+	for _, rec := range recs {
+		assert.Equal(t, gametest.SinkLobby, rec["lobby"], "%v", rec["msg"])
 	}
 }

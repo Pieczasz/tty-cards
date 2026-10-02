@@ -22,20 +22,12 @@ import (
 var ErrInvalidState = errors.New("invalid state type")
 
 var (
-	// errClosed is any call on an engine Close already ended.
-	errClosed = errors.New("game is closed")
-	// errNoGame is a call on a nil BoundEngine.
-	errNoGame = errors.New("no active game")
-	// errStaleTurn is an auto-play that lost its turn between resolveTurnTimeout
-	// dropping the lock and the submit re-acquiring it: a non-event, not a failure.
-	errStaleTurn = errors.New("turn already settled")
-	// errActionRefused is an auto-play ValidateAction refused: a rules bug, logged and
-	// re-armed, where an apply failure has already ended the game.
+	errClosed        = errors.New("game is closed")
+	errNoGame        = errors.New("no active game")
+	errStaleTurn     = errors.New("turn already settled")
 	errActionRefused = errors.New("auto-play refused")
 )
 
-// Engine owns one mutex covering its clock fields and the State: they are always read
-// together, and a second lock would only add orderings to get wrong.
 type Engine struct {
 	mu          sync.Mutex
 	state       *State
@@ -47,35 +39,26 @@ type Engine struct {
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
 type turnClock struct {
 	defaultLength time.Duration
-	// seq fences stale timers: every stop bumps it, and a timer only acts for the
-	// generation it was armed in.
-	seq      uint64
-	timer    *time.Timer
-	deadline time.Time
-	missed   map[string]int
-	// The seat and length the running deadline was armed for, and whether that
-	// seat-turn has been charged its miss: armTurnTimerLocked's continuation check.
-	playerID    string
-	length      time.Duration
-	missCharged bool
+	seq           uint64
+	timer         *time.Timer
+	deadline      time.Time
+	missed        map[string]int
+	playerID      string
+	length        time.Duration
+	missCharged   bool
 }
 
 // EngineOption configures NewEngine.
 type EngineOption func(*Engine)
 
-// WithTurnTimeout sets the default turn length; zero or less disables the clock.
-func WithTurnTimeout(d time.Duration) EngineOption {
+// WithLogger is the logger the engine and its rules write through (State.Logger).
+// The lobby passes one carrying its code and the game slug; nil keeps slog.Default().
+func WithLogger(l *slog.Logger) EngineOption {
 	return func(e *Engine) {
-		e.clock.defaultLength = d
+		e.state.logger = l
 	}
 }
 
-// NewEngine seats copies of players, not the values themselves: a lobby hands the same
-// *Player to every engine it starts, and shared seats would let the next engine deal
-// into hands a finished one's viewers still read under a different lock. Nothing
-// compares seats by pointer (the lobby uses Player.Equal), and Ratings stays shared
-// because nothing writes it once the seat is taken. NewState keeps aliasing the
-// values, which is what rules tests building a State by hand rely on.
 func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...EngineOption) *Engine {
 	seats := make([]*Player, len(players))
 	for i, p := range players {
@@ -86,12 +69,7 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 		}
 	}
 	e := &Engine{
-		state: NewState(rules, seats, cards),
-		// The argument is the subscriber cap, not a buffer size (that is fixed):
-		// headroom above the seat count for non-player subscribers (the
-		// ranked-finalize watcher) and for a reconnect overlapping the seat it
-		// replaces. Too small and a real player's Subscribe fails with
-		// ErrAtCapacity, leaving their view with no feed at all.
+		state:       NewState(rules, seats, cards),
 		broadcaster: broadcaster.New[Event](len(players) + 8),
 		clock: turnClock{
 			defaultLength: DefaultTurnTimeout,
@@ -104,9 +82,7 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 	return e
 }
 
-// Start deals and opens the table. A failed start leaves the engine half-dealt and
-// unusable: the lobby builds a new engine per attempt, and the seats are the engine's
-// own copies, so nothing outside it sees the partial deal.
+// Start deals and opens the table.
 func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -136,9 +112,7 @@ func (e *Engine) Start() error {
 		e.state.Players[playerIdx].Cards = hand
 	}
 	e.state.Phase = Playing
-	// math/rand: who acts first is public the moment the table opens, so it is no
-	// secret worth crypto/rand, and there is no error to handle.
-	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret, see above
+	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret
 
 	if err := e.state.Rules.OnGameStart(e.state); err != nil {
 		return fmt.Errorf("set up game: %w", err)
@@ -150,11 +124,6 @@ func (e *Engine) Start() error {
 
 // SubmitAction applies action for playerID, who must be on turn. Acting for yourself
 // clears your missed-turn count.
-//
-// A rules panic ends the table as a rules error and comes back as an error rather than
-// unwinding into the session, whose recover would leave the table running on
-// half-applied state. The recover is a direct defer and runs before the unlock, so the
-// lock is still held.
 func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -168,17 +137,22 @@ func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	if err != nil {
 		return err
 	}
-	// Cleared only on a move the rules accept: clearing on any keypress would let a
-	// client dodge the idle check in removeIfStillIdle by spamming rejected actions.
 	delete(e.clock.missed, playerID)
 	return e.applyActionLocked(current, action)
 }
 
 // RemovePlayer takes playerID's seat, running the rules' PlayerLeaveHandler, and ends
 // the table when the leave decides it. An unknown seat or a finished table is a no-op.
+// A rules panic ends the table rather than escaping: the lobby calls this from its
+// disconnect-grace timer, where nothing above would recover it.
 func (e *Engine) RemovePlayer(playerID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			e.endOnRulesPanicLocked(r)
+		}
+	}()
 	e.removePlayerLocked(playerID)
 }
 
@@ -288,7 +262,7 @@ func (e *Engine) Standings() (standings []Standing) {
 	defer e.mu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("rules panicked computing standings", "panic", r, "stack", string(debug.Stack()))
+			e.state.Logger().Error("rules panicked computing standings", "panic", r, "stack", string(debug.Stack()))
 			standings = nil
 		}
 	}()
@@ -303,8 +277,8 @@ func (e *Engine) Standings() (standings []Standing) {
 }
 
 // WithState runs fn with the engine lock held. fn must not call back into the engine:
-// every Engine method takes the same lock, so it would deadlock. A test seam: nothing
-// in production calls it, and views read through Frame.
+// every Engine method takes the same lock, so it would deadlock. Server side only (the
+// lobby reads a finished table's leavers through it); views read through Frame.
 func (e *Engine) WithState(fn func(state *State)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -323,20 +297,18 @@ func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64
 	// The miss count is left alone: this timeout is already counted, and clearing it
 	// would mean somebody who never comes back is never removed.
 	current, err := e.checkTurnLocked(playerID, action)
-	if err == nil {
-		return e.applyActionLocked(current, action)
+	if err != nil {
+		// A matching seq rules out a closed or finished table and a wrong seat - each
+		// of those stopped or re-armed the clock - so ValidateAction refused the move.
+		// Re-armed on this lock hold, because after it is dropped a player's own move
+		// may already have armed the next seat's clock, and re-arming then would reset
+		// it. The re-armed turn is chargeable again, or a rules set that always refuses
+		// would never lose the seat.
+		e.clock.missCharged = false
+		e.armTurnTimerLocked()
+		return fmt.Errorf("%w: %w", errActionRefused, err)
 	}
-	if e.state.Phase != Playing {
-		return err
-	}
-	// Still playing after a refusal means ValidateAction refused the move: seq rules
-	// out a wrong seat. Re-armed on this lock hold, because after it is dropped a
-	// player's own move may already have armed the next seat's clock, and re-arming
-	// then would reset it. The re-armed turn is chargeable again, or a rules set that
-	// always refuses would never lose the seat.
-	e.clock.missCharged = false
-	e.armTurnTimerLocked()
-	return fmt.Errorf("%w: %w", errActionRefused, err)
+	return e.applyActionLocked(current, action)
 }
 
 // checkTurnLocked is everything an action is refused on before it touches the state:
@@ -353,17 +325,16 @@ func (e *Engine) checkTurnLocked(playerID string, action Action) (*Player, error
 	if current == nil || current.ID != playerID {
 		return nil, errors.New("wait for your turn to perform an action")
 	}
+	// The rules' own refusal ("must follow suit") is written for the player, and the
+	// views show it as it is.
 	if err := e.state.Rules.ValidateAction(e.state, action); err != nil {
-		return nil, fmt.Errorf("you can't perform that action: %w", err)
+		return nil, err //nolint:wrapcheck // the rules' message is the one the player reads
 	}
 	return current, nil
 }
 
-// applyActionLocked plays an action checkTurnLocked accepted for current and moves the
-// table on. Any error has already ended the game.
 func (e *Engine) applyActionLocked(current *Player, action Action) error {
 	if err := e.state.Rules.ApplyAction(e.state, action); err != nil {
-		// State may be half-applied, so the game cannot be played on.
 		e.finishGameLocked(current, EndReasonRulesError)
 		return fmt.Errorf("apply action: %w", err)
 	}

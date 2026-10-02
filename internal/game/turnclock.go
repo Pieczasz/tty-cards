@@ -2,7 +2,6 @@ package game
 
 import (
 	"errors"
-	"log/slog"
 	"runtime/debug"
 	"time"
 )
@@ -68,20 +67,6 @@ func (e *Engine) stopTurnTimerLocked() {
 	e.clock.deadline = time.Time{}
 }
 
-// turnDeadline is a test seam; views read the remaining time from Frame.
-func (e *Engine) turnDeadline() time.Time {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.clock.deadline
-}
-
-// missedTurns is a test seam: the idle count is the engine's own business.
-func (e *Engine) missedTurns(playerID string) int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.clock.missed[playerID]
-}
-
 func (e *Engine) onTurnTimeout(seq uint64) {
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
 	// rules hook here would take the whole process down: every table, for one game's
@@ -108,10 +93,10 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 	case errors.Is(err, errActionRefused):
 		// TimeoutAction returned a move ValidateAction refuses: a rules bug. The clock
 		// was re-armed under the lock, and each expiry still counts a miss.
-		slog.Warn("auto-play for an expired turn was refused",
+		e.state.Logger().Warn("auto-play for an expired turn was refused",
 			"error", err, "player_id", playerID, "action", action.Name())
 	default:
-		slog.Error("auto-play ended the table on a rules error",
+		e.state.Logger().Error("auto-play ended the table on a rules error",
 			"error", err, "player_id", playerID, "action", action.Name())
 	}
 }
@@ -135,7 +120,7 @@ func (e *Engine) recoverRulesPanic() {
 // has already set Finished without announcing it, and every rules hook runs only on a
 // table that was Playing.
 func (e *Engine) endOnRulesPanicLocked(r any) {
-	slog.Error("rules panicked; ending the table as a rules error",
+	e.state.Logger().Error("rules panicked; ending the table as a rules error",
 		"panic", r, "stack", string(debug.Stack()))
 	if !e.closed {
 		e.endGameLocked(nil, EndReasonRulesError)
@@ -188,7 +173,7 @@ func (e *Engine) resolveTurnTimeout(seq uint64) (outcome timeoutOutcome, playerI
 		// No safe move: the seat goes rather than the table waiting. A full set of
 		// misses is what makes that re-checkable in removeIfStillIdle. Reaching this in
 		// real play is a rules bug, hence the log.
-		slog.Warn("rules returned no safe timeout move; taking the seat",
+		e.state.Logger().Warn("rules returned no safe timeout move; taking the seat",
 			"player_id", current.ID, "phase", e.state.Phase)
 		e.clock.missed[current.ID] = MaxMissedTurns
 		return timeoutTakeSeat, current.ID, nil
@@ -220,7 +205,7 @@ func (e *Engine) removeIfStillIdle(seq uint64, playerID string) {
 	}
 	// EventPlayerIdle ends the player's ssh session through the view, so this is the
 	// only server-side record that a seat was taken for idling.
-	slog.Info("removing idle player",
+	e.state.Logger().Info("removing idle player",
 		"player_id", playerID, "missed_turns", e.clock.missed[playerID])
 	e.broadcaster.Broadcast(Event{Type: EventPlayerIdle, PlayerID: playerID})
 	e.removePlayerLocked(playerID)

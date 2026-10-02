@@ -13,17 +13,12 @@ type Module struct {
 	Factory func() Rules
 }
 
-// Registry is the set of games a server offers, keyed by display name. It is fixed at
-// construction - nothing registers a game after startup - so it needs no lock.
+// Registry is the set of games a server offers, keyed by display name.
 type Registry struct {
 	modules map[string]Module
-	order   []string // declaration order, for GameNames
+	order   []string
 }
 
-// NewRegistry indexes mods by display name in the order given. A half-declared module
-// or a name declared twice is a wiring bug that would otherwise surface as a missing
-// route or a nil factory the moment somebody starts a table, so it panics, naming the
-// game.
 func NewRegistry(mods ...Module) *Registry {
 	r := &Registry{
 		modules: make(map[string]Module, len(mods)),

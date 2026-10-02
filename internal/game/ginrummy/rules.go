@@ -5,7 +5,6 @@ package ginrummy
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -110,6 +109,9 @@ func beginHand(state *game.State, extra *State) error {
 var (
 	errDrawFirst    = errors.New("must draw first")
 	errDiscardFirst = errors.New("must discard first")
+	// errPileEmpty is a draw ValidateAction should have refused; it ends the table
+	// rather than letting the player discard a card they never picked up.
+	errPileEmpty = errors.New("draw failed: the pile came up empty")
 )
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
@@ -193,22 +195,23 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 
 	switch action := action.(type) {
 	case ActionDrawStock:
-		// The phase only moves on a card that actually arrived; AfterAction turns a
-		// failed draw into an error rather than letting the player discard a card
-		// they never picked up.
-		if drawn, ok := state.Deck.Draw(); ok {
-			p.Cards = append(p.Cards, drawn)
-			extra.TakenUpcard = nil
-			extra.Phase = PhaseAwaitingDiscard
+		drawn, ok := state.Deck.Draw()
+		if !ok {
+			return errPileEmpty
 		}
+		p.Cards = append(p.Cards, drawn)
+		extra.TakenUpcard = nil
+		extra.Phase = PhaseAwaitingDiscard
 		// Draw then discard is one turn: keep the cursor on this seat.
 		state.OverrideTurn(state.CurrentTurn)
 	case ActionDrawDiscard:
-		if drawn, ok := state.Discard.Draw(); ok {
-			p.Cards = append(p.Cards, drawn)
-			extra.TakenUpcard = &drawn
-			extra.Phase = PhaseAwaitingDiscard
+		drawn, ok := state.Discard.Draw()
+		if !ok {
+			return errPileEmpty
 		}
+		p.Cards = append(p.Cards, drawn)
+		extra.TakenUpcard = &drawn
+		extra.Phase = PhaseAwaitingDiscard
 		state.OverrideTurn(state.CurrentTurn)
 	case ActionDiscard:
 		p.Cards = deck.RemoveOne(p.Cards, action.Card)
@@ -244,7 +247,7 @@ func applyKnock(state *game.State, extra *State, action ActionKnock) {
 
 	// A knock is the only scoring event in the game and the one players argue about,
 	// so both deadwood counts and the direction the points went are recorded.
-	slog.Info("gin rummy knock",
+	state.Logger().Info("gin rummy knock",
 		"hand", extra.HandNumber,
 		"knocker", knocker.ID,
 		"winner", result.Winner,
@@ -336,10 +339,6 @@ func (r *Rules) AfterAction(state *game.State, action game.Action) error {
 	switch action.(type) {
 	case ActionNextHand:
 		return beginHand(state, extra)
-	case ActionDrawStock, ActionDrawDiscard:
-		if extra.Phase != PhaseAwaitingDiscard {
-			return errors.New("draw failed: the pile came up empty")
-		}
 	case ActionDiscard:
 		if cause, hit := handHitTheWall(state, extra); hit {
 			settleWall(state, extra, cause)
@@ -366,7 +365,7 @@ func handHitTheWall(state *game.State, extra *State) (cause string, hit bool) {
 // here on the hand cap - which is what stops a table that walls every time from
 // dealing forever.
 func settleWall(state *game.State, extra *State, cause string) {
-	slog.Info("gin rummy hand walled",
+	state.Logger().Info("gin rummy hand walled",
 		"hand", extra.HandNumber,
 		"cause", cause,
 		"turns", extra.TurnsThisHand,
@@ -401,9 +400,6 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 			return nil
 		}
 		return ActionNextHand{}
-	}
-	if state.CurrentTurn < 0 || state.CurrentTurn >= len(state.Players) {
-		return nil
 	}
 	p := state.Players[state.CurrentTurn]
 	switch extra.Phase {
