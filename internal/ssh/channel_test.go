@@ -3,6 +3,7 @@ package ssh
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -20,41 +21,52 @@ import (
 // user repository that answers every fingerprint with user.
 func startInProcessServer(t *testing.T, user *db.User) (string, *SessionTracker) {
 	t.Helper()
-	deps := newSessionDeps(t, stubUserRepo{user: user})
+	return startServerWith(t, stubUserRepo{user: user})
+}
+
+func startServerWith(tb testing.TB, repo db.Authenticator) (string, *SessionTracker) {
+	tb.Helper()
+	return startServerWithRegistry(tb, repo, newSessionRegistry(cellBudget, extraCellBudget))
+}
+
+// startServerWithRegistry is startServerWith over a registry the test sized.
+func startServerWithRegistry(tb testing.TB, repo db.Authenticator, reg *sessionRegistry) (string, *SessionTracker) {
+	tb.Helper()
+	deps := newSessionDeps(tb, repo)
 	deps.Config = &config.Config{
-		SSHKeyPath:      t.TempDir() + "/id_ed25519",
+		SSHKeyPath:      tb.TempDir() + "/id_ed25519",
 		RateLimitCount:  100,
 		RateLimitWindow: time.Minute,
 	}
 	deps.Tracker = NewSessionTracker(0)
-	server, err := NewServer(deps)
-	require.NoError(t, err)
+	server, err := newServer(deps, reg)
+	require.NoError(tb, err)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
 		_ = server.Serve(listener)
 	}()
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		_ = server.Close()
 		<-served
 	})
 	return listener.Addr().String(), deps.Tracker
 }
 
-func dialInProcess(t *testing.T, addr, user string) *gossh.Client {
-	t.Helper()
-	signer, err := gossh.NewSignerFromKey(testPrivateKey(t))
-	require.NoError(t, err)
+func dialInProcess(tb testing.TB, addr, user string) *gossh.Client {
+	tb.Helper()
+	signer, err := gossh.NewSignerFromKey(testPrivateKey(tb))
+	require.NoError(tb, err)
 	client, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{
 		User:            user,
 		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close() })
+	require.NoError(tb, err)
+	tb.Cleanup(func() { _ = client.Close() })
 	return client
 }
 
@@ -130,10 +142,10 @@ func TestNewServer_CapsEnvRequests(t *testing.T) {
 	assert.Positive(t, stored, "an ordinary environment must still get through")
 }
 
-func testPrivateKey(t *testing.T) ed25519.PrivateKey {
-	t.Helper()
+func testPrivateKey(tb testing.TB) ed25519.PrivateKey {
+	tb.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	return priv
 }
 
@@ -171,4 +183,24 @@ func TestNewServer_DisplacementClosesTheOldConnection(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the displaced connection is still open")
 	}
+}
+
+type unopenableChannel struct{ gossh.NewChannel }
+
+var errUnopenable = errors.New("peer went away")
+
+func (unopenableChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
+	return nil, nil, errUnopenable
+}
+
+// A channel that never opened has no request stream to filter: the caller gets the
+// cause and nothing to read from, and no filtering goroutine is left behind.
+func TestEnvCappedChannel_AcceptFailureIsReturned(t *testing.T) {
+	t.Parallel()
+
+	ch, reqs, err := envCappedChannel{NewChannel: unopenableChannel{}}.Accept()
+
+	require.ErrorIs(t, err, errUnopenable)
+	assert.Nil(t, ch)
+	assert.Nil(t, reqs)
 }

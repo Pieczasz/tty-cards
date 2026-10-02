@@ -9,6 +9,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
+	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,7 +54,7 @@ func TestHasRoute(t *testing.T) {
 	r := New(GlobalContext{})
 	assert.False(t, r.HasRoute(RouteHome), "nothing is registered yet")
 
-	r.Register(RouteHome, func(GlobalContext, any) tea.Model { return MockModel{} })
+	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return MockModel{} })
 	assert.True(t, r.HasRoute(RouteHome))
 	assert.False(t, r.HasRoute(GameRoute("poker")), "an unregistered game is not routable")
 }
@@ -79,14 +81,15 @@ func TestRouter_SetInitialRouteIsWhatInitBuilds(t *testing.T) {
 	t.Parallel()
 
 	var home, lobby int
+	table := &internallobby.Lobby{}
 	r := New(GlobalContext{})
-	r.Register(RouteHome, func(GlobalContext, any) tea.Model { return countingModel{inits: &home} })
-	r.Register(RouteLobby, func(_ GlobalContext, ctx any) tea.Model {
-		assert.Equal(t, "ABCD", ctx, "the context handed to SetInitialRoute reaches the factory")
+	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return countingModel{inits: &home} })
+	r.Register(RouteLobby, func(_ GlobalContext, p Payload) tea.Model {
+		assert.Same(t, table, p.Lobby, "the payload handed to SetInitialRoute reaches the factory")
 		return countingModel{inits: &lobby}
 	})
 
-	r.SetInitialRoute(RouteLobby, "ABCD")
+	r.SetInitialRoute(RouteLobby, Payload{Lobby: table})
 	r.Init()
 
 	assert.Equal(t, RouteLobby, r.activeKey, "the session opens where it was told to")
@@ -100,7 +103,7 @@ func TestRouter_InitWithAnUnknownInitialRoute(t *testing.T) {
 	t.Parallel()
 
 	r := New(GlobalContext{Width: 100, Height: 40})
-	r.SetInitialRoute("nowhere", nil)
+	r.SetInitialRoute("nowhere", Payload{})
 
 	assert.NotNil(t, r.Init(), "the tick and the background query are armed regardless")
 	assert.Nil(t, r.active)
@@ -141,13 +144,13 @@ func TestRouter_IdleQuit(t *testing.T) {
 			t.Parallel()
 
 			r := New(GlobalContext{})
-			r.Register(tt.route, func(GlobalContext, any) tea.Model {
+			r.Register(tt.route, func(GlobalContext, Payload) tea.Model {
 				if tt.exempt != nil {
 					return exemptModel{exempt: *tt.exempt}
 				}
 				return MockModel{}
 			})
-			r.Goto(tt.route, nil)
+			r.Goto(tt.route, Payload{})
 
 			r.lastActivity = time.Now().Add(-tt.idleFor)
 			if tt.keyPress {
@@ -242,8 +245,8 @@ func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 
 			var last tea.Msg
 			r := New(GlobalContext{})
-			r.Register("mock", func(GlobalContext, any) tea.Model { return recordingModel{last: &last} })
-			r.Goto("mock", nil)
+			r.Register("mock", func(GlobalContext, Payload) tea.Model { return recordingModel{last: &last} })
+			r.Goto("mock", Payload{})
 
 			r.Update(tt.msg)
 
@@ -267,11 +270,11 @@ func TestRouter_ChangeViewMsgRoutes(t *testing.T) {
 
 	var last tea.Msg
 	r := New(GlobalContext{})
-	r.Register("first", func(GlobalContext, any) tea.Model { return recordingModel{last: &last} })
-	r.Register("second", func(GlobalContext, any) tea.Model { return MockModel{} })
-	r.Goto("first", nil)
+	r.Register("first", func(GlobalContext, Payload) tea.Model { return recordingModel{last: &last} })
+	r.Register("second", func(GlobalContext, Payload) tea.Model { return MockModel{} })
+	r.Goto("first", Payload{})
 
-	r.Update(ChangeViewMsg{ViewName: "second", Context: "ctx"})
+	r.Update(ChangeViewMsg{ViewName: "second"})
 	assert.Equal(t, Route("second"), r.activeKey)
 
 	r.Update(ChangeViewMsg{ViewName: "nope"})
@@ -307,8 +310,8 @@ func TestRouter_View(t *testing.T) {
 
 			r := New(GlobalContext{Width: tt.w, Height: tt.h})
 			if tt.register {
-				r.Register("mock", func(GlobalContext, any) tea.Model { return MockModel{} })
-				r.Goto("mock", nil)
+				r.Register("mock", func(GlobalContext, Payload) tea.Model { return MockModel{} })
+				r.Goto("mock", Payload{})
 			}
 
 			v := r.View()
@@ -346,7 +349,7 @@ func TestRouter_CarriesTheViewsOwnCommands(t *testing.T) {
 	ran := func() tea.Msg { return ranMsg{} }
 
 	r := New(GlobalContext{})
-	r.Register(RouteHome, func(GlobalContext, any) tea.Model { return commandingModel{cmd: ran} })
+	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return commandingModel{cmd: ran} })
 
 	initCmd := r.Init()
 	require.NotNil(t, initCmd, "the view's Init command is batched with the router's own")

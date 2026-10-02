@@ -1,0 +1,351 @@
+package ssh
+
+import (
+	"io"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Pieczasz/tty-cards/internal/db"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	gossh "golang.org/x/crypto/ssh"
+)
+
+// Each tier's threshold is the session count its cells fit the budget at: 250 at
+// 250x80, 416 at 200x60, 625 at 160x50. Past one the tier drops; it comes back only
+// at 90% of it, so a count hovering at a threshold does not resize every big session
+// back and forth.
+func TestNextTier(t *testing.T) {
+	t.Parallel()
+
+	const top, big, mid, floor = 3, 2, 1, 0
+	tests := []struct {
+		name     string
+		cur, n   int
+		wantTier int
+	}{
+		{"an empty server grants the top tier", floor, 0, top},
+		{"one session gets the top tier", floor, 1, top},
+		{"the top tier holds at its threshold", top, 250, top},
+		{"one past the threshold steps down", top, 251, big},
+		{"coming back needs 10 percent headroom", big, 250, big},
+		{"at 90 percent of the threshold it steps back up", big, 225, top},
+		{"200x60 holds at its threshold", big, 416, big},
+		{"one past it steps down to 160x50", big, 417, mid},
+		{"160x50 does not return to 200x60 short of 90 percent", mid, 400, mid},
+		{"and does at it", mid, 375, big},
+		{"160x50 holds at its threshold", mid, 625, mid},
+		{"one past it is the floor", mid, 626, floor},
+		{"a rush drops several tiers at once", top, 700, floor},
+		{"an emptied server climbs several at once", floor, 10, top},
+		{"the floor is granted however many connect", floor, 100_000, floor},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.wantTier, nextTier(tt.cur, tt.n, cellBudget))
+		})
+	}
+}
+
+// Tiers nest - each is at least as wide and as tall as the one below - which is what
+// lets a session's held tier bound everything its renderer has ever allocated. And no
+// tier edge may sit just below a layout breakpoint: the full table needs 80x40.
+func TestSizeTiers_NestAndClearTheLayoutBreakpoints(t *testing.T) {
+	t.Parallel()
+	for i := 1; i < len(sizeTiers); i++ {
+		assert.GreaterOrEqual(t, sizeTiers[i].w, sizeTiers[i-1].w)
+		assert.GreaterOrEqual(t, sizeTiers[i].h, sizeTiers[i-1].h)
+	}
+	assert.GreaterOrEqual(t, sizeTiers[0].w, 80, "the floor is narrower than the full table layout")
+	assert.GreaterOrEqual(t, sizeTiers[0].h, 40, "the floor is shorter than the full table layout")
+}
+
+func TestSizeBudget_Grant(t *testing.T) {
+	t.Parallel()
+
+	floorExtra := func(tier int) int { return sizeTiers[tier].cells() - sizeTiers[0].cells() }
+	tests := []struct {
+		name      string
+		tier      int
+		extra     int // room for cells above the floor
+		held      int
+		want      termSize
+		wantSize  termSize
+		wantHeld  int
+		wantSpent int
+	}{
+		{
+			name: "a small terminal is untouched and spends nothing",
+			tier: 3, extra: 1 << 30,
+			want: termSize{80, 24}, wantSize: termSize{80, 24},
+		},
+		{
+			name: "an absurd request is capped at the top tier",
+			tier: 3, extra: 1 << 30,
+			want: termSize{4_000_000, 3_000_000}, wantSize: termSize{250, 80},
+			wantHeld: 3, wantSpent: floorExtra(3),
+		},
+		{
+			name: "only the dimension out of range moves",
+			tier: 3, extra: 1 << 30,
+			want: termSize{4_000_000, 40}, wantSize: termSize{250, 40},
+			wantHeld: 3, wantSpent: floorExtra(3),
+		},
+		{
+			name: "the server's tier caps a big terminal",
+			tier: 1, extra: 1 << 30,
+			want: termSize{300, 100}, wantSize: termSize{160, 50},
+			wantHeld: 1, wantSpent: floorExtra(1),
+		},
+		{
+			name: "a request just past the floor is charged the tier it needs",
+			tier: 3, extra: 1 << 30,
+			want: termSize{130, 45}, wantSize: termSize{130, 45},
+			wantHeld: 1, wantSpent: floorExtra(1),
+		},
+		{
+			name: "no room above the floor still grants the floor",
+			tier: 3, extra: 0,
+			want: termSize{300, 100}, wantSize: termSize{120, 40},
+		},
+		{
+			name: "short of room for the top tier, the largest that fits",
+			tier: 3, extra: floorExtra(2),
+			want: termSize{300, 100}, wantSize: termSize{200, 60},
+			wantHeld: 2, wantSpent: floorExtra(2),
+		},
+		{
+			name: "what a session already holds costs nothing again",
+			tier: 3, extra: 0, held: 2,
+			want: termSize{300, 100}, wantSize: termSize{200, 60}, wantHeld: 2,
+		},
+		{
+			name: "a lowered tier shrinks a session but it keeps what it holds",
+			tier: 0, extra: 1 << 30, held: 3,
+			want: termSize{300, 100}, wantSize: termSize{120, 40}, wantHeld: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b := &sizeBudget{extra: tt.extra}
+			b.tier.Store(int32(tt.tier))
+
+			size, held := b.grant(tt.held, tt.want)
+			assert.Equal(t, tt.wantSize, size)
+			assert.Equal(t, tt.wantHeld, held)
+			assert.Equal(t, int64(tt.wantSpent), b.extraUsed.Load())
+		})
+	}
+}
+
+// The zero budget is the floor for everyone, which is what a sessionRegistry{} in a
+// test gets.
+func TestSizeBudget_ZeroValueGrantsTheFloor(t *testing.T) {
+	t.Parallel()
+	var b sizeBudget
+	b.join()
+	size, held := b.grant(0, termSize{300, 100})
+	assert.Equal(t, sizeTiers[0], size)
+	assert.Zero(t, held)
+}
+
+// Leaving gives back the cells above the floor the session held, so the next big
+// terminal can have them.
+func TestSizeBudget_LeaveReturnsWhatTheSessionHeld(t *testing.T) {
+	t.Parallel()
+	b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+	b.join()
+	_, held := b.grant(0, termSize{300, 100})
+	require.Equal(t, 3, held)
+
+	b.leave(held)
+	assert.Zero(t, b.extraUsed.Load())
+}
+
+func TestSessionSize_Filter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bubbletea's first resize echoes the grant and is not a request", func(t *testing.T) {
+		t.Parallel()
+		b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+		sz := &sessionSize{}
+		start, _ := sz.start(b, termSize{300, 100})
+		require.Equal(t, termSize{250, 80}, start)
+
+		b.tier.Store(1) // the server fills up before the echo arrives
+		got := sz.filter(tea.WindowSizeMsg{Width: start.w, Height: start.h})
+		assert.Equal(t, tea.WindowSizeMsg{Width: 160, Height: 50}, got)
+		assert.Equal(t, termSize{300, 100}, *sz.wanted.Load(), "the echo replaced the client's request")
+	})
+
+	t.Run("a resize that beats the echo is not undone by it", func(t *testing.T) {
+		t.Parallel()
+		b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+		sz := &sessionSize{}
+		start, _ := sz.start(b, termSize{300, 100})
+
+		sz.filter(tea.WindowSizeMsg{Width: 100, Height: 30}) // the client shrank at once
+		got := sz.filter(tea.WindowSizeMsg{Width: start.w, Height: start.h})
+		assert.Equal(t, tea.WindowSizeMsg{Width: 100, Height: 30}, got,
+			"the echo was taken for a request and the session drew past the client's window")
+	})
+
+	t.Run("a resize is a request, clamped", func(t *testing.T) {
+		t.Parallel()
+		b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+		sz := &sessionSize{}
+		sz.start(b, termSize{80, 24})
+		sz.filter(tea.WindowSizeMsg{Width: 80, Height: 24}) // the echo
+
+		got := sz.filter(tea.WindowSizeMsg{Width: 4_000_000, Height: 3_000_000})
+		assert.Equal(t, tea.WindowSizeMsg{Width: 250, Height: 80}, got)
+		assert.Equal(t, termSize{250, 80}, *sz.granted.Load())
+	})
+
+	t.Run("a retier to the same size is dropped", func(t *testing.T) {
+		t.Parallel()
+		b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+		sz := &sessionSize{}
+		sz.start(b, termSize{300, 100})
+		assert.Nil(t, sz.filter(retierMsg{}), "an unchanged size would repaint the screen for nothing")
+		assert.False(t, sz.stale())
+	})
+
+	t.Run("a retier after the tier drops shrinks the session", func(t *testing.T) {
+		t.Parallel()
+		b := &sizeBudget{cells: cellBudget, extra: 1 << 30}
+		sz := &sessionSize{}
+		sz.start(b, termSize{300, 100})
+
+		b.tier.Store(0)
+		require.True(t, sz.stale())
+		assert.Equal(t, tea.WindowSizeMsg{Width: 120, Height: 40}, sz.filter(retierMsg{}))
+		assert.False(t, sz.stale())
+	})
+
+	t.Run("anything else passes through", func(t *testing.T) {
+		t.Parallel()
+		sz := &sessionSize{}
+		sz.start(&sizeBudget{}, termSize{80, 24})
+		assert.Equal(t, tea.KeyPressMsg{Code: 'a'}, sz.filter(tea.KeyPressMsg{Code: 'a'}))
+	})
+}
+
+// grantedSizes is the size every live session was last told, by what it asked for.
+func grantedSizes(reg *sessionRegistry) map[termSize]termSize {
+	out := map[termSize]termSize{}
+	reg.states.Range(func(_, v any) bool {
+		st, _ := v.(*sessionState)
+		if w, g := st.size.wanted.Load(), st.size.granted.Load(); w != nil && g != nil {
+			out[*w] = *g
+		}
+		return true
+	})
+	return out
+}
+
+func openSession(t *testing.T, addr string, w, h int) (*gossh.Client, *countingDiscard) {
+	t.Helper()
+	client := dialInProcess(t, addr, "bench")
+	s, err := client.NewSession()
+	require.NoError(t, err)
+	out := &countingDiscard{}
+	s.Stdout = out
+	s.Stderr = io.Discard
+	require.NoError(t, s.RequestPty("xterm-256color", h, w, gossh.TerminalModes{}))
+	require.NoError(t, s.Shell())
+	return client, out
+}
+
+// A budget of one top-tier terminal: a second session drops the tier to 160x50, and
+// the big session already running has to be told, or it keeps rendering 250x80 for
+// as long as it stays.
+func TestSession_TierStepDownResizesTheBigSession(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(sizeTiers[3].cells(), 1<<30)
+	addr, tracker := startServerWithRegistry(t, &usersByKey{users: map[string]*db.User{}}, reg)
+	big, small := termSize{300, 100}, termSize{80, 24}
+
+	_, out := openSession(t, addr, big.w, big.h)
+	require.Eventually(t, func() bool {
+		return out.n.Load() > 0 && grantedSizes(reg)[big] == termSize{250, 80}
+	}, 5*time.Second, 10*time.Millisecond, "one session on an empty server should get the top tier")
+
+	second, _ := openSession(t, addr, small.w, small.h)
+	require.Eventually(t, func() bool { return tracker.Count() == 2 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return grantedSizes(reg)[big] == termSize{160, 50} },
+		5*time.Second, 10*time.Millisecond, "the big session was never shrunk to the new tier")
+	assert.Equal(t, small, grantedSizes(reg)[small])
+
+	// Back to one session: 90% of the budget fits 200x60 but not 250x80.
+	_ = second.Close()
+	require.Eventually(t, func() bool { return grantedSizes(reg)[big] == termSize{200, 60} },
+		5*time.Second, 10*time.Millisecond, "the big session was never grown back")
+}
+
+func liveHeap() float64 {
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return float64(m.HeapAlloc) / (1 << 20)
+}
+
+// fillModel draws every cell it is given, as a full-screen view does.
+type fillModel struct{ w, h int }
+
+func (fillModel) Init() tea.Cmd { return nil }
+
+func (m fillModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.w, m.h = size.Width, size.Height
+	}
+	return m, nil
+}
+
+func (m fillModel) View() tea.View {
+	v := tea.NewView(strings.TrimSuffix(strings.Repeat(strings.Repeat("x", m.w)+"\n", m.h), "\n"))
+	v.AltScreen = true
+	return v
+}
+
+// rendererHeap runs a program at size, then shrinks it to 120x40 if shrink is set,
+// and returns the heap it holds.
+func rendererHeap(t *testing.T, size termSize, shrink bool) float64 {
+	t.Helper()
+	before := liveHeap()
+	p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard),
+		tea.WithWindowSize(size.w, size.h), tea.WithFPS(120), tea.WithoutSignals())
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = p.Run() }()
+	time.Sleep(100 * time.Millisecond)
+	if shrink {
+		p.Send(tea.WindowSizeMsg{Width: 120, Height: 40})
+		time.Sleep(100 * time.Millisecond)
+	}
+	held := liveHeap() - before
+	p.Quit()
+	<-done
+	return held
+}
+
+// extraCellBudget exists because of this: bubbletea reslices its cell buffers on a
+// shrink rather than reallocating them, so a session keeps the memory of the largest
+// size it was ever granted. If this starts failing, bubbletea frees on shrink and the
+// extra budget can go: a tier step-down alone would then bound memory too.
+//
+//nolint:paralleltest // measures the process heap
+func TestRenderer_KeepsItsBuffersAfterAShrink(t *testing.T) {
+	top, floor := sizeTiers[len(sizeTiers)-1], sizeTiers[0]
+	atTop := rendererHeap(t, top, false)
+	shrunk := rendererHeap(t, top, true)
+	atFloor := rendererHeap(t, floor, false)
+	t.Logf("250x80 %.2f MiB, shrunk to 120x40 %.2f MiB, started at 120x40 %.2f MiB", atTop, shrunk, atFloor)
+	require.Greater(t, atTop-atFloor, 1.0, "the measurement cannot tell the two sizes apart")
+	assert.Greater(t, shrunk, atFloor+(atTop-atFloor)/2, "a shrink gave the buffers back")
+}

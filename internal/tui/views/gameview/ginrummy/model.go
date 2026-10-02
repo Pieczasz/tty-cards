@@ -20,16 +20,15 @@ type model struct {
 	phase            logic.Phase
 	handNumber       int
 	cumulativeScores map[string]int
-	handComplete     bool
 	matchComplete    bool
 	lastHandResult   *logic.HandResult
 }
 
 // New creates a Gin Rummy TUI view bound to the session player; slug is its catalog
 // slug, the game_type its metrics carry.
-func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
+func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, slug)
+	session, _ := gameview.NewSession(global, table, slug)
 	m := &model{
 		Session:          session,
 		cumulativeScores: map[string]int{},
@@ -44,7 +43,6 @@ func (m *model) syncState() {
 			m.phase = s.Phase
 			m.handNumber = s.HandNumber
 			m.cumulativeScores = maps.Clone(s.CumulativeScores)
-			m.handComplete = s.HandComplete()
 			m.matchComplete = s.MatchComplete
 			// Cloned: the view keeps rendering this after releasing the engine lock.
 			m.lastHandResult = s.LastHandResult.Clone()

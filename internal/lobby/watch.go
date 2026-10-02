@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -69,9 +70,11 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 		}
 	}
 
-	// The feed ending is not proof the match did not finish: the broadcaster is
-	// latest-wins and can drop EventGameEnded, and RemoveLobby closes the feed from
-	// under this goroutine.
+	// The feed ending is not proof the match did not finish. EventGameEnded is the
+	// last event an engine sends, so latest-wins never drops it, but RemoveLobby closes
+	// the feed from under this goroutine, and a leave already on its way can still end
+	// the game on the closed engine, whose broadcast is then a no-op. Why it ended is
+	// lost with the event, so finalize records it unrated.
 	if engine.IsFinished() {
 		l.requestFinalize(engine, game.EndReasonUnknown, req)
 	}
@@ -89,8 +92,13 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 // The registration is taken before anything else: every statement between observing
 // the end and that call is a window for shutdown to begin, and a refusal then drops a
 // finished match with nothing left for WaitForFinalizers to wait on.
+//
+// The finish is counted here, where every end passes, so games started minus games
+// finished stays true across a drain and on a server with no match repository.
 func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
 	registered := l.manager.registerFinalizer()
+	observability.GameFinished(l.manager.shutdownCtx(), req.game.Slug, req.isRanked, reason.String(),
+		time.Since(req.startedAt))
 	l.releaseFinishedGame()
 	if !registered {
 		l.manager.dropFinishedMatch(req)

@@ -584,3 +584,73 @@ func TestLobby_IsLeader(t *testing.T) {
 	m.LeaveLobby(leader)
 	assert.True(t, l.IsLeader(guest))
 }
+
+// A session that never resolved to a user hands the manager a nil player. Every
+// entry point a teardown reaches has to shrug it off rather than panic the session.
+func TestManager_NilPlayerIsANoOp(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	assert.NotPanics(t, func() {
+		m.LeaveLobby(nil)
+		m.DisconnectPlayer(nil)
+	})
+	assert.Nil(t, m.ResumePlayer(nil))
+
+	var none *Manager
+	assert.NotPanics(t, none.BeginShutdown, "the server can shut down before it built a manager")
+}
+
+func TestManager_CreateLobby_RefusesATableForOne(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	leader := mockPlayer("p1", testutil.UID(1))
+
+	l, err := m.CreateLobby(leader, WithCardGame("Mock"), WithMaxPlayers(1))
+
+	require.ErrorContains(t, err, "at least 2")
+	assert.Nil(t, l)
+	assert.Nil(t, m.FindLobbyByPlayer(leader), "a refused table still seated its leader")
+}
+
+func TestManager_FindLobbyByCode_RefusesAMalformedCode(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	_, err := m.FindLobbyByCode("abc")
+	require.ErrorIs(t, err, ErrInvalidCode)
+}
+
+// RemoveLobby runs after LeaveLobby has dropped every lock, so the code may already
+// be gone; that must not touch any other table.
+func TestManager_RemoveLobby_UnknownCodeIsANoOp(t *testing.T) {
+	t.Parallel()
+	m, l, _ := newTestLobby(t, 2)
+
+	m.RemoveLobby("ZZZZZZZZ")
+
+	found, err := m.FindLobbyByCode(l.Code())
+	require.NoError(t, err)
+	assert.Equal(t, l, found)
+	assert.Equal(t, l, m.FindLobbyByPlayer(l.Leader()))
+}
+
+// A player whose index entry outlived their seat is leaving all the same: the entry
+// goes, and the table they are no longer at is left alone.
+func TestManager_LeaveLobby_DropsAStaleIndexEntry(t *testing.T) {
+	t.Parallel()
+	m, l, _ := newTestLobby(t, 2)
+	stranger := mockPlayer("p9", testutil.UID(9))
+	events, err := l.Subscribe(l.Leader().ID)
+	require.NoError(t, err)
+	m.mu.Lock()
+	m.playerLobby[stranger.ID] = l
+	m.mu.Unlock()
+
+	m.LeaveLobby(stranger)
+
+	m.mu.RLock()
+	_, indexed := m.playerLobby[stranger.ID]
+	m.mu.RUnlock()
+	assert.False(t, indexed, "the stale entry survived the leave")
+	assert.Equal(t, 1, l.CurrentPlayers())
+	assert.Empty(t, drainEventTypes(events), "a leave that moved nobody was broadcast")
+}

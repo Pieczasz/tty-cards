@@ -36,20 +36,47 @@ func GameRoute(slug string) Route {
 	return Route(routeGamePrefix + slug)
 }
 
-// ViewFactory builds a view for a route. ctx is whatever the navigation carried: a
-// *lobby.Lobby for the lobby route, a *game.Engine for a game route, nil otherwise.
-type ViewFactory func(g GlobalContext, ctx any) tea.Model
-
-// ChangeViewMsg asks the router to replace the active view with the one registered
-// under ViewName, built with Context. An unknown route is ignored.
-type ChangeViewMsg struct {
-	ViewName Route
-	Context  any
+// Payload is what a navigation hands the view it builds. Each route reads the one field
+// it takes, so a factory gets its argument already typed rather than casting an any:
+// the wrong kind of value for a route is a compile error. The zero Payload is what every
+// other route takes; a route whose field is nil falls back as its factory decides.
+type Payload struct {
+	// Lobby is RouteLobby's table.
+	Lobby *lobby.Lobby
+	// Table is a GameRoute's seat, already bound to the session's own player: a view
+	// never holds the *game.Engine behind it.
+	Table *game.BoundEngine
 }
 
-// Navigate is the command a view returns to move the session to route.
-func Navigate(route Route, ctx any) tea.Cmd {
-	return func() tea.Msg { return ChangeViewMsg{ViewName: route, Context: ctx} }
+// ViewFactory builds a view for a route from what the navigation carried.
+type ViewFactory func(g GlobalContext, p Payload) tea.Model
+
+// ChangeViewMsg asks the router to replace the active view with the one registered
+// under ViewName, built with Payload. An unknown route is ignored.
+type ChangeViewMsg struct {
+	ViewName Route
+	Payload  Payload
+}
+
+// Navigate is the command a view returns to move the session to a route that takes no
+// payload.
+func Navigate(route Route) tea.Cmd {
+	return navigate(route, Payload{})
+}
+
+// NavigateToLobby moves the session to l's waiting room.
+func NavigateToLobby(l *lobby.Lobby) tea.Cmd {
+	return navigate(RouteLobby, Payload{Lobby: l})
+}
+
+// NavigateToGame moves the session to the table view registered for slug, seated at
+// table.
+func NavigateToGame(slug string, table *game.BoundEngine) tea.Cmd {
+	return navigate(GameRoute(slug), Payload{Table: table})
+}
+
+func navigate(route Route, p Payload) tea.Cmd {
+	return func() tea.Msg { return ChangeViewMsg{ViewName: route, Payload: p} }
 }
 
 // GlobalContext is the session state every view is built from. Each view holds its own
@@ -102,7 +129,7 @@ type Router struct {
 	active       tea.Model
 	activeKey    Route
 	initialRoute Route
-	initialCtx   any
+	initial      Payload
 	lastActivity time.Time
 }
 
@@ -121,9 +148,9 @@ func New(global GlobalContext) *Router {
 
 // SetInitialRoute picks the first view Init builds. A reconnecting player starts
 // at their lobby instead of home; everyone else keeps the default.
-func (r *Router) SetInitialRoute(name Route, ctx any) {
+func (r *Router) SetInitialRoute(name Route, p Payload) {
 	r.initialRoute = name
-	r.initialCtx = ctx
+	r.initial = p
 }
 
 // Register makes factory the builder for name, replacing any earlier one.
@@ -174,15 +201,15 @@ func (r *Router) Close() {
 	r.activeKey = ""
 }
 
-// Goto closes the active view and builds name's with context. An unregistered route
+// Goto closes the active view and builds name's with p. An unregistered route
 // changes nothing and returns nil.
-func (r *Router) Goto(name Route, context any) tea.Cmd {
+func (r *Router) Goto(name Route, p Payload) tea.Cmd {
 	factory, ok := r.views[name]
 	if !ok {
 		return nil
 	}
 	r.closeActive()
-	r.active = factory(r.Global, context)
+	r.active = factory(r.Global, p)
 	r.activeKey = name
 	return r.active.Init()
 }
@@ -195,7 +222,7 @@ func (r *Router) Init() tea.Cmd {
 	// Goto is what runs a view's Init, so the first view is built here rather than at
 	// construction: doing both armed every command twice, which for a view holding a
 	// subscription is two listener goroutines racing for one channel.
-	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(r.initialRoute, r.initialCtx))
+	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(r.initialRoute, r.initial))
 }
 
 // Update handles the session-wide messages and hands the rest to the active view.
@@ -219,7 +246,7 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// falls through to the active view too (see views.HandleCommonMsg).
 		r.Global.Theme = styles.NewTheme(msg.IsDark())
 	case ChangeViewMsg:
-		cmd := r.Goto(msg.ViewName, msg.Context)
+		cmd := r.Goto(msg.ViewName, msg.Payload)
 		return r, cmd
 	}
 

@@ -6,41 +6,14 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
-	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestBoundedPty_RefusesGeometryNoTerminalHas(t *testing.T) {
-	t.Parallel()
-
-	srv := &ssh.Server{}
-	require.NoError(t, srv.SetOption(boundedPty()))
-
-	tests := []struct {
-		name   string
-		window ssh.Window
-		want   bool
-	}{
-		{name: "an ordinary terminal", window: ssh.Window{Width: 80, Height: 24}, want: true},
-		{name: "a very wide one", window: ssh.Window{Width: maxTerminalWidth, Height: maxTerminalHeight}, want: true},
-		{name: "zero is left to the pty layer", window: ssh.Window{}, want: true},
-		{name: "one column too many", window: ssh.Window{Width: maxTerminalWidth + 1, Height: 24}, want: false},
-		{name: "one row too many", window: ssh.Window{Width: 80, Height: maxTerminalHeight + 1}, want: false},
-		{name: "a whole uint32 of columns", window: ssh.Window{Width: 4_294_967_295, Height: 24}, want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, srv.PtyCallback(nil, ssh.Pty{Window: tt.window}))
-		})
-	}
-}
 
 func TestFilterSessionMsg(t *testing.T) {
 	t.Parallel()
@@ -51,19 +24,9 @@ func TestFilterSessionMsg(t *testing.T) {
 		want tea.Msg
 	}{
 		{
-			name: "a real resize is untouched",
-			msg:  tea.WindowSizeMsg{Width: 120, Height: 40},
-			want: tea.WindowSizeMsg{Width: 120, Height: 40},
-		},
-		{
-			name: "an absurd resize is bounded",
+			name: "a resize is left to the size budget",
 			msg:  tea.WindowSizeMsg{Width: 4_000_000, Height: 3_000_000},
-			want: tea.WindowSizeMsg{Width: maxTerminalWidth, Height: maxTerminalHeight},
-		},
-		{
-			name: "only the dimension out of range moves",
-			msg:  tea.WindowSizeMsg{Width: 4_000_000, Height: 40},
-			want: tea.WindowSizeMsg{Width: maxTerminalWidth, Height: 40},
+			want: tea.WindowSizeMsg{Width: 4_000_000, Height: 3_000_000},
 		},
 		{
 			name: "suspend is still answered with resume",

@@ -15,15 +15,15 @@ import (
 )
 
 type model struct {
-	gameview.Session
+	gameview.ShedTable
 
 	currentColor deck.Suit
 	direction    int8
-	color        gameview.ChoicePicker
 }
 
 // colorPicker is the picker a wild opens, closed. Each model takes its own copy. Every
-// cell is drawn in the colour it plays.
+// cell is drawn in the colour it plays, and it is the one table of Uno's colours: the
+// indicator and the hand's colour row read their tones from it too.
 var colorPicker = gameview.ChoicePicker{
 	Title: "Pick a color:",
 	Choices: []gameview.Choice{
@@ -34,12 +34,20 @@ var colorPicker = gameview.ChoicePicker{
 	},
 }
 
+var moves = gameview.ShedMoves{
+	Wild: logic.IsWild,
+	Play: func(c deck.Card, chosen deck.Suit) game.Action {
+		return logic.ActionPlayCard{Card: c, ChosenSuit: chosen}
+	},
+	Draw: logic.ActionDrawCard{},
+}
+
 // New creates a Uno TUI view bound to the session player; slug is its catalog
 // slug, the game_type its metrics carry.
-func New(global router.GlobalContext, engine *game.Engine, slug string) tea.Model {
+func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model {
 	// A subscribe failure is already in Session.ActionErr for the hero band.
-	session, _ := gameview.NewSession(global, engine, slug)
-	m := &model{Session: session, direction: 1, color: colorPicker}
+	session, _ := gameview.NewSession(global, table, slug)
+	m := &model{Session: session, Picker: colorPicker, direction: 1}
 	m.syncState()
 	return m
 }
@@ -51,10 +59,4 @@ func (m *model) syncState() {
 			m.direction = s.Direction
 		}
 	})
-	// The picker only means anything while the hero is the one to act, so a turn
-	// lost to the clock takes it down rather than leaving it over the table with
-	// nothing left to confirm.
-	if !m.Base.MyTurn {
-		m.color.Open = false
-	}
 }

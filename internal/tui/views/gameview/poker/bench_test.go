@@ -10,6 +10,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func benchTable(b *testing.B, n int) *model {
 	b.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	m, ok := New(global, engine, "poker").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m
@@ -79,7 +80,7 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	first, ok := New(global, engine, "poker").(*model)
+	first, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	require.True(t, ok)
 	t.Cleanup(first.Close)
 
@@ -95,9 +96,10 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	runtime.ReadMemStats(&before)
 
 	const sessions = 8
+	seat := game.Bind(engine, views.SessionPlayerID(global))
 	views := make([]*model, 0, sessions)
 	for range sessions {
-		m, okView := New(global, engine, "poker").(*model)
+		m, okView := New(global, seat, "poker").(*model)
 		require.True(t, okView)
 		views = append(views, m)
 	}
@@ -152,7 +154,7 @@ func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
 		b.Error(err)
 	}
 	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
-	m, ok := New(global, engine, "poker").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	if !ok {
 		b.Error("unexpected model type")
 	}

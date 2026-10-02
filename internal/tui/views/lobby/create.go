@@ -140,7 +140,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
-	return m, router.Navigate(router.RouteLobby, l)
+	return m, router.NavigateToLobby(l)
 }
 
 // defaultMaxPlayers is the seat count a lobby opens with, the same as
@@ -184,8 +184,8 @@ func renderOption(t styles.Theme, selected bool, label, value string) string {
 	return fmt.Sprintf("%s%s: < %s >", cursor, label, value)
 }
 
-// visibilityLabel and modeLabel are padded to one width, so toggling a row cannot
-// shift the "<" and ">" around it.
+// Each option's labels are padded to one width, so toggling a row cannot shift the
+// "<" and ">" around it. "Ranked" and "Casual" already are.
 func visibilityLabel(private bool) string {
 	if private {
 		return "Private"
@@ -195,9 +195,9 @@ func visibilityLabel(private bool) string {
 
 func modeLabel(ranked bool) string {
 	if ranked {
-		return "Ranked "
+		return "Ranked"
 	}
-	return "Casual "
+	return "Casual"
 }
 
 func (m *createModel) View() tea.View {
@@ -219,7 +219,7 @@ func (m *createModel) View() tea.View {
 	}
 	submitStr := fmt.Sprintf("%s%s", submitCursor, submitText)
 
-	form := lg.JoinVertical(lg.Left,
+	form := styles.JoinVertical(lg.Left,
 		gameStr,
 		playersStr,
 		visStr,

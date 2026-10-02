@@ -13,6 +13,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
@@ -47,26 +48,30 @@ type Session struct {
 	// ActionErr is the last move the engine rejected, or why this view cannot play at
 	// all. Submit keeps it, so the hero band renders it without a copy in every view.
 	ActionErr error
+	// refusedOn is whose turn it was when the engine refused ActionErr's move; Sync
+	// drops the refusal once the turn has moved on. Empty for errors that still hold.
+	refusedOn string
 
 	// confirmLeave is the armed forfeit prompt (HandleLeaveKey).
 	confirmLeave bool
 }
 
-// NewSession binds engine to the session player and subscribes to its events. The error
-// is for display, not a failure: an unsubscribed view still renders, it just never
-// updates, so it tells the player to rejoin.
-func NewSession(global router.GlobalContext, engine *game.Engine, slug string) (Session, error) {
-	playerID := views.SessionPlayerID(global)
-
-	s := Session{Global: global, Bound: game.Bind(engine, playerID), slug: slug}
+// NewSession subscribes to table, the session player's seat, which the lobby bound
+// before it reached the view. The error is for display, not a failure: an unsubscribed
+// view still renders, it just never updates, so it tells the player to rejoin.
+func NewSession(global router.GlobalContext, table *game.BoundEngine, slug string) (Session, error) {
+	s := Session{Global: global, Bound: table, slug: slug}
 	if s.Bound == nil {
 		return s, nil
 	}
+	playerID := table.PlayerID()
 
 	ch, err := s.Bound.Subscribe()
 	if err != nil {
-		slog.Error("game view could not subscribe to engine events",
+		ctx := global.RequestContext()
+		slog.ErrorContext(ctx, "game view could not subscribe to engine events",
 			"error", err, "game", slug, "player_id", playerID)
+		observability.SubscribeFailure(ctx, "game_view")
 		s.ActionErr = fmt.Errorf("live table updates unavailable, leave and rejoin: %w", err)
 		return s, s.ActionErr
 	}
@@ -103,6 +108,9 @@ func (s *Session) IdleRemoved(ev game.Event) bool {
 // anything derived from it that reaches the screen has to be filtered by the caller.
 func (s *Session) Sync(fn func(*game.State)) {
 	s.Base = syncBaseState(s.Bound, fn)
+	if s.refusedOn != "" && s.Base.CurrentPlayerID != s.refusedOn {
+		s.ActionErr, s.refusedOn = nil, ""
+	}
 	if s.Selected >= len(s.Base.Hand) {
 		s.MoveCursor(0)
 	}
@@ -176,8 +184,9 @@ func (s *Session) Submit(action game.Action) error {
 		s.ActionErr = errNotSeated
 		return s.ActionErr
 	}
-	s.ActionErr = s.Bound.Submit(action)
+	s.ActionErr, s.refusedOn = s.Bound.Submit(action), ""
 	if s.ActionErr != nil {
+		s.refusedOn = s.Base.CurrentPlayerID
 		// Background, not the session context: a rejection counts even when the
 		// disconnect itself caused it.
 		observability.ActionRejected(context.Background(), s.slug)
@@ -269,7 +278,7 @@ func (s *Session) LeaveConfirmScreen() (string, bool) {
 		return "", false
 	}
 	t := s.Global.Theme
-	return renderGameNotice(s.Global, lg.JoinVertical(lg.Center,
+	return renderGameNotice(s.Global, styles.JoinVertical(lg.Center,
 		t.ErrorText.Render("Leave and forfeit this game?"),
 		"",
 		t.Muted.Render("y - leave and forfeit | any other key - keep playing"),
@@ -288,7 +297,7 @@ func (s *Session) Leave() tea.Cmd {
 	s.unsubscribe()
 
 	if p == nil || !finished {
-		return router.Navigate(router.RouteHome, nil)
+		return router.Navigate(router.RouteHome)
 	}
-	return router.Navigate(router.RouteLobby, s.Global.LobbyManager.FindLobbyByPlayer(p))
+	return router.NavigateToLobby(s.Global.LobbyManager.FindLobbyByPlayer(p))
 }

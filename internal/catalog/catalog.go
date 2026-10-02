@@ -1,4 +1,4 @@
-// Package catalog is the single registration point for playable games. Rules and
+// Package catalog is the single registration point for all playable games. Rules and
 // TUI view are declared in the same entry.
 package catalog
 
@@ -21,26 +21,25 @@ import (
 )
 
 // Entry pairs a game's Module with the view that renders it, so neither can be
-// declared without the other. View is handed the entry's Slug, which labels the
-// view's metrics exactly as the lobby labels the same game's.
+// declared without the other. View is handed the session's own seat, never the engine:
+// a view can act only as the player it renders for.
 type Entry struct {
 	game.Module
-	View func(global router.GlobalContext, engine *game.Engine, slug string) tea.Model
+	View func(global router.GlobalContext, table *game.BoundEngine, slug string) tea.Model
 }
 
-// NewRegistry is the registry of every game in All, in catalog order.
+// NewRegistry is the registry of every game in Games, in catalog order.
 func NewRegistry() *game.Registry {
-	mods := make([]game.Module, 0, len(All))
-	for _, e := range All {
-		mods = append(mods, e.Module)
+	mods := make([]game.Module, 0, len(Games))
+	for _, entry := range Games {
+		mods = append(mods, entry.Module)
 	}
 	return game.NewRegistry(mods...)
 }
 
-// All is the single point of game registration: every entry carries both the
-// rules factory and the TUI view constructor, and catalog_test fails on a missing
-// field or duplicate slug. A new game ships by adding one entry here.
-var All = []Entry{
+// Games is the single point of game registration: every entry carries both the
+// rules factory and the TUI view constructor.
+var Games = []Entry{
 	{
 		Name:    "Crazy Eights",
 		Slug:    "crazy_eights",

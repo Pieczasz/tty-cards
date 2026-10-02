@@ -101,7 +101,9 @@ func newPlayer(id uuid.UUID, name string) *game.Player {
 	return lobby.NewPlayer(&db.User{ID: id, Username: name})
 }
 
-func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
+// awaitGameStart waits for l's start event and returns the engine it opened. The event
+// itself only hands out seats, so the engine is read off the lobby, server side.
+func awaitGameStart(t *testing.T, l *lobby.Lobby, events <-chan lobby.Event) *game.Engine {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -113,8 +115,9 @@ func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
 			if event.Type != lobby.EventGameStarted {
 				continue
 			}
-			require.NotNil(t, event.Engine, "GAME_STARTED must carry the engine")
-			return event.Engine
+			engine := l.ActiveGame()
+			require.NotNil(t, engine, "GAME_STARTED must leave the lobby in game")
+			return engine
 		case <-deadline:
 			t.Fatal("timed out waiting for the game to start")
 		}

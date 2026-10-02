@@ -24,7 +24,7 @@ func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
-	if m.handComplete || m.matchComplete || m.phase == logic.PhaseHandOver {
+	if m.phase == logic.PhaseHandOver || m.matchComplete {
 		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
@@ -34,9 +34,9 @@ func (m *model) View() tea.View {
 	// Seat art is the first thing to go: it costs seven rows per seat, and a name
 	// with a hand count says everything a player reads off somebody else's seat.
 	minimalSeats := gameview.IsCompact(m.Global.Width, m.Global.Height)
+	top := gameview.RenderOpponentTop(m.Global.Theme, m.Base, m.Global.Width, minimalSeats)
 
-	return tea.NewView(gameview.RenderBands(m.Global,
-		m.renderTopOpponent(minimalSeats), m.renderPlayerSection(), m.keyHints(),
+	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), m.keyHints(),
 		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
 }
 
@@ -48,16 +48,15 @@ func (m *model) keyHints() string {
 }
 
 func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
-	leftOpponent := m.renderSideOpponent(seatLeft, minimalSeats, height)
-	rightOpponent := m.renderSideOpponent(seatRight, minimalSeats, height)
-	centerStack := lg.JoinVertical(lg.Center,
+	leftOpponent, rightOpponent := gameview.RenderOpponentSides(m.Global.Theme, m.Base, height, minimalSeats)
+	centerStack := styles.JoinVertical(lg.Center,
 		m.renderTrickArea(height),
 		m.renderHeartsBrokenIndicator(),
 		m.renderPassDirection(),
 	)
 
 	return gameview.RenderTableRow(m.Global.Width, height,
-		leftOpponent, lg.NewStyle().MarginTop(1).Render(centerStack), rightOpponent)
+		leftOpponent, styles.MarginTop(1, centerStack), rightOpponent)
 }
 
 // heartsSeats is the table the art layout is drawn for: one opponent on each of the
@@ -65,8 +64,8 @@ func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
 const heartsSeats = 4
 
 // The three edges an opponent is drawn on, in clockwise order from the hero: the seat
-// that plays next sits on the left.
-
+// that plays next sits on the left. It is the order gameview.SplitZones seats three
+// opponents in, so each trick card lands in front of the seat that played it.
 const (
 	seatLeft = iota
 	seatTop
@@ -86,52 +85,6 @@ func (m *model) opponentAt(rel int) (game.PlayerSnapshot, bool) {
 		return game.PlayerSnapshot{}, false
 	}
 	return opponents[rel], true
-}
-
-func (m *model) renderTopOpponent(minimal bool) string {
-	o, ok := m.opponentAt(seatTop)
-	if !ok {
-		// Off the art layout: name every opponent on one line rather than leave the
-		// edge blank, which would hide players who are still holding cards.
-		return m.renderSeatSummary()
-	}
-	isTurn := m.Base.CurrentPlayerID == o.ID
-	if minimal {
-		return gameview.RenderOpponentMinimal(m.Global.Theme, o, isTurn)
-	}
-	return gameview.RenderOpponent(m.Global.Theme, o, isTurn, gameview.OrientationTop,
-		m.Base.TurnRemaining, m.Global.Width)
-}
-
-// renderSeatSummary is the degraded layout for a table that is not four-handed: names
-// and hand counts, laid out along the top edge.
-func (m *model) renderSeatSummary() string {
-	if len(m.Base.Opponents) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(m.Base.Opponents))
-	for _, o := range m.Base.Opponents {
-		parts = append(parts, gameview.RenderOpponentMinimal(
-			m.Global.Theme, o, m.Base.CurrentPlayerID == o.ID), "  ")
-	}
-	return lg.JoinHorizontal(lg.Center, parts...)
-}
-
-func (m *model) renderSideOpponent(rel int, minimal bool, height int) string {
-	o, ok := m.opponentAt(rel)
-	if !ok {
-		return ""
-	}
-	isTurn := m.Base.CurrentPlayerID == o.ID
-	orient := gameview.OrientationLeft
-	if rel == seatRight {
-		orient = gameview.OrientationRight
-	}
-	if minimal {
-		return gameview.RenderOpponentMinimal(m.Global.Theme, o, isTurn)
-	}
-	// Two of the rows go to the seat's name and hand count.
-	return gameview.RenderOpponent(m.Global.Theme, o, isTurn, orient, m.Base.TurnRemaining, height-2)
 }
 
 func (m *model) opponentID(rel int) string {
@@ -159,9 +112,9 @@ func (m *model) renderTrickArea(height int) string {
 	left := m.renderTrickSlot(m.opponentID(seatLeft), mini)
 	top := m.renderTrickSlot(m.opponentID(seatTop), mini)
 	right := m.renderTrickSlot(m.opponentID(seatRight), mini)
-	return lg.JoinVertical(lg.Center,
+	return styles.JoinVertical(lg.Center,
 		top,
-		lg.JoinHorizontal(lg.Center, left, "  ", right),
+		styles.JoinHorizontal(lg.Center, left, "  ", right),
 		hero,
 	)
 }
@@ -172,7 +125,7 @@ func (m *model) renderTrickSlot(playerID string, mini bool) string {
 		if mini {
 			return components.MiniCardSlot(m.Global.Theme)
 		}
-		return m.Global.Theme.Dim.Render(" · ")
+		return components.EmptyCardSlot(m.Global.Theme)
 	}
 	if mini {
 		return components.RenderMiniCard(m.Global.Theme, card)
@@ -210,13 +163,20 @@ func (m *model) renderPlayerSection() string {
 }
 
 func (m *model) renderHandOver() string {
-	h := gameview.HandOver{Title: fmt.Sprintf("HAND %d COMPLETE", m.handNumber), Hint: keyHintsOver}
-	if m.matchComplete || m.Base.Phase == game.Finished {
+	h := gameview.HandOver{
+		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
+		Header: fmt.Sprintf("%-12s  %8s  %9s", "player", "hand", "total"),
+		Hint:   keyHintsOver,
+	}
+	switch {
+	case m.interrupted && m.Base.Phase == game.Finished:
+		h.Title, h.Hint = gameview.InterruptedTitle(m.leavers), gameview.LobbyHint
+	case m.matchComplete || m.Base.Phase == game.Finished:
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
 	}
 
 	for _, seat := range m.Base.Seats {
-		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  hand %3d  total %3d",
+		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  %8d  %9d",
 			styles.PadTruncate(seat.Name, 12), m.handPoints[seat.ID], m.cumulativeScores[seat.ID])))
 	}
 	return gameview.RenderHandOver(m.Global, h)

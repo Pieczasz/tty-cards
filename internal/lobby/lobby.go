@@ -1,14 +1,12 @@
 // Package lobby seats players at tables, starts a game once every seat is ready, and
-// hands the finished match to a db.MatchRepository. It is the only place a db.User
-// becomes a game.Player and the only writer of match results.
-//
-// Lock order is Manager.mu, then Lobby.mu, then the engine's own lock.
+// hands the finished match to a db.MatchRepository.
 package lobby
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -20,9 +18,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/observability"
 )
 
-// Lobby is one table: a leader, the guests who joined, the settings the leader chose,
-// and the game running on it once everyone is ready. All methods are safe for
-// concurrent use.
+// Lobby is one table.
 type Lobby struct {
 	mu           sync.RWMutex
 	manager      *Manager
@@ -35,21 +31,26 @@ type Lobby struct {
 	ready        map[string]bool
 	activeEngine *game.Engine
 	playerSubs   map[string][]<-chan Event
-	// createdAt and startedAt give the two durations worth watching: how long a table
-	// waited for players, and how long a hand ran.
-	createdAt time.Time
-	startedAt time.Time
+	createdAt    time.Time
+	startedAt    time.Time
 }
 
 // Event is one change a lobby publishes to its subscribers.
 type Event struct {
 	Type EventType
-	// Engine is the game that just started. It is set on EventGameStarted only.
-	Engine *game.Engine
+	// engine is the table EventGameStarted opened. It stays unexported so the TUI
+	// never holds a *game.Engine: every subscriber gets the same Event, and Seat binds
+	// it for one of them.
+	engine *game.Engine
 }
 
-// EventType is what changed. The zero value is no event, so a departure that
-// announces nothing carries it.
+// Seat is playerID's handle on the table this EventGameStarted opened, nil for any
+// other event.
+func (e Event) Seat(playerID string) *game.BoundEngine {
+	return game.Bind(e.engine, playerID)
+}
+
+// EventType is what changed. 0 value means no event.
 type EventType uint8
 
 // The lobby events.
@@ -59,21 +60,6 @@ const (
 	EventLobbyClosed
 	EventGameStarted
 )
-
-// String is the event's stable label for logs.
-func (t EventType) String() string {
-	switch t {
-	case EventPlayersUpdated:
-		return "players_updated"
-	case EventSettingsUpdated:
-		return "settings_updated"
-	case EventLobbyClosed:
-		return "lobby_closed"
-	case EventGameStarted:
-		return "game_started"
-	}
-	return "none"
-}
 
 type state uint
 
@@ -156,26 +142,30 @@ func (l *Lobby) SetRanked(actor *game.Player, isRanked bool) error {
 	})
 }
 
-// SetMaxPlayers updates capacity. Clamped to current roster size and optional game rules bounds.
-func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int, rulesMin, rulesMax int) error {
+// SetMaxPlayers updates capacity, within the current roster and the bounds of the
+// table's game in registry. The bounds are the lobby's to look up: a caller that
+// supplied them could open a seat the game cannot deal.
+func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int, registry *game.Registry) error {
 	return l.withLeaderSettings(actor, func() error {
 		current := 1 + len(l.guests)
 		if limit < current {
 			return fmt.Errorf("max players cannot be below current roster (%d)", current)
 		}
-		if rulesMin > 0 && limit < rulesMin {
-			return fmt.Errorf("max players must be at least %d for this game", rulesMin)
+		rules, err := registry.Create(l.options.cardGame)
+		if err != nil {
+			return fmt.Errorf("look up game bounds: %w", err)
 		}
-		if rulesMax > 0 && limit > rulesMax {
-			return fmt.Errorf("max players cannot exceed %d for this game", rulesMax)
+		if limit < rules.MinPlayers() {
+			return fmt.Errorf("max players must be at least %d for this game", rules.MinPlayers())
+		}
+		if limit > rules.MaxPlayers() {
+			return fmt.Errorf("max players cannot exceed %d for this game", rules.MaxPlayers())
 		}
 		l.options.maxPlayers = limit
 		return nil
 	})
 }
 
-// withLeaderSettings runs mutate under l.mu once the actor is confirmed as leader of a
-// Waiting lobby, then broadcasts SETTINGS_UPDATED.
 func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) error {
 	l.mu.Lock()
 	if !l.leader.Equal(actor) {
@@ -190,12 +180,10 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 		l.mu.Unlock()
 		return err
 	}
-	// A ready was consent to the table as it was. Keeping it lets the leader flip a
-	// setting after everyone readied and start a match nobody agreed to.
+
 	clear(l.ready)
-	// Visibility is one of these settings: a cached browse would keep offering a table
-	// that just went private.
 	l.manager.invalidatePublicCache()
+
 	bc := l.broadcaster
 	l.mu.Unlock()
 	if bc != nil {
@@ -205,9 +193,6 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 	return nil
 }
 
-// departure is what a roster change leaves to do once every lock is dropped: take the
-// seat out of the running game, announce the change, and close the table when nobody
-// is left.
 type departure struct {
 	engine     *game.Engine
 	bc         *broadcaster.Broadcaster[Event]
@@ -215,8 +200,6 @@ type departure struct {
 	closeLobby bool
 }
 
-// notify takes playerID out of the engine and publishes the event. Run it with no
-// lock held: the engine takes its own.
 func (d departure) notify(playerID string) {
 	if d.engine != nil {
 		d.engine.RemovePlayer(playerID)
@@ -226,8 +209,6 @@ func (d departure) notify(playerID string) {
 	}
 }
 
-// detachPlayerLocked mutates roster for a leaving player. Caller holds l.mu.
-// ok is false if the player was not in the lobby.
 func (l *Lobby) detachPlayerLocked(p *game.Player) (leave departure, ok bool) {
 	leave = departure{engine: l.activeEngine, bc: l.broadcaster}
 
@@ -235,7 +216,6 @@ func (l *Lobby) detachPlayerLocked(p *game.Player) (leave departure, ok bool) {
 		if len(l.guests) > 0 {
 			l.leader = l.guests[0]
 			l.guests = l.guests[1:]
-			// Same rule as removeGuestAtLocked: the table changed, so nobody is ready.
 			clear(l.ready)
 			leave.event = EventPlayersUpdated
 			return leave, true
@@ -254,12 +234,6 @@ func (l *Lobby) detachPlayerLocked(p *game.Player) (leave departure, ok bool) {
 	return departure{}, false
 }
 
-// removeGuestAtLocked removes guests[idx] and its subs, and un-readies the table.
-// Caller holds l.mu.
-//
-// A start is only checked on a ready toggle, so dropping the one unready seat used to
-// leave a table all-ready with nothing to start it. A ready was also consent to the
-// table as it was - the same rule withLeaderSettings applies.
 func (l *Lobby) removeGuestAtLocked(idx int) {
 	g := l.guests[idx]
 	l.unsubscribePlayerLocked(g.ID)
@@ -280,9 +254,6 @@ func (l *Lobby) Subscribe(playerID string) (<-chan Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("subscribe to lobby events: %w", err)
 	}
-	if l.playerSubs == nil {
-		l.playerSubs = make(map[string][]<-chan Event)
-	}
 	l.playerSubs[playerID] = append(l.playerSubs[playerID], ch)
 	return ch, nil
 }
@@ -291,27 +262,20 @@ func (l *Lobby) Subscribe(playerID string) (<-chan Event, error) {
 func (l *Lobby) Unsubscribe(playerID string, ch <-chan Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.broadcaster == nil || ch == nil {
+	if l.broadcaster == nil {
 		return
 	}
 	l.broadcaster.Unsubscribe(ch)
-	if playerID == "" || l.playerSubs == nil {
+	subs := slices.DeleteFunc(l.playerSubs[playerID], func(sub <-chan Event) bool { return sub == ch })
+	if len(subs) == 0 {
+		delete(l.playerSubs, playerID)
 		return
 	}
-	subs := l.playerSubs[playerID]
-	for i, sub := range subs {
-		if sub == ch {
-			l.playerSubs[playerID] = slices.Delete(subs, i, i+1)
-			if len(l.playerSubs[playerID]) == 0 {
-				delete(l.playerSubs, playerID)
-			}
-			return
-		}
-	}
+	l.playerSubs[playerID] = subs
 }
 
 func (l *Lobby) unsubscribePlayerLocked(playerID string) {
-	if playerID == "" || l.broadcaster == nil || l.playerSubs == nil {
+	if l.broadcaster == nil {
 		return
 	}
 	for _, ch := range l.playerSubs[playerID] {
@@ -395,7 +359,8 @@ func (l *Lobby) IsPrivate() bool {
 	return l.options.isPrivate
 }
 
-// ActiveGame is the running engine, or nil; a reconnecting view lands back through it.
+// ActiveGame is the running engine, or nil. It is the server side's: a view reaches
+// the table through Seat.
 func (l *Lobby) ActiveGame() *game.Engine {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -403,6 +368,22 @@ func (l *Lobby) ActiveGame() *game.Engine {
 		return nil
 	}
 	return l.activeEngine
+}
+
+// Seat is playerID's handle on the running table, or nil when there is none, it has
+// finished, or the engine no longer seats playerID (idle removal takes the seat before
+// the roster catches up). A reconnecting view lands back at the table through it.
+func (l *Lobby) Seat(playerID string) *game.BoundEngine {
+	engine := l.ActiveGame()
+	// A finished engine still lists its seats until the lobby reopens on its own
+	// goroutine; routing there would show a game-over screen whose esc lands back here.
+	if engine == nil || engine.IsFinished() {
+		return nil
+	}
+	if !slices.ContainsFunc(engine.Snapshot().Players, func(p game.PlayerSnapshot) bool { return p.ID == playerID }) {
+		return nil
+	}
+	return game.Bind(engine, playerID)
 }
 
 // Leader is the player in seat 0, who owns the settings.
@@ -466,12 +447,8 @@ func ratingFor(ratings map[string]uint32, gameName string) uint32 {
 	return elo.ToUint32(elo.DefaultRating)
 }
 
-// averageEloLocked is the table's average rating in gameName, or the starting rating
-// when the game is unnamed. Caller holds l.mu.
+// averageEloLocked is the table's average rating in gameName. Caller holds l.mu.
 func (l *Lobby) averageEloLocked(gameName string) uint32 {
-	if gameName == "" {
-		return elo.ToUint32(elo.DefaultRating)
-	}
 	totalElo := ratingFor(l.leader.Ratings, gameName)
 	count := uint32(1)
 	for _, g := range l.guests {
@@ -493,13 +470,8 @@ func (l *Lobby) addGuest(p *game.Player) error {
 		return ErrLobbyFull
 	}
 
-	if l.leader.Equal(p) {
-		return errors.New("player is already the leader of this lobby")
-	}
-	for _, g := range l.guests {
-		if g.Equal(p) {
-			return errors.New("player is already in this lobby")
-		}
+	if l.hasPlayerLocked(p) {
+		return ErrAlreadyInLobby
 	}
 
 	l.guests = append(l.guests, p)
@@ -524,16 +496,15 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	if l.state != waiting {
 		return errors.New("lobby is not in waiting state")
 	}
-	if !l.allReadyLocked() {
-		return errors.New("not all players are ready")
-	}
-	if l.options.cardGame == "" {
-		return errors.New("no card game selected")
-	}
 
+	// The two failures logged here are defects, not refusals: the lobby view logs what
+	// ToggleReady returns at Debug, since from there "too few players" looks the same.
+	ctx := l.manager.shutdownCtx()
 	rules, err := registry.Create(l.options.cardGame)
 	if err != nil {
-		return fmt.Errorf("create game rules: %w", err)
+		err = fmt.Errorf("create game rules: %w", err)
+		slog.ErrorContext(ctx, "cannot start game", "error", err, "lobby", l.code, "game_name", l.options.cardGame)
+		return err
 	}
 
 	totalPlayers := len(l.guests) + 1
@@ -544,18 +515,21 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 		return errTooManyPlayers
 	}
 
+	// The slug, not the display name, is what the match is persisted under. Create
+	// above already proved the module is registered.
+	mod, _ := registry.Module(l.options.cardGame)
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
-	engine := game.NewEngine(rules, players, rules.InitialDeck())
+	logger := slog.With("lobby", l.code, "game", mod.Slug)
+	engine := game.NewEngine(rules, players, rules.InitialDeck(), game.WithLogger(logger))
 
 	if err := engine.Start(); err != nil {
-		return fmt.Errorf("start game engine: %w", err)
+		err = fmt.Errorf("start game engine: %w", err)
+		logger.ErrorContext(ctx, "cannot start game", "error", err)
+		return err
 	}
 
 	// Before watchGameLocked, which snapshots it for the finalize.
 	l.startedAt = time.Now()
-	// The slug, not the display name, is what the match is persisted under. Create
-	// above already proved the module is registered.
-	mod, _ := registry.Module(l.options.cardGame)
 	l.watchGameLocked(engine, db.GameRef{Slug: mod.Slug, Name: l.options.cardGame})
 
 	l.setStateLocked(inGame)
@@ -567,7 +541,7 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 		observability.LobbyStarted(context.Background(), mod.Slug, time.Since(l.createdAt))
 	}
 
-	l.broadcastLocked(Event{Type: EventGameStarted, Engine: engine})
+	l.broadcastLocked(Event{Type: EventGameStarted, engine: engine})
 
 	return nil
 }
@@ -607,16 +581,12 @@ func (l *Lobby) releaseFinishedGame() {
 // kickableGuestLocked returns the guest index host may remove. Caller holds l.mu.
 func (l *Lobby) kickableGuestLocked(host, target *game.Player) (int, error) {
 	switch {
-	case l.state == closed:
-		return -1, ErrLobbyClosed
 	// A leader who can kick mid-hand can farm Elo: drop whoever is winning, let the
 	// engine finish the match without them, and take the rating.
 	case l.state == inGame:
 		return -1, errKickInGame
 	case !l.leader.Equal(host):
 		return -1, fmt.Errorf("%w kick players", ErrNotLeader)
-	case l.leader.Equal(target):
-		return -1, errors.New("cannot kick the lobby leader")
 	}
 	idx := slices.IndexFunc(l.guests, func(g *game.Player) bool { return g.Equal(target) })
 	if idx == -1 {

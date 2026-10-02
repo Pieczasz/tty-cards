@@ -2,6 +2,7 @@ package ginrummy
 
 import (
 	"testing"
+	"uuid"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -10,6 +11,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +36,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 		Width:        80,
 		Height:       40,
 	}
-	m, ok := New(global, engine, "gin_rummy").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "gin_rummy").(*model)
 	require.True(t, ok)
 	return engine, m
 }
@@ -164,7 +166,7 @@ func TestHandleEnter_MeansWhateverTheScreenSays(t *testing.T) {
 	t.Run("between hands only the dealer deals", func(t *testing.T) {
 		t.Parallel()
 		_, m := startedTable(t)
-		m.handComplete = true
+		m.phase = logic.PhaseHandOver
 		m.Base.MyTurn = false
 
 		_, cmd := m.Update(tuitest.Key("enter"))
@@ -198,4 +200,67 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
 	assert.NotNil(t, m.Init())
+}
+
+// tableOnTurn seats the view as whichever player the engine put on turn.
+func tableOnTurn(t *testing.T) *model {
+	t.Helper()
+	engine, _ := startedTable(t)
+
+	id, err := uuid.Parse(engine.CurrentPlayerID())
+	require.NoError(t, err)
+	global := router.GlobalContext{
+		User:         &db.User{ID: id, Username: "hero"},
+		LobbyManager: lobby.NewManager(t.Context(), nil),
+		Width:        80,
+		Height:       40,
+	}
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "gin_rummy").(*model)
+	require.True(t, ok)
+	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
+	return m
+}
+
+// A turn is a draw and then a discard: enter throws the card under the cursor, and
+// the turn passes on with the hand back at ten.
+func TestHandleEnter_DiscardsTheCardUnderTheCursor(t *testing.T) {
+	t.Parallel()
+	m := tableOnTurn(t)
+
+	_, _ = m.Update(tuitest.Key("s"))
+	m.syncState()
+	require.NoError(t, m.ActionErr)
+	require.Equal(t, logic.PhaseAwaitingDiscard, m.phase)
+	require.Len(t, m.Base.Hand, 11)
+
+	m.Selected = 0
+	discard := m.Base.Hand[0]
+	_, _ = m.Update(tuitest.Key("enter"))
+	m.syncState()
+
+	require.NoError(t, m.ActionErr)
+	assert.Len(t, m.Base.Hand, 10)
+	assert.NotContains(t, m.Base.Hand, discard)
+	assert.Equal(t, discard, m.Base.TopDiscard, "the card lands on the pile")
+	assert.False(t, m.Base.MyTurn, "and the turn passes on")
+}
+
+func TestHandleEnter_TheSeatOnTurnDealsTheNextHand(t *testing.T) {
+	t.Parallel()
+	m := tableOnTurn(t)
+	m.phase = logic.PhaseHandOver
+
+	_, _ = m.Update(tuitest.Key("enter"))
+
+	// The engine's hand is still in play, so the deal is refused - but it was asked for.
+	assert.Error(t, m.ActionErr)
+}
+
+func TestUpdate_IgnoresWhatIsNotAKey(t *testing.T) {
+	t.Parallel()
+	_, m := startedTable(t)
+
+	_, cmd := m.Update(struct{}{})
+	assert.Nil(t, cmd)
+	assert.NoError(t, m.ActionErr)
 }

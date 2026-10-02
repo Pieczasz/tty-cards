@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/elo"
@@ -164,7 +165,7 @@ func TestLobby_SettersAndGetters(t *testing.T) {
 	require.NoError(t, l.SetRanked(leader, false))
 	assert.False(t, l.IsRanked())
 
-	require.NoError(t, l.SetMaxPlayers(leader, 5, 2, 6))
+	require.NoError(t, l.SetMaxPlayers(leader, 5, gameRegistry(cardGame, stubRules{minPlayers: 2, maxPlayers: 6})))
 	assert.Equal(t, 5, l.MaxPlayers())
 }
 
@@ -195,6 +196,7 @@ func TestLobby_BasicGetters(t *testing.T) {
 
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2)))))
 	assert.Len(t, l.Guests(), 1)
+	assert.Nil(t, l.ActiveGame(), "a waiting table has no game to land in")
 }
 
 func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
@@ -463,18 +465,19 @@ func TestLobby_ChangesAreBroadcast(t *testing.T) {
 
 	t.Run("a rejected settings change is not announced", func(t *testing.T) {
 		t.Parallel()
-		_, l, _ := newTestLobby(t, 4)
+		_, l, registry := newTestLobby(t, 4)
 		ch, err := l.Subscribe("p1")
 		require.NoError(t, err)
 
-		require.Error(t, l.SetMaxPlayers(l.Leader(), 0, 0, 0))
+		require.Error(t, l.SetMaxPlayers(l.Leader(), 0, registry))
 
 		assert.Empty(t, drainEventTypes(ch), "nothing changed, so there is nothing to publish")
 	})
 }
 
 // SetMaxPlayers is the one setting that can contradict reality: it must not be allowed to
-// drop below the players already seated, or below what the game itself needs.
+// drop below the players already seated, or outside what the game itself deals. The
+// game's bounds come from the registry, never from the caller.
 func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 	t.Parallel()
 
@@ -484,6 +487,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 		limit    int
 		rulesMin int
 		rulesMax int
+		unknown  bool
 		wantErr  string
 	}{
 		{name: "equal to the roster is allowed", guests: 2, limit: 3},
@@ -493,7 +497,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 		{name: "below the game minimum is refused", guests: 0, limit: 2, rulesMin: 3, wantErr: "at least 3"},
 		{name: "equal to the game maximum is allowed", guests: 0, limit: 4, rulesMax: 4},
 		{name: "above the game maximum is refused", guests: 0, limit: 5, rulesMax: 4, wantErr: "cannot exceed 4"},
-		{name: "unbounded rules impose nothing", guests: 0, limit: 9, rulesMin: 0, rulesMax: 0},
+		{name: "a game the registry does not hold is refused", limit: 3, unknown: true, wantErr: "not found"},
 	}
 
 	for _, tt := range tests {
@@ -504,8 +508,13 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 			for _, g := range testutil.Players(tt.guests + 1)[1:] {
 				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 			}
+			name := l.GameName()
+			if tt.unknown {
+				name = "Some Other Game"
+			}
+			registry := gameRegistry(name, stubRules{minPlayers: tt.rulesMin, maxPlayers: tt.rulesMax})
 
-			err := l.SetMaxPlayers(l.Leader(), tt.limit, tt.rulesMin, tt.rulesMax)
+			err := l.SetMaxPlayers(l.Leader(), tt.limit, registry)
 
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
@@ -714,6 +723,23 @@ func TestLobby_UnsubscribeClosesTheChannel(t *testing.T) {
 	assert.NotContains(t, l.playerSubs, "p1", "and the player must no longer be tracked")
 }
 
+// A reconnect briefly holds two feeds. The old view closing its own must leave the new
+// one tracked, or a later leave would not close it.
+func TestLobby_UnsubscribeKeepsThePlayersOtherFeed(t *testing.T) {
+	t.Parallel()
+	_, l, _ := newTestLobby(t, 4)
+	old, err := l.Subscribe("p1")
+	require.NoError(t, err)
+	current, err := l.Subscribe("p1")
+	require.NoError(t, err)
+
+	l.Unsubscribe("p1", old)
+
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	assert.Equal(t, []<-chan Event{current}, l.playerSubs["p1"])
+}
+
 // A failed write is the one outcome nobody else will notice: the players see a
 // finished game either way, so the log line is the only signal the result was lost.
 //
@@ -846,7 +872,7 @@ func TestLobby_InheritedLeaderCanChangeSettingsAfterTheGameEnds(t *testing.T) {
 	l.releaseFinishedGame()
 
 	require.NoError(t, l.SetPrivate(inheritor, false), "the new leader owns the settings")
-	require.NoError(t, l.SetMaxPlayers(inheritor, 4, 2, 9))
+	require.NoError(t, l.SetMaxPlayers(inheritor, 4, gameRegistry("Mock", stubRules{maxPlayers: 9})))
 	assert.Equal(t, 4, l.MaxPlayers())
 }
 
@@ -926,4 +952,110 @@ func TestRating_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
 	assert.Equal(t, start, Rating(&game.Player{}, "Poker"))
 	assert.Equal(t, start, Rating(&game.Player{Ratings: map[string]uint32{"Poker": 0}}, "Poker"))
 	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"Poker": 1720}}, "Poker"))
+}
+
+// refusedStartRules is stubRules whose deal fails, so the engine never starts.
+type refusedStartRules struct{ stubRules }
+
+func (refusedStartRules) OnGameStart(*game.State) error { return errors.New("no deal") }
+
+// A start that fails leaves the table as it was - waiting, with no engine - so the
+// players can fix what is wrong and ready again.
+func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		rules     game.Rules
+		withGuest bool
+		wantErr   string
+	}{
+		{name: "too few players", rules: stubRules{minPlayers: 2}, wantErr: "need at least 2 players"},
+		{name: "the rules refuse the deal", rules: refusedStartRules{}, withGuest: true, wantErr: "start game engine"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestManager(t, nil)
+			seats := []*game.Player{mockPlayer("p1", testutil.UID(1))}
+			l, err := m.CreateLobby(seats[0], WithCardGame("Mock"))
+			require.NoError(t, err)
+			if tt.withGuest {
+				seats = append(seats, mockPlayer("p2", testutil.UID(2)))
+				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), seats[1])))
+			}
+			registry := gameRegistry("Mock", tt.rules)
+
+			for _, p := range seats[:len(seats)-1] {
+				require.NoError(t, l.ToggleReady(p, registry))
+			}
+			require.ErrorContains(t, l.ToggleReady(seats[len(seats)-1], registry), tt.wantErr)
+
+			assert.True(t, isWaiting(l), "a failed start left the table out of Waiting")
+			assert.Nil(t, l.ActiveGame())
+		})
+	}
+}
+
+// A leader who leaves alone closes the table, but their screen can still send a
+// ready. It must not start a game on a table the manager no longer holds.
+func TestLobby_ClosedTableCannotStart(t *testing.T) {
+	t.Parallel()
+	m, l, registry := newTestLobby(t, 2)
+	leader := l.Leader()
+	m.LeaveLobby(leader)
+
+	require.ErrorContains(t, l.ToggleReady(leader, registry), "not in waiting state")
+	assert.Nil(t, l.ActiveGame())
+}
+
+// A refused settings change must change nothing and announce nothing: every client
+// would otherwise redraw a table that is still the same.
+func TestLobby_OnlyTheLeaderChangesSettings(t *testing.T) {
+	t.Parallel()
+	m, l, registry := newTestLobby(t, 3)
+	guest := mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	events, err := l.Subscribe(l.Leader().ID)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, l.SetPrivate(guest, false), ErrNotLeader)
+	require.ErrorIs(t, l.SetRanked(guest, true), ErrNotLeader)
+	require.ErrorIs(t, l.SetMaxPlayers(guest, 2, registry), ErrNotLeader)
+
+	assert.True(t, l.IsPrivate())
+	assert.False(t, l.IsRanked())
+	assert.Equal(t, 3, l.MaxPlayers())
+	assert.Empty(t, drainEventTypes(events), "a refused change was broadcast")
+}
+
+// The feed has a fixed number of slots. A subscriber past them is told so rather than
+// handed a channel that never delivers, and the refusal is not tracked as theirs.
+func TestLobby_SubscribePastCapacityIsRefused(t *testing.T) {
+	t.Parallel()
+	_, l, _ := newTestLobby(t, 2)
+	id := l.Leader().ID
+	for range maxLobbySubscribers {
+		_, err := l.Subscribe(id)
+		require.NoError(t, err)
+	}
+
+	ch, err := l.Subscribe(id)
+	require.ErrorIs(t, err, broadcaster.ErrAtCapacity)
+	assert.Nil(t, ch)
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	assert.Len(t, l.playerSubs[id], maxLobbySubscribers)
+}
+
+// JoinLobbyByCode turns a seated player away before reaching the table; this is the
+// table's own guard against seating one player twice if that ever slips.
+func TestLobby_AddGuestRefusesASeatedPlayer(t *testing.T) {
+	t.Parallel()
+	m, l, _ := newTestLobby(t, 3)
+	guest := mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+
+	require.ErrorIs(t, l.addGuest(l.Leader()), ErrAlreadyInLobby)
+	require.ErrorIs(t, l.addGuest(guest), ErrAlreadyInLobby)
+	assert.Len(t, l.Guests(), 1)
 }

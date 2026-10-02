@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAll_EntriesComplete(t *testing.T) {
+func TestGames_EntriesComplete(t *testing.T) {
 	t.Parallel()
-	require.NotEmpty(t, All)
+	require.NotEmpty(t, Games)
 
-	names := make(map[string]bool, len(All))
-	slugs := make(map[string]bool, len(All))
-	for _, e := range All {
+	names := make(map[string]bool, len(Games))
+	slugs := make(map[string]bool, len(Games))
+	for _, e := range Games {
 		require.NotEmpty(t, e.Name, "entry with slug %q has no name", e.Slug)
 		require.NotEmpty(t, e.Slug, "entry %q has no slug", e.Name)
 		require.NotNil(t, e.Factory, "entry %q has no rules factory", e.Name)
@@ -41,8 +41,8 @@ func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry()
 
-	names := make([]string, 0, len(All))
-	for _, e := range All {
+	names := make([]string, 0, len(Games))
+	for _, e := range Games {
 		names = append(names, e.Name)
 		mod, ok := registry.Module(e.Name)
 		require.Truef(t, ok, "%q is in the catalog but not in the registry", e.Name)
@@ -58,7 +58,7 @@ func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 // game up by, so a rename is a data migration, not a cosmetic edit: existing rows,
 // existing rankings and every match already recorded point at the old string. Freeze
 // them here so changing one has to be deliberate.
-func TestAll_NamesArePersistedAndFrozen(t *testing.T) {
+func TestGames_NamesArePersistedAndFrozen(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]string{
@@ -69,8 +69,8 @@ func TestAll_NamesArePersistedAndFrozen(t *testing.T) {
 		"gin_rummy":    "Gin Rummy",
 	}
 
-	got := make(map[string]string, len(All))
-	for _, e := range All {
+	got := make(map[string]string, len(Games))
+	for _, e := range Games {
 		got[e.Slug] = e.Name
 	}
 
@@ -82,7 +82,7 @@ func TestAll_NamesArePersistedAndFrozen(t *testing.T) {
 // shipped. If a catalog slug ever disagrees with that table, a running server writes
 // ratings under one slug while the migration filed the old rows under another, and the
 // leaderboard for that game silently splits in two.
-func TestAll_SlugsMatchTheMigrationBackfill(t *testing.T) {
+func TestGames_SlugsMatchTheMigrationBackfill(t *testing.T) {
 	t.Parallel()
 	matches, err := filepath.Glob("../db/migrations/000005_*.up.sql")
 	require.NoError(t, err)
@@ -96,8 +96,8 @@ func TestAll_SlugsMatchTheMigrationBackfill(t *testing.T) {
 		want[m[1]] = m[2]
 	}
 
-	gotByName := make(map[string]string, len(All))
-	for _, e := range All {
+	gotByName := make(map[string]string, len(Games))
+	for _, e := range Games {
 		gotByName[e.Name] = e.Slug
 	}
 	for name, slug := range want {

@@ -123,6 +123,39 @@ func TestJoin_CursorSurvivesAShrinkingList(t *testing.T) {
 	require.NotPanics(t, func() { view.joinSelected() }, "and joining nothing is a no-op")
 }
 
+// Off the code prompt the browser is a menu like any other: the arrows walk the list
+// without leaving it, and esc and q go back home.
+func TestJoin_BrowsingKeys(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the cursor stops at both ends", func(t *testing.T) {
+		t.Parallel()
+		m := lobby.NewManager(t.Context(), nil)
+		for i, name := range []string{"a", "b"} {
+			openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameName)
+		}
+		view := newJoinModel(t, m)
+		require.Len(t, view.entries, 2)
+
+		for _, step := range []struct {
+			key  string
+			want int
+		}{{"down", 1}, {"down", 1}, {"up", 0}, {"k", 0}} {
+			pressJoin(t, view, step.key)
+			assert.Equal(t, step.want, view.cursor, "after %q", step.key)
+		}
+	})
+
+	for _, key := range []string{"esc", "q"} {
+		t.Run(key+" goes home", func(t *testing.T) {
+			t.Parallel()
+			view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+			_, cmd := view.Update(tuitest.Key(key))
+			assert.Equal(t, router.RouteHome, routeOf(t, cmd))
+		})
+	}
+}
+
 func TestJoin_FiltersCycle(t *testing.T) {
 	t.Parallel()
 
@@ -389,7 +422,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 		change, ok := cmd().(router.ChangeViewMsg)
 		require.True(t, ok)
 		assert.Equal(t, router.RouteLobby, change.ViewName)
-		assert.Same(t, table, change.Context, "the lobby view is handed the table that was joined")
+		assert.Same(t, table, change.Payload.Lobby, "the lobby view is handed the table that was joined")
 		assert.NoError(t, view.err)
 	})
 }
@@ -427,6 +460,8 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 		view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
 		pressJoin(t, view, "c")
 		require.True(t, view.writingCode)
+		assert.Contains(t, tuitest.StripANSI(view.View().Content), "press ESC to cancel",
+			"the prompt says how to get out of it")
 
 		pressJoin(t, view, "a")
 		pressJoin(t, view, "esc")

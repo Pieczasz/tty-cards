@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
+	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -142,8 +143,47 @@ func TestRenderRankings_DrawsExactlyOnePage(t *testing.T) {
 func TestNeedsFetch_CapsAtMax(t *testing.T) {
 	t.Parallel()
 	m := board(t, maxLeaderboardPlayers)
-	assert.Equal(t, 0, m.needsFetch(maxLeaderboardPlayers/maxRowsPerPage),
+	rows := m.rowsPerPage()
+	firstPageBeyond := (maxLeaderboardPlayers + rows - 1) / rows
+	require.GreaterOrEqual(t, firstPageBeyond*rows, len(m.rankings), "the page asked for is past every row held")
+	assert.Equal(t, 0, m.needsFetch(firstPageBeyond),
 		"a full window does not ask the repository again")
+}
+
+// An empty board is one page, and there is nowhere to page to once the repository
+// has said it holds nothing.
+func TestGoPage_AnEmptyExhaustedBoardStaysPut(t *testing.T) {
+	t.Parallel()
+	m := board(t, 0)
+	m.exhausted = true
+
+	assert.Equal(t, 1, m.pageCount())
+	_, cmd := m.goPage(1)
+	assert.Nil(t, cmd, "nothing to fetch")
+	assert.Zero(t, m.page)
+}
+
+// Paging past what is held keeps the current page on screen while the next loads, and
+// the pager says so instead of claiming ranks it does not have yet.
+func TestView_ShowsTheLoadingPagerWhilePaging(t *testing.T) {
+	t.Parallel()
+	m := board(t, boardRows(t))
+	m.loading = true
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "loading…")
+	assert.Contains(t, out, "player01", "the page already held stays on screen")
+}
+
+func TestUpdate_TakesTheTerminalSize(t *testing.T) {
+	t.Parallel()
+	m := board(t, 0)
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, 80, m.global.Width)
+	assert.Equal(t, 24, m.global.Height)
 }
 
 // The board is a full-screen view, so it has to fit the screen. It used to force
@@ -209,9 +249,9 @@ func TestNew_BuildsAFilterPerCatalogGame(t *testing.T) {
 	m, ok := New(router.GlobalContext{GameRegistry: catalog.NewRegistry()}).(*model)
 	require.True(t, ok)
 
-	require.Len(t, m.filters, 1+len(catalog.All))
+	require.Len(t, m.filters, 1+len(catalog.Games))
 	assert.Equal(t, filterAll, m.filters[0].label, "the unfiltered view is the default")
-	for i, e := range catalog.All {
+	for i, e := range catalog.Games {
 		assert.Equal(t, e.Name, m.filters[i+1].label)
 		assert.Equal(t, e.Slug, m.filters[i+1].slug)
 	}

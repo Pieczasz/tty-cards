@@ -49,7 +49,7 @@ func New(deps Deps) *router.Router {
 	// reached a menu would never see the game start - the engine would auto-play
 	// until the idle timer took the seat.
 	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
-		return func(g router.GlobalContext, _ any) tea.Model {
+		return func(g router.GlobalContext, _ router.Payload) tea.Model {
 			if l := g.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(g)); l != nil {
 				return lobby.New(g, l)
 			}
@@ -63,12 +63,11 @@ func New(deps Deps) *router.Router {
 	r.Register(router.RouteLobbyCreate, seatedOr(lobby.NewCreate))
 	r.Register(router.RouteLobbyJoin, seatedOr(lobby.NewJoin))
 
-	r.Register(router.RouteLobby, func(g router.GlobalContext, ctx any) tea.Model {
-		l, ok := ctx.(*internallobby.Lobby)
-		if !ok {
+	r.Register(router.RouteLobby, func(g router.GlobalContext, p router.Payload) tea.Model {
+		if p.Lobby == nil {
 			return home.New(g)
 		}
-		return lobby.New(g, l)
+		return lobby.New(g, p.Lobby)
 	})
 
 	registerGameViews(r)
@@ -85,18 +84,20 @@ func New(deps Deps) *router.Router {
 // tracker slot, and must run before the router's Init.
 func ResumeSeat(r *router.Router) {
 	if l := r.Global.LobbyManager.ResumePlayer(views.SessionPlayer(r.Global)); l != nil {
-		r.SetInitialRoute(router.RouteLobby, l)
+		r.SetInitialRoute(router.RouteLobby, router.Payload{Lobby: l})
 	}
 }
 
+// registerGameViews is where a seat reaches a view, so it is where the handle is held
+// to the session's own player: a table bound to anyone else is not this session's to
+// render or play.
 func registerGameViews(r *router.Router) {
-	for _, e := range catalog.All {
-		r.Register(router.GameRoute(e.Slug), func(g router.GlobalContext, ctx any) tea.Model {
-			engine, ok := ctx.(*game.Engine)
-			if !ok {
+	for _, e := range catalog.Games {
+		r.Register(router.GameRoute(e.Slug), func(g router.GlobalContext, p router.Payload) tea.Model {
+			if p.Table == nil || p.Table.PlayerID() != views.SessionPlayerID(g) {
 				return home.New(g)
 			}
-			return e.View(g, engine, e.Slug)
+			return e.View(g, p.Table, e.Slug)
 		})
 	}
 }

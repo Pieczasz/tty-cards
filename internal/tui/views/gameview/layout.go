@@ -91,7 +91,7 @@ func renderHand(
 		labels.WriteString(styles.PadCenter(slot, label))
 	}
 
-	return lg.JoinVertical(lg.Left, fan, labels.String())
+	return styles.JoinVertical(lg.Left, fan, labels.String())
 }
 
 // Orientation is the table edge an opponent's seat is drawn on.
@@ -187,6 +187,18 @@ func buildVerticalCardsString(count int, topEdge, midEdge, botEdge, cardBody str
 	return sb.String()
 }
 
+// RenderPiles is a shedding table's two piles: the stock face down, with how many
+// cards are left in it, beside the discard. A spent stock keeps its place as an empty
+// slot, so the discard does not slide over when the last card is drawn.
+func RenderPiles(t styles.Theme, stock int, discard string) string {
+	back := components.FaceDownCard(t)
+	if stock <= 0 {
+		back = components.EmptyCardSlot(t)
+	}
+	pile := styles.JoinVertical(lg.Center, back, t.Muted.Render(fmt.Sprintf("stock %d", stock)))
+	return styles.JoinHorizontal(lg.Top, pile, "   ", discard)
+}
+
 // RenderOpponent draws one opponent's seat. budget is how much room the card art may
 // take: columns across for a seat on the top edge, rows down for one stacked at a
 // side. Zero means unbounded.
@@ -198,23 +210,17 @@ func RenderOpponent(
 	remaining time.Duration,
 	budget int,
 ) string {
-	nameStyle := t.SectionHeading
-	if isCurrentTurn {
-		nameStyle = t.TurnName
-	}
-	nameView := nameStyle.Render(o.Name)
-	cardsCountView := t.Muted.Render(fmt.Sprintf("[%d cards]", o.HandSize))
-
-	infoView := lg.JoinVertical(lg.Center, nameView, cardsCountView)
+	name, count := seatLabel(t, o, isCurrentTurn)
+	infoView := styles.JoinVertical(lg.Center, name, count)
 
 	var block string
 	switch orientation {
 	case OrientationTop:
-		block = lg.JoinVertical(lg.Center, renderTopCards(t, o.HandSize, budget), infoView)
+		block = styles.JoinVertical(lg.Center, renderTopCards(t, o.HandSize, budget), infoView)
 	case OrientationLeft:
-		block = lg.JoinVertical(lg.Left, infoView, renderLeftCards(t, o.HandSize, budget))
+		block = styles.JoinVertical(lg.Left, infoView, renderLeftCards(t, o.HandSize, budget))
 	case OrientationRight:
-		block = lg.JoinVertical(lg.Right, infoView, renderRightCards(t, o.HandSize, budget))
+		block = styles.JoinVertical(lg.Right, infoView, renderRightCards(t, o.HandSize, budget))
 	}
 
 	if !isCurrentTurn {
@@ -226,14 +232,17 @@ func RenderOpponent(
 // RenderOpponentMinimal is a seat as its name and hand count on one line, for a table
 // with no room for card art.
 func RenderOpponentMinimal(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) string {
+	name, count := seatLabel(t, o, isCurrentTurn)
+	return styles.JoinHorizontal(lg.Center, name, " ", count)
+}
+
+// seatLabel is a seat's name, lit while it is on turn, and its hand count.
+func seatLabel(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) (name, count string) {
 	nameStyle := t.SectionHeading
 	if isCurrentTurn {
 		nameStyle = t.TurnName
 	}
-	nameView := nameStyle.Render(o.Name)
-	cardsCountView := t.Muted.Render(fmt.Sprintf("[%d cards]", o.HandSize))
-
-	return lg.JoinHorizontal(lg.Center, nameView, " ", cardsCountView)
+	return nameStyle.Render(o.Name), t.Muted.Render(fmt.Sprintf("[%d cards]", o.HandSize))
 }
 
 // RenderHeroBand is the bottom band every table builds the same way: the turn status,
@@ -250,7 +259,7 @@ func RenderHeroBand(t styles.Theme, actionErr error, rows ...string) string {
 	if actionErr != nil {
 		parts = append(parts, t.ErrorText.Render(actionErr.Error()))
 	}
-	return lg.JoinVertical(lg.Center, parts...)
+	return styles.JoinVertical(lg.Center, parts...)
 }
 
 // RenderStatus names whose turn it is, with the countdown on the same line: a second row
@@ -276,6 +285,16 @@ const preciseClockThreshold = 6 * time.Second
 // a second per client is not something to run for a whole turn over ssh.
 const tenthTickInterval = 100 * time.Millisecond
 
+// Somebody else's clock reads in coarseClockStep steps until its last coarseClockFloor.
+// Three seats in four watch a clock that is not theirs, and a frame is the costliest
+// thing a session makes (profiled: two thirds of the server's CPU at 1000 sessions), so
+// each of them re-rendering every second for another player's digit is most of a
+// table's work.
+const (
+	coarseClockStep  = 5 * time.Second
+	coarseClockFloor = 10 * time.Second
+)
+
 // formatTurnClock renders the turn countdown, or empty when no clock is running. precise
 // asks for tenths below preciseClockThreshold, which only the player who has to act
 // needs - it costs a tick ten times a second. Both forms round up, so the display never
@@ -283,6 +302,11 @@ const tenthTickInterval = 100 * time.Millisecond
 func formatTurnClock(remaining time.Duration, precise bool) string {
 	if remaining <= 0 {
 		return ""
+	}
+	if !precise && remaining > coarseClockFloor {
+		if stepped := remaining.Truncate(coarseClockStep); stepped < remaining {
+			remaining = stepped + coarseClockStep
+		}
 	}
 	if precise && remaining < preciseClockThreshold {
 		tenths := int(math.Ceil(remaining.Seconds() * 10))
@@ -313,12 +337,12 @@ func AttachTurnClock(block, clock string, orientation Orientation) string {
 	}
 	switch orientation {
 	case OrientationLeft:
-		return lg.JoinHorizontal(lg.Center, block, " ", clock)
+		return styles.JoinHorizontal(lg.Center, block, " ", clock)
 	case OrientationRight:
-		return lg.JoinHorizontal(lg.Center, clock, " ", block)
+		return styles.JoinHorizontal(lg.Center, clock, " ", block)
 	case OrientationTop:
 	}
-	return lg.JoinVertical(lg.Center, block, clock)
+	return styles.JoinVertical(lg.Center, block, clock)
 }
 
 // ClockTickMsg drives the turn countdown. Source is the feed of the session that armed
@@ -331,11 +355,21 @@ type ClockTickMsg struct{ Source <-chan game.Event }
 // allocations, and every seat paying that rate for somebody else's digit multiplies the
 // table's work for nothing.
 func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) tea.Cmd {
-	interval := time.Second
-	if onTurn && remaining > 0 && remaining < preciseClockThreshold {
-		interval = tenthTickInterval
+	return tea.Tick(tickInterval(remaining, onTurn), func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
+}
+
+// tickInterval is how long until the clock this seat reads next changes.
+func tickInterval(remaining time.Duration, onTurn bool) time.Duration {
+	switch {
+	case onTurn && remaining > 0 && remaining < preciseClockThreshold:
+		return tenthTickInterval
+	case !onTurn && remaining > coarseClockFloor:
+		// The step boundary below remaining, or the start of the last seconds.
+		next := max((remaining - 1).Truncate(coarseClockStep), coarseClockFloor)
+		return remaining - next
+	default:
+		return time.Second
 	}
-	return tea.Tick(interval, func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
 }
 
 // RenderWaitingScreen is the full-screen notice a table shows before it starts and
@@ -352,6 +386,6 @@ func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string
 func renderGameNotice(g router.GlobalContext, content string) string {
 	titleFig := styles.RenderFigureASCII("Active Game", styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height))
 	header := g.Theme.Title.Render(titleFig)
-	footer := views.Footer(g.Theme, nil)
+	footer := views.SeatedFooter(g.Theme, nil)
 	return views.RenderCenteredLayout(g, header, content, footer)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/hearts"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -32,7 +33,6 @@ func TestView_HandOverShowsScores(t *testing.T) {
 			{ID: "3", Name: "carol"}, {ID: "4", Name: "dave"},
 		}},
 		phase:            logic.PhaseHandOver,
-		handComplete:     true,
 		handNumber:       2,
 		handPoints:       map[string]int{"1": 5, "2": 8, "3": 3, "4": 10},
 		cumulativeScores: map[string]int{"1": 25, "2": 8, "3": 18, "4": 17},
@@ -113,6 +113,10 @@ func TestOpponentAt_MapsTheThreeEdgesAtAFullTable(t *testing.T) {
 		seen = append(seen, o.ID)
 	}
 	assert.Equal(t, []string{"4", "1", "2"}, seen, "clockwise from the hero, hero excluded")
+
+	zones := gameview.SplitZones(m.Base.Opponents)
+	edges := []string{zones.Left[0].ID, zones.Top[0].ID, zones.Right[0].ID}
+	assert.Equal(t, seen, edges, "each trick card sits in front of the seat the table draws")
 }
 
 // The four cards of a trick are the one thing a player cannot play Hearts without
@@ -204,7 +208,7 @@ func TestView_EveryScreenFitsTheTerminal(t *testing.T) {
 			m.phase = logic.PhasePassing
 			m.passSelected = map[deck.Card]struct{}{m.Base.Hand[0]: {}, m.Base.Hand[3]: {}}
 		},
-		"the hand summary": func(m *model) { m.phase = logic.PhaseHandOver; m.handComplete = true },
+		"the hand summary": func(m *model) { m.phase = logic.PhaseHandOver },
 		"the match over": func(m *model) {
 			m.matchComplete = true
 			m.Base.Phase = game.Finished
@@ -278,7 +282,6 @@ func TestRenderHandOver_ShowsEverySeatsHandAndTotal(t *testing.T) {
 
 	m := fourHanded(120, 50)
 	m.phase = logic.PhaseHandOver
-	m.handComplete = true
 
 	out := m.View().Content
 	for _, name := range []string{"alice", "bob", "carol", "dave"} {
@@ -308,4 +311,19 @@ func TestView_WaitingScreen(t *testing.T) {
 	m := fourHanded(80, 24)
 	m.Base.Phase = game.Waiting
 	assert.Contains(t, m.View().Content, "Waiting for game to start")
+}
+
+// A match a leave cut short has no winner worth naming: the seats still at the table
+// are tied on whatever the hand had reached, and "alice wins" on zero points reads as a
+// result. The screen says the match ended early and who left.
+func TestView_AMatchCutShortByALeaveSaysSo(t *testing.T) {
+	t.Parallel()
+	engine, m := startedTable(t)
+
+	engine.RemovePlayer(testutil.SeatID(4)) // dave
+	m.syncState()
+	out := tuitest.StripANSI(m.View().Content)
+
+	assert.Contains(t, out, "MATCH ENDED EARLY - dave left the table")
+	assert.NotContains(t, out, "wins", "an interrupted match named a winner")
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
@@ -63,13 +64,13 @@ func TestUpdate_SuitPicking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			m := &model{suit: suitPicker}
-			m.suit.Show()
+			m := &model{Picker: suitPicker}
+			m.Picker.Show()
 			var tm tea.Model = m
 			for _, k := range tt.keys {
 				tm, _ = tm.Update(tuitest.Key(k))
 			}
-			assert.Equal(t, tt.wantCursor, tm.(*model).suit.Cursor)
+			assert.Equal(t, tt.wantCursor, tm.(*model).Picker.Cursor)
 		})
 	}
 }
@@ -92,7 +93,7 @@ func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 		User:         &db.User{ID: id, Username: "hero"},
 		LobbyManager: lobby.NewManager(t.Context(), nil),
 	}
-	m, ok := New(global, engine, "crazy_eights").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights").(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m
@@ -105,23 +106,23 @@ func TestSyncState_ClosesTheSuitPickerWhenTheTurnIsLost(t *testing.T) {
 	t.Parallel()
 	engine, m := tableOnTurn(t)
 
-	m.suit.Open = true
-	m.suit.Cursor = 2
+	m.Picker.Open = true
+	m.Picker.Cursor = 2
 	require.NoError(t, engine.SubmitAction(m.Bound.PlayerID(), logic.ActionDrawCard{}))
 	m.syncState()
 
 	require.False(t, m.Base.MyTurn, "drawing passes the turn on")
-	assert.False(t, m.suit.Open, "the picker cannot outlive the turn it belongs to")
+	assert.False(t, m.Picker.Open, "the picker cannot outlive the turn it belongs to")
 }
 
 func TestSyncState_KeepsTheSuitPickerWhileTheTurnIsStillYours(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
 
-	m.suit.Open = true
+	m.Picker.Open = true
 	m.syncState()
 
-	assert.True(t, m.suit.Open, "a refresh mid-turn must not close the picker")
+	assert.True(t, m.Picker.Open, "a refresh mid-turn must not close the picker")
 }
 
 func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
@@ -138,11 +139,11 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 func TestHandleEscape_CancelsThePickerBeforeLeavingTheTable(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
-	m.suit.Open = true
+	m.Picker.Open = true
 
 	_, cmd := m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "the first esc only closes the picker")
-	assert.False(t, m.suit.Open)
+	assert.False(t, m.Picker.Open)
 
 	_, cmd = m.Update(tuitest.Key("esc"))
 	require.Nil(t, cmd, "the second esc asks before forfeiting")
@@ -158,17 +159,17 @@ func TestHandleEnter_AnEightOpensThePickerAndTheNextEnterCommits(t *testing.T) {
 	t.Parallel()
 	// No engine: the submit is refused for want of a seat, which is the rejection path
 	// without depending on where a real deal happened to land the eights.
-	m := &model{suit: suitPicker}
+	m := &model{Picker: suitPicker}
 	m.Base.MyTurn = true
 	m.Base.Hand = []deck.Card{{Rank: deck.Eight, Suit: deck.Spades}}
 
 	_, _ = m.Update(tuitest.Key("enter"))
-	require.True(t, m.suit.Open, "an eight asks which suit it becomes")
-	require.Equal(t, 0, m.suit.Cursor, "the picker opens on the first suit")
+	require.True(t, m.Picker.Open, "an eight asks which suit it becomes")
+	require.Equal(t, 0, m.Picker.Cursor, "the picker opens on the first suit")
 
-	m.suit.Cursor = 2
+	m.Picker.Cursor = 2
 	_, _ = m.Update(tuitest.Key("enter"))
-	assert.False(t, m.suit.Open, "committing closes the picker whatever the engine says")
+	assert.False(t, m.Picker.Open, "committing closes the picker whatever the engine says")
 	// A rejected move has to surface a message rather than fail silently.
 	assert.Error(t, m.ActionErr)
 }
@@ -180,7 +181,7 @@ func TestHandleEnter_AnOrdinaryCardIsPlayedStraightAway(t *testing.T) {
 	m.Selected = 0
 
 	_, _ = m.Update(tuitest.Key("enter"))
-	assert.False(t, m.suit.Open, "only an eight opens the picker")
+	assert.False(t, m.Picker.Open, "only an eight opens the picker")
 }
 
 func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
@@ -204,13 +205,13 @@ func TestHandleDraw_OnlyActsOnYourOwnTurn(t *testing.T) {
 // while it is open - the digit would silently retarget the card being played.
 func TestSelectDigit_IsIgnoredWhileThePickerIsOpen(t *testing.T) {
 	t.Parallel()
-	m := &model{suit: suitPicker}
+	m := &model{Picker: suitPicker}
 	m.Base.Hand = make([]deck.Card, 5)
 
 	_, _ = m.Update(tuitest.Key("3"))
 	require.Equal(t, 3, m.Selected)
 
-	m.suit.Open = true
+	m.Picker.Open = true
 	_, _ = m.Update(tuitest.Key("1"))
 	assert.Equal(t, 3, m.Selected, "the hand cursor is frozen behind the picker")
 }
@@ -220,17 +221,17 @@ func TestSelectDigit_IsIgnoredWhileThePickerIsOpen(t *testing.T) {
 func TestHandleEnter_IgnoresASuitCursorOutOfRange(t *testing.T) {
 	t.Parallel()
 	_, m := tableOnTurn(t)
-	m.suit.Open = true
-	m.suit.Cursor = len(suitPicker.Choices)
+	m.Picker.Open = true
+	m.Picker.Cursor = len(suitPicker.Choices)
 
-	m.handleEnter()
-	assert.True(t, m.suit.Open, "nothing was committed, so the picker stays open")
+	_, _ = m.Update(tuitest.Key("enter"))
+	assert.True(t, m.Picker.Open, "nothing was committed, so the picker stays open")
 }
 
 // Once the game is over enter is the way out, not another move.
 func TestHandleEnter_LeavesAFinishedGame(t *testing.T) {
 	t.Parallel()
-	m := &model{suit: suitPicker}
+	m := &model{Picker: suitPicker}
 	m.Base.Phase = game.Finished
 
 	_, cmd := m.Update(tuitest.Key("enter"))

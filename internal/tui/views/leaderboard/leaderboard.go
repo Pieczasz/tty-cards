@@ -5,16 +5,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
+	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
-
-	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/tui/router"
-	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 )
 
 const (
@@ -91,9 +91,6 @@ type loadedMsg struct {
 }
 
 func (m *model) gameFilter() string {
-	if m.filterIndex == 0 {
-		return ""
-	}
 	return m.filters[m.filterIndex].slug
 }
 
@@ -121,10 +118,10 @@ func (m *model) pageLayout() (rows int, compact bool) {
 }
 
 func (m *model) pageCount() int {
-	rows := m.rowsPerPage()
 	if len(m.rankings) == 0 {
 		return 1
 	}
+	rows := m.rowsPerPage()
 	return (len(m.rankings) + rows - 1) / rows
 }
 
@@ -205,7 +202,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rankings = msg.rankings
 		m.err = msg.err
 		if msg.err != nil {
-			slog.Error("database error while fetching leaderboard", "error", msg.err)
+			slog.ErrorContext(m.global.RequestContext(), "database error while fetching leaderboard", "error", msg.err)
 			return m, nil
 		}
 		// Fewer rows than the request (or the hard cap) means there is nothing left to page into.
@@ -230,7 +227,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) actions() []string {
-	return []string{"g/←/-> - Filter: " + m.filterLabel(), "↑/↓ - Page"}
+	return []string{"g/←/→ - Filter: " + m.filterLabel(), "↑/↓ - Page"}
 }
 
 func (m *model) View() tea.View {
@@ -301,20 +298,21 @@ func (m *model) renderRankings(contentWidth int) string {
 		pager = m.global.Theme.Dim.Render("loading…")
 	}
 	if compact {
-		return lg.JoinVertical(lg.Center, heading, table, pager)
+		return styles.JoinVertical(lg.Center, heading, table, pager)
 	}
-	return lg.JoinVertical(lg.Center, "", heading, table, pager)
+	return styles.JoinVertical(lg.Center, "", heading, table, pager)
 }
 
-// renderPlayerRow lays the cells out itself rather than through Table.Cells: the
-// viewer's own row is highlighted, and a styled cell cannot be padded by rune count
-// afterwards without counting the escape sequence as text.
+// renderPlayerRow highlights the viewer's own row, so a player can find themselves.
 func (m *model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) string {
-	playerWidth := tbl.Cols[1].Width
-	userStr := styles.PadTruncate(r.User.Username, playerWidth)
+	userStr := styles.PadTruncate(r.User.Username, tbl.Cols[1].Width)
 	if m.global.User != nil && r.User.ID == m.global.User.ID {
 		userStr = m.global.Theme.PlayerItemSelected.Bold(true).Render(userStr)
 	}
-	return fmt.Sprintf("%-*d | %s | %-*s | %d",
-		colRank, index+1, userStr, colGame, styles.PadTruncate(r.Game.Name, colGame), r.Elo)
+	return tbl.Row(
+		styles.PadTruncate(strconv.Itoa(index+1), colRank),
+		userStr,
+		styles.PadTruncate(r.Game.Name, colGame),
+		strconv.FormatUint(uint64(r.Elo), 10),
+	)
 }

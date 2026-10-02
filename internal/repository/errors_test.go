@@ -30,7 +30,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 
 	// One real user first, so the update paths have a row to aim at before the pool
 	// goes away and are failing on the query, not on a missing record.
-	user, key, err := users.RegisterUserWithKey(ctx, "closed_pool", "closed_fp")
+	user, key, err := users.RegisterUserWithSSHKey(ctx, "closed_pool", "closed_fp")
 	require.NoError(t, err)
 
 	sqlDB, err := database.DB()
@@ -50,7 +50,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "registering a user",
-			call: func() error { _, _, err := users.RegisterUserWithKey(ctx, "another", "another_fp"); return err },
+			call: func() error { _, _, err := users.RegisterUserWithSSHKey(ctx, "another", "another_fp"); return err },
 			want: "register user transaction",
 		},
 		{

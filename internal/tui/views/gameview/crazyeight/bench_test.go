@@ -10,6 +10,7 @@ import (
 	logic "github.com/Pieczasz/tty-cards/internal/game/crazyeight"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,7 @@ func benchTable(b *testing.B, n int) *model {
 		User:  &db.User{ID: testutil.UID(1), Username: "p1"},
 		Width: 120, Height: 40, Theme: styles.NewTheme(true),
 	}
-	m, ok := New(global, engine, "crazy_eights").(*model)
+	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights").(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
 	return m

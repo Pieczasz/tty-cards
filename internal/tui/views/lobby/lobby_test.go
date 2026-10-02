@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
@@ -63,6 +64,25 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	return m, l
 }
 
+// startGame seats a guest, readies the table and returns the start event the view's own
+// feed delivered: that event is the only thing that can carry a table to the view.
+func startGame(t *testing.T, m *model, l *lobby.Lobby) lobby.Event {
+	t.Helper()
+	guest := addGuest(t, m, l, 2, "bob")
+	registry := m.global.GameRegistry
+	require.NoError(t, l.ToggleReady(l.Leader(), registry))
+	require.NoError(t, l.ToggleReady(guest, registry))
+	// Closing the engine is what ends the lobby's result watcher.
+	t.Cleanup(l.ActiveGame().Close)
+	for ev := range m.lobbyChan {
+		if ev.Type == lobby.EventGameStarted {
+			return ev
+		}
+	}
+	t.Fatal("the lobby feed closed before the game started")
+	return lobby.Event{}
+}
+
 func press(m *model, key string) (tea.Model, tea.Cmd) {
 	return m.Update(tuitest.Key(key))
 }
@@ -76,24 +96,23 @@ func routeOf(t *testing.T, cmd tea.Cmd) router.Route {
 	return change.ViewName
 }
 
-func TestHandleKey_Navigation(t *testing.T) {
+// A seated player cannot leave for a menu: tui.New routes every menu back to this lobby,
+// so a global shortcut would only tear the screen down and rebuild it. The lobby neither
+// advertises nor handles them, and quitting still works.
+func TestHandleKey_GlobalShortcutsAreNotOffered(t *testing.T) {
 	t.Parallel()
+	m, _ := leaderView(t)
 
-	cases := map[string]router.Route{
-		"n": router.RouteLobbyCreate,
-		"f": router.RouteLobbyJoin,
-		"p": router.RouteProfile,
-		"t": router.RouteLeaderboard,
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "ctrl+c - Quit")
+	for _, action := range []string{"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard"} {
+		assert.NotContains(t, out, action)
 	}
 
-	for key, want := range cases {
-		t.Run("key_"+key, func(t *testing.T) {
-			t.Parallel()
-			m, _ := leaderView(t)
-			_, cmd := press(m, key)
-			assert.Equal(t, want, routeOf(t, cmd))
-			assert.Nil(t, m.lobbyChan, "navigating away releases the lobby subscription")
-		})
+	for _, key := range []string{"n", "f", "p", "t"} {
+		_, cmd := press(m, key)
+		assert.Nil(t, cmd, "%q must not navigate", key)
+		assert.NotNil(t, m.lobbyChan, "%q must keep the lobby subscription", key)
 	}
 }
 
@@ -197,13 +216,11 @@ func TestHandleLobbyEvent_ClosedGoesHome(t *testing.T) {
 // armed so the view keeps receiving lobby events.
 func TestHandleLobbyEvent_UnknownGameKeepsListening(t *testing.T) {
 	t.Parallel()
-	m, _ := leaderView(t)
+	m, l := leaderView(t)
+	started := startGame(t, m, l)
 	m.global.GameRegistry = game.NewRegistry() // game no longer registered
 
-	engine := game.NewEngine(&crazyeight.Rules{},
-		[]*game.Player{{ID: "1"}, {ID: "2"}}, nil)
-
-	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Engine: engine, src: m.lobbyChan})
+	_, cmd := m.Update(lobbyMsg{Event: started, src: m.lobbyChan})
 	require.NotNil(t, cmd, "listener must stay armed")
 	assert.NotNil(t, m.lobbyChan, "subscription is retained")
 }
@@ -327,33 +344,10 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	cmd := m.Init()
 
 	assert.Equal(t, router.GameRoute("crazy_eights"), routeOf(t, cmd))
+	change, ok := cmd().(router.ChangeViewMsg)
+	require.True(t, ok)
+	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat resumed is this session's own")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
-}
-
-// seatedIn is what separates a reconnecting player from one the engine already took for
-// idling: the second keeps the roster instead of being dropped back into a game with no
-// seat for them.
-func TestSeatedIn(t *testing.T) {
-	t.Parallel()
-	m, _ := leaderView(t)
-	t.Cleanup(m.Close)
-
-	engine := game.NewEngine(&crazyeight.Rules{}, []*game.Player{{ID: testutil.SeatID(1)}, {ID: testutil.SeatID(2)}}, nil)
-	assert.True(t, m.seatedIn(engine), "alice is player 1")
-
-	taken := game.NewEngine(&crazyeight.Rules{}, []*game.Player{{ID: "7"}, {ID: "8"}}, nil)
-	assert.False(t, m.seatedIn(taken), "a seat the engine removed is not a seat")
-
-	// The lobby reopens a finished table on its own goroutine, so for a moment
-	// ActiveGame still hands it back. Routing there bounced the player onto a
-	// game-over screen whose esc brought them straight back here.
-	rules := &crazyeight.Rules{}
-	finished := game.NewEngine(rules, []*game.Player{{ID: testutil.SeatID(1)}, {ID: testutil.SeatID(2)}}, rules.InitialDeck())
-	t.Cleanup(finished.Close)
-	require.NoError(t, finished.Start())
-	finished.RemovePlayer(testutil.SeatID(2))
-	require.True(t, finished.IsFinished())
-	assert.False(t, m.seatedIn(finished), "a finished table has no seat to return to")
 }
 
 func TestRating(t *testing.T) {
@@ -415,19 +409,21 @@ func TestGamePlayerBounds(t *testing.T) {
 }
 
 // The whole point of the lobby screen is that it hands the player over when the game
-// starts; the payload is the engine every seat then renders from.
+// starts; the payload is this session's own seat at the table that started, never the
+// engine behind it.
 func TestHandleLobbyEvent_GameStartedRoutesToTheGameView(t *testing.T) {
 	t.Parallel()
-	m, _ := leaderView(t)
-	engine := game.NewEngine(&crazyeight.Rules{}, []*game.Player{{ID: "1"}, {ID: "2"}}, nil)
+	m, l := leaderView(t)
+	started := startGame(t, m, l)
 
-	_, cmd := m.Update(lobbyMsg{Type: lobby.EventGameStarted, Engine: engine, src: m.lobbyChan})
+	_, cmd := m.Update(lobbyMsg{Event: started, src: m.lobbyChan})
 
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
 	require.True(t, ok)
 	assert.Equal(t, router.GameRoute("crazy_eights"), change.ViewName)
-	assert.Same(t, engine, change.Context, "the view is handed the engine that started")
+	require.NotNil(t, change.Payload.Table)
+	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat is bound to this session's player")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
 }
 
@@ -449,15 +445,18 @@ func TestHandleLobbyEvent_GameStartedWithoutAnEngineKeepsListening(t *testing.T)
 func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 	t.Parallel()
 
-	for _, evType := range []lobby.EventType{lobby.EventSettingsUpdated, lobby.EventPlayersUpdated} {
-		t.Run(evType.String(), func(t *testing.T) {
+	for name, evType := range map[string]lobby.EventType{
+		"settings updated": lobby.EventSettingsUpdated,
+		"players updated":  lobby.EventPlayersUpdated,
+	} {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
 
 			require.NoError(t, l.SetPrivate(l.Leader(), true))
 			require.NoError(t, l.SetRanked(l.Leader(), true))
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 5, 2, 6))
+			require.NoError(t, l.SetMaxPlayers(l.Leader(), 5, testRegistry()))
 			m.cursor = cursorFirstGuest + 4 // a row for a guest who has since left
 
 			_, cmd := m.Update(lobbyMsg{Type: evType, src: m.lobbyChan})
@@ -755,7 +754,7 @@ func TestLobbyView_FitsTheTerminal(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 6, 2, 6))
+			require.NoError(t, l.SetMaxPlayers(l.Leader(), 6, testRegistry()))
 			for i := 2; i <= 6; i++ {
 				addGuest(t, m, l, uint64(i), fmt.Sprintf("player-number-%d", i))
 			}
@@ -801,5 +800,30 @@ func TestCapRoster_TrimsToItsBudgetAndSaysHowManyItHid(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 			assert.LessOrEqual(t, len(got), max(tc.maxRows, 0), "never more rows than it was given")
 		})
+	}
+}
+
+// The fit check has to measure the gap it then lays out: measured four columns short,
+// a roster row one ready mark too wide for the terminal was laid out side by side
+// anyway, and lipgloss wrapped " - Ready" onto a line of its own under the settings.
+func TestView_AReadyMarkStaysOnItsPlayersRowAt80x24(t *testing.T) {
+	t.Parallel()
+	m, l := leaderView(t)
+	t.Cleanup(m.Close)
+	require.NoError(t, l.SetMaxPlayers(l.Leader(), 6, testRegistry()))
+	for i := 2; i <= 4; i++ {
+		g := addGuest(t, m, l, uint64(i), fmt.Sprintf("load_%04d", i))
+		require.NoError(t, l.ToggleReady(g, m.global.GameRegistry))
+	}
+	m.global.Theme = styles.NewTheme(true)
+	m.global.Width, m.global.Height = 80, 24
+
+	out := tuitest.StripANSI(m.View().Content)
+
+	for i := 2; i <= 4; i++ {
+		name := fmt.Sprintf("load_%04d", i)
+		row := slices.IndexFunc(strings.Split(out, "\n"), func(line string) bool { return strings.Contains(line, name) })
+		require.GreaterOrEqual(t, row, 0, "%s is on the roster", name)
+		assert.Contains(t, strings.Split(out, "\n")[row], "- Ready", "%s's ready mark wrapped off its row:\n%s", name, out)
 	}
 }

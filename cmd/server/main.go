@@ -1,7 +1,6 @@
-// Command server runs terminal-card: the ssh game server on SERVER_PORT and the
+// Command server runs tty-cards: the ssh game server on SERVER_PORT and the
 // read-only stats API on API_PORT, sharing one database, lobby manager and session
-// tracker. With -healthcheck it instead probes a running server's /healthz and exits
-// with its verdict, for the container healthcheck.
+// tracker.
 package main
 
 import (
@@ -29,32 +28,27 @@ import (
 
 	charmssh "charm.land/ssh"
 	"github.com/pires/go-proxyproto"
-	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"golang.org/x/net/netutil"
 )
 
+// compose's stop_grace_period (80s) has to outlast the whole sequential drain:
+// ssh, then the stats api, then two finalizer windows, then otel, whose three
+// providers get 2s each (observability.Setup). See docs/decisions.md #29 for why a
+// match write gets windows rather than an outbox.
 const (
 	sshDrainTimeout      = 30 * time.Second
 	apiDrainTimeout      = 5 * time.Second
 	finalizeDrainTimeout = 15 * time.Second
-	otelDrainTimeout     = 5 * time.Second
+	otelDrainTimeout     = 6 * time.Second
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		os.Exit(healthcheck())
 	}
-	if err := run(); err != nil {
+	if run() != nil {
 		os.Exit(1)
 	}
-}
-
-// fatal reports a failure from before OTel is up. slog's stderr copy of a record is
-// dropped by the log pipeline as a duplicate of its OTLP copy, and there is no OTLP
-// copy yet, so a plain line is the only one that reaches Loki.
-func fatal(err error) error {
-	fmt.Fprintln(os.Stderr, "fatal:", err)
-	return err
 }
 
 func healthcheck() int {
@@ -80,43 +74,43 @@ func healthcheck() int {
 	return 0
 }
 
-func run() (err error) {
-	logLevel := installLogging()
-
-	// Installed here, not in serve, and released only when run returns. Everything
-	// below this line is deferred shutdown work - draining sessions, finalizing
-	// matches, closing the database, flushing telemetry - and it can take the better
-	// part of a minute. Releasing the handler when serve returns restored the default
-	// disposition mid-drain, so a second Ctrl-C during a redeploy killed the process
-	// while a ranked match was still being written.
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(done)
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fatal(fmt.Errorf("load configuration: %w", err))
-	}
-	logLevel.Set(cfg.LogLevel)
+// run keeps the signals registered until the drain is over, so a second SIGTERM
+// cannot kill a shutdown in progress.
+func run() error {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// This defer chain is LIFO and load-bearing; do not reorder it.
-	otelCleanup, err := setupOTel(ctx, cfg)
+	cfg, err := config.Load()
 	if err != nil {
-		return fatal(err)
+		return logExit(ctx, fmt.Errorf("load config: %w", err))
 	}
-	defer otelCleanup()
-	// Every later failure is reported here, once, and before the flush above.
-	defer func() {
-		if err != nil {
-			slog.ErrorContext(ctx, "server exited with error", "error", err)
-		}
-	}()
+	installLogging(cfg.LogLevel)
 
+	stopOTel, err := setupOTel(ctx, cfg)
+	if err != nil {
+		return logExit(ctx, err)
+	}
+	defer stopOTel()
+
+	return logExit(ctx, runServers(ctx, cfg, signals))
+}
+
+// logExit records why the server stopped while the log pipeline is still up to
+// carry it. Before installLogging that is the slog default, plain stderr.
+func logExit(ctx context.Context, err error) error {
+	if err != nil {
+		slog.ErrorContext(ctx, "server exited with error", "error", err)
+	}
+	return err
+}
+
+func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signal) error {
 	database, err := repository.Connect(cfg.DSN(), repository.Pool{
-		MaxOpenConns: cfg.DBMaxOpenConnections,
+		MaxOpenConns: cfg.DBMaxOpenConns,
 		Verbose:      cfg.IsDevelopment(),
 	})
 	if err != nil {
@@ -131,28 +125,18 @@ func run() (err error) {
 			slog.ErrorContext(ctx, "failed to close database", "error", err)
 		}
 	}()
-	if err := observability.RegisterDBStats(sqlDB); err != nil {
-		slog.ErrorContext(ctx, "failed to register database pool metrics", "error", err)
-	}
+	observability.RegisterDBStats(sqlDB)
 
 	userRepo := repository.NewUserRepository(database)
-	matchRepo := repository.NewMatchRepository(database)
-	lobbyManager := lobby.NewManager(ctx, matchRepo)
+	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database))
+	defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)
 
-	defer waitForFinalizers(ctx, lobbyManager)
-
-	// MaxConnections is the player-visible session cap: the tracker refuses the
-	// overflow with a message, while the TCP LimitListener in serve only backstops
-	// handshake floods at twice that, so a full server says so instead of hanging.
-	// The stats api shares it to count who is online.
 	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
 	server, err := newSSHServer(cfg, userRepo, lobbyManager, tracker)
 	if err != nil {
 		return err
 	}
-	if err := observability.RegisterSessionGauge(tracker.Count); err != nil {
-		slog.ErrorContext(ctx, "failed to register the session gauge", "error", err)
-	}
+	observability.RegisterSessionGauge(tracker.Count)
 
 	stopAPI, apiErr, err := startStatsAPI(ctx, cfg, tracker, lobbyManager, userRepo, sqlDB.PingContext)
 	if err != nil {
@@ -164,36 +148,9 @@ func run() (err error) {
 		config:     cfg,
 		sshServer:  server,
 		apiErr:     apiErr,
-		signals:    done,
+		signals:    signals,
 		onShutdown: lobbyManager.BeginShutdown,
 	})
-}
-
-func installLogging() *slog.LevelVar {
-	level := new(slog.LevelVar)
-	level.Set(slog.LevelInfo)
-	slog.SetDefault(slog.New(slog.NewMultiHandler(
-		slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}),
-		levelGate{Handler: otelslog.NewHandler("terminal-card"), level: level},
-	)))
-	return level
-}
-
-// levelGate holds the OTLP handler to the same live level as the stderr one, which
-// the bridge does not do for itself.
-type levelGate struct {
-	slog.Handler
-	level slog.Leveler
-}
-
-func (g levelGate) Enabled(_ context.Context, l slog.Level) bool { return l >= g.level.Level() }
-
-func (g levelGate) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return levelGate{Handler: g.Handler.WithAttrs(attrs), level: g.level}
-}
-
-func (g levelGate) WithGroup(name string) slog.Handler {
-	return levelGate{Handler: g.Handler.WithGroup(name), level: g.level}
 }
 
 func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
@@ -210,31 +167,15 @@ func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
 	}, nil
 }
 
-// waitForFinalizers is the last thing between a finished ranked match and losing it:
-// the finalizers write asynchronously, so shutdown has to outlive them.
-//
-// Two bounded windows rather than a durable queue, deliberately. The alternative is an
-// outbox table written at game end and drained on boot, which buys nothing here that
-// the grace period does not: the write it protects is a single short transaction
-// against a database in the same compose project. What it costs is a schema, a drain
-// path, and a second way for a match to be recorded.
-//
-// Two things make that trade honest, and both must hold:
-//   - compose's stop_grace_period must exceed the whole sequential drain (30s ssh +
-//     5s api + 2x15s here + 5s otel = 70s), or the runtime SIGKILLs us mid-write and
-//     the windows below never get to expire. It is set to 80s.
-//   - the give-up below is not silent: it logs at ERROR and the finalizer path counts
-//     observability.MatchFinalize(outcome="dropped"), which is alertable.
-//
-// So the residual risk is stated rather than removed: a match that finishes in the
-// last seconds of a deploy, whose write then blocks for 30s, is lost from history.
-func waitForFinalizers(ctx context.Context, lobbyManager *lobby.Manager) {
-	if lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
+// waitForFinalizers keeps the process alive while finished ranked matches are still
+// being written, and says so at ERROR, which is alertable, when it gives up on them.
+func waitForFinalizers(ctx context.Context, finalizersDone func(timeout time.Duration) bool) {
+	if finalizersDone(finalizeDrainTimeout) {
 		return
 	}
 	slog.WarnContext(ctx, "match finalizers exceeded their deadline; giving them one more window",
 		"timeout", finalizeDrainTimeout)
-	if !lobbyManager.WaitForFinalizers(finalizeDrainTimeout) {
+	if !finalizersDone(finalizeDrainTimeout) {
 		slog.ErrorContext(ctx, "abandoning match finalizers; a finished match may be missing from history",
 			"timeout", finalizeDrainTimeout)
 	}
@@ -261,8 +202,6 @@ func newSSHServer(
 	return server, nil
 }
 
-// startStatsAPI takes interfaces, not the concrete tracker and manager: a nil
-// *SessionTracker in an interface is not nil, and would pass NewServer's check.
 func startStatsAPI(
 	ctx context.Context,
 	cfg *config.Config,
@@ -273,13 +212,12 @@ func startStatsAPI(
 ) (func(), <-chan error, error) {
 	addr := net.JoinHostPort(cfg.ServerHost, strconv.Itoa(cfg.APIPort))
 	srv, err := httpapi.NewServer(addr, httpapi.Deps{
-		Sessions:          sessions,
-		Lobbies:           lobbies,
-		Users:             users,
-		AllowOrigin:       cfg.APIAllowOrigin,
-		RequestsPerMinute: cfg.APIRequestsPerMinute,
-		TrustedProxy:      cfg.APITrustProxy,
-		// Same networks the PROXY header is trusted from: in compose, exactly nginx's.
+		Sessions:             sessions,
+		Lobbies:              lobbies,
+		Users:                users,
+		AllowOrigin:          cfg.APIAllowOrigin,
+		RequestsPerMinute:    cfg.APIRequestsPerMinute,
+		TrustedProxy:         cfg.APITrustProxy,
 		TrustedProxyNetworks: cfg.ProxyTrustedCIDRs,
 		Health:               health,
 	})
@@ -311,10 +249,9 @@ type sshServer interface {
 }
 
 type serveDeps struct {
-	config    *config.Config
-	sshServer sshServer
-	apiErr    <-chan error
-	// signals is owned by run, which keeps it armed across the whole shutdown drain.
+	config     *config.Config
+	sshServer  sshServer
+	apiErr     <-chan error
 	signals    <-chan os.Signal
 	onShutdown func()
 }
@@ -332,11 +269,8 @@ func serve(ctx context.Context, d serveDeps) error {
 		_ = listener.Close()
 		return err
 	}
-	defer func() {
-		if err := acceptListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			slog.WarnContext(ctx, "failed to close listener", "error", err)
-		}
-	}()
+	// Shutdown already closed it on the normal path; this covers an early return.
+	defer func() { _ = acceptListener.Close() }()
 
 	slog.InfoContext(ctx, "starting ssh server",
 		"address", addr,
@@ -353,8 +287,6 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
-	// Every way out drains, and a failure's teardown ends live matches the same way a
-	// deploy does, so they must not be rated either.
 	defer drainServer(d.onShutdown, server)
 	select {
 	case err := <-serveErr:
@@ -401,12 +333,6 @@ func drainServer(onShutdown func(), server sshServer) {
 	stopServer(server)
 }
 
-// stopServer drains in-flight sessions, then closes whatever is left.
-//
-// A table still playing when the deploy lands is the normal case, not a failed
-// shutdown: treating the drain deadline as an error reported a healthy redeploy as a
-// failure and, worse, returned without ever closing the server, so every session
-// stayed open until the runtime killed the process.
 func stopServer(server sshServer) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), sshDrainTimeout)
 	defer cancel()
@@ -414,7 +340,6 @@ func stopServer(server sshServer) {
 		slog.WarnContext(shutdownCtx, "sessions outlasted the drain window; closing them",
 			"error", err, "timeout", sshDrainTimeout)
 	}
-	// Shutdown waits, Close is what lets go, so it runs on both paths.
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
 	}

@@ -104,10 +104,8 @@ func (m *Manager) generateLobbyCodeLocked() (string, error) {
 	raw := make([]byte, lobbyCodeLength)
 	for range lobbyCodeAttempts {
 		for i := range raw {
-			n, err := rand.Int(rand.Reader, charsetLen)
-			if err != nil {
-				return "", fmt.Errorf("generate lobby code: %w", err)
-			}
+			// crypto/rand cannot fail on Go 1.24+: a broken source crashes the process.
+			n, _ := rand.Int(rand.Reader, charsetLen)
 			raw[i] = charset[n.Int64()]
 		}
 		if code := string(raw); m.lobbies[code] == nil {
@@ -273,9 +271,7 @@ func (m *Manager) LeaveLobby(p *game.Player) {
 	leave, found := l.detachPlayerLocked(p)
 	code := l.code
 	l.mu.Unlock()
-	if found {
-		delete(m.playerLobby, p.ID)
-	}
+	delete(m.playerLobby, p.ID)
 	m.mu.Unlock()
 
 	if !found {
