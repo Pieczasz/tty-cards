@@ -1,7 +1,7 @@
 package poker
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 
 	"github.com/stretchr/testify/require"
 )

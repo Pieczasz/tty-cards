@@ -10,7 +10,7 @@ payment, and no service level. It may be slow, restarted, broken, or switched of
 without notice.
 
 The source code is published under the **MIT Licence**
-(<https://github.com/Pieczasz/terminal-card/blob/main/LICENSE>). That licence covers
+(<https://github.com/Pieczasz/tty-cards/blob/main/LICENSE>). That licence covers
 the *code*, and lets you run your own copy. It is not a promise about this particular
 server, which is what these terms are about.
 

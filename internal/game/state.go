@@ -3,7 +3,7 @@ package game
 import (
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // State is guarded by the owning Engine's mutex: every Rules method and every

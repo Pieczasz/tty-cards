@@ -3,7 +3,7 @@ package ginrummy
 import (
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // applyLayoffs lays opponent deadwood off onto knockerMelds, repeating until no card

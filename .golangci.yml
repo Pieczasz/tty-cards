@@ -112,7 +112,7 @@ linters:
           list-mode: lax
           files: ["!**/cmd/server/**", "!**/internal/repository/**", "!$test"]
           deny:
-            - pkg: github.com/Pieczasz/terminal-card/internal/repository
+            - pkg: github.com/Pieczasz/tty-cards/internal/repository
               desc: only cmd/server (the composition root) may import the GORM implementations; depend on the internal/db interfaces
         # An allow-list, so a new dependency is a decision rather than a default: the
         # rules and engine know nothing of the database, the TUI or lobbies. gametest
@@ -122,9 +122,9 @@ linters:
           files: ["**/internal/game/**", "!**/internal/game/gametest/**", "!$test"]
           allow:
             - $gostd
-            - github.com/Pieczasz/terminal-card/internal/deck
-            - github.com/Pieczasz/terminal-card/internal/broadcaster
-            - github.com/Pieczasz/terminal-card/internal/game
+            - github.com/Pieczasz/tty-cards/internal/deck
+            - github.com/Pieczasz/tty-cards/internal/broadcaster
+            - github.com/Pieczasz/tty-cards/internal/game
             - uuid
     dupl:
       threshold: 120

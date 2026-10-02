@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/game/shed"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/shed"
 )
 
 // Rules implements Uno; see the Deviation notes for where it departs from the box.

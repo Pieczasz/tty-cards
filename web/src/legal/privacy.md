@@ -1,6 +1,6 @@
 tty.cards is an SSH server that runs card games in your terminal, plus a small static
 website. It is open source under the MIT licence, so every line that touches your data
-is readable at <https://github.com/Pieczasz/terminal-card>. This policy describes what
+is readable at <https://github.com/Pieczasz/tty-cards>. This policy describes what
 that code actually does.
 
 ---

@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/Pieczasz/terminal-card)](https://go.dev/)
 [![License](https://img.shields.io/github/license/Pieczasz/terminal-card)](./LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Pieczasz/terminal-card/test.yml?branch=main)](https://github.com/Pieczasz/terminal-card/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Pieczasz/terminal-card/test.yml?branch=main)](https://github.com/Pieczasz/tty-cards/actions)
 
 An SSH server that deals cards. You `ssh` in, you get a full terminal UI, and you
 play against other people connected to the same process. No download, no browser,

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/db"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

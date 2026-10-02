@@ -5,10 +5,10 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	logic "github.com/Pieczasz/terminal-card/internal/game/hearts"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	logic "github.com/Pieczasz/tty-cards/internal/game/hearts"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
 )

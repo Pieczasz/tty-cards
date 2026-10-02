@@ -3,9 +3,9 @@ package gameview
 import (
 	"image/color"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 )
 
 // Choice is one cell of a ChoicePicker: its label, the suit it stands for and, when

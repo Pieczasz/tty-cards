@@ -3,7 +3,7 @@ package game
 import (
 	"uuid"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // Player is a seat at a table. It holds the scalars the engine, the rules and the

@@ -1,4 +1,4 @@
-module github.com/Pieczasz/terminal-card
+module github.com/Pieczasz/tty-cards
 
 go 1.27.1
 

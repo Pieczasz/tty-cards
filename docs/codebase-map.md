@@ -622,7 +622,7 @@ Regenerate the package diagram in §3 from the compiler:
 
 ```bash
 go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./cmd/... ./internal/... \
-  | sed 's#github.com/Pieczasz/terminal-card/##g'
+  | sed 's#github.com/Pieczasz/tty-cards/##g'
 ```
 
 Caveats when reading graph output for Go:

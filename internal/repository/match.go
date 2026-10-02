@@ -10,8 +10,8 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/elo"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/elo"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

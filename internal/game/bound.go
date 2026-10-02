@@ -3,7 +3,7 @@ package game
 import (
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // BoundEngine is a session-scoped handle: it only submits as its player and only

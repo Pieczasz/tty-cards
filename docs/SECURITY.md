@@ -7,7 +7,7 @@ answer, and a fix in the open.
 ## Reporting a vulnerability
 
 **Use GitHub's private vulnerability reporting:**
-<https://github.com/Pieczasz/terminal-card/security/advisories/new>
+<https://github.com/Pieczasz/tty-cards/security/advisories/new>
 
 That opens a draft advisory only the maintainers can see. Please do not open a
 public issue, a pull request, or a discussion for a vulnerability - a public

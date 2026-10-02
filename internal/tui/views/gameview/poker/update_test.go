@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	logic "github.com/Pieczasz/terminal-card/internal/game/poker"
-	"github.com/Pieczasz/terminal-card/internal/tui/tuitest"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/gameview"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

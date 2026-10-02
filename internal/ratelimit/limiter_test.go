@@ -8,7 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

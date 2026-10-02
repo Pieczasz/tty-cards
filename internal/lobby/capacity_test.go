@@ -3,7 +3,7 @@ package lobby
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"github.com/stretchr/testify/require"
 )

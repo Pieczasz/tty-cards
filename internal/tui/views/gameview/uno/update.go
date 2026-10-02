@@ -1,8 +1,8 @@
 package uno
 
 import (
-	logic "github.com/Pieczasz/terminal-card/internal/game/uno"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	logic "github.com/Pieczasz/tty-cards/internal/game/uno"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
 )

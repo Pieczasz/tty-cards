@@ -5,7 +5,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 func deadwoodPoints(c deck.Card) int { return deck.PipValue(c.Rank) }

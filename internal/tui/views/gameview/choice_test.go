@@ -3,8 +3,8 @@ package gameview
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

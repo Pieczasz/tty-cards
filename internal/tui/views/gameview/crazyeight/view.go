@@ -3,9 +3,9 @@ package crazyeight
 import (
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
-	"github.com/Pieczasz/terminal-card/internal/tui/views/gameview"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/gameview"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"

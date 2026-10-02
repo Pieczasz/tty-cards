@@ -3,19 +3,19 @@
 package catalog
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
-	crazyeightrules "github.com/Pieczasz/terminal-card/internal/game/crazyeight"
-	ginrummyrules "github.com/Pieczasz/terminal-card/internal/game/ginrummy"
-	heartsrules "github.com/Pieczasz/terminal-card/internal/game/hearts"
-	pokerrules "github.com/Pieczasz/terminal-card/internal/game/poker"
-	unorules "github.com/Pieczasz/terminal-card/internal/game/uno"
-	crazyeightview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/crazyeight"
-	ginrummyview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/ginrummy"
-	heartsview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/hearts"
-	pokerview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/poker"
-	unoview "github.com/Pieczasz/terminal-card/internal/tui/views/gameview/uno"
+	crazyeightrules "github.com/Pieczasz/tty-cards/internal/game/crazyeight"
+	ginrummyrules "github.com/Pieczasz/tty-cards/internal/game/ginrummy"
+	heartsrules "github.com/Pieczasz/tty-cards/internal/game/hearts"
+	pokerrules "github.com/Pieczasz/tty-cards/internal/game/poker"
+	unorules "github.com/Pieczasz/tty-cards/internal/game/uno"
+	crazyeightview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/crazyeight"
+	ginrummyview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/ginrummy"
+	heartsview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/hearts"
+	pokerview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/poker"
+	unoview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/uno"
 
 	tea "charm.land/bubbletea/v2"
 )

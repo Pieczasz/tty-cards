@@ -3,9 +3,9 @@ package uno
 import (
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 
-	"github.com/Pieczasz/terminal-card/internal/game/shed"
+	"github.com/Pieczasz/tty-cards/internal/game/shed"
 )
 
 // State holds Uno-specific game state stored in game.State.Extra.

@@ -3,7 +3,7 @@ package hearts
 import (
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // Phase is where a hand is. The zero value is PhasePassing, the phase every hand but

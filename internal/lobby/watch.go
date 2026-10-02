@@ -3,9 +3,9 @@ package lobby
 import (
 	"log/slog"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/observability"
 )
 
 // watchGameLocked starts the goroutine that persists the result and counts engine

@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/broadcaster"
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/elo"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/elo"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/observability"
 )
 
 // Lobby is one table: a leader, the guests who joined, the settings the leader chose,

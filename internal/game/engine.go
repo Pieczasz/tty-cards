@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/broadcaster"
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 // ErrInvalidState means State.Extra is not the type the Rules put there: a wiring bug,

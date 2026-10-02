@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 var (
