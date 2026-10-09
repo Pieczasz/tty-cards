@@ -430,8 +430,8 @@ is an honest result.
 
 **Consequences.** A player cannot tell a damped match from an unrated one from the
 outside; both read as "no Elo change". `unratedReason` logs which of the three it
-was, and the metric label - `EndReason.String()` - distinguishes them. An abandoned match with no standings
-at all writes nothing and counts as `dropped`.
+was, and the metric label - `EndReason.String()` - distinguishes them. A match with no standings
+at all, whatever ended it, writes nothing and counts as `dropped`.
 
 `EndReasonInterrupted` (2026-09-23, `141f979`) is a fourth, partial case: it stays
 rated, but only against its leavers
