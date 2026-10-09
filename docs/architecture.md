@@ -625,8 +625,8 @@ engine's.
   handle. Do not add one.
 - Rules may mutate `*State` freely under the engine lock.
 - `ValidateAction` rejects cleanly; an error from `ApplyAction` or `AfterAction`
-  finishes the game as `EndReasonRulesError` (state may be half-applied) ->
-  **unrated** persistence. Anything checkable up front belongs in
+  ends the game as `endGameLocked(nil, EndReasonRulesError)`, with no winner and
+  without asking `Standings` (state may be half-applied) -> **unrated** persistence. Anything checkable up front belongs in
   `ValidateAction`.
 - Optional, probed by type assertion: `PlayerLeaveHandler`,
   `TurnTimeoutHandler`, `TurnDurationHandler`, `StandingScorer`.
@@ -746,8 +746,8 @@ before declaring a forfeit.
 
 Every way a table ends goes through `endGameLocked(winner, reason)`: `Finished`, the
 clock stopped, the winner recorded and `EventGameEnded` broadcast, in one place.
-`finishGameLocked` asks the rules for the winner first; `settleAfterLeaveLocked`
-(abandoned, forfeit) and the panic path do not. `stopTurnTimerLocked` also runs from
+`finishGameLocked` asks the rules for the winner first (a win); `settleAfterLeaveLocked`
+(abandoned, forfeit), a rules error and the panic path do not. `stopTurnTimerLocked` also runs from
 `Close`. The engine's `closed` flag is what stops a concurrently-resolved
 timeout re-arming a timer on a closed engine.
 
@@ -907,7 +907,7 @@ metrics carry. An event is a **cue to re-read a snapshot**, never the state itse
 | `EventTurnTimedOut` | `resolveTurnTimeout` | re-sync; a safe move was played |
 | `EventPlayerLeft` | `removePlayerLocked` | re-sync |
 | `EventPlayerIdle` | `removeIfStillIdle` | **the named player's own view quits its program**, which ends the SSH session through the ordinary `releaseSession` path |
-| `EventGameEnded` | `endGameLocked`, reached from `finishGameLocked`, `settleAfterLeaveLocked` and `endOnRulesPanicLocked` | views show the result; the lobby's watcher persists it |
+| `EventGameEnded` | `endGameLocked`, reached from `finishGameLocked`, `applyActionLocked` (a rules error), `settleAfterLeaveLocked` and `endOnRulesPanicLocked` | views show the result; the lobby's watcher persists it |
 | `EventUnknown` | - | zero value, never sent |
 
 `game.StateSnapshot` is the redaction boundary: hand *sizes*, never hand

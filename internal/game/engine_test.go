@@ -224,14 +224,15 @@ func TestEngine_SubmitAction_PostConditionBeforeBroadcast(t *testing.T) {
 	m.On("ValidateAction", mock.Anything, action).Return(nil)
 	m.On("ApplyAction", mock.Anything, action).Return(nil)
 	m.On("AfterAction", mock.Anything, action).Return(assert.AnError)
-	m.On("Standings", mock.Anything).Return([]*Player{players[0], players[1]})
 
 	err := engine.SubmitAction(currentPlayerID, action)
 	require.Error(t, err)
 
 	engine.WithState(func(state *State) {
 		assert.Equal(t, Finished, state.Phase)
+		assert.Nil(t, state.Winner, "nobody wins a table that ended on a defect")
 	})
+	m.AssertNotCalled(t, "Standings", mock.Anything)
 
 	// Broadcast is synchronous under the engine mutex and returns before
 	// SubmitAction does, so by now the events either sit in the buffered channel or
@@ -819,7 +820,6 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	action := MockAction{name: "Boom"}
 	m.On("ValidateAction", mock.Anything, action).Return(nil)
 	m.On("ApplyAction", mock.Anything, action).Return(assert.AnError)
-	m.On("Standings", mock.Anything).Return([]*Player{players[1], players[0]})
 
 	require.ErrorContains(t, engine.SubmitAction(engine.CurrentPlayerID(), action), "apply action")
 
@@ -829,7 +829,9 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	require.Equal(t, []EventType{EventGameEnded}, eventTypes(events),
 		"the half-applied move must not be published, but the table has to be told it is over")
 	assert.Equal(t, EndReasonRulesError, events[0].Reason)
+	assert.Empty(t, events[0].PlayerID, "a half-applied state is not ranked, so it names no winner")
 	m.AssertNotCalled(t, "AfterAction", mock.Anything, action)
+	m.AssertNotCalled(t, "Standings", mock.Anything)
 }
 
 func eventTypes(events []Event) []EventType {

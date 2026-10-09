@@ -334,8 +334,10 @@ func (e *Engine) checkTurnLocked(playerID string, action Action) (*Player, error
 }
 
 func (e *Engine) applyActionLocked(current *Player, action Action) error {
+	// A failed hook may have left the state half-applied, so, like a rules panic, it
+	// ends the table without asking the rules to rank anyone on it.
 	if err := e.state.Rules.ApplyAction(e.state, action); err != nil {
-		e.finishGameLocked(current, EndReasonRulesError)
+		e.endGameLocked(nil, EndReasonRulesError)
 		return fmt.Errorf("apply action: %w", err)
 	}
 
@@ -345,7 +347,7 @@ func (e *Engine) applyActionLocked(current *Player, action Action) error {
 	// the broadcast every client sits on a frame that never updates and the lobby never
 	// records the match.
 	if err := e.state.Rules.AfterAction(e.state, action); err != nil {
-		e.finishGameLocked(current, EndReasonRulesError)
+		e.endGameLocked(nil, EndReasonRulesError)
 		return fmt.Errorf("after action: %w", err)
 	}
 
