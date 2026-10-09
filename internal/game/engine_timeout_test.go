@@ -40,7 +40,7 @@ func (r *timeoutRules) ApplyAction(state *State, action Action) error {
 	return nil
 }
 
-func (r *timeoutRules) Standings(state *State) []*Player { return state.Players }
+func (r *timeoutRules) Standings(state *State) []Standing { return inOrder(state.Players) }
 
 func (r *timeoutRules) TimeoutAction(*State) Action { return r.safe }
 

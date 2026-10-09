@@ -468,11 +468,20 @@ placed, in reverse leave order. `placesLocked` guards the tie branch with
 `left[p.ID] == left[standings[i-1].ID]`, so a leaver can never share a place with
 a seated player.
 
+*Since 2026-10-09 the rules own it.* `Rules.Standings` returns places itself
+(`[]game.Standing`) and `StandingScorer` is gone - it made the engine decode tie
+groups the rules had already worked out, through a second method that had to agree
+with the first. The rule is unchanged: `game.RankByScore` (hearts, gin rummy, the
+shedding games) ranks the seated, then the leavers, last to leave first on a tie,
+and only lets a group share places within itself; poker splits its tie groups at
+the same boundary. The engine only copies the result and marks `Left`.
+
 **Consequences.** A rage-quit cannot become a rated draw. Two leavers with the
 *same* score do still share a place, because splitting them would mint Elo between
 two people who both quit.
 
-**Where.** `internal/game/engine.go` `standingsLocked` and `placesLocked`.
+**Where.** `internal/game/rules.go` `RankByScore`; `internal/game/poker/streets.go`
+`rankPlayers`.
 
 ---
 

@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/Pieczasz/tty-cards/internal/game"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,8 +30,6 @@ func TestGames_EntriesComplete(t *testing.T) {
 		slugs[e.Slug] = true
 
 		assert.NotNil(t, e.Factory(), "rules factory for %q returned nil", e.Name)
-		_, scores := e.Factory().(game.StandingScorer)
-		assert.True(t, scores, "%q must implement StandingScorer so equal scores share a place", e.Name)
 	}
 }
 

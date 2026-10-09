@@ -129,9 +129,10 @@ func standingsRankByFewestCards(t *testing.T, s Shed) {
 	standings := s.Rules.Standings(s.Table(t, 5, 1, 3))
 
 	require.Len(t, standings, 3)
-	assert.Equal(t, "p2", standings[0].ID, "one card is the best position")
-	assert.Equal(t, "p3", standings[1].ID)
-	assert.Equal(t, "p1", standings[2].ID, "five cards is the worst")
+	assert.Equal(t, "p2", standings[0].Player.ID, "one card is the best position")
+	assert.Equal(t, "p3", standings[1].Player.ID)
+	assert.Equal(t, "p1", standings[2].Player.ID, "five cards is the worst")
+	assert.Equal(t, []int{1, 2, 3}, Places(standings))
 }
 
 // Ties keep a stable order, so two players on the same count do not swap places
@@ -143,12 +144,12 @@ func standingsTiesAreStable(t *testing.T, s Shed) {
 
 	require.Len(t, first, 3)
 	for i := range first {
-		assert.Equal(t, first[i].ID, second[i].ID, "position %d must not move between calls", i)
+		assert.Equal(t, first[i].Player.ID, second[i].Player.ID, "position %d must not move between calls", i)
 	}
 }
 
-// Standings and StandingScore have to agree, or the engine splits a genuine draw by
-// slice position and the seat that sorted first takes rating off the seat that did not.
+// A genuine draw shares a place, or the seat that sorted first takes rating off the
+// seat that did not.
 func tiedSeatsShareAPlace(t *testing.T, s Shed) {
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
 	engine := game.NewEngine(s.Rules, players)

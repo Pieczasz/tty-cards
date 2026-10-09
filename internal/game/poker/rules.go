@@ -36,9 +36,6 @@ var (
 	_ game.Rules               = (*Rules)(nil)
 	_ game.PlayerLeaveHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
-	// Without it, deleting StandingScore still compiles and the engine silently
-	// splits every draw by seat order.
-	_ game.StandingScorer = (*Rules)(nil)
 )
 
 // TimeoutAction never risks chips on an absent player's behalf: it checks when that
@@ -118,35 +115,12 @@ func (r *Rules) CheckWinCondition(state *game.State) bool {
 	return extra.MatchComplete
 }
 
-func (r *Rules) Standings(state *game.State) []*game.Player {
+func (r *Rules) Standings(state *game.State) []game.Standing {
 	extra, ok := state.Extra.(*State)
 	if !ok {
 		return nil
 	}
 	return rankPlayers(state, extra)
-}
-
-// StandingScore is the group a player lands in once resultLevel stops separating
-// them - two players who busted on the same hand are a draw, not places i and i+1
-// split by whose ID sorts first. Only equality is read, so the group index is enough;
-// chips alone would not be, since it would tie two busts from different hands.
-func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return 0
-	}
-	ranked := rankPlayers(state, extra)
-	level := resultLevel(state, extra)
-	group := 0
-	for i, q := range ranked {
-		if i > 0 && level(ranked[i-1], q) != 0 {
-			group++
-		}
-		if q.ID == p.ID {
-			return group
-		}
-	}
-	return group
 }
 
 // ActionFold gives up the hand and everything already committed to it.

@@ -406,8 +406,8 @@ func TestRules_Standings_Descending(t *testing.T) {
 	extra.CumulativeScores["p2"] = 90
 	standings := rules.Standings(state)
 	require.Len(t, standings, 2)
-	assert.Equal(t, "p2", standings[0].ID)
-	assert.Equal(t, "p1", standings[1].ID)
+	assert.Equal(t, "p2", standings[0].Player.ID)
+	assert.Equal(t, "p1", standings[1].Player.ID)
 }
 
 func TestRules_CheckWinCondition(t *testing.T) {
@@ -592,9 +592,9 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 	t.Fatalf("the match never ended after %d walled hands", maxHands+5)
 }
 
-// Standings and StandingScore have to agree, or the engine splits a genuine draw by
-// slice position and the seat that sorted first takes rating off the seat that did not.
-func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
+// A genuine draw shares a place, or the seat that sorted first takes rating off the
+// seat that did not.
+func TestRules_Standings_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
 	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}})
 	require.NoError(t, engine.Start())
@@ -762,7 +762,6 @@ func TestRules_NotAGinRummyState(t *testing.T) {
 	require.ErrorIs(t, rules.ApplyAction(state, ActionDrawStock{}), game.ErrInvalidState)
 	assert.Nil(t, rules.Standings(state))
 	assert.Nil(t, rules.TimeoutAction(state))
-	assert.Zero(t, rules.StandingScore(state, &game.Player{ID: "p1"}))
 	assert.False(t, rules.CheckWinCondition(state))
 }
 

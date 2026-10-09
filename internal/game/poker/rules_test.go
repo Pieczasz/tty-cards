@@ -243,7 +243,7 @@ func TestRules_Standings(t *testing.T) {
 		extra.Seats["p1"].Folded = true
 		extra.Seats["p3"].Folded = true
 		standings := (&Rules{}).Standings(state)
-		assert.Equal(t, "p2", standings[0].ID)
+		assert.Equal(t, "p2", standings[0].Player.ID)
 	})
 
 	t.Run("showdown ranks by EvaluateHand then stable id", func(t *testing.T) {
@@ -271,9 +271,9 @@ func TestRules_Standings(t *testing.T) {
 			{Rank: deck.King, Suit: deck.Diamonds},
 		}
 		standings := (&Rules{}).Standings(state)
-		assert.Equal(t, "p3", standings[0].ID)
-		assert.Equal(t, "p2", standings[1].ID)
-		assert.Equal(t, "p1", standings[2].ID)
+		assert.Equal(t, "p3", standings[0].Player.ID)
+		assert.Equal(t, "p2", standings[1].Player.ID)
+		assert.Equal(t, "p1", standings[2].Player.ID)
 	})
 }
 
@@ -535,7 +535,6 @@ func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
 
 	assert.False(t, rules.CheckWinCondition(state))
 	assert.Nil(t, rules.Standings(state))
-	assert.Zero(t, rules.StandingScore(state, state.Players[0]))
 	assert.Nil(t, rules.TimeoutAction(state))
 	assert.Zero(t, rules.TurnDuration(state))
 	require.ErrorIs(t, rules.ValidateAction(state, ActionFold{}), game.ErrInvalidState)

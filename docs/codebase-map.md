@@ -351,7 +351,7 @@ classDiagram
         ValidateAction(*State, Action) error
         ApplyAction(*State, Action) error
         CheckWinCondition(*State) bool
-        Standings(*State) []*Player
+        Standings(*State) []Standing
         TimeoutAction(*State) Action
     }
     class TurnDurationHandler {
@@ -362,10 +362,6 @@ classDiagram
         <<optional>>
         OnPlayerLeave(*State, id)
         AfterPlayerRemoved(*State, idx)
-    }
-    class StandingScorer {
-        <<optional>>
-        StandingScore(*State, *Player) int
     }
 
     class Engine {
@@ -456,13 +452,13 @@ classDiagram
 Which optional interfaces each game implements. Each is pinned by a
 `var _ game.X = (*Rules)(nil)` line in its `rules.go`.
 
-| Game | `TurnDurationHandler` | `PlayerLeaveHandler` | `StandingScorer` |
-|---|:-:|:-:|:-:|
-| Crazy Eights | | yes | yes |
-| Uno | | yes | yes |
-| Poker | yes | yes | yes |
-| Hearts | yes | yes | yes |
-| Gin Rummy | yes | | yes |
+| Game | `TurnDurationHandler` | `PlayerLeaveHandler` |
+|---|:-:|:-:|
+| Crazy Eights | | yes |
+| Uno | | yes |
+| Poker | yes | yes |
+| Hearts | yes | yes |
+| Gin Rummy | yes | |
 
 Per-game state lives in `State.Extra`. Owner: [`architecture.md` §4](architecture.md#4-contracts-the-ones-that-bite).
 
@@ -521,7 +517,7 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Pattern | Where | Why it is here |
 |---|---|---|
 | Strategy | `game.Rules`, five implementations | a sixth game touches the engine in no way |
-| Optional interface (capability probe) | `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface, kept for hooks whose absence is a valid behaviour - `TimeoutAction` left the list for `Rules` because its absence meant a table with no clock |
+| Optional interface (capability probe) | `TurnDurationHandler`, `PlayerLeaveHandler`, `router.Closer` | opt-in behaviour without a fat interface, kept for hooks whose absence is a valid behaviour - `TimeoutAction` left the list for `Rules` because its absence meant a table with no clock, and `StandingScorer` went when `Standings` started returning places |
 | Single registration point | `catalog.Games`, each `Entry` embedding a `game.Module` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs, and `game.NewRegistry` panics on a half-declared or duplicate module |
 | Facade | `game.BoundEngine` | the safe path is the default; `Frame`'s callback is the one way to whole-table state, and there is no `Engine()` escape hatch ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
 | Embedded base type | `gameview.Session` | every view gets `Init`, binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free; `gameview.RenderHandOver` and `ChoicePicker` are the shared hand-over screen and suit/colour picker |
@@ -628,7 +624,7 @@ go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./cmd/... ./internal/... \
 Caveats when reading graph output for Go:
 
 - **`code-review-graph dead-code` over-reports.** It lists the optional-interface
-  methods (`TimeoutAction`, `OnPlayerLeave`, `StandingScore`, …) as dead because
+  methods (`OnPlayerLeave`, `TurnDuration`, …) as dead because
   they are reached through a type assertion. `make deadcode` is authoritative.
 - **Same-named symbols merge.** Its top hub, `Equal`, is `Player.Equal` fused with
   testify's `assert.Equal`. The meaningful bridges it reports are

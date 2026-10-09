@@ -337,10 +337,10 @@ func TestRules_CheckWinCondition_AndStandings(t *testing.T) {
 	extra.CumulativeScores["p4"] = 80
 	standings := rules.Standings(state)
 	require.Len(t, standings, 4)
-	assert.Equal(t, "p2", standings[0].ID)
-	assert.Equal(t, "p3", standings[1].ID)
-	assert.Equal(t, "p1", standings[2].ID)
-	assert.Equal(t, "p4", standings[3].ID)
+	assert.Equal(t, "p2", standings[0].Player.ID)
+	assert.Equal(t, "p3", standings[1].Player.ID)
+	assert.Equal(t, "p1", standings[2].Player.ID)
+	assert.Equal(t, "p4", standings[3].Player.ID)
 }
 
 func TestRules_TimeoutAction(t *testing.T) {
@@ -714,9 +714,9 @@ func TestRules_ApplyAction_QueenOfSpadesDoesNotBreakHearts(t *testing.T) {
 	assert.False(t, extra.HeartsBroken, "the queen is a point card, not a heart")
 }
 
-// Standings and StandingScore have to agree, or the engine splits a genuine draw by
-// slice position and the seat that sorted first takes rating off the seat that did not.
-func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
+// A genuine draw shares a place, or the seat that sorted first takes rating off the
+// seat that did not.
+func TestRules_Standings_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
 	engine := game.NewEngine(&Rules{}, fourPlayers())
 	require.NoError(t, engine.Start())
@@ -736,10 +736,9 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 // A table that ends mid-hand on a disconnect has a live hand nobody has scored yet.
 // Those points decide the winner; once scoreHand folds them into the totals they must
 // not be counted a second time, or every completed match doubles its last hand.
-func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
+func TestRules_Standings_CountTheLiveHandExactlyOnce(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
-	engine := game.NewEngine(rules, fourPlayers())
+	engine := game.NewEngine(&Rules{}, fourPlayers())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -749,13 +748,13 @@ func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 		extra.HandPoints = map[string]int{"p1": 0, "p2": 0, "p3": 0, "p4": 25}
 		extra.Phase = PhaseTrickPlay
 
-		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "mid-hand, the live hand counts")
-		assert.Equal(t, 0, rules.StandingScore(s, s.Players[0]))
+		assert.Equal(t, 25, standingScore(extra, s.Players[3]), "mid-hand, the live hand counts")
+		assert.Equal(t, 0, standingScore(extra, s.Players[0]))
 
 		// scoreHand has run: totals now hold the hand, and HandPoints still does too.
 		extra.CumulativeScores["p4"] = 25
 		extra.Phase = PhaseHandOver
-		assert.Equal(t, 25, rules.StandingScore(s, s.Players[3]), "scored once, not twice")
+		assert.Equal(t, 25, standingScore(extra, s.Players[3]), "scored once, not twice")
 	})
 }
 
@@ -896,7 +895,6 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 		require.ErrorIs(t, rules.ApplyAction(state, ActionNextHand{}), game.ErrInvalidState)
 		assert.False(t, rules.CheckWinCondition(state))
 		assert.Nil(t, rules.Standings(state))
-		assert.Zero(t, rules.StandingScore(state, &game.Player{ID: "p1"}))
 		assert.Nil(t, rules.TimeoutAction(state))
 	})
 }

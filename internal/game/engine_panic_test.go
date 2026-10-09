@@ -17,7 +17,7 @@ func (*applyPanicRules) ApplyAction(*State, Action) error { panic("rules bug in 
 type standingsPanicRules struct{ *timeoutRules }
 
 func (*standingsPanicRules) TimeoutAction(*State) Action { panic("rules bug in auto-play") }
-func (*standingsPanicRules) Standings(*State) []*Player  { panic("rules bug in standings") }
+func (*standingsPanicRules) Standings(*State) []Standing { panic("rules bug in standings") }
 
 func endedEvent(t *testing.T, events []Event) Event {
 	t.Helper()

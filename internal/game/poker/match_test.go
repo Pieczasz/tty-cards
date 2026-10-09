@@ -130,7 +130,7 @@ func TestFinishHand(t *testing.T) {
 		finishHand(state, extra)
 
 		assert.True(t, extra.MatchComplete)
-		assert.Equal(t, "p1", (&Rules{}).Standings(state)[0].ID, "the biggest stack wins the match")
+		assert.Equal(t, "p1", (&Rules{}).Standings(state)[0].Player.ID, "the biggest stack wins the match")
 	})
 }
 
@@ -208,7 +208,7 @@ func TestStandings_BustedPlayersRankByHowLongTheyLasted(t *testing.T) {
 	standings := (&Rules{}).Standings(state)
 
 	assert.Equal(t, []string{"p0", "p2", "p1"},
-		[]string{standings[0].ID, standings[1].ID, standings[2].ID})
+		[]string{standings[0].Player.ID, standings[1].Player.ID, standings[2].Player.ID})
 }
 
 func TestFinishHand_StampsTheHandAPlayerWentOutOn(t *testing.T) {

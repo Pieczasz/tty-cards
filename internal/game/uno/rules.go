@@ -27,7 +27,6 @@ type Rules struct{}
 var (
 	_ game.Rules              = (*Rules)(nil)
 	_ game.PlayerLeaveHandler = (*Rules)(nil)
-	_ game.StandingScorer     = (*Rules)(nil)
 )
 
 // TimeoutAction draws: ValidateAction always accepts a draw, so it cannot be refused.
@@ -262,6 +261,4 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 	state.SetTurn(game.SeatAt(removedIndex-1, n))
 }
 
-func (r *Rules) Standings(state *game.State) []*game.Player { return shed.Standings(state) }
-
-func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return shed.Score(p) }
+func (r *Rules) Standings(state *game.State) []game.Standing { return shed.Standings(state) }

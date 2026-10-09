@@ -18,7 +18,7 @@ func (bindRules) ValidateAction(*State, Action) error { return nil }
 func (bindRules) ApplyAction(*State, Action) error    { return nil }
 func (bindRules) TimeoutAction(*State) Action         { return noopAction{} }
 func (bindRules) CheckWinCondition(*State) bool       { return false }
-func (bindRules) Standings(s *State) []*Player        { return s.Players }
+func (bindRules) Standings(s *State) []Standing       { return inOrder(s.Players) }
 
 // boundHand is the hand slice of a Frame read, which is the one read path views use.
 func boundHand(b *BoundEngine) []deck.Card {

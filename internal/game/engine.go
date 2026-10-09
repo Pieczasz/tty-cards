@@ -260,20 +260,8 @@ func (e *Engine) IsFinished() bool {
 	return e.state.Phase == Finished
 }
 
-// Standing is one player's finishing position.
-type Standing struct {
-	// Player is a copy of the seat's identity - ID, UserID and Name - and nothing the
-	// table still writes, so it is safe to read once the engine lock is gone.
-	Player *Player
-	// Place is 1-based. Players the rules scored equally share one.
-	Place int
-	// Left marks a seat that walked out before the end; it places below every seat
-	// still at the table.
-	Left bool
-}
-
-// Standings returns the finishing order, best first, in one lock hold. Players the
-// rules scored equally share a place; everything else counts up strictly.
+// Standings is the rules' finishing order, best first, in one lock hold, each seat a
+// copy of its identity and marked if it left.
 //
 // A rules panic returns nil, which finalize drops as unrecordable: the lobby's
 // finalize goroutine has nothing above it to recover.
@@ -287,12 +275,11 @@ func (e *Engine) Standings() (standings []Standing) {
 		}
 	}()
 
-	players := e.standingsLocked()
-	places := e.placesLocked(players)
-	standings = make([]Standing, len(players))
-	for i, p := range players {
-		standings[i] = Standing{Place: places[i]}
-		if p != nil {
+	ranked := e.state.Rules.Standings(e.state)
+	standings = make([]Standing, len(ranked))
+	for i, s := range ranked {
+		standings[i] = Standing{Place: s.Place}
+		if p := s.Player; p != nil {
 			standings[i].Player = &Player{ID: p.ID, UserID: p.UserID, Name: p.Name}
 			standings[i].Left = slices.ContainsFunc(e.state.LeftPlayers, func(l *Player) bool { return l.ID == p.ID })
 		}
@@ -367,7 +354,7 @@ func (e *Engine) finishGameLocked(fallback *Player, reason EndReason) {
 	winner := fallback
 	switch standings := e.state.Rules.Standings(e.state); {
 	case len(standings) > 0:
-		winner = standings[0]
+		winner = standings[0].Player
 	case fallback == nil && len(e.state.Players) > 0:
 		winner = e.state.Players[0]
 	}
@@ -489,55 +476,6 @@ func (e *Engine) snapshotLocked() StateSnapshot {
 		})
 	}
 	return snap
-}
-
-func (e *Engine) standingsLocked() []*Player {
-	standings := e.state.Rules.Standings(e.state)
-
-	// State.Players holds no nils (Start deals into every seat, so one would panic
-	// there first), but Standings is the rules' own slice and may.
-	placed := make(map[string]bool, len(standings))
-	for _, p := range standings {
-		if p != nil {
-			placed[p.ID] = true
-		}
-	}
-
-	out := make([]*Player, 0, len(standings)+len(e.state.LeftPlayers))
-	out = append(out, standings...)
-	for _, p := range slices.Backward(e.state.LeftPlayers) {
-		if !placed[p.ID] {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func (e *Engine) placesLocked(standings []*Player) []int {
-	// standingsLocked appends LeftPlayers after the seats the rules placed, so a
-	// leaver's StandingScore was measured against a state they are no longer in -
-	// tying it with a seated player turns a rage-quit into a rated draw. They rank
-	// strictly below everyone still at the table. Two leavers with the same score
-	// still share a place: splitting them mints Elo between people who both quit.
-	left := make(map[string]bool, len(e.state.LeftPlayers))
-	for _, p := range e.state.LeftPlayers {
-		left[p.ID] = true
-	}
-
-	scorer, ok := e.state.Rules.(StandingScorer)
-	tied := func(a, b *Player) bool {
-		return ok && a != nil && b != nil && left[a.ID] == left[b.ID] &&
-			scorer.StandingScore(e.state, a) == scorer.StandingScore(e.state, b)
-	}
-
-	places := make([]int, len(standings))
-	for i, p := range standings {
-		places[i] = i + 1
-		if i > 0 && tied(p, standings[i-1]) {
-			places[i] = places[i-1]
-		}
-	}
-	return places
 }
 
 // currentPlayerLocked is the seat State.CurrentTurn points at, or nil. Caller holds e.mu.
