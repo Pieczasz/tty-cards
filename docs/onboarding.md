@@ -131,7 +131,7 @@ tty-cards/
 │   ├── httpapi/httpapi.go      read-only JSON: /v1/stats, /v1/leaderboard, /healthz
 │   ├── lobby/
 │   │   ├── manager.go          lobby registry, CreateLobby, codes, join limiter, leave, kick
-│   │   ├── errors.go           the sentinels (ErrLobbyFull, ErrNotLeader, …)
+│   │   ├── errors.go           ErrRefused and the refusals it matches
 │   │   ├── lobby.go            one table: roster, settings, ready, start
 │   │   ├── watch.go            the engine watcher: reopen, persist
 │   │   ├── finalize.go         persist a finished match; the rating gate; the

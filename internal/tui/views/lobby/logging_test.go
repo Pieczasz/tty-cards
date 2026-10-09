@@ -1,9 +1,13 @@
 package lobby
 
 import (
+	"errors"
 	"log/slog"
 	"testing"
 
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/crazyeight"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
@@ -100,4 +104,73 @@ func TestNew_SubscriptionFailureIsLoggedUnderTheSessionTraceAndCounted(t *testin
 	assert.True(t, errs[0].SameTrace(global.SessionCtx), "the record carries the session trace")
 	assert.Equal(t, before+1,
 		tuitest.Count(t, testMetrics, "ttycards.broadcaster.subscribe.failures", "stream", "lobby_view"))
+}
+
+// noDealRules is crazy eights whose deal fails, so the engine never starts: a defect
+// in the rules, not something the players did.
+type noDealRules struct{ crazyeight.Rules }
+
+func (*noDealRules) OnGameStart(*game.State) error { return errors.New("no deal") }
+
+// The lobby returns a failure unlogged and a refusal as the player should read it, so
+// this is the one place each is told apart: a start the rules cannot deal is logged
+// once at ERROR under the session's trace and shown as a generic line, while too few
+// players is shown as it is and logged nowhere.
+//
+//nolint:paralleltest // CaptureLogs swaps the process-wide slog.Default
+func TestReady_GenuineStartFailuresAreLoggedOnceRefusalsAreShown(t *testing.T) {
+	tests := []struct {
+		name      string
+		factory   func() game.Rules
+		withGuest bool
+		wantShown string
+		wantLog   bool
+	}{
+		{
+			name: "the rules cannot deal", factory: func() game.Rules { return &noDealRules{} },
+			withGuest: true, wantShown: "something went wrong", wantLog: true,
+		},
+		{
+			name: "too few players is a refusal", factory: func() game.Rules { return &crazyeight.Rules{} },
+			wantShown: "need at least 2 players",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := tuitest.CaptureLogs(t)
+			mod := game.Module{
+				Name: testGameName, Slug: testGameSlug,
+				MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers, Factory: tt.factory,
+			}
+			manager := lobby.NewManager(t.Context(), nil, game.NewRegistry(mod))
+			leaderUser := testUser(1, "alice")
+			l, err := manager.CreateLobby(lobby.NewPlayer(leaderUser), lobby.WithCardGame(testGameSlug))
+			require.NoError(t, err)
+			global := router.GlobalContext{
+				User: leaderUser, LobbyManager: manager, Games: []game.Module{mod},
+				Width: 120, Height: 40, SessionCtx: tuitest.TracedContext(t),
+			}
+			m, ok := New(global, l).(*model)
+			require.True(t, ok)
+			t.Cleanup(m.Close)
+			if tt.withGuest {
+				guest := addGuest(t, m, l, 2, "bob")
+				require.NoError(t, manager.ToggleReady(guest))
+			}
+
+			press(m, "r")
+
+			require.Error(t, m.actionErr)
+			assert.Contains(t, tuitest.StripANSI(m.View().Content), tt.wantShown)
+			errs := logs.AtLeast(slog.LevelWarn)
+			if !tt.wantLog {
+				assert.Empty(t, errs, "a refusal is the player's business, not an error")
+				return
+			}
+			require.Len(t, errs, 1)
+			assert.Equal(t, slog.LevelError, errs[0].Level)
+			assert.True(t, errs[0].SameTrace(global.SessionCtx), "the record carries the session trace")
+			assert.NotContains(t, m.View().Content, "start game engine", "the detail is the log's, not the player's")
+		})
+	}
 }

@@ -138,7 +138,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 		lobby.WithRanked(m.isRanked),
 	)
 	if err != nil {
-		m.err = err
+		m.err = views.PlayerError(m.global.RequestContext(), err)
 		return m, nil
 	}
 	return m, router.NavigateToLobby(l)

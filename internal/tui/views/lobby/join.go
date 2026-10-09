@@ -238,7 +238,7 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	}
 	joined, err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global))
 	if err != nil {
-		m.err = err
+		m.err = views.PlayerError(m.global.RequestContext(), err)
 		// The table may have filled or started while the list was on screen, so show
 		// the player what is actually joinable now instead of a stale row.
 		m.refresh()

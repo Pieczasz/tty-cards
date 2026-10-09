@@ -140,12 +140,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "x", "q":
 		m.showLeaveConfirm = true
 	case "r":
-		// Debug, not Error: nearly every refusal here is the player's own (no seat, too
-		// few players) and is already on their screen, so a held key would flood the log.
-		m.actionErr = m.global.LobbyManager.ToggleReady(self)
-		if m.actionErr != nil {
-			slog.DebugContext(m.global.RequestContext(), "ready refused", "error", m.actionErr)
-		}
+		m.actionErr = views.PlayerError(m.global.RequestContext(), m.global.LobbyManager.ToggleReady(self))
 		m.refresh()
 	default:
 		if m.snap.IsLeader(self) {
@@ -168,7 +163,7 @@ func (m *model) handleLeaderKey(self *game.Player, key string) {
 		m.adjustSetting(self, +1)
 	case "enter":
 		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(m.snap.Guests) {
-			m.actionErr = m.global.LobbyManager.Kick(self, m.snap.Guests[i].Player)
+			m.actionErr = views.PlayerError(m.global.RequestContext(), m.global.LobbyManager.Kick(self, m.snap.Guests[i].Player))
 			m.refresh()
 		}
 	}
@@ -218,7 +213,7 @@ func (m *model) adjustSetting(self *game.Player, delta int) {
 		// guest row has no left/right adjustment, so both rows ignore it.
 		return
 	}
-	m.actionErr = err
+	m.actionErr = views.PlayerError(m.global.RequestContext(), err)
 	m.refresh()
 }
 

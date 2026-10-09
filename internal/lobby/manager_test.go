@@ -34,7 +34,7 @@ func TestManager_New(t *testing.T) {
 	assert.Equal(t, l, m.FindLobbyByPlayer(leader))
 
 	_, err = m.CreateLobby(leader, WithCardGame("testgame"))
-	require.ErrorIs(t, err, ErrAlreadyInLobby)
+	require.ErrorIs(t, err, errAlreadyInLobby)
 
 	_, err = m.CreateLobby(mockPlayer("p2", testutil.UID(2)))
 	require.ErrorIs(t, err, errNoCardGame)
@@ -56,13 +56,13 @@ func TestManager_JoinLobbyByCode(t *testing.T) {
 	assert.Equal(t, 2, l.Snapshot().Players())
 
 	err = joinErr(m.JoinLobbyByCode(l.Code(), guest2))
-	require.ErrorIs(t, err, ErrLobbyFull)
+	require.ErrorIs(t, err, errLobbyFull)
 
 	err = joinErr(m.JoinLobbyByCode("FAKE12XX", guest2))
-	require.ErrorIs(t, err, ErrLobbyNotFound)
+	require.ErrorIs(t, err, errLobbyNotFound)
 
 	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
-	require.ErrorIs(t, err, ErrAlreadyInLobby)
+	require.ErrorIs(t, err, errAlreadyInLobby)
 }
 
 func TestManager_LeaveLobby(t *testing.T) {
@@ -88,7 +88,7 @@ func TestManager_LeaveLobby(t *testing.T) {
 
 	m.LeaveLobby(guest2)
 	_, err := m.FindLobbyByCode(l.Code())
-	require.ErrorIs(t, err, ErrLobbyNotFound)
+	require.ErrorIs(t, err, errLobbyNotFound)
 }
 
 func TestManager_BrowseLobbies_ListsOnlyPublicTables(t *testing.T) {
@@ -176,7 +176,7 @@ func TestManager_Kick(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest2)))
 
-	require.ErrorIs(t, m.Kick(guest, leader), ErrNotLeader)
+	require.ErrorIs(t, m.Kick(guest, leader), errNotLeader)
 	require.ErrorIs(t, m.Kick(intruder, guest), errHostNotInLobby)
 	require.ErrorIs(t, m.Kick(leader, leader), errKickSelf)
 	require.ErrorContains(t, m.Kick(nil, guest), "required")
@@ -184,7 +184,7 @@ func TestManager_Kick(t *testing.T) {
 	assert.False(t, l.HasPlayer(guest))
 	assert.Nil(t, m.FindLobbyByPlayer(guest))
 	assert.True(t, l.HasPlayer(guest2))
-	require.ErrorIs(t, m.Kick(leader, guest), ErrNotInLobby)
+	require.ErrorIs(t, m.Kick(leader, guest), errNotInLobby)
 }
 
 func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
@@ -205,10 +205,10 @@ func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second attempt still under limit.
-	require.ErrorIs(t, joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner)), ErrLobbyNotFound)
+	require.ErrorIs(t, joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner)), errLobbyNotFound)
 	// Third attempt exceeds limit.
 	err = joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner))
-	require.ErrorIs(t, err, ErrJoinRateLimited)
+	require.ErrorIs(t, err, errJoinRateLimited)
 }
 
 func TestValidLobbyCode(t *testing.T) {
@@ -613,7 +613,7 @@ func TestManager_FindLobbyByCode_RefusesAMalformedCode(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	_, err := m.FindLobbyByCode("abc")
-	require.ErrorIs(t, err, ErrInvalidCode)
+	require.ErrorIs(t, err, errInvalidCode)
 }
 
 // RemoveLobby runs after LeaveLobby has dropped every lock, so the code may already

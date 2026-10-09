@@ -3,6 +3,9 @@
 package views
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -21,6 +24,22 @@ const RequestTimeout = 5 * time.Second
 // SessionPlayer is the session user as a seat, or nil before the user is known.
 func SessionPlayer(g router.GlobalContext) *game.Player {
 	return lobby.NewPlayer(g.User)
+}
+
+// errSomethingWentWrong is what the player reads for a failure that was not theirs:
+// the detail is for the log, and on screen it would be noise they cannot act on.
+var errSomethingWentWrong = errors.New("something went wrong, please try again")
+
+// PlayerError is what to show for err, a lobby call's result. A refusal is the
+// player's own doing and is shown as it is, unlogged, so a held key cannot flood the
+// log; anything else is a failure, logged here - the lobby returns it unlogged - and
+// shown as a generic line. nil stays nil.
+func PlayerError(ctx context.Context, err error) error {
+	if err == nil || errors.Is(err, lobby.ErrRefused) {
+		return err
+	}
+	slog.ErrorContext(ctx, "lobby request failed", "error", err)
+	return errSomethingWentWrong
 }
 
 // SessionPlayerID is the seat key the engine and lobby know this user by. It reads the
