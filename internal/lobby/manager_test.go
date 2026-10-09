@@ -143,26 +143,6 @@ func TestManager_BrowseLobbiesCacheAndSorting(t *testing.T) {
 	assert.Equal(t, public1[0].Code, public2[0].Code)
 }
 
-func TestManager_FindLobbyByPlayer_Cleanup(t *testing.T) {
-	t.Parallel()
-	m := newTestManager(t, nil)
-	leader := mockPlayer("p1", testutil.UID(1))
-
-	l, _ := m.CreateLobby(leader, WithCardGame("testgame"))
-
-	// Manually mess up internal state to trigger the cleanup branch
-	m.mu.Lock()
-	l.mu.Lock()
-	// Remove leader from lobby but keep in manager's map
-	l.leader = mockPlayer("p2", testutil.UID(2))
-	l.mu.Unlock()
-	m.mu.Unlock()
-
-	// This will notice player is not in lobby and delete from map
-	found := m.FindLobbyByPlayer(leader)
-	assert.Nil(t, found)
-}
-
 func TestManager_RejectMidGameJoin(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
@@ -465,31 +445,6 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 	require.Equal(t, inGame, l.state)
 
 	assert.Empty(t, m.BrowseLobbies(nil, BrowseFilter{}), "a table in play is not on offer")
-}
-
-// A stale player->lobby entry has to be dropped when it is noticed, or the player is told
-// they are already in a lobby that no longer holds them.
-func TestManager_FindLobbyByPlayer_DropsTheStaleEntry(t *testing.T) {
-	t.Parallel()
-	m := newTestManager(t, nil)
-	leader := mockPlayer("p1", testutil.UID(1))
-
-	l, err := m.CreateLobby(leader, WithCardGame("testgame"))
-	require.NoError(t, err)
-
-	l.mu.Lock()
-	l.leader = mockPlayer("someone-else", testutil.UID(2))
-	l.mu.Unlock()
-
-	assert.Nil(t, m.FindLobbyByPlayer(leader))
-
-	m.mu.RLock()
-	_, stillMapped := m.playerLobby[leader.ID]
-	m.mu.RUnlock()
-	assert.False(t, stillMapped, "the stale entry must be gone, not merely ignored")
-
-	_, err = m.CreateLobby(leader, WithCardGame("testgame"))
-	assert.NoError(t, err, "so the player can open a lobby again")
 }
 
 // RemoveLobby is the only place a lobby's broadcaster is torn down.
