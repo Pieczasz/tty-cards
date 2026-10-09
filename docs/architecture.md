@@ -205,8 +205,11 @@ goroutine, and blocks on a signal, an accept error or an API error. Every exit
 path calls `drainServer` (`BeginShutdown` + graceful SSH stop), so ranked matches
 interrupted by a deploy are recorded **without** Elo. The SSH stop is `Shutdown`,
 then `Close`, then `WaitSessions`: charm ssh runs session handlers on goroutines
-neither of the first two waits for, and their teardown is what ends a table and
-registers its finalize, so the finalizer drain must not start before it is done.
+neither of the first two waits for, and their teardown is what ends the tables still
+in play. `BeginShutdown` closes the lobby's gate on new games (`ToggleReady` refuses
+a start: "the server is restarting"), and `WaitForFinalizers` waits for every game
+watcher, which is counted from its game's start - so a table a late teardown ends,
+even after the finalizer drain has begun, is still written.
 
 Shutdown is sequential and budgeted: 30 s SSH `Shutdown` + 5 s session teardown + 5 s
 stats API + 15 s finalizers + a second 15 s finalizer window + 6 s OTel (2 s per
@@ -564,15 +567,15 @@ on the roster is a table that can never reach all-ready again; the watcher only
 counts it. `Lobby.Seat` still re-checks the engine's roster, because the hook lands
 just after the engine has let the seat go.
 
-**On `EventGameEnded` the lobby registers, reopens, then persists.**
-`Manager.watchGame` (`watch.go`) calls `requestFinalize`, which takes
-`registerFinalizer()`, then `releaseFinishedGame()`, then
-`finalizeFinishedGame(...)` - or `dropFinishedMatch`, which logs and counts the
-loss, when shutdown refused the registration. The reopen comes before the write
-because a 15-second write must not pin the table `inGame` while the TUI is already back in the lobby ready-ing the next hand, and the
-registration comes first because the reopen waits on `m.mu` in `releaseHeldSeats`,
-and a shutdown that began inside that wait would otherwise refuse it and drop the
-match. If the feed closes
+**On `EventGameEnded` the lobby reopens, then persists.**
+`Manager.watchGame` (`watch.go`) calls `requestFinalize`, which runs
+`releaseFinishedGame()`, then `finalizeFinishedGame(...)`, both on the watcher
+goroutine. The reopen comes before the write because a 15-second write must not pin
+the table `inGame` while the TUI is already back in the lobby ready-ing the next
+hand. Shutdown cannot cut in between: `ToggleReady` counted the watcher in
+`m.watchers` (`admitGame`) before the game could start, and `WaitForFinalizers`
+waits on that group, so there is no registration step left for a drain to refuse.
+If the feed closes
 without ever delivering `EventGameEnded` - it is the last event an engine sends, so
 latest-wins never drops it, but `RemoveLobby` closes the feed and a leave already on
 its way can still end the game on the closed engine, whose broadcast is a no-op - the
@@ -623,13 +626,11 @@ lock hold for the snapshot, the player's own hand, the turn clock and the live
 The lobby watcher sees `EventGameEnded` -> `requestFinalize` (using the snapshot
 taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
 
-1. `registerFinalizer` **first**, in `requestFinalize` before the table reopens,
-   then the `GameFinished` metric (labelled with the slug and `EndReason.String()`)
-   for every end, dropped or not, so games started minus finished stays true -
-   every statement between observing the end and that call is a window for
-   shutdown to begin, and a refusal then drops a finished match with nothing for
-   `WaitForFinalizers` to wait on. A refused registration goes to
-   `dropFinishedMatch` instead; `finalizeFinishedGame` takes the result
+1. The `GameFinished` metric (labelled with the slug and `EndReason.String()`) in
+   `requestFinalize`, for every end, written or not, so games started minus
+   finished stays true; then the reopen, then `finalizeFinishedGame`, all on the
+   game's watcher goroutine, which `WaitForFinalizers` has counted since the game
+   started
 2. A 15-second timeout context
 3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (the rules'
    own `Standings` decides it, draws sharing one) and whether they `Left`;
@@ -641,7 +642,7 @@ taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
    `FinalizeRankedMatch`
 
 Outcomes are counted as `ok` / `error` / `dropped`. A match is `dropped` - written
-nowhere - when the finalizer registry is closed, the `GameRef` slug is empty, the
+nowhere - when the `GameRef` slug is empty, the
 finished table produced no standings at all (whatever ended it), or a standing carries a nil user id.
 
 ---
@@ -1385,8 +1386,8 @@ Lobby file split:
 | `manager.go` | maps, `CreateLobby` / join / leave / kick, `RemoveLobby`, `Stats`, `disconnectGrace` |
 | `lobby.go` | roster, settings, ready, start, `Event` / `EventType`, `departure` |
 | `errors.go` | the sentinels a caller tells apart with `errors.Is` |
-| `watch.go` | `watchLocked` (subscribe at start) and the manager's engine watcher (`watchGame`) -> `requestFinalize` (register, reopen, persist) |
-| `finalize.go` | persist finished matches, the rating gate (`unratedReason`), `dropFinishedMatch`, the finalizer registry, `BeginShutdown`, `WaitForFinalizers` |
+| `watch.go` | `watchLocked` (subscribe at start) and the manager's engine watcher (`watchGame`) -> `requestFinalize` (reopen, persist) |
+| `finalize.go` | persist finished matches, the rating gate (`unratedReason`), the game gate and watcher count (`admitGame`), `BeginShutdown`, `WaitForFinalizers` |
 | `disconnect.go` | the mid-game grace state machine (`graceTimers`), `ResumePlayer`, `releaseHeldSeats` |
 | `browse.go` | public list and its cache, Elo-distance sort, `GamesOnOffer` |
 | `player.go` | `db.User` -> `game.Player` |
@@ -1641,11 +1642,9 @@ The engine broadcasts `EventGameEnded`; a different goroutine
 
 ```
 Lobby.startGameLocked -> watchLocked; Manager.ToggleReady -> go watchGame
-  -> requestFinalize
-      -> registerFinalizer          (first)
+  -> requestFinalize               (on the watcher, counted since the start)
       -> releaseFinishedGame        (reopen before the write)
-      -> Manager.dropFinishedMatch  (registration refused)
-      -> OR Manager.finalizeFinishedGame
+      -> Manager.finalizeFinishedGame
           -> persistFinishedMatch -> Engine.Standings
                                   -> rating gate (unratedReason)
                                   -> recordFinishedMatch -> MatchRepository

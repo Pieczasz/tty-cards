@@ -40,8 +40,8 @@ import (
 const (
 	sshDrainTimeout = 30 * time.Second
 	// sessionDrainTimeout bounds the wait for session handlers after Close. Their
-	// teardown is in-memory work, but a table it ends registers its finalize there,
-	// and the finalizer drain that follows refuses anything registered after it.
+	// teardown is in-memory work, but it is what ends the tables still in play, and
+	// the finalizer drain that follows waits for each of those to be written.
 	sessionDrainTimeout  = 5 * time.Second
 	apiDrainTimeout      = 5 * time.Second
 	finalizeDrainTimeout = 15 * time.Second
@@ -359,7 +359,7 @@ func stopServer(server sshServer) {
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), sessionDrainTimeout)
 	defer cancelWait()
 	if err := server.WaitSessions(waitCtx); err != nil {
-		slog.WarnContext(waitCtx, "session teardowns outlasted their window; a match they end may go unrecorded",
+		slog.WarnContext(waitCtx, "session teardowns outlasted their window; the finalizer drain may wait on their tables",
 			"error", err, "timeout", sessionDrainTimeout)
 	}
 }

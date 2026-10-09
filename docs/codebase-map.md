@@ -230,7 +230,7 @@ sequenceDiagram
         TUI->>E: Session.Sync -> Frame (one lock hold)
     end
     E-->>M: EventGameEnded (lobby watcher)
-    M->>M: register finalizer, reopen table, persist
+    M->>M: reopen table, persist (on the watcher, counted since the start)
     P--xS: disconnect
     S->>T: ReleaseWith(gen, fn) - under the account's tracker lock
     T->>M: fn = DisconnectPlayer (90 s grace mid-game)
@@ -296,11 +296,8 @@ Owner: [`architecture.md` §4.2](architecture.md#42-turn-cursor-and-clock---adva
 ```mermaid
 flowchart LR
     ended["EventGameEnded<br/>(or feed closed and IsFinished:<br/>engine.EndReason())"] --> req["requestFinalize<br/>snapshot taken at START"]
-    req --> reg["registerFinalizer<br/>before the reopen"]
-    reg --> release["releaseFinishedGame<br/>table back to Waiting"]
-    release --> fin{"registered?"}
-    fin -- no --> dropped["dropped<br/>(ERROR log + metric)"]
-    fin -- yes --> gate{"rated?<br/>ranked AND not shutting down<br/>AND not RulesError<br/>AND not Abandoned"}
+    req --> release["releaseFinishedGame<br/>table back to Waiting"]
+    release --> gate{"rated?<br/>ranked AND not shutting down<br/>AND not RulesError<br/>AND not Abandoned"}
     gate -- "yes, Interrupted" --> interrupted["FinalizeInterruptedMatch<br/>only the leavers' losses written"]
     gate -- yes --> ranked["FinalizeRankedMatch<br/>one tx: advisory locks per seat,<br/>drop erased seats, seed,<br/>SELECT FOR UPDATE,<br/>provisional + pair damp, Elo"]
     gate -- no --> casual["RecordCasualMatch<br/>history only"]

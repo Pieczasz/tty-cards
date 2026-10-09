@@ -56,19 +56,20 @@ type Manager struct {
 	matchRepo   db.MatchRepository
 	appCtx      context.Context
 	joinLimiter *ratelimit.SlidingWindow
-	// finalizerMu makes accepting a finished-match write and stopping new writes
+	// gateMu makes counting a new game's watcher and closing the gate on new games
 	// atomic with respect to shutdown. WaitGroup alone permits Add after Wait
 	// observes zero.
-	finalizerMu       sync.Mutex
-	finalizersStopped bool
-	finalizing        sync.WaitGroup
+	gateMu     sync.Mutex
+	gateClosed bool
+	// watchers counts every game's watcher goroutine, from the start of its game to
+	// the end of its finalize.
+	watchers sync.WaitGroup
 	// drained is closed by the one waiter goroutine WaitForFinalizers ever starts.
 	// Created lazily and reused, so a timed-out drain does not strand a waiter per
 	// call the way a fresh goroutine per invocation did.
 	drained chan struct{}
-	// shuttingDown is set before sessions are torn down, which is earlier than
-	// finalizersStopped: a match ending during the drain must still be recorded, just
-	// not rated. See persistFinishedMatch.
+	// shuttingDown is set before sessions are torn down: a match ending during the
+	// drain must still be recorded, just not rated. See persistFinishedMatch.
 	shuttingDown atomic.Bool
 	// grace holds mid-game seats after a dropped session (see disconnect.go).
 	grace graceTimers
@@ -183,7 +184,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 }
 
 // ToggleReady flips p's ready flag at the table p sits at, and starts the game once
-// every seat is ready.
+// every seat is ready - unless shutdown has begun, when no new game starts.
 func (m *Manager) ToggleReady(p *game.Player) error {
 	l := m.FindLobbyByPlayer(p)
 	if l == nil {
@@ -192,10 +193,20 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// Before toggleReady takes l.mu: this takes it itself, then m.mu via
 	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
 	m.releaseFinishedGame(l)
-	start, err := l.toggleReady(p, m.seatHook(l))
-	if start.engine != nil {
-		go m.watchGame(l, start)
+	// The watcher is counted before the game can start, so a drain that begins at any
+	// point after the start waits for it.
+	admitted := m.admitGame()
+	start, err := l.toggleReady(p, admitted, m.seatHook(l))
+	if start.engine == nil {
+		if admitted {
+			m.watchers.Done()
+		}
+		return err
 	}
+	go func() {
+		defer m.watchers.Done()
+		m.watchGame(l, start)
+	}()
 	return err
 }
 

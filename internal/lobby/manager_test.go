@@ -250,21 +250,21 @@ func TestManager_WaitForFinalizers(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(time.Second), "nothing in flight drains immediately")
 
 	m = newTestManager(t, nil)
-	require.True(t, m.registerFinalizer())
+	require.True(t, m.admitGame())
 	// Guarded: a timeout that is not honored blocks here forever, and a suite that
 	// hangs says far less than one that fails.
 	runWithTimeout(t, 5*time.Second, func() {
-		assert.False(t, m.WaitForFinalizers(50*time.Millisecond), "an in-flight write blocks the drain")
+		assert.False(t, m.WaitForFinalizers(50*time.Millisecond), "a game in play blocks the drain")
 	})
 
-	m.finalizing.Done()
-	assert.True(t, m.WaitForFinalizers(time.Second), "drains once the write completes")
+	m.watchers.Done()
+	assert.True(t, m.WaitForFinalizers(time.Second), "drains once its watcher is done")
 }
 
-func TestManager_WaitForFinalizers_StopsNewFinalizers(t *testing.T) {
+func TestManager_WaitForFinalizers_StopsNewGames(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.registerFinalizer())
+	require.True(t, m.admitGame())
 
 	drained := make(chan bool, 1)
 	go func() {
@@ -272,14 +272,14 @@ func TestManager_WaitForFinalizers_StopsNewFinalizers(t *testing.T) {
 	}()
 
 	assert.Eventually(t, func() bool {
-		m.finalizerMu.Lock()
-		defer m.finalizerMu.Unlock()
-		return m.finalizersStopped
+		m.gateMu.Lock()
+		defer m.gateMu.Unlock()
+		return m.gateClosed
 	}, time.Second, time.Millisecond)
-	assert.False(t, m.registerFinalizer(), "a finalizer cannot register after shutdown starts")
+	assert.False(t, m.admitGame(), "a game cannot start after the drain begins")
 
-	m.finalizing.Done()
-	assert.True(t, <-drained, "shutdown waits for the registered finalizer")
+	m.watchers.Done()
+	assert.True(t, <-drained, "the drain waits for the game already in play")
 }
 
 // Shutdown may run before a manager was ever built.
@@ -354,7 +354,6 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 	engine := game.NewEngine(&stubRules{}, seats)
 	t.Cleanup(engine.Close)
 
-	require.True(t, m.registerFinalizer())
 	m.finalizeFinishedGame(finalizeRequest{
 		lobbyCode: "FFFFFFFF", game: gameRef("Mock"), startedAt: time.Now(),
 	}, engine, game.EndReasonWin)
@@ -368,7 +367,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.registerFinalizer())
+	require.True(t, m.admitGame())
 
 	drained := make(chan bool, 1)
 	go func() {
@@ -381,7 +380,7 @@ func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	m.finalizing.Done()
+	m.watchers.Done()
 	select {
 	case ok := <-drained:
 		assert.True(t, ok)
