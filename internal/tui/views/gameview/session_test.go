@@ -54,13 +54,13 @@ func TestHandleFrame_DropsWhatAnotherSessionArmed(t *testing.T) {
 		// can only be stale.
 		"an untagged clock tick": ClockTickMsg{},
 	} {
-		cmd, handled := s.HandleFrame(msg, sync, nil)
+		cmd, handled := s.HandleFrame(msg, sync)
 		assert.True(t, handled, "%s is still consumed", name)
 		assert.Nil(t, cmd, "%s from another session must not re-arm anything", name)
 	}
 	assert.False(t, synced, "nor resync this one")
 
-	cmd, _ := s.HandleFrame(ClockTickMsg{Source: mine}, sync, nil)
+	cmd, _ := s.HandleFrame(ClockTickMsg{Source: mine}, sync)
 	assert.NotNil(t, cmd, "this session's own tick still keeps the clock going")
 }
 

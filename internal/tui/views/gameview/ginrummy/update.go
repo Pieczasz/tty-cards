@@ -9,7 +9,7 @@ import (
 )
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if cmd, handled := m.HandleFrame(msg, m.syncState, nil); handled {
+	if cmd, handled := m.HandleFrame(msg, m.syncState); handled {
 		return m, cmd
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
