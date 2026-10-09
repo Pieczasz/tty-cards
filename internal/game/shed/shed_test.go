@@ -198,6 +198,30 @@ func TestHandEmptyOrAllPassed(t *testing.T) {
 	}
 }
 
+func TestDeal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every seat gets n from a fresh stock", func(t *testing.T) {
+		t.Parallel()
+		state := shedState(nil, nil)
+		state.Players = append(state.Players, &game.Player{ID: "p2"})
+
+		require.NoError(t, Deal(state, deck.Standard(), 7))
+
+		for _, p := range state.Players {
+			assert.Len(t, p.Cards, 7, "%s replaces whatever it held", p.ID)
+		}
+		assert.Equal(t, 52-14, state.Deck.Size())
+	})
+
+	t.Run("a deck too small for the table is refused", func(t *testing.T) {
+		t.Parallel()
+		state := shedState(nil, nil)
+
+		require.ErrorContains(t, Deal(state, deck.Standard()[:3], 7), "not enough cards")
+	})
+}
+
 func TestOpenDiscard(t *testing.T) {
 	t.Parallel()
 	// Draw reads the end of the pile, so the last card listed is the first drawn.

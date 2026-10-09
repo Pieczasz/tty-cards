@@ -18,6 +18,9 @@ const (
 	MaxPlayers = 6
 )
 
+// dealCount is the hand every seat is dealt.
+const dealCount = 7
+
 // Rules implements Crazy Eights; one hand is the whole game.
 type Rules struct{}
 
@@ -37,9 +40,18 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 }
 
 func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
-func (r *Rules) InitialDealCount() int    { return 7 }
+func (r *Rules) InitialDealCount() int    { return 0 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
+	if err := shed.Deal(state, deck.Standard(), dealCount); err != nil {
+		return fmt.Errorf("deal crazy eights: %w", err)
+	}
+	return openTable(state)
+}
+
+// openTable is OnGameStart once the hands are dealt: the opening discard and the suit
+// it names.
+func openTable(state *game.State) error {
 	extra := &State{CurrentSuit: deck.NoSuit}
 	state.Extra = extra
 

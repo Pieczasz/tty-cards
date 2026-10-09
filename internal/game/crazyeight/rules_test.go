@@ -246,14 +246,15 @@ func TestRules_Init(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 
-	assert.Equal(t, 7, rules.InitialDealCount())
-
 	d := rules.InitialDeck()
 	assert.Len(t, d, 52)
 
 	state := createTestState()
 	err := rules.OnGameStart(state)
 	require.NoError(t, err)
+
+	assert.Len(t, state.Players[0].Cards, 7, "the deal replaces whatever the seat held")
+	assert.Equal(t, 52, gametest.CardsInPlay(state))
 
 	top, ok := state.Discard.Peek()
 	require.True(t, ok, "the game opens a discard pile")
@@ -349,7 +350,7 @@ func TestRules_OnGameStart_NeverOpensOnAnEight(t *testing.T) {
 	state := game.NewState(rules, []*game.Player{{ID: "p1"}, {ID: "p2"}}, nil)
 	state.Deck = deck.New(stacked)
 
-	require.NoError(t, rules.OnGameStart(state))
+	require.NoError(t, openTable(state))
 
 	top, ok := state.Discard.Peek()
 	require.True(t, ok)
@@ -474,7 +475,7 @@ func TestRules_OnGameStart_AllEightsCannotOpen(t *testing.T) {
 		{Rank: deck.Eight, Suit: deck.Hearts},
 	})
 
-	err := (&Rules{}).OnGameStart(state)
+	err := openTable(state)
 
 	require.ErrorContains(t, err, "not enough cards to start")
 	assert.Equal(t, 2, state.Deck.Size(), "the stock comes back whole")

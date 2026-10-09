@@ -115,7 +115,7 @@ nothing), set `State.Interrupted` in `OnPlayerLeave`: the removal that ends the
 game then reports `EndReasonInterrupted`, and finalize charges only the leavers
 ([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
 A shedding game should reuse package `internal/game/shed` (embed `shed.State`, and
-call `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
+call `shed.Deal`, `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
 `shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.
 Name who acts next with `State.SetTurn` / `State.OverrideTurn`, never by writing
 `CurrentTurn` and `OverrideNextTurn` by hand; refuse a foreign action with
