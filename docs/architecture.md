@@ -606,8 +606,8 @@ taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
    `FinalizeRankedMatch`
 
 Outcomes are counted as `ok` / `error` / `dropped`. A match is `dropped` - written
-nowhere - when the finalizer registry is closed, the `GameRef` slug is empty, an
-abandoned table produced no standings at all, or a standing carries a nil user id.
+nowhere - when the finalizer registry is closed, the `GameRef` slug is empty, the
+finished table produced no standings at all (whatever ended it), or a standing carries a nil user id.
 
 ---
 
@@ -1102,8 +1102,8 @@ every seat left - has standings that are reverse leave order, so rating it pays
 the last to quit; and `EndReasonUnknown` - an end the watcher never saw announced -
 may have been an interrupted match whose finishers must not be rated.
 `EndReasonForfeit` (last player standing) **is** rated. `unratedReason` names which it was for the log,
-and `EndReason.String()` gives the metric its label. An abandoned match with no standings
-writes nothing at all.
+and `EndReason.String()` gives the metric its label. A match with no standings, whatever
+ended it, writes nothing at all.
 
 An unrated ranked match goes through `RecordCasualMatch`, so it is history with
 `matches.ranked = false` and - because the increment lives only in

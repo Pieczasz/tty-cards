@@ -610,7 +610,7 @@ func TestResumePlayer_DropsAStaleIndexEntry(t *testing.T) {
 	assert.False(t, stale, "the stale index entry survived the lookup")
 }
 
-// A finished match that produces no row still has to show up as one: these two paths
+// A finished match that produces no row still has to show up as one: these paths
 // were the only bail-outs that dropped a result with no log and no counter.
 //
 //nolint:paralleltest // slog.SetDefault is process-wide, so this cannot share the process
@@ -635,7 +635,14 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 			req:     finalizeRequest{lobbyCode: "BBBBBBBB", game: gameRef("Mock"), startedAt: time.Now()},
 			reason:  game.EndReasonAbandoned,
 			rules:   noStandingsRules{},
-			wantLog: "abandoned match had no standings",
+			wantLog: "finished match had no standings",
+		},
+		{
+			name:    "a win the rules ranked nobody in",
+			req:     finalizeRequest{lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: true, startedAt: time.Now()},
+			reason:  game.EndReasonWin,
+			rules:   noStandingsRules{},
+			wantLog: "reason=win",
 		},
 		{
 			name:    "a seat with no database user",
@@ -693,7 +700,7 @@ func TestFinalize_AbandonedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 }
 
 // noStandingsRules is stubRules with an empty standings list, which is the shape an
-// abandoned table leaves behind.
+// abandoned table, or a Standings that panicked, leaves behind.
 type noStandingsRules struct{ stubRules }
 
 func (noStandingsRules) Standings(*game.State) []*game.Player { return nil }

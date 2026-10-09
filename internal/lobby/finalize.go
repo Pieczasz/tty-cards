@@ -99,11 +99,12 @@ func (m *Manager) persistFinishedMatch(
 	ctx context.Context, engine *game.Engine, reason game.EndReason, req finalizeRequest,
 ) {
 	standings := engine.Standings()
-	if reason == game.EndReasonAbandoned && len(standings) == 0 {
-		// Nobody was left to record, so there is no history to write - but it is still
-		// a finished match that produced no row, which is what the counter tracks.
-		slog.WarnContext(ctx, "abandoned match had no standings; nothing recorded",
-			"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked)
+	if len(standings) == 0 {
+		// Nobody to record (every seat left, or Standings panicked and was recovered),
+		// so there is no history to write - but it is still a finished match that
+		// produced no row, which is what the counter tracks.
+		slog.WarnContext(ctx, "finished match had no standings; nothing recorded",
+			"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked, "reason", reason.String())
 		observability.MatchFinalize(ctx, "dropped", req.isRanked)
 		return
 	}
