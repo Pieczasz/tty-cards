@@ -878,6 +878,15 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 		})
 	}
 
+	t.Run("another game's move in every phase", func(t *testing.T) {
+		t.Parallel()
+		for _, phase := range []Phase{PhasePassing, PhaseTrickPlay, PhaseHandOver} {
+			state := createTestState()
+			gametest.Extra[*State](t, state).Phase = phase
+			require.ErrorIs(t, rules.ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction, phase)
+		}
+	})
+
 	t.Run("the next hand once the match is over", func(t *testing.T) {
 		t.Parallel()
 		state := createTestState()
