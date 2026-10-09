@@ -33,6 +33,12 @@ func (m *MockRules) ApplyAction(state *State, action Action) error {
 	return args.Error(0)
 }
 
+func (m *MockRules) TimeoutAction(state *State) Action {
+	args := m.Called(state)
+	action, _ := args.Get(0).(Action)
+	return action
+}
+
 func (m *MockRules) CheckWinCondition(state *State) bool {
 	args := m.Called(state)
 	return args.Bool(0)

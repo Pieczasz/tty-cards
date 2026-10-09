@@ -632,7 +632,8 @@ engine's.
   without asking `Standings` (state may be half-applied) -> **unrated** persistence. Anything checkable up front belongs in
   `ValidateAction`.
 - Optional, probed by type assertion: `PlayerLeaveHandler`,
-  `TurnTimeoutHandler`, `TurnDurationHandler`, `StandingScorer`.
+  `TurnDurationHandler`, `StandingScorer`. `TimeoutAction` is not optional - it is
+  on `Rules` itself - because a table without it freezes on a player who walks away.
 
 Per-game state lives in `State.Extra` (`*crazyeight.State`, `*poker.State`,
 `*uno.State`, `*hearts.State`, `*ginrummy.State`).
@@ -701,9 +702,10 @@ otherwise (`Start`, a leave) the cursor stays where it is. `clampTurnLocked` the
 forces it into `[0, len(Players))` with `game.SeatAt`, because a leave handler can
 compute an index against the pre-removal seat count.
 
-The clock is `DefaultTurnTimeout` 30 s, `MaxMissedTurns` 3 (`turnclock.go`). **No
-`TurnTimeoutHandler` means no clock at all**: there is nothing safe to play for an
-absent player, so they get no clock rather than a silent removal.
+The clock is `DefaultTurnTimeout` 30 s, `MaxMissedTurns` 3 (`turnclock.go`).
+**Every table has one**: `TimeoutAction` is a `Rules` method, not an optional
+interface whose absence silently meant no clock, and `game.WithTurnTimeout(0)` -
+an engine option, not a rules choice - is the one off switch.
 `TurnDurationHandler` stretches a particular turn - hearts gives the pass phase
 45 s and the between-hands prompt a minute; poker and gin rummy stretch their
 between-hands deal the same way. Returning zero keeps the default and cannot

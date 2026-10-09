@@ -23,7 +23,6 @@ type Rules struct{}
 
 var (
 	_ game.Rules               = (*Rules)(nil)
-	_ game.TurnTimeoutHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
 	_ game.StandingScorer      = (*Rules)(nil)
 	// No PlayerLeaveHandler: gin is strictly 2-player (MinPlayers == MaxPlayers).

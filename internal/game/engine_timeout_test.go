@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,15 +48,6 @@ func (r *timeoutRules) appliedActions() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.applied...)
-}
-
-var _ TurnTimeoutHandler = (*timeoutRules)(nil)
-
-// WithTurnTimeout is for tests. It sets the default turn length; zero or less disables the clock.
-func WithTurnTimeout(d time.Duration) EngineOption {
-	return func(e *Engine) {
-		e.clock.defaultLength = d
-	}
 }
 
 // turnDeadline is for tests; views read the remaining time from Frame.
@@ -232,18 +222,6 @@ func TestEngine_TurnTimeout_RefusedSafeMoveStillLosesTheSeat(t *testing.T) {
 
 func TestEngine_TurnTimeout_ClockLifecycle(t *testing.T) {
 	t.Parallel()
-
-	t.Run("rules without a safe move get no clock", func(t *testing.T) {
-		t.Parallel()
-		rules := setupMockRules()
-		rules.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
-		engine := NewEngine(rules, []*Player{{ID: "a"}, {ID: "b"}})
-		t.Cleanup(engine.Close)
-		require.NoError(t, engine.Start())
-
-		assert.True(t, engine.turnDeadline().IsZero(),
-			"a game with no safe move must not arm a clock it cannot honor")
-	})
 
 	t.Run("close stops the clock", func(t *testing.T) {
 		t.Parallel()

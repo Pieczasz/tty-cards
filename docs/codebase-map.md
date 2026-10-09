@@ -270,7 +270,7 @@ sequenceDiagram
 sequenceDiagram
     participant Tm as time.AfterFunc
     participant E as Engine
-    participant Ru as Rules (TurnTimeoutHandler)
+    participant Ru as Rules (TimeoutAction)
     participant Bc as Broadcaster
 
     Tm->>E: onTurnTimeout(seq): lock once, defer recover<br/>(a panic ends this table only)
@@ -352,9 +352,6 @@ classDiagram
         ApplyAction(*State, Action) error
         CheckWinCondition(*State) bool
         Standings(*State) []*Player
-    }
-    class TurnTimeoutHandler {
-        <<optional>>
         TimeoutAction(*State) Action
     }
     class TurnDurationHandler {
@@ -459,13 +456,13 @@ classDiagram
 Which optional interfaces each game implements. Each is pinned by a
 `var _ game.X = (*Rules)(nil)` line in its `rules.go`.
 
-| Game | `TurnTimeoutHandler` | `TurnDurationHandler` | `PlayerLeaveHandler` | `StandingScorer` |
-|---|:-:|:-:|:-:|:-:|
-| Crazy Eights | yes | | yes | yes |
-| Uno | yes | | yes | yes |
-| Poker | yes | yes | yes | yes |
-| Hearts | yes | yes | yes | yes |
-| Gin Rummy | yes | yes | | yes |
+| Game | `TurnDurationHandler` | `PlayerLeaveHandler` | `StandingScorer` |
+|---|:-:|:-:|:-:|
+| Crazy Eights | | yes | yes |
+| Uno | | yes | yes |
+| Poker | yes | yes | yes |
+| Hearts | yes | yes | yes |
+| Gin Rummy | yes | | yes |
 
 Per-game state lives in `State.Extra`. Owner: [`architecture.md` §4](architecture.md#4-contracts-the-ones-that-bite).
 
@@ -524,7 +521,7 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Pattern | Where | Why it is here |
 |---|---|---|
 | Strategy | `game.Rules`, five implementations | a sixth game touches the engine in no way |
-| Optional interface (capability probe) | `TurnTimeoutHandler`, `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface. No timeout handler means no clock |
+| Optional interface (capability probe) | `TurnDurationHandler`, `PlayerLeaveHandler`, `StandingScorer`, `router.Closer` | opt-in behaviour without a fat interface, kept for hooks whose absence is a valid behaviour - `TimeoutAction` left the list for `Rules` because its absence meant a table with no clock |
 | Single registration point | `catalog.Games`, each `Entry` embedding a `game.Module` | rules + view declared together. `catalog_test.go` catches missing fields and duplicate slugs, and `game.NewRegistry` panics on a half-declared or duplicate module |
 | Facade | `game.BoundEngine` | the safe path is the default; `Frame`'s callback is the one way to whole-table state, and there is no `Engine()` escape hatch ([#5](decisions.md#5-boundengine-is-a-façade-not-a-capability)) |
 | Embedded base type | `gameview.Session` | every view gets `Init`, binding, update loop, clock tick, cursor, action error, forfeit prompt, idle exemption and `Close` for free; `gameview.RenderHandOver` and `ChoicePicker` are the shared hand-over screen and suit/colour picker |

@@ -101,10 +101,11 @@ optional hooks), `event.go` (86, `Event`, `EventType`, `EndReason` and their
 
 **Understand.**
 
-*The contract.* `Rules` (nine methods) plus four optional hooks probed by type
-assertion: `TurnTimeoutHandler` (`TimeoutAction`), `TurnDurationHandler`
-(`TurnDuration`), `PlayerLeaveHandler` (`OnPlayerLeave` / `AfterPlayerRemoved`)
-and `StandingScorer` (`StandingScore`, so equal results share a place).
+*The contract.* `Rules` (six methods: `OnGameStart`, `ValidateAction`,
+`ApplyAction`, `CheckWinCondition`, `Standings`, `TimeoutAction`) plus three optional
+hooks probed by type assertion: `TurnDurationHandler` (`TurnDuration`),
+`PlayerLeaveHandler` (`OnPlayerLeave` / `AfterPlayerRemoved`) and `StandingScorer`
+(`StandingScore`, so equal results share a place).
 
 *One mutex.* `Engine.mu` covers the clock fields **and** `*State`; `State` has no
 lock of its own. Every `Rules` method and every `WithState`/`Frame` callback runs
@@ -149,9 +150,9 @@ their clock ran out is neither charged a miss nor double-played.
 after `checkTurnLocked`, not before. Clearing on any keypress would let a client
 dodge removal by spamming rejected actions forever.
 
-*The clock is opt-in.* No `TurnTimeoutHandler` means `armTurnTimerLocked` returns
-without arming. There is nothing safe to play for an absent player, so they get
-no clock rather than a silent removal.
+*Every table has a clock.* `TimeoutAction` is a `Rules` method, so no rules set can
+leave it out and freeze a table on a player who walked away; the one off switch is
+the engine option `WithTurnTimeout(0)`.
 
 *A rules panic ends one table.* `onTurnTimeout` runs on a `time.AfterFunc`
 goroutine with nothing above it to recover, so it defers a `recover` directly

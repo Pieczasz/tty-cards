@@ -37,12 +37,11 @@ type Rules interface {
 	ApplyAction(state *State, action Action) error
 	CheckWinCondition(state *State) bool
 	Standings(state *State) []*Player
-}
 
-// TurnTimeoutHandler opts a rules set into the turn clock. TimeoutAction is the move
-// played for a seat whose turn ran out; it must be one ValidateAction accepts, and nil
-// means there is none, which takes the seat. Rules without it get no clock at all.
-type TurnTimeoutHandler interface {
+	// TimeoutAction is the move played for a seat whose turn ran out; it must be one
+	// ValidateAction accepts, and nil means there is none, which takes the seat. It
+	// is not optional: a table without it would freeze on a player who walked away.
+	// WithTurnTimeout(0) is how a table goes without a clock.
 	TimeoutAction(state *State) Action
 }
 

@@ -56,6 +56,10 @@ func (m *MockRules) ApplyAction(state *game.State, action game.Action) error {
 	return nil
 }
 func (m *MockRules) CheckWinCondition(state *game.State) bool { return m.Called(state).Bool(0) }
+func (m *MockRules) TimeoutAction(state *game.State) game.Action {
+	action, _ := m.Called(state).Get(0).(game.Action)
+	return action
+}
 func (m *MockRules) Standings(state *game.State) []*game.Player {
 	return m.Called(state).Get(0).([]*game.Player)
 }
@@ -761,6 +765,9 @@ func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }
 func (stubRules) CheckWinCondition(s *game.State) bool          { return s.Extra == stubWin }
 func (stubRules) Standings(s *game.State) []*game.Player        { return s.Players }
+
+// TimeoutAction passes, so an expired turn moves on.
+func (stubRules) TimeoutAction(*game.State) game.Action { return stubAction("pass") }
 
 func (stubRules) ApplyAction(s *game.State, a game.Action) error {
 	switch a {
