@@ -24,9 +24,8 @@ type timeoutRules struct {
 	applied []string
 }
 
-func (r *timeoutRules) OnGameStart(s *State) error       { return dealEach(s, 1) }
-func (r *timeoutRules) AfterAction(*State, Action) error { return nil }
-func (r *timeoutRules) CheckWinCondition(*State) bool    { return false }
+func (r *timeoutRules) OnGameStart(s *State) error    { return dealEach(s, 1) }
+func (r *timeoutRules) CheckWinCondition(*State) bool { return false }
 
 func (r *timeoutRules) ValidateAction(_ *State, _ Action) error {
 	if r.reject {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -30,11 +29,6 @@ func (m *MockRules) ValidateAction(state *State, action Action) error {
 }
 
 func (m *MockRules) ApplyAction(state *State, action Action) error {
-	args := m.Called(state, action)
-	return args.Error(0)
-}
-
-func (m *MockRules) AfterAction(state *State, action Action) error {
 	args := m.Called(state, action)
 	return args.Error(0)
 }
@@ -153,7 +147,6 @@ func TestEngine_SubmitAction(t *testing.T) {
 	validAction := MockAction{name: "MockDraw"}
 	m.On("ValidateAction", mock.Anything, validAction).Return(nil)
 	m.On("ApplyAction", mock.Anything, validAction).Return(nil)
-	m.On("AfterAction", mock.Anything, validAction).Return(nil)
 	m.On("CheckWinCondition", mock.Anything).Return(false)
 
 	err = engine.SubmitAction(currentPlayerID, validAction)
@@ -179,7 +172,6 @@ func TestEngine_SubmitAction_SetsWinnerFromStandings(t *testing.T) {
 	action := MockAction{name: "Win"}
 	m.On("ValidateAction", mock.Anything, action).Return(nil)
 	m.On("ApplyAction", mock.Anything, action).Return(nil)
-	m.On("AfterAction", mock.Anything, action).Return(nil)
 	m.On("CheckWinCondition", mock.Anything).Return(true)
 	m.On("Standings", mock.Anything).Return([]*Player{winner, loser})
 
@@ -190,67 +182,6 @@ func TestEngine_SubmitAction_SetsWinnerFromStandings(t *testing.T) {
 		assert.Equal(t, Finished, state.Phase)
 		assert.Equal(t, "p2", state.Winner.ID)
 	})
-}
-
-func TestEngine_SubmitAction_PostConditionBeforeBroadcast(t *testing.T) {
-	t.Parallel()
-	players := []*Player{{ID: "p1"}, {ID: "p2"}}
-	m := setupMockRules()
-	engine := NewEngine(m, players)
-	t.Cleanup(engine.Close)
-
-	ch, subErr := engine.Subscribe()
-	require.NoError(t, subErr)
-	t.Cleanup(func() { engine.Unsubscribe(ch) })
-
-	require.NoError(t, engine.Start())
-
-	// Drain start event
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for start event")
-	}
-
-	currentPlayerID := engine.CurrentPlayerID()
-	action := MockAction{name: "Bad"}
-	m.On("ValidateAction", mock.Anything, action).Return(nil)
-	m.On("ApplyAction", mock.Anything, action).Return(nil)
-	m.On("AfterAction", mock.Anything, action).Return(assert.AnError)
-
-	err := engine.SubmitAction(currentPlayerID, action)
-	require.Error(t, err)
-
-	engine.WithState(func(state *State) {
-		assert.Equal(t, Finished, state.Phase)
-		assert.Nil(t, state.Winner, "nobody wins a table that ended on a defect")
-	})
-	m.AssertNotCalled(t, "Standings", mock.Anything)
-
-	// Broadcast is synchronous under the engine mutex and returns before
-	// SubmitAction does, so by now the events either sit in the buffered channel or
-	// never will. A timeout would only make this slower and let a merely-slow
-	// broadcast pass.
-	//
-	// The half-applied move must never reach a client, but the game really is over,
-	// so the end of it has to be announced: without it every other player's view
-	// waits on a frame that will never come and the lobby never records the match.
-	var seen []EventType
-	var reason EndReason
-	for {
-		select {
-		case ev := <-ch:
-			seen = append(seen, ev.Type)
-			reason = ev.Reason
-			continue
-		default:
-		}
-		break
-	}
-	assert.Equal(t, []EventType{EventGameEnded}, seen,
-		"a failed post-condition ends the game without publishing the action")
-	assert.Equal(t, EndReasonRulesError, reason,
-		"finalize reads Reason to keep a half-applied hand off the ladder")
 }
 
 func TestEngine_RemovePlayer(t *testing.T) {
@@ -318,7 +249,6 @@ func TestEngine_RemovePlayer_MidTurnOverrideClamped(t *testing.T) {
 		base.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
 		base.On("ValidateAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 		base.On("ApplyAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-		base.On("AfterAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		r := &leaveAwareRules{MockRules: base}
 		// Simulate a stale index computed before removal: the pre-removal player
@@ -406,7 +336,6 @@ func newStartedEngine(t *testing.T, ids ...string) *Engine {
 	m := setupMockRules()
 	m.On("ValidateAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	m.On("ApplyAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-	m.On("AfterAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	m.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	m.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
 
@@ -568,7 +497,6 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 	action := MockAction{name: "Win"}
 	m.On("ValidateAction", mock.Anything, action).Return(nil)
 	m.On("ApplyAction", mock.Anything, action).Return(nil)
-	m.On("AfterAction", mock.Anything, action).Return(nil)
 	m.On("CheckWinCondition", mock.Anything).Return(true)
 	m.On("Standings", mock.Anything).Return([]*Player{winner, loser})
 
@@ -643,7 +571,6 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 	base := setupMockRules()
 	base.On("ValidateAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	base.On("ApplyAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-	base.On("AfterAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	base.On("CheckWinCondition", mock.Anything).Return(false).Maybe()
 	base.On("Standings", mock.Anything).Return(players).Maybe()
 
@@ -807,8 +734,8 @@ func drainEvents(ch <-chan Event) []Event {
 }
 
 // ApplyAction is the one rules hook allowed to leave the state half-applied, so its
-// failure has to end the game the same way a failed post-condition does - and say so,
-// because EndReasonRulesError is what keeps a broken hand off the ladder.
+// failure has to end the game without publishing the move - and say so, because
+// EndReasonRulesError is what keeps a broken hand off the ladder.
 func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
@@ -834,7 +761,6 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 		"the half-applied move must not be published, but the table has to be told it is over")
 	assert.Equal(t, EndReasonRulesError, events[0].Reason)
 	assert.Empty(t, events[0].PlayerID, "a half-applied state is not ranked, so it names no winner")
-	m.AssertNotCalled(t, "AfterAction", mock.Anything, action)
 	m.AssertNotCalled(t, "Standings", mock.Anything)
 }
 

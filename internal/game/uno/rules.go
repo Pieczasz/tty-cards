@@ -218,10 +218,6 @@ func applyVoluntaryDraw(state *game.State, extra *State) {
 	state.OverrideTurn(advance(state, extra, 1))
 }
 
-func (r *Rules) AfterAction(_ *game.State, _ game.Action) error {
-	return nil
-}
-
 func (r *Rules) CheckWinCondition(state *game.State) bool {
 	extra, ok := state.Extra.(*State)
 	if !ok {

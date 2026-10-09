@@ -107,7 +107,7 @@ Two rules that have each cost a bug:
   expiry still costs a miss, so the absent seat is taken early. Gin rummy's
   `autoDiscard` skips the card the upcard rule forbids for exactly this reason.
 - **Anything checkable up front belongs in `ValidateAction`.** An error from
-  `ApplyAction` or `AfterAction` ends the game as `EndReasonRulesError`, with
+  `ApplyAction` ends the game as `EndReasonRulesError`, with
   state possibly half-applied and the match recorded unrated.
 
 If one seat leaving means the match cannot go on (hearts is four-handed or

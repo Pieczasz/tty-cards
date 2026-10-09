@@ -235,15 +235,23 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	}
 }
 
+// ApplyAction plays the move and then settles the street around it - the next actor,
+// the next street or the hand's end - or deals the next hand.
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	extra, ok := state.Extra.(*State)
 	if !ok {
 		return game.ErrInvalidState
 	}
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
-		// Dealing happens in AfterAction, the only hook that can report a bad deal.
-		return nil
+		return beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
 	}
+	applyBet(state, extra, action)
+	return afterBettingAction(state, extra)
+}
+
+// applyBet moves what a betting action commits, before the street is settled around
+// it.
+func applyBet(state *game.State, extra *State, action game.Action) {
 	p := state.Players[state.CurrentTurn]
 	seat := extra.Seats[p.ID]
 
@@ -265,16 +273,4 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	}
 	seat.Acted = true
 	seat.LastBetLevel = extra.CurrentBet
-	return nil
-}
-
-func (r *Rules) AfterAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
-	if _, isNextHand := action.(ActionNextHand); isNextHand {
-		return beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
-	}
-	return afterBettingAction(state, extra)
 }

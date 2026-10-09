@@ -315,21 +315,15 @@ func (e *Engine) checkTurnLocked(playerID string, action Action) (*Player, error
 }
 
 func (e *Engine) applyActionLocked(current *Player, action Action) error {
-	// A failed hook may have left the state half-applied, so, like a rules panic, it
-	// ends the table without asking the rules to rank anyone on it.
+	// ApplyAction is the whole move, the rules' own state machine included (poker
+	// settles bets, deals the next street, picks the next actor), so it runs before
+	// any broadcast and clients never see a half-applied move. A failure may have left
+	// the state half-applied, so, like a rules panic, it ends the table without asking
+	// the rules to rank anyone on it - and ends it, with the broadcast, or every client
+	// sits on a frame that never updates and the lobby never records the match.
 	if err := e.state.Rules.ApplyAction(e.state, action); err != nil {
 		e.endGameLocked(nil, EndReasonRulesError)
 		return fmt.Errorf("apply action: %w", err)
-	}
-
-	// AfterAction advances the rules' own state machine (poker settles bets, deals the
-	// next street, picks the next actor), so it runs before any broadcast and clients
-	// never see a half-applied move. It ends the game the same way a win does: without
-	// the broadcast every client sits on a frame that never updates and the lobby never
-	// records the match.
-	if err := e.state.Rules.AfterAction(e.state, action); err != nil {
-		e.endGameLocked(nil, EndReasonRulesError)
-		return fmt.Errorf("after action: %w", err)
 	}
 
 	// One cue per settled move - EventTurnAdvanced, or EventGameEnded on a win: every

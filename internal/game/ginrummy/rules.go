@@ -217,10 +217,13 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		extra.TakenUpcard = nil
 		extra.TurnsThisHand++
 		extra.Phase = PhaseAwaitingDraw
+		if cause, hit := handHitTheWall(state, extra); hit {
+			settleWall(state, extra, cause)
+		}
 	case ActionKnock:
 		applyKnock(state, extra, action)
 	case ActionNextHand:
-		// dealt in AfterAction
+		return beginHand(state, extra)
 	}
 	return nil
 }
@@ -327,23 +330,6 @@ func matchOver(extra *State) bool {
 	return game.AnyScoreAtLeast(extra.CumulativeScores, targetScore) || extra.HandNumber >= maxHands
 }
 
-func (r *Rules) AfterAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
-
-	switch action.(type) {
-	case ActionNextHand:
-		return beginHand(state, extra)
-	case ActionDiscard:
-		if cause, hit := handHitTheWall(state, extra); hit {
-			settleWall(state, extra, cause)
-		}
-	}
-	return nil
-}
-
 // handHitTheWall reports whether the hand is out of road, and why. A stock that ran
 // out and a table that spent a hundred turns trading the upcard are very different
 // hands, and the cause is the only place they are told apart.
@@ -408,7 +394,7 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 			return ActionDrawDiscard{}
 		}
 		// At the wall with an empty pile nothing is legal: the stock is off limits,
-		// there is nothing to take, and a knock needs the card drawn first. AfterAction
+		// there is nothing to take, and a knock needs the card drawn first. ApplyAction
 		// ends a walled hand before anyone is asked to draw, so this is unreachable in
 		// play - handing back a move the validator refuses is what would turn it into
 		// a silent kick if it ever were reached.

@@ -1181,7 +1181,7 @@ Extended to the player path, and no longer asking the rules for standings,
 
 **Context.** `onTurnTimeout` runs on a goroutine `time.AfterFunc` started, and
 nothing above it recovers. A panic in any rules hook reached from there -
-`TimeoutAction`, `ValidateAction`, `ApplyAction`, `AfterAction`, a leave handler -
+`TimeoutAction`, `ValidateAction`, `ApplyAction` (then also `AfterAction`), a leave handler -
 would take the whole process down: every table in memory, for one game package's
 defect.
 

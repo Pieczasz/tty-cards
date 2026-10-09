@@ -55,9 +55,6 @@ func (m *MockRules) ApplyAction(state *game.State, action game.Action) error {
 	m.Called(state, action)
 	return nil
 }
-func (m *MockRules) AfterAction(state *game.State, action game.Action) error {
-	return m.Called(state, action).Error(0)
-}
 func (m *MockRules) CheckWinCondition(state *game.State) bool { return m.Called(state).Bool(0) }
 func (m *MockRules) Standings(state *game.State) []*game.Player {
 	return m.Called(state).Get(0).([]*game.Player)
@@ -762,7 +759,6 @@ type stubRules struct{}
 
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }
-func (stubRules) AfterAction(*game.State, game.Action) error    { return nil }
 func (stubRules) CheckWinCondition(s *game.State) bool          { return s.Extra == stubWin }
 func (stubRules) Standings(s *game.State) []*game.Player        { return s.Players }
 
@@ -799,7 +795,6 @@ func endHand(engine *game.Engine, a game.Action) {
 func acceptAnyAction(m *MockRules) {
 	m.On("ValidateAction", mock.Anything, mock.Anything).Return(nil)
 	m.On("ApplyAction", mock.Anything, mock.Anything)
-	m.On("AfterAction", mock.Anything, mock.Anything).Return(nil)
 }
 
 // A match that ends has to reopen the table by itself.

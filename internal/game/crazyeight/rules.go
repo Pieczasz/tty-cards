@@ -142,10 +142,6 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	return nil
 }
 
-func (r *Rules) AfterAction(_ *game.State, _ game.Action) error {
-	return nil
-}
-
 func (r *Rules) CheckWinCondition(state *game.State) bool {
 	extra, ok := state.Extra.(*State)
 	if !ok {
