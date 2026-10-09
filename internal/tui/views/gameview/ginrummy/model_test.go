@@ -24,7 +24,7 @@ func testUser() *db.User {
 
 func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

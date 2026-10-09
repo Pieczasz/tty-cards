@@ -13,9 +13,7 @@ import (
 
 type bindRules struct{}
 
-func (bindRules) InitialDeck() []deck.Card            { return deck.Standard() }
-func (bindRules) InitialDealCount() int               { return 2 }
-func (bindRules) OnGameStart(*State) error            { return nil }
+func (bindRules) OnGameStart(s *State) error          { return dealEach(s, 2) }
 func (bindRules) ValidateAction(*State, Action) error { return nil }
 func (bindRules) AfterAction(*State, Action) error    { return nil }
 func (bindRules) ApplyAction(*State, Action) error    { return nil }
@@ -33,7 +31,7 @@ func TestBoundEngine_HandIsClonedAndScoped(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -57,7 +55,7 @@ func TestBoundEngine_HandBelongsToTheBoundPlayerOnly(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -82,7 +80,7 @@ func TestBoundEngine_SubmitRequiresBoundPlayer(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -101,7 +99,7 @@ func TestBoundEngine_SubmitRequiresBoundPlayer(t *testing.T) {
 func TestBoundEngine_SubscribeAndUnsubscribe(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	bound := Bind(engine, "1")
 
@@ -143,7 +141,7 @@ func TestBoundEngine_NilIsInert(t *testing.T) {
 func TestBoundEngine_ExposesItsSeat(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 
 	assert.Equal(t, "1", Bind(engine, "1").PlayerID())
@@ -154,7 +152,7 @@ func TestBoundEngine_ExposesItsSeat(t *testing.T) {
 func TestBoundEngine_FrameCallbackSeesTheSnapshottedState(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -175,7 +173,7 @@ func TestBoundEngine_FrameCallbackSeesTheSnapshottedState(t *testing.T) {
 func TestBoundEngine_SubscribeReportsCapacity(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.Standard())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	bound := Bind(engine, "1")
 

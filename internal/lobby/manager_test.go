@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
@@ -177,8 +176,6 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	mockRules := new(MockRules)
-	mockRules.On("InitialDeck").Return(deck.Standard())
-	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	registry := boundedRegistry("MockGame", mockRules, 2, 4)
 
@@ -369,7 +366,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	m := NewManager(ctx, repo)
 	cancel()
-	engine := game.NewEngine(&stubRules{}, seats, deck.Standard())
+	engine := game.NewEngine(&stubRules{}, seats)
 	t.Cleanup(engine.Close)
 
 	require.True(t, m.registerFinalizer())
@@ -459,8 +456,6 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
 
 	rules := new(MockRules)
-	rules.On("InitialDeck").Return(deck.Standard())
-	rules.On("InitialDealCount").Return(2)
 	rules.On("OnGameStart", mock.Anything).Return(nil)
 	registry := boundedRegistry("Mock", rules, 2, 4)
 

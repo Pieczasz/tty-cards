@@ -246,9 +246,6 @@ func TestRules_Init(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 
-	d := rules.InitialDeck()
-	assert.Len(t, d, 52)
-
 	state := createTestState()
 	err := rules.OnGameStart(state)
 	require.NoError(t, err)
@@ -266,7 +263,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -369,7 +366,7 @@ func TestRules_CardConservation(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
-		engine := game.NewEngine(rules, players, deck.Standard())
+		engine := game.NewEngine(rules, players)
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

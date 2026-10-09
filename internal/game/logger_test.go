@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,8 +47,9 @@ func TestEngine_LogsThroughItsTableLogger(t *testing.T) {
 	table := slog.New(slog.NewJSONHandler(sink, nil)).With("lobby", "ABCD1234", "game", "stub")
 
 	// No safe move, so the expiry takes the seat: a Warn and an Info from the clock.
-	engine := NewEngine(&timeoutRules{}, []*Player{{ID: "a"}, {ID: "b"}}, deck.Standard(),
+	engine := NewEngine(&timeoutRules{}, []*Player{{ID: "a"}, {ID: "b"}},
 		WithTurnTimeout(time.Hour), WithLogger(table))
+
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -73,7 +72,7 @@ func TestState_LoggerDefaultsToTheProcessLogger(t *testing.T) {
 	t.Parallel()
 	assert.Same(t, slog.Default(), (&State{}).Logger())
 
-	engine := NewEngine(&timeoutRules{}, []*Player{{ID: "a"}}, deck.Standard(), WithLogger(nil))
+	engine := NewEngine(&timeoutRules{}, []*Player{{ID: "a"}}, WithLogger(nil))
 	t.Cleanup(engine.Close)
 	engine.WithState(func(s *State) {
 		assert.Same(t, slog.Default(), s.Logger(), "a nil logger is no logger, not a panic")

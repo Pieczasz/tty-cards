@@ -443,7 +443,7 @@ func TestRules_OnPlayerLeave_EndsMatch(t *testing.T) {
 func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	engine := game.NewEngine(&Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&Rules{}, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 	events, err := engine.Subscribe()
@@ -463,7 +463,7 @@ func TestRules_LeaveEndsTheMatchAsInterrupted(t *testing.T) {
 
 func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
+	engine := game.NewEngine(&Rules{}, fourPlayers())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -724,7 +724,7 @@ func TestRules_ApplyAction_QueenOfSpadesDoesNotBreakHearts(t *testing.T) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, fourPlayers(), deck.Standard())
+	engine := game.NewEngine(&Rules{}, fourPlayers())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -745,7 +745,7 @@ func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	engine := game.NewEngine(rules, fourPlayers(), deck.Standard())
+	engine := game.NewEngine(rules, fourPlayers())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -767,10 +767,8 @@ func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 	assert.Equal(t, 4, MinPlayers, "hearts is a four-handed game either way")
 	assert.Equal(t, 4, MaxPlayers)
-	assert.Len(t, rules.InitialDeck(), 52)
 	assert.Equal(t, "hearts.PassCards", ActionPassCards{}.Name())
 	assert.Equal(t, "hearts.PlayCard", ActionPlayCard{}.Name())
 	assert.Equal(t, "hearts.NextHand", ActionNextHand{}.Name())
@@ -813,7 +811,7 @@ func TestRules_TurnDuration(t *testing.T) {
 func TestStandings_MidHandLeaveCountsTheLiveHand(t *testing.T) {
 	t.Parallel()
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-	engine := game.NewEngine(&Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&Rules{}, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -931,7 +929,7 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-		engine := game.NewEngine(rules, players, deck.Standard())
+		engine := game.NewEngine(rules, players)
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 
@@ -961,7 +959,7 @@ func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
 	rules := &Rules{}
 
 	rapid.Check(t, func(rt *rapid.T) {
-		engine := game.NewEngine(rules, fourPlayers(), deck.Standard())
+		engine := game.NewEngine(rules, fourPlayers())
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

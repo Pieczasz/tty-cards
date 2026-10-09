@@ -238,7 +238,7 @@ func TestSeatNames_CannotCarryATerminalEscape(t *testing.T) {
 func TestSession_SubmitCountsARejection(t *testing.T) {
 	t.Parallel()
 
-	engine := game.NewEngine(&crazyeight.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.Standard())
+	engine := game.NewEngine(&crazyeight.Rules{}, testutil.NamedPlayers("alice", "bob"))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

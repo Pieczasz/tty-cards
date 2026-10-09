@@ -79,7 +79,7 @@ func TestUpdate_ColorPicking(t *testing.T) {
 func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	players := testutil.NamedPlayers("alice", "bob", "carol")
-	engine := game.NewEngine(&logic.Rules{}, players, (&logic.Rules{}).InitialDeck())
+	engine := game.NewEngine(&logic.Rules{}, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

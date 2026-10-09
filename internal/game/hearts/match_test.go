@@ -171,7 +171,7 @@ func TestScoreHand_LogsOnceAHandThroughTheTableLogger(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	sink := &gametest.LogSink{}
-	engine := game.NewEngine(rules, fourPlayers(), deck.Standard(), game.WithLogger(sink.Logger()))
+	engine := game.NewEngine(rules, fourPlayers(), game.WithLogger(sink.Logger()))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

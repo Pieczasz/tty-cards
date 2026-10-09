@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
@@ -663,7 +662,7 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 
 			repo := new(MockMatchRepo)
 			m := newTestManager(t, repo)
-			engine := game.NewEngine(tt.rules, tt.seats, deck.Standard())
+			engine := game.NewEngine(tt.rules, tt.seats)
 			t.Cleanup(engine.Close)
 
 			require.True(t, m.registerFinalizer())
@@ -687,7 +686,7 @@ func TestFinalize_AbandonedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 	repo.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).
 		Return(nil).Once()
 	m := newTestManager(t, repo)
-	engine := game.NewEngine(&stubRules{}, seats, deck.Standard())
+	engine := game.NewEngine(&stubRules{}, seats)
 	t.Cleanup(engine.Close)
 
 	require.True(t, m.registerFinalizer())
@@ -808,7 +807,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 				m.shuttingDown.Store(true)
 			}
 
-			engine := game.NewEngine(&stubRules{}, seated, deck.Standard())
+			engine := game.NewEngine(&stubRules{}, seated)
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
 

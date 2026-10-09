@@ -63,7 +63,7 @@ func TestBetting_CheckThroughFlop(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 
 	for i := 0; i < 20 && !engine.IsFinished(); i++ {
@@ -108,7 +108,7 @@ func TestLeave_NonCurrentPlayerKeepsTurn(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 
 	current := engine.CurrentPlayerID()
@@ -129,7 +129,7 @@ func TestLeave_CurrentPlayerPassesTurnToValidActor(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 
 	current := engine.CurrentPlayerID()
@@ -289,7 +289,7 @@ func TestLeave_MultiwayContinues(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 
 	engine.RemovePlayer("b")
@@ -346,7 +346,7 @@ func TestSmoke_PassiveHands(t *testing.T) {
 			for i := range players {
 				players[i] = &game.Player{ID: fmt.Sprintf("p%d", i)}
 			}
-			engine := game.NewEngine(rules, players, deck.Standard())
+			engine := game.NewEngine(rules, players)
 			require.NoError(t, engine.Start())
 			// Every hand of a passive match: check it down, then deal the next one.
 			for i := 0; i < 100*HandsPerMatch && !engine.IsFinished(); i++ {
@@ -374,7 +374,7 @@ func startTable(t gametest.TB, n int) *game.Engine {
 	for i := range n {
 		players = append(players, &game.Player{ID: fmt.Sprintf("p%d", i+1)})
 	}
-	engine := game.NewEngine(&Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&Rules{}, players)
 	require.NoError(t, engine.Start())
 	return engine
 }

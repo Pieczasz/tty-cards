@@ -519,7 +519,7 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	rules := mod.Factory()
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
-	engine := game.NewEngine(rules, players, rules.InitialDeck(), game.WithLogger(logger))
+	engine := game.NewEngine(rules, players, game.WithLogger(logger))
 
 	if err := engine.Start(); err != nil {
 		err = fmt.Errorf("start game engine: %w", err)

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
@@ -24,7 +23,7 @@ func testUser(name string) *db.User {
 // startedTable returns a two-handed table mid-hand plus the view bound to seat 1.
 func startedTable(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"))
 
 	require.NoError(t, engine.Start())
 
@@ -138,7 +137,7 @@ func TestClampRaise_BoundsToLegalRange(t *testing.T) {
 // test does not depend on where the button landed.
 func tableOnTurn(t *testing.T, seats int) (*game.Engine, *model) {
 	t.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(seats), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(seats))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

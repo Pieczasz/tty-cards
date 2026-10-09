@@ -39,9 +39,6 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 	return ActionDrawCard{}
 }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
-func (r *Rules) InitialDealCount() int    { return 0 }
-
 func (r *Rules) OnGameStart(state *game.State) error {
 	if err := shed.Deal(state, deck.Standard(), dealCount); err != nil {
 		return fmt.Errorf("deal crazy eights: %w", err)

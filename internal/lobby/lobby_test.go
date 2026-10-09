@@ -14,7 +14,6 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/elo"
 	"github.com/Pieczasz/tty-cards/internal/game"
 
@@ -48,8 +47,6 @@ type MockRules struct {
 	mock.Mock
 }
 
-func (m *MockRules) InitialDeck() []deck.Card            { return m.Called().Get(0).([]deck.Card) }
-func (m *MockRules) InitialDealCount() int               { return m.Called().Int(0) }
 func (m *MockRules) OnGameStart(state *game.State) error { return m.Called(state).Error(0) }
 func (m *MockRules) ValidateAction(state *game.State, action game.Action) error {
 	return m.Called(state, action).Error(0)
@@ -130,8 +127,6 @@ func TestLobby_ToggleReady(t *testing.T) {
 
 	mockRules := new(MockRules)
 
-	mockRules.On("InitialDeck").Return(deck.Standard())
-	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 
 	registry := boundedRegistry("MockGame", mockRules, 2, 4)
@@ -217,8 +212,6 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 
 	mockRules := new(MockRules)
 
-	mockRules.On("InitialDeck").Return(deck.Standard())
-	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true) // Immediate win to end game
 	acceptAnyAction(mockRules)
@@ -276,8 +269,6 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	mockRules := new(MockRules)
-	mockRules.On("InitialDeck").Return(deck.Standard())
-	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
@@ -337,8 +328,6 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 
 	// Game already in progress
 	mockRules2 := new(MockRules)
-	mockRules2.On("InitialDeck").Return(deck.Standard())
-	mockRules2.On("InitialDealCount").Return(5)
 	mockRules2.On("OnGameStart", mock.Anything).Return(nil)
 	registry = boundedRegistry("Mock2", mockRules2, 2, 4)
 
@@ -752,7 +741,7 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 	l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("Mock"), WithRanked(true))
 	require.NoError(t, err)
 
-	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))}, deck.Standard())
+	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))})
 	t.Cleanup(engine.Close)
 
 	l.requestFinalize(engine, game.EndReasonWin, finalizeRequest{
@@ -771,8 +760,6 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 // the seats in order.
 type stubRules struct{}
 
-func (stubRules) InitialDeck() []deck.Card                      { return deck.Standard() }
-func (stubRules) InitialDealCount() int                         { return 1 }
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }
 func (stubRules) AfterAction(*game.State, game.Action) error    { return nil }
@@ -948,7 +935,8 @@ func TestRating_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
 	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"Poker": 1720}}, "Poker"))
 }
 
-// refusedStartRules is stubRules whose deal fails, so the engine never starts.
+// refusedStartRules is stubRules whose deal fails, so the engine never starts: a
+// defect in the rules, not something the players did.
 type refusedStartRules struct{ stubRules }
 
 func (refusedStartRules) OnGameStart(*game.State) error { return errors.New("no deal") }

@@ -515,8 +515,8 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
   seated at a newer table.
 
-**Starting a game.** `startGameLocked` -> `registry.Create(name)` ->
-`game.NewEngine(rules, players, rules.InitialDeck())` -> `engine.Start()` ->
+**Starting a game.** `startGameLocked` -> `registry.Module(name)` (the seat
+bounds) -> `mod.Factory()` -> `game.NewEngine(rules, players, opts...)` -> `engine.Start()` ->
 `l.startedAt = time.Now()` -> `watchGameLocked(engine, db.GameRef{...})` ->
 `setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the engine in an
 unexported field; a subscriber gets its own seat with `Event.Seat(playerID)`.
@@ -661,9 +661,12 @@ tests); the soak mixes random legal plays, Eights' and Wilds' suit choices among
 them, into the clock's own moves before a clock-only tail proves the table still ends.
 
 `NewEngine` seats **copies** of the players it is given, with `Cards` cleared, so
-a finished engine's viewers and the next engine never share a hand. `Start` has no
-rollback: a failed start leaves that engine unusable, and the lobby builds a new
-engine per attempt. The first seat to act is `math/rand/v2` - it is public the
+a finished engine's viewers and the next engine never share a hand. The engine
+deals nothing: `OnGameStart` owns the deal (the shedding games through
+`shed.Deal`, the hand-based games through their own per-hand deal), and `Start`
+sets `Playing` only once it succeeded, so a refused start leaves the table
+`Waiting` with no clock. It has no rollback beyond that - the deal may be
+half-done - and the lobby builds a new engine per attempt. The first seat to act is `math/rand/v2` - it is public the
 moment the table opens, so it is no secret worth `crypto/rand`.
 
 ### 4.2 Turn cursor and clock - `advanceTurnLocked` / `settleTurnLocked`

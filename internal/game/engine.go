@@ -70,7 +70,7 @@ func WithOnIdleRemoved(fn func(playerID string)) EngineOption {
 	}
 }
 
-func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...EngineOption) *Engine {
+func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 	seats := make([]*Player, len(players))
 	for i, p := range players {
 		if p != nil {
@@ -80,7 +80,7 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 		}
 	}
 	e := &Engine{
-		state:       NewState(rules, seats, cards),
+		state:       NewState(rules, seats, nil),
 		broadcaster: broadcaster.New[Event](len(players) + 8),
 		clock: turnClock{
 			defaultLength: DefaultTurnTimeout,
@@ -93,7 +93,8 @@ func NewEngine(rules Rules, players []*Player, cards []deck.Card, opts ...Engine
 	return e
 }
 
-// Start deals and opens the table.
+// Start opens the table: it picks the first seat and lets the rules set the game up,
+// the deal included. A table whose rules refuse it stays Waiting.
 func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -108,26 +109,12 @@ func (e *Engine) Start() error {
 		return errors.New("cannot start game with no players")
 	}
 
-	e.state.Deck.Shuffle()
-
-	hands := make([][]deck.Card, len(e.state.Players))
-	for playerIdx := range e.state.Players {
-		cards, ok := e.state.Deck.DrawN(e.state.Rules.InitialDealCount())
-		if !ok {
-			return errors.New("insufficient number of cards to deal for all players")
-		}
-		hands[playerIdx] = cards
-	}
-
-	for playerIdx, hand := range hands {
-		e.state.Players[playerIdx].Cards = hand
-	}
-	e.state.Phase = Playing
 	e.state.CurrentTurn = rand.IntN(len(e.state.Players)) //nolint:gosec // G404: not a secret
 
 	if err := e.state.Rules.OnGameStart(e.state); err != nil {
 		return fmt.Errorf("set up game: %w", err)
 	}
+	e.state.Phase = Playing
 	e.settleTurnLocked()
 	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
 	return nil

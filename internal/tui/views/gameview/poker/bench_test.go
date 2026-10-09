@@ -6,7 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
@@ -21,7 +20,7 @@ import (
 // games actually support.
 func benchTable(b *testing.B, n int) *model {
 	b.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n))
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 
@@ -75,7 +74,7 @@ func BenchmarkPokerView_Frame(b *testing.B) {
 //
 //nolint:paralleltest // measures process-wide heap, so it cannot share the process
 func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(6), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(6))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -149,7 +148,7 @@ func BenchmarkPokerView_RenderParallel(b *testing.B) {
 //
 //nolint:thelper // runs on a parallel worker, so it must not register as a helper
 func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n))
 	if err := engine.Start(); err != nil {
 		b.Error(err)
 	}

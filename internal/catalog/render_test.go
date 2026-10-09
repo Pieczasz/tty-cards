@@ -134,7 +134,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 	t.Helper()
 
 	rules := entry.Factory()
-	engine := game.NewEngine(rules, testutil.Players(seats), deck.Standard())
+	engine := game.NewEngine(rules, testutil.Players(seats))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

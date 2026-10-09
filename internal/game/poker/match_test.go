@@ -352,8 +352,9 @@ func standingIDs(engine *game.Engine) []string {
 func TestChipConservation_LogsThroughTheTableLogger(t *testing.T) {
 	t.Parallel()
 	sink := &gametest.LogSink{}
-	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard(),
+	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}},
 		game.WithLogger(sink.Logger()))
+
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
