@@ -27,30 +27,28 @@ func isWaiting(l *Lobby) bool {
 func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 	t.Parallel()
 
-	changes := map[string]func(l *Lobby, leader *game.Player, registry *game.Registry) error{
-		"ranked":  func(l *Lobby, leader *game.Player, _ *game.Registry) error { return l.SetRanked(leader, true) },
-		"private": func(l *Lobby, leader *game.Player, _ *game.Registry) error { return l.SetPrivate(leader, false) },
-		"max_players": func(l *Lobby, leader *game.Player, registry *game.Registry) error {
-			return l.SetMaxPlayers(leader, 3, registry)
-		},
+	changes := map[string]func(l *Lobby, leader *game.Player) error{
+		"ranked":      func(l *Lobby, leader *game.Player) error { return l.SetRanked(leader, true) },
+		"private":     func(l *Lobby, leader *game.Player) error { return l.SetPrivate(leader, false) },
+		"max_players": func(l *Lobby, leader *game.Player) error { return l.SetMaxPlayers(leader, 3) },
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			m, l, registry := newTestLobby(t, 4)
+			m, l := newTestLobby(t, 4)
 			leader := l.Leader()
 			guest := mockPlayer("p2", testutil.UID(2))
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-			require.NoError(t, l.ToggleReady(guest, registry))
+			require.NoError(t, m.ToggleReady(guest))
 
 			ch, err := l.Subscribe("watcher")
 			require.NoError(t, err)
-			require.NoError(t, change(l, leader, registry))
+			require.NoError(t, change(l, leader))
 
 			assert.False(t, l.IsReady(guest), "the guest's ready survived a setting change")
 			assert.Contains(t, drainEventTypes(ch), EventPlayersUpdated, "the rosters were not told")
 
-			require.NoError(t, l.ToggleReady(leader, registry))
+			require.NoError(t, m.ToggleReady(leader))
 			assert.Equal(t, waiting, l.state, "the leader started a match the guest never readied for")
 		})
 	}
@@ -69,7 +67,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 	for name, remove := range removals {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			m, l, registry := newTestLobby(t, 4)
+			m, l := newTestLobby(t, 4)
 			leader := l.Leader()
 			b := mockPlayer("p2", testutil.UID(2))
 			c := mockPlayer("p3", testutil.UID(3))
@@ -78,7 +76,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), p)))
 			}
 			for _, p := range []*game.Player{leader, b, c} {
-				require.NoError(t, l.ToggleReady(p, registry))
+				require.NoError(t, m.ToggleReady(p))
 			}
 
 			require.NoError(t, remove(m, leader, holdout))
@@ -92,13 +90,13 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 
 	t.Run("the leader leaves", func(t *testing.T) {
 		t.Parallel()
-		m, l, registry := newTestLobby(t, 4)
+		m, l := newTestLobby(t, 4)
 		leader := l.Leader()
 		b := mockPlayer("p2", testutil.UID(2))
 		c := mockPlayer("p3", testutil.UID(3))
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), b)))
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), c)))
-		require.NoError(t, l.ToggleReady(b, registry))
+		require.NoError(t, m.ToggleReady(b))
 
 		m.LeaveLobby(leader)
 
@@ -134,7 +132,7 @@ func TestRemoveLobby_KeepsANewerLobbysMapping(t *testing.T) {
 // LeaveLobby takes the player out of whatever table they sit at by then.
 func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
 	t.Parallel()
-	m, l, _ := newTestLobby(t, 4)
+	m, l := newTestLobby(t, 4)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 

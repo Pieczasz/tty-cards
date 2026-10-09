@@ -78,9 +78,8 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 func startGame(t *testing.T, m *model, l *lobby.Lobby) lobby.Event {
 	t.Helper()
 	guest := addGuest(t, m, l, 2, "bob")
-	registry := m.global.GameRegistry
-	require.NoError(t, l.ToggleReady(l.Leader(), registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Leader()))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(guest))
 	// Closing the engine is what ends the lobby's result watcher.
 	t.Cleanup(l.ActiveGame().Close)
 	for ev := range m.lobbyChan {
@@ -341,9 +340,8 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	m, l := leaderView(t)
 	guest := addGuest(t, m, l, 2, "bob")
 
-	registry := m.global.GameRegistry
-	require.NoError(t, l.ToggleReady(l.Leader(), registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Leader()))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(guest))
 	engine := l.ActiveGame()
 	require.NotNil(t, engine)
 	// The lobby watches the engine on a goroutine; closing it is what lets that
@@ -465,7 +463,7 @@ func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 
 			require.NoError(t, l.SetPrivate(l.Leader(), true))
 			require.NoError(t, l.SetRanked(l.Leader(), true))
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 5, testRegistry()))
+			require.NoError(t, l.SetMaxPlayers(l.Leader(), 5))
 			m.cursor = cursorFirstGuest + 4 // a row for a guest who has since left
 
 			_, cmd := m.Update(lobbyMsg{Type: evType, src: m.lobbyChan})
@@ -715,7 +713,7 @@ func TestRenderPlayerList(t *testing.T) {
 	t.Cleanup(m.Close)
 	bob := addGuest(t, m, l, 2, "bob")
 	addGuest(t, m, l, 3, "carol")
-	require.NoError(t, l.ToggleReady(bob, m.global.GameRegistry))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(bob))
 
 	m.cursor = cursorFirstGuest // bob's row
 
@@ -763,7 +761,7 @@ func TestLobbyView_FitsTheTerminal(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 6, testRegistry()))
+			require.NoError(t, l.SetMaxPlayers(l.Leader(), 6))
 			for i := 2; i <= 6; i++ {
 				addGuest(t, m, l, uint64(i), fmt.Sprintf("player-number-%d", i))
 			}
@@ -819,10 +817,10 @@ func TestView_AReadyMarkStaysOnItsPlayersRowAt80x24(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 	t.Cleanup(m.Close)
-	require.NoError(t, l.SetMaxPlayers(l.Leader(), 6, testRegistry()))
+	require.NoError(t, l.SetMaxPlayers(l.Leader(), 6))
 	for i := 2; i <= 4; i++ {
 		g := addGuest(t, m, l, uint64(i), fmt.Sprintf("load_%04d", i))
-		require.NoError(t, l.ToggleReady(g, m.global.GameRegistry))
+		require.NoError(t, m.global.LobbyManager.ToggleReady(g))
 	}
 	m.global.Theme = styles.NewTheme(true)
 	m.global.Width, m.global.Height = 80, 24

@@ -81,9 +81,8 @@ func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 	view.refresh()
 	require.Len(t, view.entries, 1)
 
-	registry := testRegistry()
-	require.NoError(t, l.ToggleReady(l.Leader(), registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(l.Leader()))
+	require.NoError(t, m.ToggleReady(guest))
 	// Starting a game arms the lobby's own result watcher, which lives until the
 	// engine's feed closes. Nothing else in this test ends the match, so without this
 	// the goroutine outlives the package and goleak fails the whole run.

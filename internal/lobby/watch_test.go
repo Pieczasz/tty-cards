@@ -50,9 +50,8 @@ func playFinishedTable(t *testing.T, m *Manager, gameName string) {
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame(gameName), WithRanked(true))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	registry := gameRegistry(gameName, stubRules{})
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 
 	endHand(l.ActiveGame(), stubWin)
 	require.Eventually(t, func() bool { return isWaiting(l) }, 2*time.Second, time.Millisecond)
@@ -152,11 +151,11 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logged, nil)))
 	t.Cleanup(func() { slog.SetDefault(original) })
 
-	m, l, registry := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	require.NoError(t, l.ToggleReady(l.Leader(), registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(l.Leader()))
+	require.NoError(t, m.ToggleReady(guest))
 
 	l.ActiveGame().WithState(func(s *game.State) { s.Logger().Info("probe") })
 
@@ -174,8 +173,8 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 
 // The lobby view logs what ToggleReady returns at Debug, because a refusal (too few
 // players, game in progress) and a real failure look alike from there. Only the start
-// itself knows a broken registry or a rules set that cannot deal is not a refusal, so
-// it has to say so at Error, naming the table.
+// itself knows a rules set that cannot deal is not a refusal, so it has to say so at
+// Error, naming the table.
 //
 //nolint:paralleltest // slog.SetDefault is process-wide, so this cannot share the process
 func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
@@ -183,17 +182,8 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 		name     string
 		registry *game.Registry
 		wantLog  bool
-		// A game the registry lacks has no slug yet, so it is named by display name.
-		gameKey, wantGame string
 	}{
-		{
-			name: "game missing from the registry", registry: game.NewRegistry(),
-			wantLog: true, gameKey: "game_name", wantGame: "Mock",
-		},
-		{
-			name: "engine cannot deal", registry: gameRegistry("Mock", refusedStartRules{}),
-			wantLog: true, gameKey: "game", wantGame: "mock",
-		},
+		{name: "engine cannot deal", registry: gameRegistry("Mock", refusedStartRules{}), wantLog: true},
 		{name: "too few players is a refusal", registry: boundedRegistry("Mock", stubRules{}, 3, 9)},
 	}
 	for _, tt := range tests {
@@ -203,11 +193,13 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
 			t.Cleanup(func() { slog.SetDefault(original) })
 
-			m, l, _ := newTestLobby(t, 4)
+			m := newManagerFor(t, nil, tt.registry)
+			l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("Mock"))
+			require.NoError(t, err)
 			guest := mockPlayer("p2", testutil.UID(2))
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-			require.NoError(t, l.ToggleReady(l.Leader(), tt.registry))
-			require.Error(t, l.ToggleReady(guest, tt.registry))
+			require.NoError(t, m.ToggleReady(l.Leader()))
+			require.Error(t, m.ToggleReady(guest))
 
 			if !tt.wantLog {
 				assert.Empty(t, logged.String(), "a refusal is the player's business, not an error")
@@ -217,7 +209,7 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(logged.String()), &rec), logged.String())
 			assert.Equal(t, "cannot start game", rec["msg"])
 			assert.Equal(t, l.Code(), rec["lobby"])
-			assert.Equal(t, tt.wantGame, rec[tt.gameKey])
+			assert.Equal(t, "mock", rec["game"])
 			assert.NotEmpty(t, rec["error"])
 		})
 	}

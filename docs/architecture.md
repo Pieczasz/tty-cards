@@ -480,7 +480,7 @@ dirty flag):
 
 | From | To | Trigger |
 |---|---|---|
-| `waiting` | `inGame` | `ToggleReady` with everyone ready -> `startGameLocked` |
+| `waiting` | `inGame` | `Manager.ToggleReady` with everyone ready -> `startGameLocked` |
 | `inGame` | `waiting` | `releaseFinishedGameLocked`, once the engine `IsFinished()` |
 | any | `closed` | `detachPlayerLocked`: the leader leaves and there are no guests |
 
@@ -521,8 +521,11 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
   seated at a newer table.
 
-**Starting a game.** `startGameLocked` -> `registry.Module(name)` (the seat
-bounds) -> `mod.Factory()` -> `game.NewEngine(rules, players, opts...)` -> `engine.Start()` ->
+**Starting a game.** `Manager.ToggleReady(p)` finds p's table through the index,
+releases a finished game still holding it, and flips the flag; with every seat ready
+`startGameLocked` checks the game's minimum against the lobby's own `l.game` (the
+maximum cannot be exceeded: `CreateLobby` and `SetMaxPlayers` keep the cap inside the
+game's range) -> `l.game.Factory()` -> `game.NewEngine(rules, players, opts...)` -> `engine.Start()` ->
 `l.startedAt = time.Now()` -> `watchGameLocked(engine, db.GameRef{...})` ->
 `setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the engine in an
 unexported field; a subscriber gets its own seat with `Event.Seat(playerID)`.
@@ -568,7 +571,7 @@ manager lock so a reconnect cannot resume a seat about to vanish.
 
 **The hold is released at two more points:**
 
-- `releaseHeldSeats` (`disconnect.go`), called from `Lobby.releaseFinishedGame` - the hold only
+- `releaseHeldSeats` (`disconnect.go`), called from `Manager.releaseFinishedGame` - the hold only
   makes sense mid-hand. Once the table is `waiting` again, a still-armed timer
   keeps the player out of every other table, and this one unable to reach
   all-ready, for up to 90 s. It claims the grace the way the timer would, so a

@@ -175,12 +175,8 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	mockRules := new(MockRules)
-	mockRules.On("OnGameStart", mock.Anything).Return(nil)
-	registry := boundedRegistry("MockGame", mockRules, 2, 4)
-
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 	assert.Equal(t, inGame, l.state)
 
 	err = joinErr(m.JoinLobbyByCode(l.Code(), late))
@@ -464,12 +460,8 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
 
-	rules := new(MockRules)
-	rules.On("OnGameStart", mock.Anything).Return(nil)
-	registry := boundedRegistry("Mock", rules, 2, 4)
-
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 	require.Equal(t, inGame, l.state)
 
 	assert.Empty(t, m.BrowseLobbies(nil, BrowseFilter{}), "a table in play is not on offer")
@@ -580,7 +572,7 @@ func TestManager_Stats(t *testing.T) {
 // IsLeader is what the lobby view gates every settings control on.
 func TestLobby_IsLeader(t *testing.T) {
 	t.Parallel()
-	m, l, _ := newTestLobby(t, 3)
+	m, l := newTestLobby(t, 3)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
@@ -674,7 +666,7 @@ func TestManager_FindLobbyByCode_RefusesAMalformedCode(t *testing.T) {
 // be gone; that must not touch any other table.
 func TestManager_RemoveLobby_UnknownCodeIsANoOp(t *testing.T) {
 	t.Parallel()
-	m, l, _ := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 
 	m.RemoveLobby("ZZZZZZZZ")
 
@@ -688,7 +680,7 @@ func TestManager_RemoveLobby_UnknownCodeIsANoOp(t *testing.T) {
 // goes, and the table they are no longer at is left alone.
 func TestManager_LeaveLobby_DropsAStaleIndexEntry(t *testing.T) {
 	t.Parallel()
-	m, l, _ := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	stranger := mockPlayer("p9", testutil.UID(9))
 	events, err := l.Subscribe(l.Leader().ID)
 	require.NoError(t, err)

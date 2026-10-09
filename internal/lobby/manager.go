@@ -194,6 +194,19 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	return lobby, nil
 }
 
+// ToggleReady flips p's ready flag at the table p sits at, and starts the game once
+// every seat is ready.
+func (m *Manager) ToggleReady(p *game.Player) error {
+	l := m.FindLobbyByPlayer(p)
+	if l == nil {
+		return ErrNotInLobby
+	}
+	// Before toggleReady takes l.mu: this takes it itself, then m.mu via
+	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
+	m.releaseFinishedGame(l)
+	return l.toggleReady(p)
+}
+
 // JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
 // does not look the code up a second time - by when the table may be gone.
 func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {

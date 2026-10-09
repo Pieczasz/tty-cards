@@ -29,7 +29,6 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := newSignallingMatchRepo(repository.NewMatchRepository(gormDB))
 	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 3)
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -54,7 +53,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	t.Cleanup(func() { l.Unsubscribe(leader.ID, events) })
 
 	for _, p := range players {
-		require.NoError(t, l.ToggleReady(p, registry))
+		require.NoError(t, manager.ToggleReady(p))
 	}
 	engine := awaitGameStart(t, l, events)
 
@@ -99,7 +98,6 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := repository.NewMatchRepository(gormDB)
 	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 2)
 	for _, name := range []string{"dave", "erin"} {
@@ -120,7 +118,7 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	require.NoError(t, subErr)
 	t.Cleanup(func() { l.Unsubscribe(players[0].ID, events) })
 	for _, p := range players {
-		require.NoError(t, l.ToggleReady(p, registry))
+		require.NoError(t, manager.ToggleReady(p))
 	}
 	engine := awaitGameStart(t, l, events)
 

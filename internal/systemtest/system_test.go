@@ -26,7 +26,6 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 
 	repo := newRankedFinalizeRecorder()
 	manager := lobby.NewManager(t.Context(), repo, catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
 	guests := []*game.Player{newPlayer(testutil.UID(2), "bob"), newPlayer(testutil.UID(3), "carol"), newPlayer(testutil.UID(4), "dave")}
@@ -39,14 +38,14 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, leader, l.Leader())
 
-	require.NoError(t, l.SetMaxPlayers(leader, 4, registry))
+	require.NoError(t, l.SetMaxPlayers(leader, 4))
 	require.NoError(t, l.SetPrivate(leader, false))
 	require.NoError(t, l.SetRanked(leader, true))
 	assert.Equal(t, 4, l.MaxPlayers())
 	assert.False(t, l.IsPrivate())
 	assert.True(t, l.IsRanked())
 
-	require.Error(t, l.SetMaxPlayers(guests[0], 9, registry), "only the leader may change settings")
+	require.Error(t, l.SetMaxPlayers(guests[0], 9), "only the leader may change settings")
 
 	for _, g := range guests {
 		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)), "guest %s should join", g.ID)
@@ -60,7 +59,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 
 	all := slices.Concat([]*game.Player{leader}, guests)
 	for _, p := range all {
-		require.NoError(t, l.ToggleReady(p, registry))
+		require.NoError(t, manager.ToggleReady(p))
 	}
 
 	engine := awaitGameStart(t, l, events)
@@ -101,7 +100,6 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	t.Parallel()
 
 	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
 	l, err := manager.CreateLobby(leader,
@@ -110,7 +108,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	err = l.ToggleReady(leader, registry)
+	err = manager.ToggleReady(leader)
 	require.ErrorContains(t, err, "at least 2 players")
 	assert.True(t, l.IsReady(leader), "the ready flag still toggles")
 	assert.Nil(t, l.ActiveGame(), "one ready player cannot start a two-player game")
