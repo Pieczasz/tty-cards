@@ -154,6 +154,28 @@ rules:
           metavariable: $F
           regex: ^(Info|Debug)(Context)?$
 
+  - id: game-logs-without-its-table
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Game code logs through State.Logger() - the engine's own lines too - the table
+      logger WithLogger set, which carries the lobby code and the game slug. A bare
+      slog call drops both, and a line such as "hand 7" no longer says which of a
+      thousand tables it is about.
+    paths:
+      include:
+        - /internal/game/
+      exclude:
+        - /internal/game/gametest/
+        - "*_test.go"
+    patterns:
+      - pattern-either:
+          - pattern: slog.$F(...)
+          - pattern: slog.Default().$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(Debug|Info|Warn|Error|Log|LogAttrs)(Context)?$
+
   - id: database-credential-leaves-config
     languages: [go]
     severity: ERROR
