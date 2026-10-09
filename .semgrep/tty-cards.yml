@@ -51,6 +51,29 @@ rules:
       # skipped so the rule can still be explained where it applies.
       - pattern-regex: (?m)^(?!\s*//).*?\bgame\.(Engine|NewEngine|Bind)\b
 
+  - id: rules-package-reaches-the-engine
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A rules package is driven by the Engine and never drives one: every hook runs
+      with Engine.mu held and receives only *State, so a call into an Engine from
+      rules code deadlocks on that lock or acts on some other table (decision #2).
+      Naming game.Engine, building one (game.NewEngine), binding one (game.Bind) or
+      calling WithState / SubmitAction has no place in internal/game/<game>/. Tests
+      and gametest are exempt: they drive tables.
+    paths:
+      include:
+        - /internal/game/*/
+      exclude:
+        - /internal/game/gametest/
+        - "*_test.go"
+    pattern-either:
+      - pattern: $E.WithState(...)
+      - pattern: $E.SubmitAction(...)
+      # A regex because semgrep cannot match a bare Go type; comment-only lines are
+      # skipped so the rule can still be explained where it applies.
+      - pattern-regex: (?m)^(?!\s*//).*?\bgame\.(Engine|NewEngine|Bind)\b
+
   - id: tui-uses-lipgloss-join
     languages: [go]
     severity: ERROR

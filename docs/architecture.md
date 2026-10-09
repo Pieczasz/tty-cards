@@ -626,7 +626,9 @@ engine's.
 
 - Rules must **never** call back into `Engine` (deadlock). This holds
   structurally: `Rules` methods receive only `*State`, which carries no engine
-  handle. Do not add one.
+  handle. Do not add one. The semgrep rule `rules-package-reaches-the-engine`
+  covers the rest: rules code that names, builds, binds or drives an `Engine`
+  fails `make semgrep`.
 - Rules may mutate `*State` freely under the engine lock.
 - `ValidateAction` rejects cleanly; an error from `ApplyAction` (the whole move:
   a rules set's own after-step, such as poker settling the street, runs at its

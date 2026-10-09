@@ -63,7 +63,8 @@ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 - **`make semgrep`** - the `CLAUDE.md` invariants a linter cannot express, in
   `.semgrep/tty-cards.yml`: the turn cursor moves only through `SetTurn` /
   `OverrideTurn`; TUI code never calls `Engine.WithState`, `SubmitAction` or the
-  two-argument `Frame`; recover helpers are deferred directly; no client address
+  two-argument `Frame`; rules code never names, builds, binds or drives an
+  `Engine`; recover helpers are deferred directly; no client address
   on a span or metric, and none in an info/debug log; the DSN and DB password
   never reach a log, print or error; a `Subscribe` error is never dropped; boolean
   env values go through `strconv.ParseBool`. Every rule has `// ruleid:` / `// ok:`
