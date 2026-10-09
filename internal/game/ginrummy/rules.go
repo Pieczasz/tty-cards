@@ -224,6 +224,8 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		applyKnock(state, extra, action)
 	case ActionNextHand:
 		return beginHand(state, extra)
+	default:
+		return game.ErrUnknownAction
 	}
 	return nil
 }

@@ -256,8 +256,11 @@ func timeoutDraws(t *testing.T, s Shed) {
 	assert.NoError(t, s.Rules.ValidateAction(state, s.Rules.TimeoutAction(state)))
 }
 
+// ApplyAction refuses one too: a move added to ValidateAction and forgotten here
+// must not be accepted as a silent no-op.
 func foreignActionIsRefused(t *testing.T, s Shed) {
 	require.ErrorIs(t, s.Rules.ValidateAction(s.Table(t, 3, 3), ForeignAction{}), game.ErrUnknownAction)
+	require.ErrorIs(t, s.Rules.ApplyAction(s.Table(t, 3, 3), ForeignAction{}), game.ErrUnknownAction)
 }
 
 // Extra holding something else is a wiring bug: every hook refuses or ignores it

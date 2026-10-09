@@ -613,7 +613,7 @@ func TestApplyAction_AllInCommitsTheWholeStack(t *testing.T) {
 			extra.MinRaise = DefaultBigBlind
 			state.CurrentTurn = 0
 
-			applyBet(state, extra, ActionAllIn{})
+			require.NoError(t, applyBet(state, extra, ActionAllIn{}))
 
 			assert.Zero(t, extra.Seats["a"].Chips, "all-in leaves no chips behind")
 			assert.Equal(t, tt.wantBet, extra.Seats["a"].Bet)

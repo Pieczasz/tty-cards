@@ -181,6 +181,8 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		}
 	case ActionDrawCard:
 		applyVoluntaryDraw(state, extra)
+	default:
+		return game.ErrUnknownAction
 	}
 	return nil
 }

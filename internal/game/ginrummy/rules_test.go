@@ -749,7 +749,8 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 func TestRules_ValidateAction_UnknownActionIsRefused(t *testing.T) {
 	t.Parallel()
 	state, _ := startedState(t)
-	assert.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
+	require.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
+	assert.ErrorIs(t, (&Rules{}).ApplyAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
 }
 
 func TestRules_NotAGinRummyState(t *testing.T) {

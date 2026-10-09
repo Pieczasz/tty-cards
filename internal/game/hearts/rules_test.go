@@ -876,6 +876,7 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 			state := createTestState()
 			gametest.Extra[*State](t, state).Phase = phase
 			require.ErrorIs(t, rules.ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction, phase)
+			require.ErrorIs(t, rules.ApplyAction(state, gametest.ForeignAction{}), game.ErrUnknownAction, phase)
 		}
 	})
 
