@@ -9,11 +9,7 @@ import (
 )
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// The table has moved on, so a complaint about a move the player tried against
-	// the old one has nothing left to refer to. Only on an event: clearing it on the
-	// clock tick too would wipe the message inside a second of it being shown.
-	clearErr := func() { m.ActionErr = nil }
-	if cmd, handled := m.HandleFrame(msg, m.syncState, clearErr); handled {
+	if cmd, handled := m.HandleFrame(msg, m.syncState); handled {
 		return m, cmd
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {

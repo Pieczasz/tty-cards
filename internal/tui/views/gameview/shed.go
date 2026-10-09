@@ -35,7 +35,7 @@ func (t *ShedTable) Sync(fn func(*game.State)) {
 
 // Handle is a shedding view's whole Update: sync is its state refresh.
 func (t *ShedTable) Handle(msg tea.Msg, sync func(), moves ShedMoves) tea.Cmd {
-	if cmd, handled := t.HandleFrame(msg, sync, nil); handled {
+	if cmd, handled := t.HandleFrame(msg, sync); handled {
 		return cmd
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {

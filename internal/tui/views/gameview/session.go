@@ -118,9 +118,9 @@ func (s *Session) Sync(fn func(*game.State)) {
 
 // HandleFrame runs the part of Update that is the same at every table: the common
 // window, theme and quit keys, the engine's event feed and the turn-clock tick. sync is
-// the view's own state refresh; onEvent runs before an event-driven sync. It reports
-// whether the message was consumed, so a view falls through to its own key bindings.
-func (s *Session) HandleFrame(msg tea.Msg, sync func(), onEvent func()) (tea.Cmd, bool) {
+// the view's own state refresh. It reports whether the message was consumed, so a view
+// falls through to its own key bindings.
+func (s *Session) HandleFrame(msg tea.Msg, sync func()) (tea.Cmd, bool) {
 	if handled, cmd := views.HandleCommonMsg(msg, &s.Global); handled {
 		return cmd, true
 	}
@@ -132,7 +132,7 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func(), onEvent func()) (tea.Cmd
 		if msg.Source != s.Events {
 			return nil, true
 		}
-		return s.handleEvent(msg.Event, sync, onEvent), true
+		return s.handleEvent(msg.Event, sync), true
 	case ClockTickMsg:
 		if msg.Source != s.Events {
 			return nil, true
@@ -143,7 +143,7 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func(), onEvent func()) (tea.Cmd
 	return nil, false
 }
 
-func (s *Session) handleEvent(ev game.Event, sync func(), onEvent func()) tea.Cmd {
+func (s *Session) handleEvent(ev game.Event, sync func()) tea.Cmd {
 	if s.IdleRemoved(ev) {
 		// Quitting ends the bubbletea program, which tears the ssh session down through
 		// the ordinary leave path.
@@ -151,9 +151,6 @@ func (s *Session) handleEvent(ev game.Event, sync func(), onEvent func()) tea.Cm
 	}
 
 	wasPlaying := s.Base.Phase == game.Playing
-	if onEvent != nil {
-		onEvent()
-	}
 	sync()
 
 	cmds := []tea.Cmd{s.Listen()}
