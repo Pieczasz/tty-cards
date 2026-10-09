@@ -85,7 +85,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "finalizing a ranked match",
-			call: func() error { return matches.FinalizeRankedMatch(ctx, ref, []uuid.UUID{user.ID}, nil) },
+			call: func() error { return finalizeErr(matches.FinalizeRankedMatch(ctx, ref, []uuid.UUID{user.ID}, nil)) },
 			want: "finalize ranked match",
 		},
 	}

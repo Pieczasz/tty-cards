@@ -68,8 +68,10 @@ type MatchRepository interface {
 	// FinalizeRankedMatch moves Elo and writes history. places is parallel to
 	// orderedUserIDs and 1-based; equal entries are scored as a draw, which still moves
 	// rating from the higher-rated of the pair to the lower. A nil places means a
-	// strict finish order.
-	FinalizeRankedMatch(ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int) error
+	// strict finish order. It returns the rating it stored for each user whose ranking
+	// row it wrote - a seat it skipped (erased, or charged nothing) is absent - so a
+	// caller can show the new ratings without reading them back.
+	FinalizeRankedMatch(ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int) (map[uuid.UUID]uint32, error)
 	// FinalizeInterruptedMatch settles a ranked match that a leave ended early for
 	// everyone (game.EndReasonInterrupted). Elo is computed as for FinalizeRankedMatch,
 	// with the leavers already ranked last, but only a leaver's loss is written: every
@@ -77,8 +79,9 @@ type MatchRepository interface {
 	// bank a lead, and a losing player cannot quit for free. leavers are user ids from
 	// orderedUserIDs; anything else is ignored. With no leaver left to charge (erased,
 	// or not at the table) the match is recorded as casual: it moved no rating, so it
-	// must not count toward the 24h pairing cap.
+	// must not count toward the 24h pairing cap. It returns what FinalizeRankedMatch
+	// does: here, only the leavers' new ratings.
 	FinalizeInterruptedMatch(
 		ctx context.Context, ref GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
-	) error
+	) (map[uuid.UUID]uint32, error)
 }

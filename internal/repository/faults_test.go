@@ -124,10 +124,10 @@ func TestFinalizeFailureAtAnyStepWritesNothing(t *testing.T) {
 				ids = append(ids, u.ID)
 			}
 			// A match already played gives the pairing count participants to read.
-			require.NoError(t, matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: slug, Name: "Before"}, ids, nil))
+			require.NoError(t, finalizeErr(matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: slug, Name: "Before"}, ids, nil)))
 			before := snapshotFinalize(t, database, slug, ids)
 
-			err := matches.FinalizeRankedMatch(failAt(ctx, tt.fragment), db.GameRef{Slug: slug, Name: "After"}, ids, nil)
+			err := finalizeErr(matches.FinalizeRankedMatch(failAt(ctx, tt.fragment), db.GameRef{Slug: slug, Name: "After"}, ids, nil))
 			require.ErrorIs(t, err, errInjected)
 			require.ErrorContains(t, err, "finalize ranked match: "+tt.want)
 			assert.Equal(t, before, snapshotFinalize(t, database, slug, ids), "a failed finalize left a write behind")
@@ -171,13 +171,14 @@ func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
 			ctx := t.Context()
 			clean := seatPair(t, database, fmt.Sprintf("clean%d", i))
 			ref := db.GameRef{Slug: fmt.Sprintf("retry_clean_%d", i), Name: "Retry"}
-			require.NoError(t, matches.FinalizeRankedMatch(ctx, ref, clean, nil))
+			require.NoError(t, finalizeErr(matches.FinalizeRankedMatch(ctx, ref, clean, nil)))
 			want := snapshotFinalize(t, database, ref.Slug, clean)
 
 			ids := seatPair(t, database, fmt.Sprintf("retry%d", i))
 			ref.Slug = fmt.Sprintf("retry_%d", i)
 			var ran atomic.Int32
-			require.NoError(t, matches.FinalizeRankedMatch(abortAt(ctx, `INSERT INTO "matches"`, code, 1, &ran), ref, ids, nil))
+			written, err := matches.FinalizeRankedMatch(abortAt(ctx, `INSERT INTO "matches"`, code, 1, &ran), ref, ids, nil)
+			require.NoError(t, err)
 			require.Equal(t, int32(2), ran.Load(), "the aborted finalize was not run again")
 
 			got := snapshotFinalize(t, database, ref.Slug, ids)
@@ -186,7 +187,9 @@ func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
 			for seat := range got.rankings {
 				assert.Equal(t, want.rankings[seat].Elo, got.rankings[seat].Elo, "seat %d", seat)
 				assert.Equal(t, uint64(1), got.rankings[seat].MatchesPlayed, "seat %d", seat)
+				assert.Equal(t, got.rankings[seat].Elo, written[got.rankings[seat].UserID], "seat %d: what the retry reported", seat)
 			}
+			assert.Len(t, written, len(ids))
 		})
 	}
 
@@ -204,7 +207,7 @@ func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
 		ids := seatPair(t, database, "retrylost")
 		var ran atomic.Int32
 		ctx := abortAt(t.Context(), `INSERT INTO "matches"`, "40P01", 1000, &ran)
-		err := matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_lost", Name: "Retry"}, ids, nil)
+		err := finalizeErr(matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_lost", Name: "Retry"}, ids, nil))
 		var pgErr *pgconn.PgError
 		require.ErrorAs(t, err, &pgErr)
 		assert.Equal(t, int32(3), ran.Load())
@@ -218,7 +221,7 @@ func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
 			ran.Add(1)
 			_ = tx.AddError(errInjected)
 		})
-		err := matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_other", Name: "Retry"}, ids, nil)
+		err := finalizeErr(matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_other", Name: "Retry"}, ids, nil))
 		require.ErrorIs(t, err, errInjected)
 		assert.Equal(t, int32(1), ran.Load())
 	})

@@ -31,8 +31,10 @@ func TestFinalizeRankedMatchSkipsAnErasedSeat(t *testing.T) {
 	users := repository.NewUserRepository(gormDB)
 	require.NoError(t, users.DeleteAccount(ctx, erased))
 
-	require.NoError(t, repository.NewMatchRepository(gormDB).
-		FinalizeRankedMatch(ctx, gameRef(antiFarmGame), ids, nil))
+	written, err := repository.NewMatchRepository(gormDB).
+		FinalizeRankedMatch(ctx, gameRef(antiFarmGame), ids, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, written, erased, "a rating was reported for a seat nothing was written for")
 
 	var rows int64
 	require.NoError(t, gormDB.Unscoped().Model(&db.Ranking{}).
@@ -48,6 +50,9 @@ func TestFinalizeRankedMatchSkipsAnErasedSeat(t *testing.T) {
 	// The rest of the table is still rated among itself, and the erased seat keeps its
 	// history row - other players' history has to keep resolving.
 	assert.Greater(t, rankingOf(t, gormDB, second, gameID).Elo, rankingOf(t, gormDB, third, gameID).Elo)
+	assert.Equal(t, map[uuid.UUID]uint32{
+		second: rankingOf(t, gormDB, second, gameID).Elo, third: rankingOf(t, gormDB, third, gameID).Elo,
+	}, written, "the finalize reported what it stored")
 	deltas := lastMatchDeltas(t, gormDB)
 	assert.Len(t, deltas, 3)
 	assert.Zero(t, deltas[erased])
@@ -66,7 +71,7 @@ func TestEraseAndFinalizeSerialize(t *testing.T) {
 	matches := repository.NewMatchRepository(gormDB)
 	errs := make(chan error, 2)
 	go func() { errs <- users.DeleteAccount(ctx, ids[0]) }()
-	go func() { errs <- matches.FinalizeRankedMatch(ctx, gameRef(antiFarmGame), ids, nil) }()
+	go func() { errs <- finalizeErr(matches.FinalizeRankedMatch(ctx, gameRef(antiFarmGame), ids, nil)) }()
 	for range 2 {
 		require.NoError(t, <-errs)
 	}
@@ -117,8 +122,9 @@ func TestFinalizeInterruptedMatchChargesOnlyTheLeaver(t *testing.T) {
 	require.NoError(t, gormDB.Create(&newcomer).Error)
 	standings := []uuid.UUID{first, second, newcomer.ID, leaver}
 
-	require.NoError(t, repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
-		ctx, gameRef(antiFarmGame), standings, nil, []uuid.UUID{leaver}))
+	written, err := repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
+		ctx, gameRef(antiFarmGame), standings, nil, []uuid.UUID{leaver})
+	require.NoError(t, err)
 
 	for id, was := range map[uuid.UUID]uint32{first: 1600, second: 1500} {
 		r := rankingOf(t, gormDB, id, gameID)
@@ -132,6 +138,7 @@ func TestFinalizeInterruptedMatchChargesOnlyTheLeaver(t *testing.T) {
 	quit := rankingOf(t, gormDB, leaver, gameID)
 	assert.Less(t, quit.Elo, uint32(1500), "the leaver quit for free")
 	assert.Equal(t, uint64(11), quit.MatchesPlayed, "the leaver's rated loss is a match played")
+	assert.Equal(t, map[uuid.UUID]uint32{leaver: quit.Elo}, written, "only the leaver's row was written")
 
 	deltas := lastMatchDeltas(t, gormDB)
 	assert.Zero(t, deltas[first])
@@ -152,8 +159,8 @@ func TestFinalizeInterruptedMatchNeverPaysALeaver(t *testing.T) {
 	gameID, ids := antiFarmTable(t, gormDB,
 		seat{elo: 1500, played: 10}, seat{elo: 1900, played: 10}, seat{elo: 1100, played: 10})
 
-	require.NoError(t, repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
-		ctx, gameRef(antiFarmGame), ids, []int{1, 2, 2}, []uuid.UUID{ids[1], ids[2]}))
+	require.NoError(t, finalizeErr(repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
+		ctx, gameRef(antiFarmGame), ids, []int{1, 2, 2}, []uuid.UUID{ids[1], ids[2]})))
 
 	assert.LessOrEqual(t, rankingOf(t, gormDB, ids[2], gameID).Elo, uint32(1100), "a leaver was paid for quitting")
 	assert.Less(t, rankingOf(t, gormDB, ids[1], gameID).Elo, uint32(1900))
@@ -167,8 +174,8 @@ func TestFinalizeInterruptedMatchWithNobodyToChargeMovesNoRating(t *testing.T) {
 	gormDB := testutil.SetupTestDB(t)
 	gameID, ids := antiFarmTable(t, gormDB, seat{elo: 1600, played: 10}, seat{elo: 1400, played: 10})
 
-	require.NoError(t, repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
-		t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()}))
+	require.NoError(t, finalizeErr(repository.NewMatchRepository(gormDB).FinalizeInterruptedMatch(
+		t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()})))
 
 	for id, was := range map[uuid.UUID]uint32{ids[0]: 1600, ids[1]: 1400} {
 		r := rankingOf(t, gormDB, id, gameID)
@@ -192,10 +199,10 @@ func TestFinalizeInterruptedMatchWithNobodyToChargeDoesNotDampTheNextMatch(t *te
 	gameID, ids := antiFarmTable(t, gormDB, seat{elo: 1500, played: 10}, seat{elo: 1500, played: 10})
 
 	for range 3 {
-		require.NoError(t, repo.FinalizeInterruptedMatch(
-			t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()}))
+		require.NoError(t, finalizeErr(repo.FinalizeInterruptedMatch(
+			t.Context(), gameRef(antiFarmGame), ids, nil, []uuid.UUID{uuid.New()})))
 	}
-	require.NoError(t, repo.FinalizeRankedMatch(t.Context(), gameRef(antiFarmGame), ids, nil))
+	require.NoError(t, finalizeErr(repo.FinalizeRankedMatch(t.Context(), gameRef(antiFarmGame), ids, nil)))
 
 	assert.Greater(t, rankingOf(t, gormDB, ids[0], gameID).Elo, uint32(1500), "the winner was damped")
 }

@@ -160,8 +160,8 @@ func newSignallingMatchRepo(inner db.MatchRepository) *signallingMatchRepo {
 
 func (s *signallingMatchRepo) FinalizeRankedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int,
-) error {
-	err := s.MatchRepository.FinalizeRankedMatch(ctx, ref, orderedUserIDs, places)
+) (map[uuid.UUID]uint32, error) {
+	ratings, err := s.MatchRepository.FinalizeRankedMatch(ctx, ref, orderedUserIDs, places)
 	s.fire()
-	return err
+	return ratings, err
 }

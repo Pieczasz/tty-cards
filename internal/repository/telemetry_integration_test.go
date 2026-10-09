@@ -110,10 +110,10 @@ func TestFinalizeRankedMatchCountsADampedMatch(t *testing.T) {
 	repo := repository.NewMatchRepository(gormDB)
 
 	for range 3 {
-		require.NoError(t, repo.FinalizeRankedMatch(t.Context(), ref, userIDs, nil))
+		require.NoError(t, finalizeErr(repo.FinalizeRankedMatch(t.Context(), ref, userIDs, nil)))
 	}
 	require.Zero(t, dampedCount(t, ref.Slug), "the first three pairings of the day pay")
 
-	require.NoError(t, repo.FinalizeRankedMatch(t.Context(), ref, userIDs, nil))
+	require.NoError(t, finalizeErr(repo.FinalizeRankedMatch(t.Context(), ref, userIDs, nil)))
 	assert.Equal(t, int64(1), dampedCount(t, ref.Slug))
 }
