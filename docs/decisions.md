@@ -1275,7 +1275,8 @@ moment banked the lead, so a friend quitting on cue was a way to lock in a win, 
 a player losing badly paid only the ordinary loss for walking out.
 
 **Decision.** A new `game.EndReasonInterrupted`. Hearts' `OnPlayerLeave` sets
-`State.Interrupted`, and `removePlayerLocked` reports that reason instead of
+`State.Interrupted` (since 2026-10-09: its `AfterPlayerRemoved` returns
+`game.LeaveInterruptsMatch`, and the field is gone), and `removePlayerLocked` reports that reason instead of
 `EndReasonWin` when the removal ends the game with it set; the engine knows nothing
 about ratings. The lobby routes a ranked interrupted match to
 `FinalizeInterruptedMatch` with the engine's leavers (since 2026-10-09, the
@@ -1294,11 +1295,11 @@ not at the table) nothing is rated, so the match is stored `ranked = false`
 instead: a match that moved nobody must not spend the pair budget of the players
 who stayed. It is the fourth
 partial end state ([#11](#11-three-end-states-are-recorded-without-elo)), labelled
-`interrupted` on the metric. Only hearts sets `Interrupted` today; a new game whose
+`interrupted` on the metric. Only hearts interrupts today; a new game whose
 table cannot continue short-handed opts in the same way.
 
-**Where.** `internal/game/state.go` `Interrupted`, `internal/game/engine.go`
-`removePlayerLocked`, `internal/game/hearts/rules.go` `OnPlayerLeave`,
+**Where.** `internal/game/rules.go` `LeaveOutcome`, `internal/game/engine.go`
+`settleAfterLeaveLocked`, `internal/game/hearts/rules.go` `AfterPlayerRemoved`,
 `internal/lobby/finalize.go` `recordFinishedMatch` / `leaverIDs`,
 `internal/repository/match.go` `FinalizeInterruptedMatch` / `writeRanking`,
 `internal/rating/rating.go` `LeaversOnly` / `Scope.Written` (the loss-only cap).

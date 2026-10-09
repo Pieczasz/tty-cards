@@ -14,7 +14,6 @@ type State struct {
 	OverrideNextTurn *int
 	Phase            Phase
 	Winner           *Player
-	Interrupted      bool
 	Deck             *deck.Pile
 	Discard          *deck.Pile
 	Rules            Rules

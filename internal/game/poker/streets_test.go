@@ -282,6 +282,22 @@ func TestLeave_FoldsAndAwardsPot(t *testing.T) {
 	})
 }
 
+// An all-in player who walks out still contests the pot, so the seat left facing their
+// shove has a decision to make, not a forfeit win to collect.
+func TestLeave_AnAllInLeaverKeepsTheHandOpen(t *testing.T) {
+	t.Parallel()
+	engine := startHeadsUp(t)
+	shover := engine.CurrentPlayerID()
+	require.NoError(t, engine.SubmitAction(shover, ActionAllIn{}))
+	caller := engine.CurrentPlayerID()
+	require.NotEqual(t, shover, caller)
+
+	engine.RemovePlayer(shover)
+
+	require.False(t, engine.IsFinished(), "the shove is still live")
+	assert.Equal(t, caller, engine.CurrentPlayerID(), "and the caller decides on it")
+}
+
 func TestLeave_MultiwayContinues(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
@@ -1077,7 +1093,7 @@ func TestLeave_TheOnlyPlayerWithChipsBehindStillPaysTheAllIns(t *testing.T) {
 	rules.OnPlayerLeave(state, "c")
 	state.Players = state.Players[:2]
 	state.LeftPlayers = []*game.Player{players[2]}
-	rules.AfterPlayerRemoved(state, 2)
+	assert.Equal(t, game.LeaveSettled, rules.AfterPlayerRemoved(state, 2), "a closed hand holds nobody")
 
 	assert.True(t, extra.HandComplete())
 	assert.Len(t, extra.Table, BoardSize, "the board ran out for the two all-ins")

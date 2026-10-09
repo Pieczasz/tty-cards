@@ -57,11 +57,30 @@ type TurnDurationHandler interface {
 
 // PlayerLeaveHandler lets a rules set settle a seat that leaves mid-game.
 // OnPlayerLeave runs while the seat is still in State.Players; AfterPlayerRemoved runs
-// once it is gone and the later seats have shifted down, with the index it had.
+// once it is gone and the later seats have shifted down, with the index it had, and
+// says what the leave did to the match. Rules without it are LeaveSettled.
 type PlayerLeaveHandler interface {
 	OnPlayerLeave(state *State, playerID string)
-	AfterPlayerRemoved(state *State, removedIndex int)
+	AfterPlayerRemoved(state *State, removedIndex int) LeaveOutcome
 }
+
+// LeaveOutcome is what a leave did to the match, so OverrideNextTurn only ever means
+// who acts next.
+type LeaveOutcome uint8
+
+// The ways a leave can leave a match.
+const (
+	// LeaveSettled leaves the rest to the engine: a win, a forfeit to a lone
+	// remaining seat, or the next turn.
+	LeaveSettled LeaveOutcome = iota
+	// LeaveKeepsHandOpen is a lone remaining seat that still has a hand to play out -
+	// poker's all-in leaver still contests the pot - so it does not win by forfeit.
+	LeaveKeepsHandOpen
+	// LeaveInterruptsMatch is a match that cannot go on without the seat, which the
+	// seats still playing did not finish: it ends EndReasonInterrupted, and finalize
+	// charges only the leavers.
+	LeaveInterruptsMatch
+)
 
 // Standing is one player's finishing position.
 type Standing struct {

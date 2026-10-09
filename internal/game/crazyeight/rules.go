@@ -160,8 +160,8 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 	shed.Leave(state, &extra.State, playerID)
 }
 
-// AfterPlayerRemoved is a no-op; the engine's generic cursor handling suffices.
-func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) {}
+// AfterPlayerRemoved leaves it to the engine: its generic cursor handling suffices.
+func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) game.LeaveOutcome { return game.LeaveSettled }
 
 // Standings ranks by fewest cards held. Deviation: the paper game scores a hand by
 // the pip value of the cards left in each hand, which needs a running match total

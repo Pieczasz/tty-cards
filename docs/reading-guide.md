@@ -237,7 +237,7 @@ Same shape each time. Read the rules package, then its view package later (step
 | Game | Rules | Lines | What is new |
 |---|---|---|---|
 | Uno | `internal/game/uno/` | 257 + 51 + 33 (`rules`, `deck`, `state`) | Skip, Reverse and the draw cards name the next seat with `State.OverrideTurn`, so a reversed table honours `Direction` rather than the engine's +1 |
-| Hearts | `internal/game/hearts/` | 353 + 167 + 143 (`rules`, `trick`, `state`) | A pass phase with its own clock (`TurnDurationHandler`), a `Phase` enum (`PhasePassing`, `PhaseTrickPlay`, `PhaseHandOver`), trick resolution, shooting the moon, `game.AnyScoreAtLeast` for the match target, and a leave that ends the match as `EndReasonInterrupted` (`State.Interrupted`) |
+| Hearts | `internal/game/hearts/` | 353 + 167 + 143 (`rules`, `trick`, `state`) | A pass phase with its own clock (`TurnDurationHandler`), a `Phase` enum (`PhasePassing`, `PhaseTrickPlay`, `PhaseHandOver`), trick resolution, shooting the moon, `game.AnyScoreAtLeast` for the match target, and a leave that ends the match as `EndReasonInterrupted` (`AfterPlayerRemoved` returns `game.LeaveInterruptsMatch`) |
 | Gin Rummy | `internal/game/ginrummy/` | 487 + 249 + 145 + 67 (`rules`, `melds`, `state`, `layoffs`) | A search problem; see below |
 | Poker | `internal/game/poker/` | 289 + 232 + 205 + 76 + 417 + 251 + 131 (`rules`, `hand`, `betting`, `leave`, `streets`, `evaluator`, `state`) | Money, kept per player on one `Seat` in `State.Seats`; see below |
 

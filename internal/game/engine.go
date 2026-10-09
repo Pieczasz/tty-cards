@@ -411,17 +411,19 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	// Players by the clamped cursor and no longer guards the range itself.
 	e.clampTurnLocked()
 
+	outcome := LeaveSettled
 	if h, ok := e.state.Rules.(PlayerLeaveHandler); ok {
-		h.AfterPlayerRemoved(e.state, playerIndex)
+		outcome = h.AfterPlayerRemoved(e.state, playerIndex)
 	}
 
 	e.broadcaster.Broadcast(Event{Type: EventPlayerLeft, PlayerID: playerID})
-	e.settleAfterLeaveLocked()
+	e.settleAfterLeaveLocked(outcome)
 }
 
-// settleAfterLeaveLocked decides what a leave leaves behind: an abandoned table, a win,
-// a forfeit to the last seat, or the next turn. Caller holds e.mu.
-func (e *Engine) settleAfterLeaveLocked() {
+// settleAfterLeaveLocked decides what a leave leaves behind: an abandoned table, an
+// interrupted match, a win, a forfeit to the last seat, or the next turn. Caller holds
+// e.mu.
+func (e *Engine) settleAfterLeaveLocked(outcome LeaveOutcome) {
 	// A table that never started cannot be won: "any hand empty wins" would report a
 	// bogus win over undealt hands.
 	if e.state.Phase != Playing {
@@ -431,15 +433,11 @@ func (e *Engine) settleAfterLeaveLocked() {
 	switch {
 	case len(e.state.Players) == 0:
 		e.endGameLocked(nil, EndReasonAbandoned)
+	case outcome == LeaveInterruptsMatch:
+		e.finishGameLocked(nil, EndReasonInterrupted)
 	case e.state.Rules.CheckWinCondition(e.state):
-		reason := EndReasonWin
-		if e.state.Interrupted {
-			reason = EndReasonInterrupted
-		}
-		e.finishGameLocked(nil, reason)
-	// A leave handler may keep the hand open (poker all-in leavers still contest the
-	// pot). OverrideNextTurn means the last seat still has work.
-	case len(e.state.Players) == 1 && e.state.OverrideNextTurn == nil:
+		e.finishGameLocked(nil, EndReasonWin)
+	case len(e.state.Players) == 1 && outcome != LeaveKeepsHandOpen:
 		e.endGameLocked(e.state.Players[0], EndReasonForfeit)
 	default:
 		e.settleTurnLocked()
