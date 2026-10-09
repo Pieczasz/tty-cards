@@ -241,6 +241,17 @@ func TestSession_SyncBase(t *testing.T) {
 	assert.Equal(t, []string{testutil.SeatID(1), testutil.SeatID(2)}, s.Base.SeatOrder())
 	assert.Equal(t, map[string]string{testutil.SeatID(1): "alice", testutil.SeatID(2): "bob"}, s.Base.SeatNames())
 	assert.Positive(t, s.Base.DeckSize)
+	assert.Equal(t, game.EndReasonUnknown, s.Base.EndReason, "a live table has not ended")
+}
+
+func TestSession_SyncBase_SaysWhyTheTableEnded(t *testing.T) {
+	t.Parallel()
+	engine, s := startedSession(t)
+	engine.RemovePlayer(testutil.SeatID(2))
+	s.Sync(nil)
+
+	assert.Equal(t, game.Finished, s.Base.Phase)
+	assert.Equal(t, game.EndReasonForfeit, s.Base.EndReason)
 }
 
 func TestSession_SyncBase_PullsTheCursorBackIntoAShrinkingHand(t *testing.T) {

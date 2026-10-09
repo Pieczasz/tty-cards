@@ -87,3 +87,17 @@ func TestEngine_RemovePlayer_RulesPanicEndsTheTable(t *testing.T) {
 	assert.True(t, engine.turnDeadline().IsZero(), "a finished table must not auto-play")
 	assert.Equal(t, EndReasonRulesError, endedEvent(t, drainEvents(events)).Reason)
 }
+
+// RemoveLobby closes the engine while a leave may still be on its way into the rules.
+// A panic there broadcasts nothing, so the reason the engine keeps is all the lobby's
+// watcher has to finalize with.
+func TestEngine_RemovePlayer_RulesPanicOnAClosedEngineIsRecorded(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, &leavePanicRules{&timeoutRules{safe: namedAction{name: "safe"}}}, "a", "b", "c")
+	engine.Close()
+
+	require.NotPanics(t, func() { engine.RemovePlayer("a") })
+
+	assert.True(t, engine.IsFinished())
+	assert.Equal(t, EndReasonRulesError, engine.EndReason())
+}

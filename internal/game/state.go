@@ -72,4 +72,5 @@ type StateSnapshot struct {
 	DeckSize          int
 	Players           []PlayerSnapshot
 	WinnerName        string
+	EndReason         EndReason
 }
