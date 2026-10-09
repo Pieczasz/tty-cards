@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,6 +17,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/rating"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -33,6 +35,36 @@ func recordSpanResult(span trace.Span, err error) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
+	}
+}
+
+const (
+	pgSerializationFailureCode = "40001"
+	pgDeadlockDetectedCode     = "40P01"
+	// finalizeAttempts bounds how often an aborted finalize is run again. The lock
+	// order makes an abort rare, so a third in a row means something is wrong.
+	finalizeAttempts = 3
+)
+
+// isRetryableAbort is a transaction Postgres rolled back to break a conflict. Both
+// codes are raised before commit, so nothing was written and running it again is
+// safe; a dropped connection is not on the list, because it may have committed.
+func isRetryableAbort(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		(pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
+}
+
+// transactRetrying runs fn as one transaction, again when Postgres aborted it. Without
+// it an abort loses a finished match from history and Elo; fn must keep no state
+// across attempts it does not reset itself.
+func transactRetrying(ctx context.Context, conn *gorm.DB, fn func(tx *gorm.DB) error) error {
+	for attempt := 1; ; attempt++ {
+		err := conn.WithContext(ctx).Transaction(fn)
+		if attempt == finalizeAttempts || !isRetryableAbort(err) {
+			return err //nolint:wrapcheck // the caller names the write
+		}
+		slog.WarnContext(ctx, "finalize aborted by postgres; retrying", "error", err, "attempt", attempt)
 	}
 }
 
@@ -118,7 +150,7 @@ func (q *MatchRepository) RecordCasualMatch(
 		return fmt.Errorf("record casual match: %w", err)
 	}
 
-	if err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err = transactRetrying(ctx, q.db, func(tx *gorm.DB) error {
 		game, err := getOrCreateGame(tx, ref)
 		if err != nil {
 			return err
@@ -171,7 +203,8 @@ func (q *MatchRepository) finalizeRanked(
 	}
 
 	var damped bool
-	if err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err = transactRetrying(ctx, q.db, func(tx *gorm.DB) error {
+		damped = false
 		game, err := getOrCreateGame(tx, ref)
 		if err != nil {
 			return err
@@ -508,7 +541,7 @@ func fetchRankings(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) (map[uuid.UUID
 	// where the row locks are actually taken (the seed's ON CONFLICT DO NOTHING locks
 	// nothing when the row already exists, which is the common case), so without a
 	// fixed order two finalizes over overlapping seats can lock in opposite orders.
-	// Postgres then aborts one, and that match is lost from history and Elo.
+	// Postgres then aborts one, and transactRetrying only runs it again so many times.
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("user_id IN ? AND game_id = ?", uuidStrings(userIDs), gameID).
 		Order("user_id").Find(&rankings).Error; err != nil {
