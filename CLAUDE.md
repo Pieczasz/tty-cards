@@ -92,7 +92,7 @@ Every game view embeds `gameview.Session` (package `gameview`, `internal/tui/vie
 
 Read per-game state through the `extra` callback of `Session.Sync` (unredacted table state the view has to filter itself; `BoundEngine.Frame` is the standalone form) - and seat order, display names and stock size through `BaseState` (`Seats`, `SeatOrder()`, `SeatNames()`, `DeckSize`) rather than re-deriving them from the live `*State` - `PlayerSnapshot.Name` already falls back to the player ID. `BaseState.Opponents` drops the hero and runs clockwise from the hero's left (the seat that acts next comes first), the order `SplitZones` lays the table out in; `Seats` is engine order. Snapshot display names are `Name`, `CurrentPlayerName` and `WinnerName`; decide turns on `CurrentPlayerID`.
 
-Anything a view keeps after releasing the engine lock must be copied, not aliased (`maps.Clone`, `HandResult.Clone`).
+Anything a view keeps after releasing the engine lock must be copied, not aliased (`maps.Clone`, `HandResult.Clone`). The hand-based views (poker, hearts, gin rummy) copy it out in one pure `readTable(state, ...)` that returns a value, assigned to the model once `Sync` returns, so no callback writes the model under the engine lock and the copy boundary is one function.
 
 ### Subscription lifecycle
 

@@ -172,7 +172,9 @@ clockwise from the hero's left. Wire it the way `crazyeight` does:
 - Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
   render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
 
-Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`). The
+Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`), in one pure
+`readTable(state, ...)` that returns a value you assign once `Sync` returns, as
+poker, hearts and gin rummy do. The
 `*State` you get is live and unredacted - filtering what the player may see is
 your job, and it should be a named function so a reviewer can find it. Where
 what a seat may see is a rule of the game, that function lives in the rules
