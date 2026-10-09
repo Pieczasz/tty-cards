@@ -853,7 +853,10 @@ left, so the seat that acts next comes first - the order `SplitZones` lays the t
 out in. `PlayerSnapshot.Name` already falls back to the player id.
 
 Anything a view keeps after releasing the engine lock must be **copied, not
-aliased** (`maps.Clone`, `HandResult.Clone`).
+aliased** (`maps.Clone`, `HandResult.Clone`). Poker, hearts and gin rummy do the
+copying in one pure `readTable(state, ...)` that returns a value the model takes
+once `Sync` returns, so the copy boundary is one function and no callback writes
+the model under the engine lock.
 
 ### 4.5 Subscriptions
 
