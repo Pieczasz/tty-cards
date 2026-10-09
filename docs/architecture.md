@@ -546,7 +546,8 @@ without ever delivering `EventGameEnded` - it is the last event an engine sends,
 latest-wins never drops it, but `RemoveLobby` closes the feed and a leave already on
 its way can still end the game on the closed engine, whose broadcast is a no-op - the
 loop falls through to `engine.IsFinished()` and does the same thing with
-`EndReasonUnknown`, which is recorded unrated. The same loop counts `EventTurnTimedOut` and
+`engine.EndReason()`, which `endGameLocked` recorded whether or not anyone heard the
+broadcast. The same loop counts `EventTurnTimedOut` and
 `EventPlayerIdle` under the game's slug, the `game_type` label every game metric
 carries ([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)).
 
@@ -757,8 +758,9 @@ hook would take down every table for one game's defect. `Engine.recoverRulesPani
 is a direct `defer` on that goroutine and re-takes `e.mu` (the locked helpers
 release it in their own defers as the panic unwinds); `SubmitAction` has its own
 direct deferred `recover`, which runs before its unlock. Both call
-`endOnRulesPanicLocked`, which logs the panic with a stack and, on a live engine,
-calls `endGameLocked(nil, EndReasonRulesError)`. It deliberately does **not** call
+`endOnRulesPanicLocked`, which logs the panic with a stack and calls
+`endGameLocked(nil, EndReasonRulesError)` - on a closed engine too, where the
+broadcast is a no-op but the engine still records the reason for the watcher. It deliberately does **not** call
 `Rules.Standings` - the state a hook panicked on cannot be trusted to rank anyone,
 and a second panic inside a recover would take the process down - and it does not
 check for `Playing`, because a panic inside `finishGameLocked`'s own `Standings`
@@ -1095,12 +1097,12 @@ if why := unratedReason(reason, m.isShuttingDown()); rated && why != "" {
 }
 ```
 
-Four ways a ranked match is written without Elo, and the comment gives one
+Three ways a ranked match is written without Elo, and the comment gives one
 reason for each: a deploy decided who was left holding cards, not play; a
-half-applied rules error must not move the ladder; an **abandoned** table -
+half-applied rules error must not move the ladder; and an **abandoned** table -
 every seat left - has standings that are reverse leave order, so rating it pays
-the last to quit; and `EndReasonUnknown` - an end the watcher never saw announced -
-may have been an interrupted match whose finishers must not be rated.
+the last to quit. An end the watcher never saw announced is not a fourth: the
+engine keeps its reason (`Engine.EndReason`), and finalize uses that.
 `EndReasonForfeit` (last player standing) **is** rated. `unratedReason` names which it was for the log,
 and `EndReason.String()` gives the metric its label. A match with no standings, whatever
 ended it, writes nothing at all.

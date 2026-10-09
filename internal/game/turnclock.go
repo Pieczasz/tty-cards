@@ -118,13 +118,12 @@ func (e *Engine) recoverRulesPanic() {
 // winner, and a second panic from Standings inside a recover would take the process
 // down. It does not check for Playing: a panic inside finishGameLocked's Standings call
 // has already set Finished without announcing it, and every rules hook runs only on a
-// table that was Playing.
+// table that was Playing. Nor for closed: a leave can still reach the rules on a
+// closed engine, and the reason has to be recorded even though the broadcast is lost.
 func (e *Engine) endOnRulesPanicLocked(r any) {
 	e.state.Logger().Error("rules panicked; ending the table as a rules error",
 		"panic", r, "stack", string(debug.Stack()))
-	if !e.closed {
-		e.endGameLocked(nil, EndReasonRulesError)
-	}
+	e.endGameLocked(nil, EndReasonRulesError)
 }
 
 // timeoutOutcome is what resolveTurnTimeout decided an expiry means.

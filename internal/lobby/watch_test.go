@@ -111,24 +111,23 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 
 // The feed can end with no EventGameEnded on it: RemoveLobby closes the engine, and a
 // leave already on its way can still end the game on the closed engine, whose
-// broadcast is then a no-op. The reason is lost, and it may have been an interrupted
-// match whose finishers must not be rated - so the unobserved end is recorded as
-// history, never rated.
-func TestFeedEnd_UnobservedEndIsRecordedWithoutElo(t *testing.T) {
+// broadcast is then a no-op. The engine still knows why it ended, so a forfeit is
+// rated like one rather than guessed at.
+func TestFeedEnd_UnobservedEndIsFinalizedWithTheEnginesReason(t *testing.T) {
 	t.Parallel()
 	seats := []*game.Player{mockPlayer("a", testutil.UID(1)), mockPlayer("b", testutil.UID(2))}
 	repo := new(MockMatchRepo)
-	repo.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).
-		Return(nil).Once()
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("Mock"),
+		[]uuid.UUID{testutil.UID(2), testutil.UID(1)}, []int{1, 2}).Return(nil).Once()
 	m := newTestManager(t, repo)
 	l, err := m.CreateLobby(seats[0], WithCardGame("Mock"), WithRanked(true))
 	require.NoError(t, err)
 
 	engine := game.NewEngine(stubRules{}, seats, deck.Standard())
-	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
-	endHand(engine, stubWin)
-	require.True(t, engine.IsFinished())
+	engine.Close()
+	engine.RemovePlayer("a")
+	require.Equal(t, game.EndReasonForfeit, engine.EndReason())
 
 	closedFeed := make(chan game.Event)
 	close(closedFeed)
@@ -138,7 +137,7 @@ func TestFeedEnd_UnobservedEndIsRecordedWithoutElo(t *testing.T) {
 
 	require.True(t, m.WaitForFinalizers(2*time.Second))
 	repo.AssertExpectations(t)
-	repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
 }
 
 // An engine line that says "hand 7" matches every table on the server unless it names

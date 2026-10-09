@@ -25,6 +25,7 @@ type BaseState struct {
 	CurrentPlayerName string
 	CurrentPlayerID   string
 	WinnerName        string
+	EndReason         game.EndReason
 	// TurnRemaining is time left before the engine plays for them; zero means no clock.
 	TurnRemaining time.Duration
 }
@@ -44,6 +45,7 @@ func syncBaseState(bound *game.BoundEngine, fn func(*game.State)) BaseState {
 	base.CurrentPlayerName = snap.CurrentPlayerName
 	base.CurrentPlayerID = snap.CurrentPlayerID
 	base.WinnerName = snap.WinnerName
+	base.EndReason = snap.EndReason
 	base.Hand = hand
 	base.TurnRemaining = remaining
 	base.Seats = snap.Players

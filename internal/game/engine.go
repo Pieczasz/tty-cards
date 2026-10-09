@@ -34,6 +34,7 @@ type Engine struct {
 	broadcaster *broadcaster.Broadcaster[Event]
 	closed      bool
 	clock       turnClock
+	endReason   EndReason
 }
 
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
@@ -234,6 +235,15 @@ func (e *Engine) CurrentPlayerID() string {
 	return current.ID
 }
 
+// EndReason is why the table ended, or EndReasonUnknown while it has not. It is kept
+// for a reader that missed EventGameEnded: an end on a closed engine broadcasts
+// nothing.
+func (e *Engine) EndReason() EndReason {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.endReason
+}
+
 // IsFinished reports whether the table has ended, for any reason.
 func (e *Engine) IsFinished() bool {
 	e.mu.Lock()
@@ -392,6 +402,7 @@ func (e *Engine) endGameLocked(winner *Player, reason EndReason) {
 	e.state.Phase = Finished
 	e.stopTurnTimerLocked()
 	e.state.Winner = winner
+	e.endReason = reason
 
 	winnerID := ""
 	if winner != nil {
@@ -474,6 +485,7 @@ func (e *Engine) snapshotLocked() StateSnapshot {
 	state := e.state
 	var snap StateSnapshot
 	snap.Phase = state.Phase
+	snap.EndReason = e.endReason
 	if state.Deck != nil {
 		snap.DeckSize = state.Deck.Size()
 	}

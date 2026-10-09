@@ -441,6 +441,17 @@ func TestEngine_Snapshot(t *testing.T) {
 		assert.Equal(t, "p1", snap.Players[0].ID)
 		assert.Equal(t, 5, snap.Players[0].HandSize)
 		assert.Empty(t, snap.WinnerName, "nobody has won yet")
+		assert.Equal(t, EndReasonUnknown, snap.EndReason, "nor has the table ended")
+		assert.Equal(t, EndReasonUnknown, engine.EndReason())
+	})
+
+	t.Run("a finished game says why it ended", func(t *testing.T) {
+		t.Parallel()
+		engine := newStartedEngine(t, "p1", "p2")
+		engine.RemovePlayer("p1")
+
+		assert.Equal(t, EndReasonForfeit, engine.Snapshot().EndReason)
+		assert.Equal(t, EndReasonForfeit, engine.EndReason())
 	})
 
 	t.Run("a finished game names the winner", func(t *testing.T) {

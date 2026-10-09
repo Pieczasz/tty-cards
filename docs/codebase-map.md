@@ -296,7 +296,7 @@ Owner: [`architecture.md` §4.2](architecture.md#42-turn-cursor-and-clock---adva
 
 ```mermaid
 flowchart LR
-    ended["EventGameEnded<br/>(or feed closed and IsFinished)"] --> req["requestFinalize<br/>snapshot taken at START"]
+    ended["EventGameEnded<br/>(or feed closed and IsFinished:<br/>engine.EndReason())"] --> req["requestFinalize<br/>snapshot taken at START"]
     req --> reg["registerFinalizer<br/>before the reopen"]
     reg --> release["releaseFinishedGame<br/>table back to Waiting"]
     release --> fin{"registered?"}
@@ -382,11 +382,13 @@ classDiagram
         -state *State
         -broadcaster *Broadcaster[Event]
         -clock turnClock
+        -endReason EndReason
         Start() error
         SubmitAction(id, Action) error
         RemovePlayer(id)
         Frame(id, fn) (Snapshot, hand, remaining)
         Standings() []Standing
+        EndReason() EndReason
         Subscribe() (chan Event, error)
         Unsubscribe(chan Event)
         Dropped() int64

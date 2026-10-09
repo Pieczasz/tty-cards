@@ -1178,8 +1178,9 @@ defect.
 **Decision.** `Engine.recoverRulesPanic` is a direct `defer` on that goroutine and
 re-takes `e.mu`; `SubmitAction` has its own direct deferred `recover`, which runs
 before the unlock. Both call `endOnRulesPanicLocked`, which logs the panic with
-`debug.Stack()` and, on a live engine, calls `endGameLocked(nil,
-EndReasonRulesError)` - the one primitive that ends a table: `Phase = Finished`, the
+`debug.Stack()` and calls `endGameLocked(nil,
+EndReasonRulesError)` - on a closed engine too, which broadcasts nothing but still
+records the reason `Engine.EndReason` hands the lobby's watcher - the one primitive that ends a table: `Phase = Finished`, the
 clock stopped, `EventGameEnded{Reason: EndReasonRulesError}`. It does **not** call `Rules.Standings` - the state a hook
 panicked on cannot be trusted to rank a winner, and a second panic from
 `Standings` inside the timer's recover would take the process down after all - and

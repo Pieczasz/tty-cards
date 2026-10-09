@@ -73,10 +73,10 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 	// The feed ending is not proof the match did not finish. EventGameEnded is the
 	// last event an engine sends, so latest-wins never drops it, but RemoveLobby closes
 	// the feed from under this goroutine, and a leave already on its way can still end
-	// the game on the closed engine, whose broadcast is then a no-op. Why it ended is
-	// lost with the event, so finalize records it unrated.
+	// the game on the closed engine, whose broadcast is then a no-op. The engine kept
+	// why it ended.
 	if engine.IsFinished() {
-		l.requestFinalize(engine, game.EndReasonUnknown, req)
+		l.requestFinalize(engine, engine.EndReason(), req)
 	}
 }
 
