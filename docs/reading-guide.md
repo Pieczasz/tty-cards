@@ -219,13 +219,14 @@ per-game `State` embeds `shed.State`.
 with only the 10-second floor and each refused expiry still costs a miss - the
 seat goes early and the clock stops being a clock.
 
-**Test.** `internal/game/crazyeight/helpers_test.go`
-`TestSoak_TimeoutActionIsAlwaysLegal` - a `rapid`-driven soak
-(`gametest.SoakTimeoutIsAlwaysLegal`, `internal/game/gametest/shed.go`, 342) that
-plays random tables and asserts the auto-play move at every reachable state. Four
-of the five games have one; poker has the deterministic equivalent
-`TestRules_TimeoutAction_IsAcceptedByValidateAction`. `TestShedContract` in the
-same file runs `gametest.RunShed`, the one suite crazy eights and Uno share.
+**Test.** `internal/catalog/rules_test.go`
+`TestGames_TimeoutActionIsLegalAmongRandomMoves` - a `rapid`-driven soak
+(`gametest.SoakAmongRandomMoves`, `internal/game/gametest/rules.go`, 216) that
+plays random tables of every catalog game, seats walking out now and then, and
+asserts the auto-play move at every reachable state; `TestGames_KeepTheRulesContract`
+beside it proves a table the clock plays alone ends. `TestShedContract` in
+`internal/game/crazyeight/helpers_test.go` runs `gametest.RunShed`, the one suite
+crazy eights and Uno share.
 
 ---
 

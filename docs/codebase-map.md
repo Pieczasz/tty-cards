@@ -524,7 +524,7 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Snapshot / DTO | `StateSnapshot`, `BrowseEntry` | built under one lock, rendered lock-free. Hand sizes only |
 | Fencing token | the engine's `clock.seq`, `SessionTracker` generations | stale timers and displaced sessions become no-ops |
 | Repository, interface at the consumer | `internal/db` declares, `internal/repository` implements | swap point for Postgres; enforced by `depguard`. Each consumer asks for the smallest of `db.Authenticator`, `db.Profiles`, `db.Leaderboard` ([#50](decisions.md#50-consumers-ask-for-the-smallest-repository-interface)) |
-| Shared test suite | `gametest.RunShed`, `gametest.SoakTimeoutIsAlwaysLegal` | crazy eights and uno run one set of shedding-game tests instead of two copies |
+| Shared test suite | `gametest.RunRules`, `gametest.SoakAmongRandomMoves`, `gametest.RunShed` | every catalog game runs one Rules contract, and crazy eights and uno one set of shedding-game tests, instead of a copy each |
 | Functional options | `lobby.Option`, `game.EngineOption` | |
 | One label per game | the catalog slug as the `game_type` metric label, lobby and views alike | a dashboard never splits one game in two ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
 | Middleware chain | `wish.WithMiddleware` (runs last-first), `withCORS`/`withRateLimit` | |

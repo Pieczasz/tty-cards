@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func createTestState() *game.State {
@@ -404,80 +403,6 @@ func TestRules_TimeoutAction(t *testing.T) {
 			assert.Equal(t, tt.want, (&Rules{}).TimeoutAction(state))
 		})
 	}
-}
-
-// A safe move the rules then refuse would leave the seat stalling the whole table: the
-// turn re-arms and the engine takes the seat on the next expiry instead of playing for
-// it. So the two are checked against each other on every turn of a whole match, the
-// between-hands deal included - that is the one timeout an absent player would
-// otherwise freeze the table with.
-func TestRules_TimeoutAction_IsAcceptedByValidateAction(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-	engine := game.NewEngine(rules, []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}})
-	t.Cleanup(engine.Close)
-	require.NoError(t, engine.Start())
-
-	sawDeal := false
-	for range 500 {
-		if engine.IsFinished() {
-			break
-		}
-		var action game.Action
-		engine.WithState(func(state *game.State) {
-			action = rules.TimeoutAction(state)
-			require.NotNil(t, action, "a live table must always have a safe move")
-			require.NoError(t, rules.ValidateAction(state, action))
-		})
-		if _, isDeal := action.(ActionNextHand); isDeal {
-			sawDeal = true
-		}
-		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), action))
-	}
-
-	assert.True(t, engine.IsFinished(), "auto-playing every turn has to finish the match")
-	assert.True(t, sawDeal, "and that includes dealing for an absent dealer")
-}
-
-// The timeout-only match above only ever checks, calls or folds, so it never puts an
-// absent player behind a short all-in, a raise that did not reopen the betting, or a
-// leave. Random legal moves between the checks reach those states.
-func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		engine := startTable(rt, rapid.IntRange(2, 6).Draw(rt, "players"))
-		defer engine.Close()
-
-		for step := range 200 {
-			if engine.IsFinished() {
-				return
-			}
-			if ids := seatedIDs(rt, engine); len(ids) > 2 && rapid.IntRange(0, 19).Draw(rt, fmt.Sprintf("leave%d", step)) == 0 {
-				engine.RemovePlayer(rapid.SampledFrom(ids).Draw(rt, fmt.Sprintf("who%d", step)))
-				continue
-			}
-			id := engine.CurrentPlayerID()
-			var legal []game.Action
-			engine.WithState(func(s *game.State) {
-				timeout := rules.TimeoutAction(s)
-				require.NotNil(rt, timeout, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, timeout),
-					"step %d: %s is not a legal move", step, timeout.Name())
-				legal = append(legal, timeout)
-
-				lo, hi, _ := RaiseBounds(s, id)
-				for _, m := range append(candidateActions(lo), ActionRaiseTo{Amount: hi}) {
-					if rules.ValidateAction(s, m) == nil {
-						legal = append(legal, m)
-					}
-				}
-			})
-			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
-			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
-		}
-	})
 }
 
 // Action names go into logs, metrics and the engine's event stream, so they are part

@@ -1,7 +1,6 @@
 package ginrummy
 
 import (
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func twoPlayers(hands ...[]deck.Card) []*game.Player {
@@ -746,13 +744,6 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	assert.Zero(t, extra.CumulativeScores["p2"], "the loser of a plain knock scores nothing")
 }
 
-func TestRules_ValidateAction_UnknownActionIsRefused(t *testing.T) {
-	t.Parallel()
-	state, _ := startedState(t)
-	require.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
-	assert.ErrorIs(t, (&Rules{}).ApplyAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
-}
-
 func TestRules_NotAGinRummyState(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
@@ -763,85 +754,4 @@ func TestRules_NotAGinRummyState(t *testing.T) {
 	assert.Nil(t, rules.Standings(state))
 	assert.Nil(t, rules.TimeoutAction(state))
 	assert.False(t, rules.CheckWinCondition(state))
-}
-
-// The engine plays TimeoutAction for a seat that has gone quiet. A move ValidateAction
-// refuses is not a skipped turn: the clock re-arms and the seat is taken on the next
-// expiry, so a player is removed for a mistake the rules made. The auto-player only
-// knocks on gin, so most hands run to the wall and the match ends on the hand cap.
-func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		players := []*game.Player{{ID: "p1"}, {ID: "p2"}}
-		engine := game.NewEngine(rules, players)
-		require.NoError(rt, engine.Start())
-		defer engine.Close()
-
-		for step := range maxHands * (maxHandTurns + 4) {
-			if engine.IsFinished() {
-				return
-			}
-			id := engine.CurrentPlayerID()
-			var act game.Action
-			engine.WithState(func(s *game.State) {
-				act = rules.TimeoutAction(s)
-				require.NotNil(rt, act, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, act),
-					"step %d: %s is not a legal move", step, act.Name())
-			})
-			require.NoError(rt, engine.SubmitAction(id, act))
-		}
-		rt.Fatalf("a match played entirely by the clock never reached the %d-hand cap", maxHands)
-	})
-}
-
-// The timeout-only soak never draws the upcard, so it never reaches the one move
-// autoDiscard must avoid: laying that upcard straight back. Here a random legal move
-// is played between the checks, which puts every phase, taken upcard included, in
-// front of TimeoutAction.
-func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		engine := game.NewEngine(rules, []*game.Player{{ID: "p1"}, {ID: "p2"}})
-		require.NoError(rt, engine.Start())
-		defer engine.Close()
-
-		for step := range 120 {
-			if engine.IsFinished() {
-				return
-			}
-			id := engine.CurrentPlayerID()
-			var legal []game.Action
-			engine.WithState(func(s *game.State) {
-				timeout := rules.TimeoutAction(s)
-				require.NotNil(rt, timeout, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, timeout),
-					"step %d: %s is not a legal move", step, timeout.Name())
-				legal = append(legal, timeout)
-
-				hand := s.Players[s.CurrentTurn].Cards
-				moves := []game.Action{ActionDrawStock{}, ActionDrawDiscard{}}
-				for _, c := range hand {
-					moves = append(moves, ActionDiscard{Card: c})
-				}
-				// One knock per step: each costs a meld search, and one is enough to
-				// end hands early now and then.
-				if len(hand) > 0 {
-					knock := rapid.SampledFrom(hand).Draw(rt, fmt.Sprintf("knock%d", step))
-					moves = append(moves, ActionKnock{Discard: knock})
-				}
-				for _, m := range moves {
-					if rules.ValidateAction(s, m) == nil {
-						legal = append(legal, m)
-					}
-				}
-			})
-			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
-			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
-		}
-	})
 }
