@@ -197,14 +197,24 @@ func TestIdleRemoved_MatchesOnlyOurOwnSeat(t *testing.T) {
 	}
 }
 
+// ownFeed moves the table on and reads the event off the view's own feed: a message
+// only counts as this view's when it carries that channel, which Session keeps to itself.
+func ownFeed(t *testing.T, engine *game.Engine, m *model) <-chan game.Event {
+	t.Helper()
+	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), logic.ActionCall{}))
+	msg, ok := m.Listen()().(gameview.EventMsg)
+	require.True(t, ok, "the view's feed delivered nothing")
+	return msg.Source
+}
+
 // Only the quit path asserts on the returned command.
 func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 	t.Parallel()
-	_, m := startedTable(t)
+	engine, m := startedTable(t)
 
 	_, cmd := m.Update(gameview.EventMsg{
 		Type: game.EventPlayerIdle, PlayerID: testutil.SeatID(1),
-		Source: m.Events,
+		Source: ownFeed(t, engine, m),
 	})
 
 	require.NotNil(t, cmd)
@@ -217,8 +227,9 @@ func TestUpdate_IdleRemovalQuitsTheSession(t *testing.T) {
 func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
+	feed := ownFeed(t, engine, m)
 
-	_, cmd := m.Update(gameview.ClockTickMsg{Source: m.Events})
+	_, cmd := m.Update(gameview.ClockTickMsg{Source: feed})
 	require.NotNil(t, cmd, "a live hand keeps counting down")
 	_, isTick := cmd().(gameview.ClockTickMsg)
 	assert.True(t, isTick)
@@ -228,7 +239,7 @@ func TestUpdate_ClockTickReschedulesOnlyWhilePlaying(t *testing.T) {
 	engine.RemovePlayer(testutil.SeatID(2))
 	require.True(t, engine.IsFinished())
 
-	_, cmd = m.Update(gameview.ClockTickMsg{Source: m.Events})
+	_, cmd = m.Update(gameview.ClockTickMsg{Source: feed})
 	assert.Nil(t, cmd, "a finished game must not keep ticking")
 }
 
@@ -260,10 +271,10 @@ func heroOnTurn(t *testing.T, engine *game.Engine, m *model) {
 // on a healthy connection or every session opens on a false alarm.
 func TestNew_HealthyTableReportsNoError(t *testing.T) {
 	t.Parallel()
-	_, m := startedTable(t)
+	engine, m := startedTable(t)
 
 	require.NoError(t, m.ActionErr, "a successful subscription is not an error")
-	assert.NotNil(t, m.Events, "and the feed is live")
+	assert.NotNil(t, ownFeed(t, engine, m), "and the feed is live")
 }
 
 // matchComplete is what turns esc from "forfeit" into "leave", and what stops the hero being

@@ -160,7 +160,7 @@ func TestSyncState_ClosesTheRaisePromptWhenTheTurnIsLost(t *testing.T) {
 
 	m.raising = true
 	m.raiseAmount = 500
-	require.NoError(t, engine.SubmitAction(m.Bound.PlayerID(), logic.ActionFold{}))
+	require.NoError(t, engine.SubmitAction(m.HeroID(), logic.ActionFold{}))
 	m.syncState()
 
 	require.False(t, m.Base.MyTurn, "folding passes the action on")
@@ -196,7 +196,7 @@ func TestSyncState_NilBoundIsInert(t *testing.T) {
 func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
 	t.Parallel()
 	engine, m := startedTable(t)
-	heroID := m.Bound.PlayerID()
+	heroID := m.HeroID()
 	engine.WithState(func(state *game.State) {
 		e := extra(t, state)
 		for i, p := range state.Players {

@@ -73,10 +73,7 @@ func New(global router.GlobalContext, table *game.BoundEngine, slug string) tea.
 }
 
 func (m *model) syncState() {
-	heroID := ""
-	if m.Bound != nil {
-		heroID = m.Bound.PlayerID()
-	}
+	heroID := m.HeroID()
 
 	// Poker needs State.Players for hole cards at showdown, so the Frame callback
 	// takes the live *State (not only Extra) and fills betting scalars in the same

@@ -108,7 +108,7 @@ const trickArtRows = 3*(components.FaceHeight+3) + 2
 func (m *model) renderTrickArea(height int) string {
 	mini := height > 0 && height < trickArtRows
 
-	hero := m.renderTrickSlot(m.Bound.PlayerID(), mini)
+	hero := m.renderTrickSlot(m.HeroID(), mini)
 	left := m.renderTrickSlot(m.opponentID(seatLeft), mini)
 	top := m.renderTrickSlot(m.opponentID(seatTop), mini)
 	right := m.renderTrickSlot(m.opponentID(seatRight), mini)

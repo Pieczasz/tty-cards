@@ -125,7 +125,7 @@ func (m *model) beginRaise() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) submit(action game.Action) (tea.Model, tea.Cmd) {
-	if m.Bound == nil || !m.Base.MyTurn {
+	if m.HeroID() == "" || !m.Base.MyTurn {
 		return m, nil
 	}
 	if err := m.Submit(action); err != nil {

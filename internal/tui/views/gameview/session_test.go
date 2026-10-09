@@ -28,7 +28,7 @@ func TestSession_Listen_DeliversWhatTheEngineBroadcasts(t *testing.T) {
 
 	events := make(chan game.Event, 1)
 	events <- game.Event{Type: game.EventTurnAdvanced}
-	s := Session{Events: events}
+	s := Session{events: events}
 
 	msg := s.Listen()()
 
@@ -43,7 +43,7 @@ func TestHandleFrame_DropsWhatAnotherSessionArmed(t *testing.T) {
 	t.Parallel()
 
 	mine, theirs := make(chan game.Event), make(chan game.Event)
-	s := &Session{Events: mine, Base: BaseState{Phase: game.Playing}}
+	s := &Session{events: mine, Base: BaseState{Phase: game.Playing}}
 	synced := false
 	sync := func() { synced = true }
 
@@ -69,7 +69,7 @@ func TestSession_Listen_TagsItsOwnFeed(t *testing.T) {
 
 	events := make(chan game.Event, 1)
 	events <- game.Event{Type: game.EventTurnAdvanced}
-	s := Session{Events: events}
+	s := Session{events: events}
 
 	msg, ok := s.Listen()().(EventMsg)
 	require.True(t, ok)
@@ -84,7 +84,7 @@ func TestSession_Listen_EndsQuietlyWithoutAFeed(t *testing.T) {
 
 	closed := make(chan game.Event)
 	close(closed)
-	ended := Session{Events: closed}
+	ended := Session{events: closed}
 	assert.Nil(t, ended.Listen()(), "a closed feed ends the listener")
 }
 
@@ -95,10 +95,10 @@ func TestSession_Listen_UnsubscribeBeforeRunDoesNotBlock(t *testing.T) {
 
 	events := make(chan game.Event, 1)
 	events <- game.Event{Type: game.EventTurnAdvanced}
-	s := Session{Events: events}
+	s := Session{events: events}
 
 	cmd := s.Listen()
-	s.Events = nil
+	s.events = nil
 	assert.NotNil(t, cmd())
 }
 
@@ -212,8 +212,8 @@ func TestNewSession_BindsAndSubscribes(t *testing.T) {
 	engine, s := startedSession(t)
 
 	require.NotNil(t, s.Bound)
-	assert.Equal(t, testutil.SeatID(1), s.Bound.PlayerID())
-	assert.NotNil(t, s.Events)
+	assert.Equal(t, testutil.SeatID(1), s.HeroID())
+	assert.NotNil(t, s.events)
 	assert.Equal(t, 1, engine.SubscriberCount())
 }
 
@@ -222,7 +222,8 @@ func TestNewSession_WithoutAUserStillBuildsAView(t *testing.T) {
 	s, err := NewSession(router.GlobalContext{}, nil, "crazy_eights")
 	require.NoError(t, err)
 	assert.Nil(t, s.Bound)
-	assert.Nil(t, s.Events)
+	assert.Empty(t, s.HeroID())
+	assert.Nil(t, s.events)
 	assert.NotPanics(t, func() { s.Sync(nil) }, "an unbound view still renders")
 }
 
@@ -266,7 +267,7 @@ func TestSession_UnsubscribeReleasesTheEngineSlot(t *testing.T) {
 	s.unsubscribe()
 
 	assert.Zero(t, engine.SubscriberCount())
-	assert.Nil(t, s.Events)
+	assert.Nil(t, s.events)
 }
 
 // Leaving mid-game forfeits the seat, so there is no table to go back to; once the
