@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/broadcaster"
@@ -19,9 +20,15 @@ import (
 )
 
 // Lobby is one table.
+//
+// A Lobby is a leaf in the lock order: its methods take only l.mu, with engine calls
+// innermost, and it holds no pointer back to its Manager. Only the Manager ever holds
+// two locks, so nothing a lobby does under l.mu can reach for m.mu.
 type Lobby struct {
-	mu      sync.RWMutex
-	manager *Manager
+	mu sync.RWMutex
+	// cacheDirty is the manager's browse-cache flag, shared rather than reached
+	// through the manager: setting it takes no lock, so a lobby sets it under l.mu.
+	cacheDirty *atomic.Bool
 	// game is what the table plays. CreateLobby sets it and nothing changes it, so it
 	// is read without l.mu.
 	game         game.Module
@@ -124,7 +131,7 @@ func setupDefaultOptions() *options {
 
 func (l *Lobby) setStateLocked(s state) {
 	l.state = s
-	l.manager.invalidatePublicCache()
+	l.cacheDirty.Store(true)
 }
 
 func (l *Lobby) broadcastLocked(event Event) {
@@ -185,7 +192,7 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 	}
 
 	clear(l.ready)
-	l.manager.invalidatePublicCache()
+	l.cacheDirty.Store(true)
 
 	bc := l.broadcaster
 	l.mu.Unlock()
@@ -288,30 +295,33 @@ func (l *Lobby) unsubscribePlayerLocked(playerID string) {
 }
 
 // toggleReady flips p's ready flag, and starts the game once every seat is ready.
-func (l *Lobby) toggleReady(p *game.Player) error {
+// The started game is returned for the manager to watch; its zero value means there
+// is nothing to watch.
+func (l *Lobby) toggleReady(p *game.Player) (gameStart, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.state == inGame {
-		return ErrGameInProgress
+		return gameStart{}, ErrGameInProgress
 	}
 	if !l.hasPlayerLocked(p) {
-		return ErrNotInLobby
+		return gameStart{}, ErrNotInLobby
 	}
 
 	l.ready[p.ID] = !l.ready[p.ID]
 
 	if !l.allReadyLocked() {
 		l.broadcastLocked(Event{Type: EventPlayersUpdated})
-		return nil
+		return gameStart{}, nil
 	}
 
-	if err := l.startGameLocked(); err != nil {
+	start, err := l.startGameLocked()
+	if err != nil {
 		// The ready flip is already committed, so the other clients have to see it even
 		// though the start failed, or their rosters disagree with the server.
 		l.broadcastLocked(Event{Type: EventPlayersUpdated})
-		return err
+		return gameStart{}, err
 	}
-	return nil
+	return start, nil
 }
 
 func (l *Lobby) allReadyLocked() bool {
@@ -419,17 +429,18 @@ func (l *Lobby) hasPlayerLocked(p *game.Player) bool {
 	return false
 }
 
-// startGameLocked starts a match. Caller must hold l.mu. Never more seats than the
-// game deals for: CreateLobby and SetMaxPlayers keep the cap inside its range, and
-// addGuest keeps the roster under the cap.
-func (l *Lobby) startGameLocked() error {
+// startGameLocked starts a match and returns it for the manager to watch: the zero
+// value if the watch could not subscribe. Caller must hold l.mu. Never more seats
+// than the game deals for: CreateLobby and SetMaxPlayers keep the cap inside its
+// range, and addGuest keeps the roster under the cap.
+func (l *Lobby) startGameLocked() (gameStart, error) {
 	if l.state != waiting {
-		return errors.New("lobby is not in waiting state")
+		return gameStart{}, errors.New("lobby is not in waiting state")
 	}
 
 	mod := l.game
 	if totalPlayers := len(l.guests) + 1; totalPlayers < mod.MinPlayers {
-		return fmt.Errorf("need at least %d players to start", mod.MinPlayers)
+		return gameStart{}, fmt.Errorf("need at least %d players to start", mod.MinPlayers)
 	}
 
 	// The slug, not the display name, is what the match is persisted under.
@@ -442,13 +453,13 @@ func (l *Lobby) startGameLocked() error {
 	// since from there "too few players" looks the same.
 	if err := engine.Start(); err != nil {
 		err = fmt.Errorf("start game engine: %w", err)
-		logger.ErrorContext(l.manager.appCtx, "cannot start game", "error", err)
-		return err
+		logger.ErrorContext(context.Background(), "cannot start game", "error", err)
+		return gameStart{}, err
 	}
 
-	// Before watchGameLocked, which snapshots it for the finalize.
+	// Before watchLocked, which snapshots it for the finalize.
 	l.startedAt = time.Now()
-	l.watchGameLocked(engine, db.GameRef{Slug: mod.Slug, Name: mod.Name})
+	start := l.watchLocked(engine, db.GameRef{Slug: mod.Slug, Name: mod.Name})
 
 	l.setStateLocked(inGame)
 	l.activeEngine = engine
@@ -461,12 +472,12 @@ func (l *Lobby) startGameLocked() error {
 
 	l.broadcastLocked(Event{Type: EventGameStarted, engine: engine})
 
-	return nil
+	return start, nil
 }
 
 // releaseFinishedGameLocked returns a finished lobby to Waiting and hands back the
-// engine to close. Caller holds l.mu; closing and releaseHeldSeats are the unlocked
-// caller's job (lock order is manager then lobby).
+// engine to close. Caller holds l.mu; closing it and releaseHeldSeats are the
+// manager's, once l.mu is released.
 func (l *Lobby) releaseFinishedGameLocked() *game.Engine {
 	if l.state != inGame || l.activeEngine == nil || !l.activeEngine.IsFinished() {
 		return nil

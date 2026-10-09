@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -9,50 +10,59 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/observability"
 )
 
-// watchGameLocked starts the goroutine that persists the result and counts engine
-// events. It is the only thing that persists a match, so a failed subscribe costs the
-// players their history and Elo - the engine's len(players)+8 broadcaster exists so
-// that cannot happen, and it is logged loudly if it ever does. Caller holds l.mu.
-//
-// It subscribes whether or not a match repository is configured: this goroutine is
-// also the only consumer of EventPlayerIdle, so skipping it leaves an idle-removed
-// seat on the roster with the engine no longer holding it, and the table can never
-// reach all-ready again. finalizeFinishedGame already no-ops without a repository.
+// gameStart is a game toggleReady just started, handed to the manager to watch: the
+// engine, its feed and the finalize snapshot. The zero value means nothing to watch.
+type gameStart struct {
+	engine *game.Engine
+	feed   <-chan game.Event
+	req    finalizeRequest
+}
+
+// watchLocked subscribes the manager's watcher to engine before l.mu is released, so
+// no seat can act - and no game can end - before the feed is open. The watcher is the
+// only thing that persists a match, so a failed subscribe costs the players their
+// history and Elo - the engine's len(players)+8 broadcaster exists so that cannot
+// happen, and it is logged loudly if it ever does. Caller holds l.mu.
 //
 // The finalize snapshot is taken here, not when the game ends: by then the lobby may
 // have reopened and been reconfigured, and the result would be written under the new
 // ranked flag, the new game, and the next hand's start time.
-func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
+func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
 	ch, err := engine.Subscribe()
 	if err != nil {
-		observability.SubscribeFailure(l.manager.appCtx, "game")
-		slog.ErrorContext(l.manager.appCtx,
-			"cannot watch game for completion; result will not be persisted",
+		ctx := context.Background()
+		observability.SubscribeFailure(ctx, "game")
+		slog.ErrorContext(ctx, "cannot watch game for completion; result will not be persisted",
 			"error", err, "lobby", l.code, "game", ref.Slug)
-		return
+		return gameStart{}
 	}
-	req := finalizeRequest{
+	return gameStart{engine: engine, feed: ch, req: finalizeRequest{
 		lobbyCode: l.code,
 		game:      ref,
 		isRanked:  l.options.isRanked,
 		startedAt: l.startedAt,
-	}
-	go func() {
-		defer engine.Unsubscribe(ch)
-		l.handleGameEvents(ch, engine, req)
-	}()
+	}}
 }
 
-func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
-	ctx := l.manager.appCtx
-	slug := req.game.Slug
+// watchGame is the goroutine ToggleReady starts for every game: it counts engine
+// events, and when the game ends it reopens the table and persists the result.
+//
+// It runs whether or not a match repository is configured: this goroutine is also
+// the only consumer of EventPlayerIdle, so skipping it leaves an idle-removed seat on
+// the roster with the engine no longer holding it, and the table can never reach
+// all-ready again. finalizeFinishedGame already no-ops without a repository.
+func (m *Manager) watchGame(l *Lobby, start gameStart) {
+	engine := start.engine
+	defer engine.Unsubscribe(start.feed)
+	ctx := m.appCtx
+	slug := start.req.game.Slug
 	defer func() {
 		if n := engine.Dropped(); n > 0 {
 			observability.BroadcastDropped(ctx, "game", n)
 		}
 	}()
 
-	for event := range ch {
+	for event := range start.feed {
 		switch event.Type {
 		case game.EventTurnTimedOut:
 			observability.TurnTimedOut(ctx, slug)
@@ -61,9 +71,9 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 			// The engine took the seat, so the roster follows, or a player kicked for
 			// idling reconnects into a lobby whose game no longer has them. Equal falls
 			// back to ID, so a zero-UserID stub still matches.
-			l.manager.LeaveLobby(&game.Player{ID: event.PlayerID})
+			m.LeaveLobby(&game.Player{ID: event.PlayerID})
 		case game.EventGameEnded:
-			l.requestFinalize(engine, event.Reason, req)
+			m.requestFinalize(l, engine, event.Reason, start.req)
 			return
 		default:
 			// Turn and leave events are the views' business; the lobby counts nothing.
@@ -76,13 +86,13 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 	// the game on the closed engine, whose broadcast is then a no-op. The engine kept
 	// why it ended.
 	if engine.IsFinished() {
-		l.requestFinalize(engine, engine.EndReason(), req)
+		m.requestFinalize(l, engine, engine.EndReason(), start.req)
 	}
 }
 
-// requestFinalize reopens the finished table and hands it to Manager for persistence.
-// req was snapshotted by watchGameLocked when this game started, so a lobby that has
-// since reopened cannot rewrite what the finished match is recorded as.
+// requestFinalize reopens the finished table and persists its result. req was
+// snapshotted by watchLocked when this game started, so a lobby that has since
+// reopened cannot rewrite what the finished match is recorded as.
 //
 // Register, reopen, persist - in that order. Reopening comes before the write, so a
 // 15s write does not pin InGame while the TUI is already back in the lobby; but it
@@ -95,14 +105,14 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 //
 // The finish is counted here, where every end passes, so games started minus games
 // finished stays true across a drain and on a server with no match repository.
-func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
-	registered := l.manager.registerFinalizer()
-	observability.GameFinished(l.manager.appCtx, req.game.Slug, req.isRanked, reason.String(),
+func (m *Manager) requestFinalize(l *Lobby, engine *game.Engine, reason game.EndReason, req finalizeRequest) {
+	registered := m.registerFinalizer()
+	observability.GameFinished(m.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
-	l.manager.releaseFinishedGame(l)
+	m.releaseFinishedGame(l)
 	if !registered {
-		l.manager.dropFinishedMatch(req)
+		m.dropFinishedMatch(req)
 		return
 	}
-	l.manager.finalizeFinishedGame(req, engine, reason)
+	m.finalizeFinishedGame(req, engine, reason)
 }

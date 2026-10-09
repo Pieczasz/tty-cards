@@ -536,13 +536,13 @@ releases a finished game still holding it, and flips the flag; with every seat r
 `startGameLocked` checks the game's minimum against the lobby's own `l.game` (the
 maximum cannot be exceeded: `CreateLobby` and `SetMaxPlayers` keep the cap inside the
 game's range) -> `l.game.Factory()` -> `game.NewEngine(rules, players, opts...)` -> `engine.Start()` ->
-`l.startedAt = time.Now()` -> `watchGameLocked(engine, db.GameRef{...})` ->
+`l.startedAt = time.Now()` -> `watchLocked(engine, db.GameRef{...})` ->
 `setStateLocked(inGame)` -> broadcast `EventGameStarted` carrying the engine in an
 unexported field; a subscriber gets its own seat with `Event.Seat(playerID)`.
 The leader is always seat 0.
 
 **The finalize snapshot is taken when the game starts, not when it ends.**
-`watchGameLocked` builds `finalizeRequest{lobbyCode, game, isRanked, startedAt}`
+`watchLocked` builds `finalizeRequest{lobbyCode, game, isRanked, startedAt}`
 at subscribe time; its comment says why (by the time the game ends the lobby may
 have reopened and been reconfigured, and the result would be written under the
 new ranked flag, the new game and the next hand's start time). `startGameLocked`
@@ -554,7 +554,7 @@ on the roster while the engine no longer holds it - a table that can never reach
 all-ready again. `finalizeFinishedGame` already no-ops without a repository.
 
 **On `EventGameEnded` the lobby registers, reopens, then persists.**
-`handleGameEvents` (`watch.go`) calls `requestFinalize`, which takes
+`Manager.watchGame` (`watch.go`) calls `requestFinalize`, which takes
 `registerFinalizer()`, then `releaseFinishedGame()`, then
 `finalizeFinishedGame(...)` - or `dropFinishedMatch`, which logs and counts the
 loss, when shutdown refused the registration. The reopen comes before the write
@@ -918,10 +918,14 @@ In Postgres the order is the per-seat advisory lock before any row lock: a ranke
 finalize and an erasure both take `pg_advisory_xact_lock` for the seat first
 (§6.5).
 
-Three places in the code state the rule: the comment on `Manager.cacheDirty`, the
-doc on `Manager.LeaveLobby`, and the doc on `Lobby.releaseFinishedGameLocked`.
-The browse cache uses an `atomic.Bool` dirty flag **specifically** so a lobby can
-mark it while holding its own lock without reaching for the manager's.
+A `Lobby` is a leaf: its methods take only `l.mu`, with engine calls innermost, and
+it has no pointer back to its manager, so `Manager` is the only type that ever holds
+two of these locks. What a lobby used to reach the manager for is now either shared
+or the manager's own: the browse cache's dirty flag is an `atomic.Bool` each lobby
+holds a pointer to and sets under its own lock, and the game watcher, the reopen
+and finalize are `Manager` methods (`watchGame`), started by `ToggleReady` with the
+feed `toggleReady` subscribed under `l.mu` so no end can be missed. The doc on
+`Lobby` states the rule.
 `Manager.Stats` and `publicLobbies` both copy the lobby slice under
 `m.mu` and release it before taking any `l.mu`.
 
@@ -1369,7 +1373,7 @@ Lobby file split:
 | `manager.go` | maps, `CreateLobby` / join / leave / kick, `RemoveLobby`, `Stats`, `disconnectGrace` |
 | `lobby.go` | roster, settings, ready, start, `Event` / `EventType`, `departure` |
 | `errors.go` | the sentinels a caller tells apart with `errors.Is` |
-| `watch.go` | the engine watcher (`handleGameEvents`) -> `requestFinalize` (register, reopen, persist) |
+| `watch.go` | `watchLocked` (subscribe at start) and the manager's engine watcher (`watchGame`) -> `requestFinalize` (register, reopen, persist) |
 | `finalize.go` | persist finished matches, the rating gate (`unratedReason`), `dropFinishedMatch`, the finalizer registry, `BeginShutdown`, `WaitForFinalizers` |
 | `disconnect.go` | the mid-game grace state machine (`graceTimers`), `ResumePlayer`, `releaseHeldSeats` |
 | `browse.go` | public list and its cache, Elo-distance sort, `GamesOnOffer` |
@@ -1621,10 +1625,10 @@ receives and `time.AfterFunc` do not become call edges.
 
 **There is no static path from `BoundEngine.Submit` to `finalizeFinishedGame`.**
 The engine broadcasts `EventGameEnded`; a different goroutine
-(`handleGameEvents`) picks it up.
+(`Manager.watchGame`) picks it up.
 
 ```
-Lobby.startGameLocked -> watchGameLocked -> handleGameEvents
+Lobby.startGameLocked -> watchLocked; Manager.ToggleReady -> go watchGame
   -> requestFinalize
       -> registerFinalizer          (first)
       -> releaseFinishedGame        (reopen before the write)
