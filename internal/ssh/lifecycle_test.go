@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -114,6 +115,51 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	<-reconnected
 	assert.True(t, table.HasPlayer(guestPlayer), "the reconnected session lost the seat it just took")
 	assert.Equal(t, table, manager.FindLobbyByPlayer(guestPlayer), "and the index disagrees with the roster")
+}
+
+// charm ssh runs each session handler on a goroutine its Shutdown and Close never
+// wait for, so a teardown still giving up its seat would race the finalizer drain
+// that is meant to come after it.
+func TestWaitSessions_HoldsWhileAHandlerIsTearingDown(t *testing.T) {
+	t.Parallel()
+	reg := &sessionRegistry{}
+	server := &Server{sessions: reg}
+	entered, finish := make(chan struct{}), make(chan struct{})
+	srv := &ssh.Server{Handler: sessionLifecycle(Deps{}, reg)(func(ssh.Session) {
+		close(entered)
+		<-finish
+	})}
+	session := testsession.New(t, srv, nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = session.Output("")
+	}()
+	<-entered
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, server.WaitSessions(ctx), context.DeadlineExceeded,
+		"the drain moved on while a session handler was still running")
+
+	close(finish)
+	require.NoError(t, server.WaitSessions(t.Context()))
+	<-done
+}
+
+// A handler charm ssh started just before Close can reach the lifecycle after the
+// drain stopped counting. Run untracked, its teardown would race the drain again.
+func TestWaitSessions_ASessionArrivingDuringTheDrainIsRefused(t *testing.T) {
+	t.Parallel()
+	reg := &sessionRegistry{}
+	require.NoError(t, (&Server{sessions: reg}).WaitSessions(t.Context()))
+
+	var ran atomic.Bool
+	srv := &ssh.Server{Handler: sessionLifecycle(Deps{}, reg)(func(ssh.Session) { ran.Store(true) })}
+	out, _ := testsession.New(t, srv, nil).CombinedOutput("")
+
+	assert.False(t, ran.Load(), "a session started after the drain began")
+	assert.Contains(t, string(out), "restarting")
 }
 
 func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {

@@ -187,7 +187,7 @@ func newSSHServer(
 	userRepo db.UserRepository,
 	lobbyManager *lobby.Manager,
 	tracker *ssh.SessionTracker,
-) (*charmssh.Server, error) {
+) (*ssh.Server, error) {
 	server, err := ssh.NewServer(ssh.Deps{
 		Config:       cfg,
 		Auth:         userRepo,

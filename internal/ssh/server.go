@@ -106,6 +106,52 @@ func (st *sessionState) filter(m tea.Model, msg tea.Msg) tea.Msg {
 type sessionRegistry struct {
 	states sync.Map
 	sizes  sizeBudget
+	// live counts session handlers still running. charm ssh runs each on a goroutine
+	// that neither its Shutdown nor its Close waits for, so without this the drain
+	// would move on while teardowns are still giving up seats. liveMu makes admitting
+	// a handler and starting to drain atomic: a WaitGroup alone permits Add after
+	// Wait has seen zero.
+	liveMu   sync.Mutex
+	draining bool
+	live     sync.WaitGroup
+	// drained is closed by the one waiter goroutine waitSessions ever starts.
+	drained chan struct{}
+}
+
+// admit counts a session handler in, unless the server is draining.
+func (reg *sessionRegistry) admit() bool {
+	reg.liveMu.Lock()
+	defer reg.liveMu.Unlock()
+	if reg.draining {
+		return false
+	}
+	reg.live.Add(1)
+	return true
+}
+
+// waitSessions stops admitting session handlers, then blocks until every admitted
+// one has returned or ctx ends. The waiter is started once and reused, so a caller
+// that times out and calls again does not strand one per attempt.
+func (reg *sessionRegistry) waitSessions(ctx context.Context) error {
+	reg.liveMu.Lock()
+	reg.draining = true
+	if reg.drained == nil {
+		ch := make(chan struct{})
+		reg.drained = ch
+		go func() {
+			reg.live.Wait()
+			close(ch)
+		}()
+	}
+	drained := reg.drained
+	reg.liveMu.Unlock()
+
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
+	}
 }
 
 func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
@@ -138,17 +184,31 @@ type Deps struct {
 	Tracker      *SessionTracker
 }
 
+// Server is the wish server plus the one thing charm ssh does not track: the session
+// handlers, whose deferred teardown gives up seats and tracker slots.
+type Server struct {
+	*ssh.Server
+	sessions *sessionRegistry
+}
+
+// WaitSessions refuses any session not yet started, then blocks until every running
+// session handler has finished its teardown or ctx ends. Close is what ends them, so
+// it is called after Close.
+func (s *Server) WaitSessions(ctx context.Context) error {
+	return s.sessions.waitSessions(ctx)
+}
+
 // ErrNoTracker refuses a server with no session tracker. A default one used to be
 // built here, and the stats API, holding its own, then counted nobody online.
 var ErrNoTracker = errors.New("ssh server needs a session tracker")
 
 // NewServer builds the ssh server, creating its host key on first run. The caller
 // owns the listener and calls Serve on it.
-func NewServer(deps Deps) (*ssh.Server, error) {
+func NewServer(deps Deps) (*Server, error) {
 	return newServer(deps, newSessionRegistry(cellBudget, extraCellBudget))
 }
 
-func newServer(deps Deps, reg *sessionRegistry) (*ssh.Server, error) {
+func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 	if deps.Tracker == nil {
 		return nil, ErrNoTracker
 	}
@@ -199,7 +259,7 @@ func newServer(deps Deps, reg *sessionRegistry) (*ssh.Server, error) {
 		"session": limitSessionChannels(ssh.DefaultSessionHandler),
 	}
 
-	return server, nil
+	return &Server{Server: server, sessions: reg}, nil
 }
 
 func ensureHostKeyPermissions(path string) error {
@@ -546,6 +606,15 @@ func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error)
 func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
+			// A handler charm ssh started just before Close can get here after the
+			// drain stopped counting; it refuses itself rather than run untracked.
+			if !reg.admit() {
+				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
+				return
+			}
+			// Registered first, so it runs last: the drain is over only once the
+			// whole teardown below has run.
+			defer reg.live.Done()
 			st := reg.startSession(s)
 			defer reg.finishSession(s, st)
 			defer reg.recoverSession(s)
