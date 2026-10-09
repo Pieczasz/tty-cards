@@ -204,7 +204,7 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// Before toggleReady takes l.mu: this takes it itself, then m.mu via
 	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
 	m.releaseFinishedGame(l)
-	start, err := l.toggleReady(p)
+	start, err := l.toggleReady(p, m.seatHook(l))
 	if start.engine != nil {
 		go m.watchGame(l, start)
 	}
@@ -292,10 +292,33 @@ func (m *Manager) LeaveLobby(p *game.Player) {
 	if p == nil {
 		return
 	}
+	m.leave(p, nil)
+}
 
+// seatHook keeps l's roster in step with the seats its engine takes for idling. It
+// is the engine's lossless WithOnIdleRemoved rather than EventPlayerIdle on the
+// latest-wins feed: a dropped event would leave the seat on the roster with the
+// engine no longer holding it, and the table could never reach all-ready again.
+func (m *Manager) seatHook(l *Lobby) game.EngineOption {
+	return game.WithOnIdleRemoved(func(playerID string) { m.dropSeat(l, playerID) })
+}
+
+// dropSeat gives up the seat l's engine took from playerID. Only while the player is
+// still indexed to l: the hook runs after the engine lock is released, and a player
+// who left in that gap and sat down elsewhere must keep the new seat.
+func (m *Manager) dropSeat(l *Lobby, playerID string) {
+	m.leave(&game.Player{ID: playerID}, l)
+}
+
+// leave is LeaveLobby, limited to a player still indexed to from when it is not nil.
+func (m *Manager) leave(p *game.Player, from *Lobby) {
 	m.mu.Lock()
-	m.grace.clear(p.ID)
 	l, ok := m.playerLobby[p.ID]
+	if from != nil && l != from {
+		m.mu.Unlock()
+		return
+	}
+	m.grace.clear(p.ID)
 	if !ok || l == nil {
 		m.mu.Unlock()
 		return

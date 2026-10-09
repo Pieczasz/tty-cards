@@ -47,10 +47,11 @@ func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
 // watchGame is the goroutine ToggleReady starts for every game: it counts engine
 // events, and when the game ends it reopens the table and persists the result.
 //
-// It runs whether or not a match repository is configured: this goroutine is also
-// the only consumer of EventPlayerIdle, so skipping it leaves an idle-removed seat on
-// the roster with the engine no longer holding it, and the table can never reach
-// all-ready again. finalizeFinishedGame already no-ops without a repository.
+// It runs whether or not a match repository is configured: reopening the table and
+// giving up the seats it held for a reconnect are its job too, and
+// finalizeFinishedGame already no-ops without a repository. Idle-removed seats do
+// not reach the roster through it but through seatHook, which no dropped event can
+// lose.
 func (m *Manager) watchGame(l *Lobby, start gameStart) {
 	engine := start.engine
 	defer engine.Unsubscribe(start.feed)
@@ -68,10 +69,6 @@ func (m *Manager) watchGame(l *Lobby, start gameStart) {
 			observability.TurnTimedOut(ctx, slug)
 		case game.EventPlayerIdle:
 			observability.PlayerIdleRemoved(ctx, slug)
-			// The engine took the seat, so the roster follows, or a player kicked for
-			// idling reconnects into a lobby whose game no longer has them. Equal falls
-			// back to ID, so a zero-UserID stub still matches.
-			m.LeaveLobby(&game.Player{ID: event.PlayerID})
 		case game.EventGameEnded:
 			m.requestFinalize(l, engine, event.Reason, start.req)
 			return

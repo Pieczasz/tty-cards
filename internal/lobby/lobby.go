@@ -296,8 +296,8 @@ func (l *Lobby) unsubscribePlayerLocked(playerID string) {
 
 // toggleReady flips p's ready flag, and starts the game once every seat is ready.
 // The started game is returned for the manager to watch; its zero value means there
-// is nothing to watch.
-func (l *Lobby) toggleReady(p *game.Player) (gameStart, error) {
+// is nothing to watch. opts are the manager's, for the engine a start builds.
+func (l *Lobby) toggleReady(p *game.Player, opts ...game.EngineOption) (gameStart, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.state == inGame {
@@ -314,7 +314,7 @@ func (l *Lobby) toggleReady(p *game.Player) (gameStart, error) {
 		return gameStart{}, nil
 	}
 
-	start, err := l.startGameLocked()
+	start, err := l.startGameLocked(opts)
 	if err != nil {
 		// The ready flip is already committed, so the other clients have to see it even
 		// though the start failed, or their rosters disagree with the server.
@@ -433,7 +433,7 @@ func (l *Lobby) hasPlayerLocked(p *game.Player) bool {
 // value if the watch could not subscribe. Caller must hold l.mu. Never more seats
 // than the game deals for: CreateLobby and SetMaxPlayers keep the cap inside its
 // range, and addGuest keeps the roster under the cap.
-func (l *Lobby) startGameLocked() (gameStart, error) {
+func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 	if l.state != waiting {
 		return gameStart{}, errors.New("lobby is not in waiting state")
 	}
@@ -447,7 +447,7 @@ func (l *Lobby) startGameLocked() (gameStart, error) {
 	rules := mod.Factory()
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
-	engine := game.NewEngine(rules, players, game.WithLogger(logger))
+	engine := game.NewEngine(rules, players, append(opts, game.WithLogger(logger))...)
 
 	// A defect, not a refusal: the lobby view logs what ToggleReady returns at Debug,
 	// since from there "too few players" looks the same.

@@ -447,14 +447,14 @@ func pendingGrace(m *Manager, id string) bool {
 	return ok
 }
 
-// The watcher goroutine is the only consumer of EventPlayerIdle, and it used to be
-// skipped entirely when no match repository was configured. The engine then dropped
-// the seat while the lobby roster kept it, and the table could never reach all-ready
-// again.
+// A seat the engine takes for idling has to leave the lobby roster too, or the table
+// can never reach all-ready again. That used to ride EventPlayerIdle through the
+// watcher, which was skipped with no match repository; the engine's seat hook now
+// carries it.
 //
 // The turn clock is real, so this runs in a synctest bubble: the idle removal takes
 // MaxMissedTurns of one seat's turns, minutes of fake time that pass at once.
-func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
+func TestLobby_IdleRemovalLeavesTheRoster(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		m := newTestManager(t, nil)
@@ -477,6 +477,49 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 		assert.Nil(t, m.FindLobbyByPlayer(idler))
 		assert.True(t, l.HasPlayer(other), "only the idle seat leaves")
 	})
+}
+
+// EventPlayerIdle rides the latest-wins feed, so it can be lost; the roster must not
+// depend on it. This engine has no subscriber at all - every event it sends is
+// dropped - and the seat it takes still leaves the roster through the hook.
+func TestLobby_IdleRemovalReachesTheRosterWithNothingReadingTheFeed(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		m, l := newTestLobby(t, 2)
+		leader, guest := l.Snapshot().Leader.Player, mockPlayer("p2", testutil.UID(2))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+
+		engine := game.NewEngine(stubRules{}, []*game.Player{leader, guest}, m.seatHook(l))
+		require.NoError(t, engine.Start())
+		idler, other := leader, guest
+		if engine.CurrentPlayerID() != leader.ID {
+			idler, other = guest, leader
+		}
+
+		time.Sleep(2 * game.MaxMissedTurns * game.DefaultTurnTimeout)
+		synctest.Wait()
+		engine.Close()
+
+		assert.False(t, l.HasPlayer(idler), "the idle seat stayed on the roster")
+		assert.Nil(t, m.FindLobbyByPlayer(idler))
+		assert.True(t, l.HasPlayer(other), "only the idle seat leaves")
+	})
+}
+
+// The hook runs after the engine lock is released, so a player can leave in between
+// and sit down elsewhere. The late hook must not take that new seat.
+func TestDropSeat_LeavesAPlayerWhoMovedOnAlone(t *testing.T) {
+	t.Parallel()
+	m, l, _, guest := startedGame(t)
+	m.LeaveLobby(guest)
+	next, err := m.CreateLobby(mockPlayer("p3", testutil.UID(3)), WithMaxPlayers(2), WithCardGame("mock"))
+	require.NoError(t, err)
+	require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+
+	m.dropSeat(l, guest.ID)
+
+	assert.True(t, next.HasPlayer(guest), "the late hook took the seat at the next table")
+	assert.Same(t, next, m.FindLobbyByPlayer(guest))
 }
 
 // A seat is held for a reconnect because the hand is still running. Once the game is

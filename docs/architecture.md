@@ -548,10 +548,17 @@ have reopened and been reconfigured, and the result would be written under the
 new ranked flag, the new game and the next hand's start time). `startGameLocked`
 sets `l.startedAt` immediately before, for the same reason.
 
-**That watcher subscribes even with no match repository.** It is also the only
-consumer of `EventPlayerIdle`, and skipping it would leave an idle-removed seat
-on the roster while the engine no longer holds it - a table that can never reach
-all-ready again. `finalizeFinishedGame` already no-ops without a repository.
+**That watcher runs even with no match repository:** reopening the finished table
+and giving up the seats it held are its job too, and `finalizeFinishedGame` already
+no-ops without a repository. An idle-removed seat does not reach the roster through
+it. `ToggleReady` builds the engine with `game.WithOnIdleRemoved`
+(`Manager.seatHook`), whose `dropSeat` leaves the table for that player - unless the
+player is no longer indexed to it, since the hook runs after the engine lock is
+released and they may have left and sat down elsewhere in between. `EventPlayerIdle`
+on the latest-wins feed could be dropped, and a seat the engine no longer holds left
+on the roster is a table that can never reach all-ready again; the watcher only
+counts it. `Lobby.Seat` still re-checks the engine's roster, because the hook lands
+just after the engine has let the seat go.
 
 **On `EventGameEnded` the lobby registers, reopens, then persists.**
 `Manager.watchGame` (`watch.go`) calls `requestFinalize`, which takes
@@ -782,7 +789,8 @@ is decided under one hold and acted on under another, so there is no gap for a
 player's move to land in. A taken seat is also handed to the
 `WithOnIdleRemoved` callback, once the lock is released: unlike `EventPlayerIdle`
 on the latest-wins feed it cannot be dropped, and outside the lock it may take the
-lobby's locks, which order before `Engine.mu`. `RemovePlayer` never calls it. Only **accepted** actions clear a player's miss count
+lobby's locks, which order before `Engine.mu` - the lobby's roster follows idle
+removal through it (§3.4). `RemovePlayer` never calls it. Only **accepted** actions clear a player's miss count
 (`clock.missed`) - a move the rules reject
 does not, or spamming garbage would dodge removal forever.
 
