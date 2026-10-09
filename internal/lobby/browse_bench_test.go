@@ -15,16 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// benchGames are what the browse tables play: enough distinct games that GameNames
-// and the per-game rating lookups have work to do.
-var benchGames = []string{"Crazy Eights", "Uno", "Poker", "Hearts", "Gin Rummy"}
+// benchGames are the slugs the browse tables play: enough distinct games that
+// GamesOnOffer and the per-game rating lookups have work to do.
+var benchGames = []string{"crazy_eights", "uno", "poker", "hearts", "gin_rummy"}
 
 func benchRegistry() *game.Registry {
 	mods := make([]game.Module, len(benchGames))
-	for i, name := range benchGames {
+	for i, slug := range benchGames {
 		mods[i] = game.Module{
-			Name:       name,
-			Slug:       strings.ReplaceAll(strings.ToLower(name), " ", "_"),
+			Name:       strings.ToUpper(slug),
+			Slug:       slug,
 			MinPlayers: 2,
 			MaxPlayers: 6,
 			Factory:    func() game.Rules { return stubRules{} },
@@ -37,8 +37,8 @@ func benchRegistry() *game.Registry {
 // are real lookups rather than the unrated fast path.
 func benchPlayer(i int) *game.Player {
 	ratings := make(map[string]uint32, len(benchGames))
-	for g, name := range benchGames {
-		ratings[name] = uint32(900 + (i*37+g*101)%900)
+	for g, slug := range benchGames {
+		ratings[slug] = uint32(900 + (i*37+g*101)%900)
 	}
 	return &game.Player{ID: fmt.Sprintf("bench-%06d", i), UserID: testutil.UID(i + 1), Ratings: ratings}
 }
@@ -80,7 +80,7 @@ func newBrowseFixture(b *testing.B, n int) browseFixture {
 // list a browser sees, and the games its filter cycles through.
 func (f browseFixture) refresh() int {
 	entries := f.m.BrowseLobbies(f.browser, BrowseFilter{OnlyWithRoom: true, Limit: MaxBrowseLimit})
-	return len(entries) + len(f.m.GameNames())
+	return len(entries) + len(f.m.GamesOnOffer())
 }
 
 // churnRates are how often a public table changes its settings while browsers read:

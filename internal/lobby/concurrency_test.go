@@ -60,7 +60,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("testgame"))
 	require.NoError(t, err)
 
 	guests := make([]*guestRef, joiners)
@@ -134,7 +134,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	all := testutil.Players(players)
-	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("testgame"))
 	require.NoError(t, err)
 	for _, g := range all[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
@@ -188,7 +188,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			unlimitedJoins(m)
 
 			leader := mockPlayer(fmt.Sprintf("leader-%d", i), testutil.UID(uint64(2*i+1)))
-			l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
+			l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
 			code := l.Code()
 
@@ -251,7 +251,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	m := newManagerFor(t, nil, boundedRegistry("NeverStarts", stubRules{}, members+1, members+1))
 	unlimitedJoins(m)
 	roster := testutil.Players(members)
-	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("NeverStarts"))
+	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("neverstarts"))
 	require.NoError(t, err)
 	for _, g := range roster[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
@@ -474,9 +474,9 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			target := mockPlayer("target", testutil.UID(2))
 			other := mockPlayer("other", testutil.UID(3))
 
-			table, err := m.CreateLobby(host, WithMaxPlayers(4), WithCardGame("TestGame"))
+			table, err := m.CreateLobby(host, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
-			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("TestGame"))
+			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
 			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
 
@@ -533,7 +533,7 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 		defer wg.Done()
 		for i := range tables {
 			_, err := m.CreateLobby(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
-				WithPrivate(false), WithCardGame("TestGame"))
+				WithPrivate(false), WithCardGame("testgame"))
 			assert.NoError(t, err)
 		}
 	}()

@@ -25,9 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// gameRegistry is a registry of rules under one display name, seating 1 to 9. These
-// tests only ever look games up by name, so the slug just has to be present and
-// distinct.
+// gameRegistry is a registry of rules under one game, seating 1 to 9. Its slug, the
+// key a table is opened with, is name in lower case.
 func gameRegistry(name string, rules game.Rules) *game.Registry {
 	return boundedRegistry(name, rules, 1, 9)
 }
@@ -106,10 +105,11 @@ func gameRef(name string) db.GameRef {
 
 // testGames is what newTestManager opens tables for: every game these tests name,
 // dealt by stubRules and seating 1 to 10, so a table's size is the test's to choose.
+// Each slug is the name in lower case, as with gameRegistry.
 var testGames = func() *game.Registry {
 	names := []string{
-		"TestGame", "TestGame2", "Game", "Mock", "Mock2", "MockGame", "NeverStarts",
-		"CrazyEights", "Crazy Eights", "Poker", "Uno", "Hidden",
+		"TestGame", "TestGame2", "Game", "Mock", "Mock2", "MockGame",
+		"CrazyEights", "Poker", "Uno", "Hidden",
 	}
 	mods := make([]game.Module, len(names))
 	for i, name := range names {
@@ -156,7 +156,7 @@ func TestLobby_ToggleReady(t *testing.T) {
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 
-	cardGame := "MockGame"
+	cardGame := "mockgame"
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame(cardGame))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
@@ -182,7 +182,7 @@ func TestLobby_SettersAndGetters(t *testing.T) {
 	m := newTestManager(t, nil)
 	leader := mockPlayer("p1", testutil.UID(1))
 
-	cardGame := "CrazyEights"
+	cardGame := "crazyeights"
 	l, err := m.CreateLobby(leader, WithCardGame(cardGame), WithPrivate(true), WithRanked(true))
 	require.NoError(t, err)
 
@@ -204,7 +204,7 @@ func TestLobby_DefaultCasual(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.CreateLobby(leader, WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithCardGame("testgame"))
 	require.NoError(t, err)
 	assert.False(t, l.IsRanked(), "new lobbies default to casual to limit Elo farming under open registration")
 }
@@ -214,11 +214,12 @@ func TestLobby_BasicGetters(t *testing.T) {
 	m := newTestManager(t, nil)
 	leader := mockPlayer("leader", testutil.UID(1))
 
-	cardGame := "CrazyEights"
+	cardGame := "crazyeights"
 	l, err := m.CreateLobby(leader, WithCardGame(cardGame), WithPrivate(true), WithMaxPlayers(4))
 	require.NoError(t, err)
 
-	assert.Equal(t, cardGame, l.GameName())
+	assert.Equal(t, cardGame, l.Slug())
+	assert.Equal(t, "CrazyEights", l.GameName(), "the name is the registry's, for display")
 	assert.Len(t, l.Code(), 8)
 	assert.NotNil(t, l.broadcaster)
 	assert.Empty(t, l.Guests())
@@ -238,7 +239,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	leader := mockPlayer("leader", testutil.UID(1))
 	guest := mockPlayer("guest", testutil.UID(2))
 
-	cardGame := "MockGame"
+	cardGame := "mockgame"
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame(cardGame), WithRanked(true))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
@@ -293,7 +294,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	leader := mockPlayer("leader", testutil.UID(1))
 	guest := mockPlayer("guest", testutil.UID(2))
 
-	cardGame := "MockGame"
+	cardGame := "mockgame"
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame(cardGame), WithRanked(false))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
@@ -332,7 +333,7 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	guest := mockPlayer("p6", testutil.UID(6))
 	nobody := mockPlayer("p3", testutil.UID(3))
 
-	l, err := m.CreateLobby(leader, WithCardGame("Mock2"))
+	l, err := m.CreateLobby(leader, WithCardGame("mock2"))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, m.ToggleReady(leader))
@@ -356,7 +357,7 @@ func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby) {
 	m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, 2, maxPlayers))
 	leader := mockPlayer("p1", testutil.UID(1))
 
-	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("Mock"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("mock"))
 	require.NoError(t, err)
 	return m, l
 }
@@ -482,7 +483,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 			start := cmp.Or(tt.rulesMax, 9)
 			m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, cmp.Or(tt.rulesMin, 1), start))
 			roster := testutil.Players(tt.guests + 1)
-			l, err := m.CreateLobby(roster[0], WithCardGame("Mock"), WithMaxPlayers(start))
+			l, err := m.CreateLobby(roster[0], WithCardGame("mock"), WithMaxPlayers(start))
 			require.NoError(t, err)
 			for _, g := range roster[1:] {
 				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
@@ -727,7 +728,7 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 	repo := new(MockMatchRepo)
 	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("Mock"), []uuid.UUID{testutil.UID(1)}, mock.Anything).Return(assert.AnError)
 	m := newTestManager(t, repo)
-	l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("Mock"), WithRanked(true))
+	l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("mock"), WithRanked(true))
 	require.NoError(t, err)
 
 	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))})
@@ -890,7 +891,7 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 
 	m := newTestManager(t, repo)
 	leader := mockPlayer("p1", testutil.UID(1))
-	l, err := m.CreateLobby(leader, WithCardGame("Mock"), WithRanked(true))
+	l, err := m.CreateLobby(leader, WithCardGame("mock"), WithRanked(true))
 	require.NoError(t, err)
 
 	require.NoError(t, m.ToggleReady(leader))
@@ -923,8 +924,8 @@ func TestRating_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
 	start := elo.ToUint32(elo.DefaultRating)
 	assert.Equal(t, start, Rating(nil, "Poker"))
 	assert.Equal(t, start, Rating(&game.Player{}, "Poker"))
-	assert.Equal(t, start, Rating(&game.Player{Ratings: map[string]uint32{"Poker": 0}}, "Poker"))
-	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"Poker": 1720}}, "Poker"))
+	assert.Equal(t, start, Rating(&game.Player{Ratings: map[string]uint32{"poker": 0}}, "poker"))
+	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"poker": 1720}}, "poker"))
 }
 
 // refusedStartRules is stubRules whose deal fails, so the engine never starts: a
@@ -952,7 +953,7 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 			t.Parallel()
 			m := newManagerFor(t, nil, boundedRegistry("Mock", tt.rules, cmp.Or(tt.min, 1), 9))
 			seats := []*game.Player{mockPlayer("p1", testutil.UID(1))}
-			l, err := m.CreateLobby(seats[0], WithCardGame("Mock"))
+			l, err := m.CreateLobby(seats[0], WithCardGame("mock"))
 			require.NoError(t, err)
 			if tt.withGuest {
 				seats = append(seats, mockPlayer("p2", testutil.UID(2)))

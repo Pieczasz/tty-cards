@@ -69,8 +69,7 @@ type model struct {
 func New(global router.GlobalContext) tea.Model {
 	filters := []boardFilter{{label: filterAll}}
 	if reg := global.GameRegistry; reg != nil {
-		for _, name := range reg.GameNames() {
-			mod, _ := reg.Module(name)
+		for _, mod := range reg.Modules() {
 			filters = append(filters, boardFilter{label: mod.Name, slug: mod.Slug})
 		}
 	}

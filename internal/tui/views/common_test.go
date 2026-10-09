@@ -112,7 +112,7 @@ func TestSessionPlayer(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{User: &db.User{ID: testutil.UID(7),
 			Username: "alice",
-			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Name: "Poker"}}},
+			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Slug: "poker", Name: "Poker"}}},
 		}}
 
 		p := views.SessionPlayer(g)
@@ -120,7 +120,7 @@ func TestSessionPlayer(t *testing.T) {
 		assert.Equal(t, testutil.UID(7).String(), p.ID)
 		assert.Equal(t, testutil.UID(7), p.UserID)
 		assert.Equal(t, "alice", p.Name)
-		assert.Equal(t, map[string]uint32{"Poker": 1600}, p.Ratings)
+		assert.Equal(t, map[string]uint32{"poker": 1600}, p.Ratings)
 
 		// The ID has to be the same spelling the engine seats the player under, or a
 		// subscription keyed on it silently never fires.

@@ -11,49 +11,34 @@ func fakeModule(name, slug string) Module {
 	return Module{Name: name, Slug: slug, MinPlayers: 2, MaxPlayers: 4, Factory: func() Rules { return &MockRules{} }}
 }
 
-func TestRegistry_CreateBuildsADeclaredGame(t *testing.T) {
-	t.Parallel()
-	r := NewRegistry(fakeModule("FakeGame", "fakegame"))
-
-	rules, err := r.Create("FakeGame")
-	require.NoError(t, err)
-	assert.NotNil(t, rules)
-}
-
-// The error names the game, so a log line says which lobby option points nowhere.
-func TestRegistry_CreateNamesAnUnknownGame(t *testing.T) {
-	t.Parallel()
-	_, err := NewRegistry(fakeModule("FakeGame", "fakegame")).Create("NotExists")
-	require.ErrorContains(t, err, `"NotExists"`)
-}
-
-func TestRegistry_ModuleLooksUpByDisplayName(t *testing.T) {
+func TestRegistry_ModuleLooksUpBySlug(t *testing.T) {
 	t.Parallel()
 	r := NewRegistry(fakeModule("Crazy Eights", "crazy_eights"))
 
-	mod, ok := r.Module("Crazy Eights")
+	mod, ok := r.Module("crazy_eights")
 	require.True(t, ok)
-	assert.Equal(t, "crazy_eights", mod.Slug)
+	assert.Equal(t, "Crazy Eights", mod.Name)
 
-	_, ok = r.Module("crazy_eights")
-	assert.False(t, ok, "the slug is not the registry key")
+	_, ok = r.Module("Crazy Eights")
+	assert.False(t, ok, "the display name is not the registry key")
 }
 
-func TestRegistry_GameNamesKeepDeclarationOrder(t *testing.T) {
+func TestRegistry_ModulesKeepDeclarationOrder(t *testing.T) {
 	t.Parallel()
 	r := NewRegistry(fakeModule("Poker", "poker"), fakeModule("Hearts", "hearts"), fakeModule("Uno", "uno"))
 
-	names := r.GameNames()
-	require.Equal(t, []string{"Poker", "Hearts", "Uno"}, names)
+	mods := r.Modules()
+	require.Len(t, mods, 3)
+	assert.Equal(t, []string{"poker", "hearts", "uno"}, []string{mods[0].Slug, mods[1].Slug, mods[2].Slug})
 
-	names[0] = "mutated"
-	assert.Equal(t, "Poker", r.GameNames()[0], "callers get a copy")
+	mods[0].Slug = "mutated"
+	assert.Equal(t, "poker", r.Modules()[0].Slug, "callers get a copy")
 }
 
 // A half-declared module is a wiring bug, and a registry that accepted one would fail
 // later as a missing route or a nil factory panic at the moment somebody starts a
 // table. catalog_test.go leans on this being loud. A name declared twice is the
-// same mistake: GameNames drives the menu, and one of the two would be unreachable.
+// same mistake: the menus list names, and two alike cannot be told apart.
 // A slug declared twice files two games' ratings under one identity, and seat bounds
 // no table could satisfy make a game nobody can start.
 func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {

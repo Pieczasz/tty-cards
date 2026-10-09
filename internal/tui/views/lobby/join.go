@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
@@ -67,7 +68,7 @@ type joinModel struct {
 	entries []lobby.BrowseEntry
 	filter  lobby.BrowseFilter
 	// games is the set of games with a table right now, for cycling the filter.
-	games []string
+	games []game.Module
 
 	// lastKey/lastView memoize the rendered frame. The browse tick re-renders this
 	// screen every 2s for every player parked on it, and a frame costs ~6.7k
@@ -104,7 +105,7 @@ func (m *joinModel) Init() tea.Cmd {
 // every time rather than only when the list shrinks to empty.
 func (m *joinModel) refresh() {
 	m.entries = m.global.LobbyManager.BrowseLobbies(views.SessionPlayer(m.global), m.filter)
-	m.games = m.global.LobbyManager.GameNames()
+	m.games = m.global.LobbyManager.GamesOnOffer()
 	m.cursor = components.StepCursor(m.cursor, 0, len(m.entries)-1)
 }
 
@@ -199,15 +200,15 @@ func (m *joinModel) applyFilter() {
 // why, so a game that disappears drops the filter back to any.
 func (m *joinModel) cycleGame() {
 	if len(m.games) == 0 {
-		m.filter.GameName = ""
+		m.filter.Slug = ""
 		m.applyFilter()
 		return
 	}
-	current := slices.Index(m.games, m.filter.GameName)
+	current := m.gameIndex(m.filter.Slug)
 	if current+1 >= len(m.games) {
-		m.filter.GameName = ""
+		m.filter.Slug = ""
 	} else {
-		m.filter.GameName = m.games[current+1]
+		m.filter.Slug = m.games[current+1].Slug
 	}
 	m.applyFilter()
 }
@@ -258,16 +259,23 @@ func (m *joinModel) modeLabel() string {
 	return "any"
 }
 
+// gameIndex is where slug sits in games, or -1.
+func (m *joinModel) gameIndex(slug string) int {
+	return slices.IndexFunc(m.games, func(g game.Module) bool { return g.Slug == slug })
+}
+
 func (m *joinModel) filterLine() string {
-	game := "any"
-	if m.filter.GameName != "" {
-		game = m.filter.GameName
+	label := "any"
+	if i := m.gameIndex(m.filter.Slug); i >= 0 {
+		label = m.games[i].Name
+	} else if m.filter.Slug != "" {
+		label = m.filter.Slug
 	}
 	seats := "all tables"
 	if m.filter.OnlyWithRoom {
 		seats = "with seats"
 	}
-	return m.global.Theme.Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", game, m.modeLabel(), seats))
+	return m.global.Theme.Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", label, m.modeLabel(), seats))
 }
 
 // Column widths are fixed so a filter keypress cannot resize the list under the

@@ -85,10 +85,8 @@ func (m *model) Init() tea.Cmd {
 	// (idle removal) stays here and sees the roster instead.
 	if m.currentLobby != nil {
 		if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
-			if mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName()); ok {
-				m.unsubscribe()
-				return router.NavigateToGame(mod.Slug, table)
-			}
+			m.unsubscribe()
+			return router.NavigateToGame(m.currentLobby.Slug(), table)
 		}
 	}
 	return listenToLobbyBroadcaster(m.lobbyChan)
@@ -98,7 +96,7 @@ func (m *model) Init() tea.Cmd {
 // taken when they logged in - not a live read. A rating that changes mid-session shows
 // up the next time they connect.
 func (m *model) rating(p *game.Player) uint32 {
-	return lobby.Rating(p, m.currentLobby.GameName())
+	return lobby.Rating(p, m.currentLobby.Slug())
 }
 
 func (m *model) unsubscribe() {
@@ -215,7 +213,7 @@ func (m *model) adjustSetting(self *game.Player, delta int) {
 	var err error
 	switch m.cursor {
 	case cursorMaxPlayers:
-		rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.GameName())
+		rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.Slug())
 		next := m.maxPlayers + delta
 		if next < max(rulesMin, m.currentLobby.CurrentPlayers()) || next > rulesMax {
 			return
@@ -251,17 +249,8 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			slog.ErrorContext(m.global.RequestContext(), "GAME_STARTED carried no game engine")
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
-		mod, ok := m.global.GameRegistry.Module(m.currentLobby.GameName())
-		if !ok {
-			// Keep the listener armed: an unregistered game is no reason to eject
-			// the player, and returning a nil command would leave this view deaf to
-			// every later lobby event while still holding its subscriber slot.
-			slog.ErrorContext(m.global.RequestContext(), "game not registered, cannot route to its view",
-				"game", m.currentLobby.GameName())
-			return m, listenToLobbyBroadcaster(m.lobbyChan)
-		}
 		m.unsubscribe()
-		return m, router.NavigateToGame(mod.Slug, table)
+		return m, router.NavigateToGame(m.currentLobby.Slug(), table)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
 		self := views.SessionPlayer(m.global)
 		if !m.currentLobby.Leader().Equal(self) && !slices.ContainsFunc(m.currentLobby.Guests(), self.Equal) {

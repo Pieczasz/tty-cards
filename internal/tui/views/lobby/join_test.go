@@ -57,7 +57,7 @@ func TestJoin_RefreshPicksUpNewTables(t *testing.T) {
 	view := newJoinModel(t, m)
 	require.Empty(t, view.entries, "nothing is open yet")
 
-	openPublicTable(t, m, "host", testutil.UID(1), testGameName)
+	openPublicTable(t, m, "host", testutil.UID(1), testGameSlug)
 
 	updated, cmd := view.Update(refreshMsg{owner: view})
 
@@ -71,7 +71,7 @@ func TestJoin_RefreshPicksUpNewTables(t *testing.T) {
 func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)
-	l := openPublicTable(t, m, "host", testutil.UID(1), testGameName, lobby.WithMaxPlayers(2))
+	l := openPublicTable(t, m, "host", testutil.UID(1), testGameSlug, lobby.WithMaxPlayers(2))
 	guest := &game.Player{ID: "guest", UserID: testutil.UID(2), Name: "guest"}
 	_, err := m.JoinLobbyByCode(l.Code(), guest)
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestJoin_CursorSurvivesAShrinkingList(t *testing.T) {
 	m := newManager(t)
 	tables := make([]*lobby.Lobby, 0, 3)
 	for i, name := range []string{"a", "b", "c"} {
-		tables = append(tables, openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameName))
+		tables = append(tables, openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameSlug))
 	}
 
 	view := newJoinModel(t, m)
@@ -131,7 +131,7 @@ func TestJoin_BrowsingKeys(t *testing.T) {
 		t.Parallel()
 		m := newManager(t)
 		for i, name := range []string{"a", "b"} {
-			openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameName)
+			openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameSlug)
 		}
 		view := newJoinModel(t, m)
 		require.Len(t, view.entries, 2)
@@ -163,8 +163,8 @@ func TestJoin_FiltersCycle(t *testing.T) {
 	newBrowser := func(t *testing.T) *joinModel {
 		t.Helper()
 		m := newManager(t)
-		openPublicTable(t, m, "poker", testutil.UID(1), "Poker")
-		openPublicTable(t, m, "eights", testutil.UID(2), testGameName, lobby.WithRanked(true))
+		openPublicTable(t, m, "poker", testutil.UID(1), "poker")
+		openPublicTable(t, m, "eights", testutil.UID(2), testGameSlug, lobby.WithRanked(true))
 		view := newJoinModel(t, m)
 		require.Len(t, view.entries, 2)
 		return view
@@ -174,17 +174,19 @@ func TestJoin_FiltersCycle(t *testing.T) {
 		t.Parallel()
 		view := newBrowser(t)
 		games := view.games
-		require.Equal(t, []string{testGameName, "Poker"}, games, "sorted, so the cycle is predictable")
+		require.Len(t, games, 2)
+		require.Equal(t, []string{testGameName, "Poker"}, []string{games[0].Name, games[1].Name},
+			"sorted, so the cycle is predictable")
 
 		pressJoin(t, view, "g")
-		assert.Equal(t, games[0], view.filter.GameName)
+		assert.Equal(t, games[0].Slug, view.filter.Slug)
 		assert.Len(t, view.entries, 1, "narrowed to one game")
 
 		pressJoin(t, view, "g")
-		assert.Equal(t, games[1], view.filter.GameName)
+		assert.Equal(t, games[1].Slug, view.filter.Slug)
 
 		pressJoin(t, view, "g")
-		assert.Empty(t, view.filter.GameName, "past the last game it comes back to any")
+		assert.Empty(t, view.filter.Slug, "past the last game it comes back to any")
 		assert.Len(t, view.entries, 2)
 	})
 
@@ -224,8 +226,8 @@ func TestJoin_FiltersCycle(t *testing.T) {
 func TestJoin_FilterAppliesImmediatelyAndResetsTheCursor(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)
-	openPublicTable(t, m, "poker", testutil.UID(1), "Poker")
-	openPublicTable(t, m, "eights", testutil.UID(2), testGameName)
+	openPublicTable(t, m, "poker", testutil.UID(1), "poker")
+	openPublicTable(t, m, "eights", testutil.UID(2), testGameSlug)
 
 	view := newJoinModel(t, m)
 	pressJoin(t, view, "j")
@@ -242,11 +244,11 @@ func TestJoin_GameFilterWithNoTablesFallsBackToAny(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)
 	view := newJoinModel(t, m)
-	view.filter.GameName = "Poker"
+	view.filter.Slug = "poker"
 
 	view.cycleGame()
 
-	assert.Empty(t, view.filter.GameName)
+	assert.Empty(t, view.filter.Slug)
 }
 
 // The mode tag is how a player tells ranked from casual before joining. Codes stay
@@ -255,7 +257,7 @@ func TestJoin_GameFilterWithNoTablesFallsBackToAny(t *testing.T) {
 func TestJoin_ViewShowsTheColumns(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)
-	ranked := openPublicTable(t, m, "poker", testutil.UID(1), "Poker", lobby.WithRanked(true), lobby.WithMaxPlayers(4))
+	ranked := openPublicTable(t, m, "poker", testutil.UID(1), "poker", lobby.WithRanked(true), lobby.WithMaxPlayers(4))
 
 	view := newJoinModel(t, m)
 	rendered := tuitest.StripANSI(view.View().Content)
@@ -399,7 +401,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 		t.Parallel()
 		m := newManager(t)
 		view := newJoinModel(t, m)
-		openPublicTable(t, m, "host", testutil.UID(1), testGameName)
+		openPublicTable(t, m, "host", testutil.UID(1), testGameSlug)
 
 		_, cmd := view.joinByCode("NOSUCH12")
 
@@ -412,7 +414,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 	t.Run("a good code seats the player and opens the lobby", func(t *testing.T) {
 		t.Parallel()
 		m := newManager(t)
-		table := openPublicTable(t, m, "host", testutil.UID(1), testGameName)
+		table := openPublicTable(t, m, "host", testutil.UID(1), testGameSlug)
 		view := newJoinModel(t, m)
 
 		_, cmd := view.joinByCode(table.Code())
@@ -435,7 +437,7 @@ func TestJoin_SelectingARowJoinsIt(t *testing.T) {
 		t.Run("with "+key, func(t *testing.T) {
 			t.Parallel()
 			m := newManager(t)
-			openPublicTable(t, m, "host", testutil.UID(1), testGameName)
+			openPublicTable(t, m, "host", testutil.UID(1), testGameSlug)
 			view := newJoinModel(t, m)
 			require.Len(t, view.entries, 1)
 
@@ -483,7 +485,7 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 	t.Run("enter submits what was typed", func(t *testing.T) {
 		t.Parallel()
 		m := newManager(t)
-		table := openPublicTable(t, m, "host", testutil.UID(1), testGameName)
+		table := openPublicTable(t, m, "host", testutil.UID(1), testGameSlug)
 		view := newJoinModel(t, m)
 
 		pressJoin(t, view, "c")
@@ -527,13 +529,14 @@ func TestJoin_FilterLineNamesEveryFilter(t *testing.T) {
 		{name: "the defaults", filter: lobby.BrowseFilter{OnlyWithRoom: true}, want: "game: any   mode: any   showing: with seats"},
 		{name: "ranked only", filter: lobby.BrowseFilter{Mode: lobby.BrowseRanked}, want: "game: any   mode: ranked   showing: all tables"},
 		{name: "casual only", filter: lobby.BrowseFilter{Mode: lobby.BrowseCasual}, want: "game: any   mode: casual   showing: all tables"},
-		{name: "pinned to a game", filter: lobby.BrowseFilter{GameName: "Poker"}, want: "game: Poker   mode: any   showing: all tables"},
+		{name: "pinned to a game", filter: lobby.BrowseFilter{Slug: "poker"}, want: "game: Poker   mode: any   showing: all tables"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			view := newJoinModel(t, newManager(t))
+			view.games = []game.Module{{Name: "Poker", Slug: "poker"}}
 			view.filter = tt.filter
 
 			assert.Equal(t, tt.want, tuitest.StripANSI(view.filterLine()))

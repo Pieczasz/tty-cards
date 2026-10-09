@@ -320,7 +320,7 @@ func seatedSession(t *testing.T) (*lobby.Manager, *game.Player, Session) {
 		Factory: func() game.Rules { return &crazyeight.Rules{} },
 	}))
 	alice := lobby.NewPlayer(s.Global.User)
-	_, err := manager.CreateLobby(alice, lobby.WithCardGame("Crazy Eights"))
+	_, err := manager.CreateLobby(alice, lobby.WithCardGame("crazy_eights"))
 	require.NoError(t, err)
 	s.Global.LobbyManager = manager
 	s.Global.Theme = styles.NewTheme(true)

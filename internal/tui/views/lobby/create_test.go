@@ -55,11 +55,11 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 	m := newCreateModel(t)
 
 	pokerIdx, crazyIdx := -1, -1
-	for i, name := range m.gameOptions {
-		switch name {
-		case "Poker":
+	for i, mod := range m.gameOptions {
+		switch mod.Slug {
+		case "poker":
 			pokerIdx = i
-		case "Crazy Eights":
+		case "crazy_eights":
 			crazyIdx = i
 		}
 	}
@@ -131,7 +131,7 @@ func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
 	require.True(t, ok)
 
 	assert.Empty(t, m.gameOptions, "no registered game means no game on the form")
-	assert.Empty(t, m.selectedGame())
+	assert.Empty(t, m.selectedGame().Slug)
 
 	require.NotPanics(t, func() { m.View() }, "an empty form still has to render")
 
@@ -146,7 +146,14 @@ func TestCreate_OffersEveryRegisteredGame(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
 
-	assert.ElementsMatch(t, m.global.GameRegistry.GameNames(), m.gameOptions)
+	var want, got []string
+	for _, mod := range m.global.GameRegistry.Modules() {
+		want = append(want, mod.Slug)
+	}
+	for _, mod := range m.gameOptions {
+		got = append(got, mod.Slug)
+	}
+	assert.Equal(t, want, got)
 }
 
 func TestCreate_NavigationKeys(t *testing.T) {
@@ -220,7 +227,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				_, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+				_, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
 				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
@@ -313,7 +320,7 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	assert.Equal(t, router.RouteLobby, change.ViewName)
 	created := change.Payload.Lobby
 	require.NotNil(t, created, "the lobby view is handed the lobby that was just made")
-	assert.Equal(t, m.selectedGame(), created.GameName())
+	assert.Equal(t, m.selectedGame().Name, created.GameName())
 	assert.Equal(t, 5, created.MaxPlayers())
 	assert.False(t, created.IsPrivate())
 	assert.True(t, created.IsRanked())
@@ -327,7 +334,7 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	manager := newManager(t)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
-	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
+	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame().Slug))
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit
@@ -359,7 +366,7 @@ func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
 	m := newCreateModel(t)
 	m.global.GameRegistry = game.NewRegistry()
 
-	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
 	assert.Equal(t, fallbackMinPlayers, minP)
 	assert.Equal(t, fallbackMaxPlayers, maxP)
 }

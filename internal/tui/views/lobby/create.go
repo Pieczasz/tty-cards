@@ -31,7 +31,7 @@ type createModel struct {
 	isPrivate   bool
 	isRanked    bool
 	maxPlayers  int
-	gameOptions []string
+	gameOptions []game.Module
 	gameIndex   int
 }
 
@@ -39,7 +39,7 @@ type createModel struct {
 // nowhere else: a hardcoded fallback here would be a second place a game is
 // declared, and it would offer a game the registry cannot build.
 func NewCreate(global router.GlobalContext) tea.Model {
-	gameOptions := global.GameRegistry.GameNames()
+	gameOptions := global.GameRegistry.Modules()
 	return &createModel{
 		global:      global,
 		cursor:      0,
@@ -103,8 +103,9 @@ func (m *createModel) adjustSetting(delta int) {
 	case createCursorMode:
 		m.isRanked = !m.isRanked
 	case createCursorPlayers:
-		if minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame()); m.maxPlayers+delta >= minP && m.maxPlayers+delta <= maxP {
-			m.maxPlayers += delta
+		minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
+		if next := m.maxPlayers + delta; next >= minP && next <= maxP {
+			m.maxPlayers = next
 		}
 	case createCursorSubmit:
 		// The submitted row has no left/right adjustment.
@@ -115,23 +116,24 @@ func (m *createModel) adjustSetting(delta int) {
 // deployment rather than a player mistake, but it still has to read as something.
 var errNoGames = errors.New("no games are available right now")
 
-// selectedGame is the highlighted game, or empty when there are none to highlight.
-func (m *createModel) selectedGame() string {
+// selectedGame is the highlighted game, or the zero Module when there are none to
+// highlight.
+func (m *createModel) selectedGame() game.Module {
 	if m.gameIndex < 0 || m.gameIndex >= len(m.gameOptions) {
-		return ""
+		return game.Module{}
 	}
 	return m.gameOptions[m.gameIndex]
 }
 
 func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
-	name := m.selectedGame()
-	if name == "" {
+	slug := m.selectedGame().Slug
+	if slug == "" {
 		m.err = errNoGames
 		return m, nil
 	}
 
 	l, err := m.global.LobbyManager.CreateLobby(views.SessionPlayer(m.global),
-		lobby.WithCardGame(name),
+		lobby.WithCardGame(slug),
 		lobby.WithMaxPlayers(m.maxPlayers),
 		lobby.WithPrivate(m.isPrivate),
 		lobby.WithRanked(m.isRanked),
@@ -154,13 +156,13 @@ const (
 	fallbackMaxPlayers = 6
 )
 
-// gamePlayerBounds is gameName's seat range, or the fallback range for a game the
-// registry does not hold.
-func gamePlayerBounds(registry *game.Registry, gameName string) (minP, maxP int) {
+// gamePlayerBounds is the seat range of the game slug names, or the fallback range for
+// a game the registry does not hold.
+func gamePlayerBounds(registry *game.Registry, slug string) (minP, maxP int) {
 	if registry == nil {
 		return fallbackMinPlayers, fallbackMaxPlayers
 	}
-	mod, ok := registry.Module(gameName)
+	mod, ok := registry.Module(slug)
 	if !ok {
 		return fallbackMinPlayers, fallbackMaxPlayers
 	}
@@ -168,7 +170,7 @@ func gamePlayerBounds(registry *game.Registry, gameName string) (minP, maxP int)
 }
 
 func (m *createModel) clampMaxPlayers() {
-	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame())
+	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
 	// minP is applied last so it wins if a game's bounds ever cross.
 	m.maxPlayers = max(min(m.maxPlayers, maxP), minP)
 }
@@ -202,7 +204,7 @@ func modeLabel(ranked bool) string {
 
 func (m *createModel) View() tea.View {
 	t := m.global.Theme
-	gameName := m.selectedGame()
+	gameName := m.selectedGame().Name
 	if gameName == "" {
 		gameName = "none available"
 	}

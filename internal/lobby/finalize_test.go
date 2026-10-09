@@ -29,7 +29,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	leader := mockPlayer("leader", testutil.UID(1))
 	guest := mockPlayer("guest", testutil.UID(2))
 
-	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("MockGame"), WithRanked(true))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mockgame"), WithRanked(true))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
@@ -204,7 +204,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, 3, 4))
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Mock"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("mock"))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
@@ -459,7 +459,7 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m := newTestManager(t, nil)
 		leader, guest := mockPlayer("p1", testutil.UID(1)), mockPlayer("p2", testutil.UID(2))
-		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
+		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 		require.NoError(t, m.ToggleReady(leader))
@@ -514,7 +514,7 @@ func TestDisconnectPlayer_ReleasedHoldDoesNotFireIntoTheNextTable(t *testing.T) 
 
 		time.Sleep(disconnectGrace / 2)
 		host := mockPlayer("p3", testutil.UID(3))
-		next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("Mock"))
+		next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
 		require.NoError(t, m.ToggleReady(host))

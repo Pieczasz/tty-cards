@@ -29,7 +29,7 @@ func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 		t.Run(entry.Slug, func(t *testing.T) {
 			m := lobby.NewManager(t.Context(), nil, NewRegistry())
 			players := testutil.Players(entry.MinPlayers)
-			l, err := m.CreateLobby(players[0], lobby.WithCardGame(entry.Name), lobby.WithMaxPlayers(len(players)))
+			l, err := m.CreateLobby(players[0], lobby.WithCardGame(entry.Slug), lobby.WithMaxPlayers(len(players)))
 			require.NoError(t, err)
 			t.Cleanup(func() { m.RemoveLobby(l.Code()) })
 			for _, p := range players[1:] {

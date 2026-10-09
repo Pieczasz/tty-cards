@@ -492,8 +492,8 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
 - `Manager.CreateLobby(leader, opts...)` generates an 8-character code from
   `[A-Z0-9]` using `crypto/rand`, retried up to 10 times against collisions.
   Defaults: `maxPlayers` 4 clamped to the game's `[MinPlayers, MaxPlayers]`,
-  private, casual. `WithCardGame(name)` takes the **display name**, which is the
-  `game.Registry` key; the persisted identity is the slug (§6.1). The game is
+  private, casual. `WithCardGame(slug)` takes the **slug**, the `game.Registry` key
+  and the persisted identity (§6.1); the name is display only. The game is
   resolved here, against the manager's registry, and kept on the lobby: an unknown
   game or a `WithMaxPlayers` outside the game's range is refused before there is a
   table.
@@ -1036,9 +1036,9 @@ The two halves travel together as `db.GameRef{Slug, Name}`:
 
 ```
 catalog.Entry{Name, Slug}
-  -> game.Module{Name, Slug, MinPlayers, MaxPlayers, Factory}   registry keyed by Name
-  -> lobby options.cardGame (Name)
-  -> at start: db.GameRef{Slug: mod.Slug, Name: l.options.cardGame}
+  -> game.Module{Name, Slug, MinPlayers, MaxPlayers, Factory}   registry keyed by Slug
+  -> lobby WithCardGame(slug), the Module kept on the Lobby
+  -> at start: db.GameRef{Slug: mod.Slug, Name: mod.Name}
   -> repository getOrCreateGame: read by slug; upsert ON CONFLICT (slug) only on a
      miss, a rename or a soft-deleted row
 ```
@@ -1310,9 +1310,9 @@ rules still compiles, so keep the pair in lockstep by hand.
 
 | Field | Consumer |
 |---|---|
-| `Module.Name` | registry key, lobby option, `db.Game.Name` (display) |
+| `Module.Name` | display only: menus, the lobby and browse rows, `db.Game.Name` |
 | `MinPlayers` / `MaxPlayers` | the lobby's seat bounds (`SetMaxPlayers`, the start check) and the create form's range - read off the module, no `Rules` built |
-| `Slug` | TUI route `game_<slug>`, **`games.slug`, the persisted identity**, and the `game_type` label on every game metric, lobby and view alike ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
+| `Slug` | registry key, lobby option, `Player.Ratings` key, TUI route `game_<slug>`, **`games.slug`, the persisted identity**, and the `game_type` label on every game metric, lobby and view alike ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
 
 ---
 
@@ -1362,7 +1362,7 @@ Lobby file split:
 | `watch.go` | the engine watcher (`handleGameEvents`) -> `requestFinalize` (register, reopen, persist) |
 | `finalize.go` | persist finished matches, the rating gate (`unratedReason`), `dropFinishedMatch`, the finalizer registry, `BeginShutdown`, `WaitForFinalizers` |
 | `disconnect.go` | the mid-game grace state machine (`graceTimers`), `ResumePlayer`, `releaseHeldSeats` |
-| `browse.go` | public list and its cache, Elo-distance sort, `GameNames` |
+| `browse.go` | public list and its cache, Elo-distance sort, `GamesOnOffer` |
 | `player.go` | `db.User` -> `game.Player` |
 
 ---

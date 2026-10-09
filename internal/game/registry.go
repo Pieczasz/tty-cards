@@ -1,9 +1,6 @@
 package game
 
-import (
-	"fmt"
-	"slices"
-)
+import "fmt"
 
 // Module declares one playable game: its display name, the slug routes and persisted
 // ratings hang off, the seat range it deals for, and the factory that builds a fresh
@@ -17,7 +14,8 @@ type Module struct {
 	Factory    func() Rules
 }
 
-// Registry is the set of games a server offers, keyed by display name.
+// Registry is the set of games a server offers, keyed by slug: the identity a game's
+// ratings and history are persisted under. A name is only what a player reads.
 type Registry struct {
 	modules map[string]Module
 	order   []string
@@ -28,7 +26,7 @@ func NewRegistry(mods ...Module) *Registry {
 		modules: make(map[string]Module, len(mods)),
 		order:   make([]string, 0, len(mods)),
 	}
-	slugs := make(map[string]bool, len(mods))
+	names := make(map[string]bool, len(mods))
 	for _, m := range mods {
 		if m.Name == "" || m.Slug == "" || m.Factory == nil {
 			panic(fmt.Sprintf("game.NewRegistry: %q (slug %q): Name, Slug, and Factory are required", m.Name, m.Slug))
@@ -36,35 +34,30 @@ func NewRegistry(mods ...Module) *Registry {
 		if m.MinPlayers < 1 || m.MaxPlayers < m.MinPlayers {
 			panic(fmt.Sprintf("game.NewRegistry: %q: seat bounds %d..%d", m.Name, m.MinPlayers, m.MaxPlayers))
 		}
-		if _, dup := r.modules[m.Name]; dup {
+		if names[m.Name] {
 			panic(fmt.Sprintf("game.NewRegistry: %q declared twice", m.Name))
 		}
-		if slugs[m.Slug] {
+		if _, dup := r.modules[m.Slug]; dup {
 			panic(fmt.Sprintf("game.NewRegistry: slug %q declared twice", m.Slug))
 		}
-		slugs[m.Slug] = true
-		r.modules[m.Name] = m
-		r.order = append(r.order, m.Name)
+		names[m.Name] = true
+		r.modules[m.Slug] = m
+		r.order = append(r.order, m.Slug)
 	}
 	return r
 }
 
-// GameNames lists the display names in declaration order.
-func (r *Registry) GameNames() []string {
-	return slices.Clone(r.order)
-}
-
-// Module looks a game up by display name.
-func (r *Registry) Module(name string) (Module, bool) {
-	m, ok := r.modules[name]
-	return m, ok
-}
-
-// Create builds a fresh Rules for a registered game.
-func (r *Registry) Create(name string) (Rules, error) {
-	m, ok := r.Module(name)
-	if !ok {
-		return nil, fmt.Errorf("game %q not found in registry", name)
+// Modules lists the games in declaration order. The slice is the caller's.
+func (r *Registry) Modules() []Module {
+	mods := make([]Module, len(r.order))
+	for i, slug := range r.order {
+		mods[i] = r.modules[slug]
 	}
-	return m.Factory(), nil
+	return mods
+}
+
+// Module looks a game up by slug.
+func (r *Registry) Module(slug string) (Module, bool) {
+	m, ok := r.modules[slug]
+	return m, ok
 }

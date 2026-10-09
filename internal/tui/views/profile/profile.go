@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -71,7 +72,7 @@ type model struct {
 	err         error
 	historyErr  error
 
-	gameFilters   []string
+	gameFilters   []game.Module
 	gameFilterIdx int
 	resultFilters []string
 	resultIdx     int
@@ -85,9 +86,10 @@ type model struct {
 
 // New builds the profile screen with one game filter per registered game.
 func New(global router.GlobalContext) tea.Model {
-	gameFilters := []string{filterAllGames}
+	// The first is "All": no slug, so it matches every match.
+	gameFilters := []game.Module{{Name: filterAllGames}}
 	if global.GameRegistry != nil {
-		gameFilters = append(gameFilters, global.GameRegistry.GameNames()...)
+		gameFilters = append(gameFilters, global.GameRegistry.Modules()...)
 	}
 	return &model{
 		global:        global,
@@ -196,7 +198,7 @@ func (m *model) renderContent(contentHeight int) string {
 
 	userInfo := "Profile for: " + m.userProfile.Username
 	filters := m.global.Theme.Muted.Render(fmt.Sprintf("Game: %s  Result: %s",
-		styles.PadTruncate(m.gameFilters[m.gameFilterIdx], colGame),
+		styles.PadTruncate(m.gameFilters[m.gameFilterIdx].Name, colGame),
 		styles.PadTruncate(m.resultFilters[m.resultIdx], len(filterLosses)),
 	))
 	if m.notice != "" {
@@ -289,10 +291,10 @@ func (m *model) rankingRows(maxItems int) []string {
 
 func (m *model) filteredHistory() []db.MatchParticipant {
 	out := make([]db.MatchParticipant, 0, len(m.history))
-	wantGame := m.gameFilters[m.gameFilterIdx]
+	wantGame := m.gameFilters[m.gameFilterIdx].Slug
 	wantResult := m.resultFilters[m.resultIdx]
 	for _, h := range m.history {
-		if wantGame != filterAllGames && h.Match.Game.Name != wantGame {
+		if wantGame != "" && h.Match.Game.Slug != wantGame {
 			continue
 		}
 		won := h.Placement == 1

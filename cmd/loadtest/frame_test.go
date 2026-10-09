@@ -92,7 +92,7 @@ func TestClassify_RealScreens(t *testing.T) {
 	t.Parallel()
 	mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	g := seatGlobal(t, mgr, 1)
-	l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("Crazy Eights"))
+	l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("crazy_eights"))
 	require.NoError(t, err)
 
 	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("a", "b"))
@@ -300,7 +300,7 @@ func TestLobbyScreen_CodeAndGuests(t *testing.T) {
 			t.Parallel()
 			mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 			g := seatGlobal(t, mgr, 1)
-			l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("Crazy Eights"), lobby.WithMaxPlayers(6))
+			l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("crazy_eights"), lobby.WithMaxPlayers(6))
 			require.NoError(t, err)
 			for n := range guests {
 				_, err := mgr.JoinLobbyByCode(l.Code(), views.SessionPlayer(seatGlobal(t, mgr, n+2)))
