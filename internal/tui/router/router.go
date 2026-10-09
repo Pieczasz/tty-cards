@@ -87,7 +87,9 @@ type GlobalContext struct {
 	Leaderboard  db.Leaderboard
 	LobbyManager *lobby.Manager
 	GameRegistry *game.Registry
-	// SessionCtx is canceled when the SSH session ends.
+	// SessionCtx is canceled when the SSH connection ends, not this session: it
+	// derives from s.Context(), which every channel on the connection shares, so a
+	// closed session's context lives on while a sibling channel keeps the connection up.
 	SessionCtx context.Context
 	Width      int
 	Height     int
