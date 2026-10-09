@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -97,17 +98,12 @@ func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 	assert.Empty(t, calls, "the same hand was persisted twice")
 }
 
-// The window between observing the end of a game and registering the finalizer used
-// to be a silent drop: shutdown could start inside it and the result vanished with
-// nothing logged and nothing for WaitForFinalizers to wait on.
-//
-//nolint:paralleltest // slog.SetDefault is process-wide, so this cannot share the process
-func TestShutdown_MatchEndingDuringDrainIsNotSilentlyDropped(t *testing.T) {
-	logged := &syncBuffer{}
-	original := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(logged, &slog.HandlerOptions{Level: slog.LevelError})))
-	t.Cleanup(func() { slog.SetDefault(original) })
-
+// A match ending at the same moment the drain begins used to race it: a finalize
+// registered only once the end was observed, so the drain could see nothing in flight
+// and refuse the write. The watcher is counted from game start now, so whichever
+// lands first, the match is written before the drain returns.
+func TestShutdown_MatchEndingDuringDrainIsRecorded(t *testing.T) {
+	t.Parallel()
 	for i := range 20 {
 		var recorded atomic.Int32
 		repo := new(MockMatchRepo)
@@ -117,7 +113,6 @@ func TestShutdown_MatchEndingDuringDrainIsNotSilentlyDropped(t *testing.T) {
 			Run(func(mock.Arguments) { recorded.Add(1) }).Return(nil)
 
 		m, l, engine := newFinishedGameLobby(t, repo)
-		logged.Reset()
 
 		done := make(chan struct{})
 		go func() {
@@ -128,14 +123,57 @@ func TestShutdown_MatchEndingDuringDrainIsNotSilentlyDropped(t *testing.T) {
 		<-done
 		require.True(t, drained, "the drain gave up on iteration %d", i)
 
-		// Every iteration either persisted the result or shouted that it could not.
-		require.Eventually(t, func() bool {
-			return recorded.Load() > 0 || logged.contains("finished match dropped")
-		}, 2*time.Second, 5*time.Millisecond,
-			"iteration %d neither persisted the match nor logged the drop", i)
+		require.Equal(t, int32(1), recorded.Load(), "iteration %d drained without the match", i)
 
 		m.RemoveLobby(l.Code())
 	}
+}
+
+// A late session teardown can end a table after the drain has begun - after
+// BeginShutdown, or even after WaitForFinalizers has started waiting. Its watcher was
+// counted when the game started, so the drain waits for it and the match is written,
+// unrated, rather than dropped.
+func TestShutdown_AGameEndingAfterBeginShutdownIsRecorded(t *testing.T) {
+	t.Parallel()
+	for _, endsWhileWaiting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ends_while_waiting=%t", endsWhileWaiting), func(t *testing.T) {
+			t.Parallel()
+			repo := new(MockMatchRepo)
+			repo.On("RecordCasualMatch", mock.Anything, gameRef("MockGame"), mock.Anything).Return(nil).Once()
+			m, l, _ := newFinishedGameLobby(t, repo)
+			guest := l.Snapshot().Guests[0].Player
+			m.BeginShutdown()
+
+			if endsWhileWaiting {
+				assert.False(t, m.WaitForFinalizers(50*time.Millisecond),
+					"the drain gave up on nothing while a game was still in play")
+			}
+			m.LeaveLobby(guest) // the teardown: the leader is left standing
+
+			require.True(t, m.WaitForFinalizers(2*time.Second))
+			repo.AssertExpectations(t)
+			repo.AssertNotCalled(t, "FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
+// No game starts once the drain has begun: it would be cut short by the teardown that
+// follows, and nothing would wait for it. Readying up still works; only the start is
+// refused, and the table is left waiting.
+func TestToggleReady_NoGameStartsWhileTheServerDrains(t *testing.T) {
+	t.Parallel()
+	m, l := newTestLobby(t, 2)
+	leader, guest := l.Snapshot().Leader.Player, mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, m.ToggleReady(leader))
+
+	m.BeginShutdown()
+
+	require.ErrorIs(t, m.ToggleReady(guest), errServerRestarting)
+	assert.True(t, isWaiting(l), "a game started during the drain")
+	assert.Nil(t, l.ActiveGame())
+	require.NoError(t, m.ToggleReady(leader), "an unready is not a start")
+	assert.True(t, m.WaitForFinalizers(time.Second), "the refused start kept its watcher counted")
 }
 
 // syncBuffer is a log sink two goroutines can touch: the finalizer writes to it while
@@ -149,12 +187,6 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) Reset() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buf.Reset()
 }
 
 func (b *syncBuffer) String() string {
@@ -226,23 +258,23 @@ func TestWaitForFinalizers_TimeoutDoesNotLeakItsWaiter(t *testing.T) {
 	t.Parallel()
 
 	m := newTestManager(t, nil)
-	require.True(t, m.registerFinalizer())
+	require.True(t, m.admitGame())
 
-	assert.False(t, m.WaitForFinalizers(10*time.Millisecond), "an in-flight write blocks the drain")
+	assert.False(t, m.WaitForFinalizers(10*time.Millisecond), "a game in play blocks the drain")
 
-	m.finalizerMu.Lock()
+	m.gateMu.Lock()
 	first := m.drained
-	m.finalizerMu.Unlock()
+	m.gateMu.Unlock()
 
 	assert.False(t, m.WaitForFinalizers(10*time.Millisecond))
 
-	m.finalizerMu.Lock()
+	m.gateMu.Lock()
 	second := m.drained
-	m.finalizerMu.Unlock()
+	m.gateMu.Unlock()
 	assert.Equal(t, first, second, "a second attempt started a second waiter")
 
 	// goleak's TestMain is the other half of this: the one waiter has to exit.
-	m.finalizing.Done()
+	m.watchers.Done()
 	assert.True(t, m.WaitForFinalizers(2*time.Second))
 }
 
@@ -686,7 +718,6 @@ func TestFinalize_SilentDropsAreCountedAndLogged(t *testing.T) {
 			engine := game.NewEngine(tt.rules, tt.seats)
 			t.Cleanup(engine.Close)
 
-			require.True(t, m.registerFinalizer())
 			m.finalizeFinishedGame(tt.req, engine, tt.reason)
 
 			assert.True(t, logged.contains(tt.wantLog), "the drop was silent: %s", logged.String())
@@ -710,7 +741,6 @@ func TestFinalize_AbandonedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 	engine := game.NewEngine(&stubRules{}, seats)
 	t.Cleanup(engine.Close)
 
-	require.True(t, m.registerFinalizer())
 	m.finalizeFinishedGame(finalizeRequest{
 		lobbyCode: "EEEEEEEE", game: gameRef("Mock"), isRanked: true, startedAt: time.Now(),
 	}, engine, game.EndReasonAbandoned)
@@ -743,10 +773,10 @@ func TestFinalize_EndReasonMetricLabelsAreStable(t *testing.T) {
 }
 
 // The watcher reopens the table before it persists, and reopening waits on m.mu in
-// releaseHeldSeats. Registering the finalizer only after that left the drain a window
-// to see zero writes in flight and stop accepting them: the match was dropped at
-// shutdown with the process already told it was safe to exit.
-func TestFinalize_RegistersBeforeReopeningTheTable(t *testing.T) {
+// releaseHeldSeats. A drain that begins inside that wait must still wait for the
+// write: it once saw nothing in flight, and the process was told it was safe to exit
+// with a finished match unwritten.
+func TestFinalize_DrainWaitsForAWatcherStillReopeningTheTable(t *testing.T) {
 	t.Parallel()
 
 	repo := new(MockMatchRepo)
@@ -832,7 +862,6 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 			t.Cleanup(engine.Close)
 			engine.WithState(func(state *game.State) { state.LeftPlayers = []*game.Player{leaver} })
 
-			require.True(t, m.registerFinalizer())
 			m.finalizeFinishedGame(finalizeRequest{
 				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
 			}, engine, game.EndReasonInterrupted)

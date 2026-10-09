@@ -74,15 +74,6 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 			},
 		},
 		{
-			name: "dropped by shutdown",
-			setup: func(t *testing.T, games *game.Registry) *Manager {
-				t.Helper()
-				m := newManagerFor(t, new(MockMatchRepo), games)
-				require.True(t, m.WaitForFinalizers(time.Second), "nothing is in flight yet")
-				return m
-			},
-		},
-		{
 			name: "persisted",
 			setup: func(t *testing.T, games *game.Registry) *Manager {
 				t.Helper()

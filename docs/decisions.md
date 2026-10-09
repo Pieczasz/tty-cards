@@ -1033,6 +1033,15 @@ deploy in the wrong second loses it.
 **Decision.** Two bounded drain windows on shutdown (15 s, then another 15 s with
 a warning), not a durable outbox.
 
+*Revised in the 2026-09 review (`lobby` F3, `transport-and-root` F1).* The drain
+used to count finalizes from when a game *ended*: `WaitForFinalizers` closed a
+registry, and a table that a late session teardown ended after that was dropped -
+an ERROR and a `dropped` count on an ordinary deploy. It now counts each game's
+watcher from when the game *starts*: `BeginShutdown` closes a gate on new games
+(`ToggleReady` refuses a start while the server drains), and `WaitForFinalizers`
+waits for every watcher, which reopens the table and runs the finalize on its own
+goroutine. A match that ends anywhere in the drain is written, unrated.
+
 **Consequences.** The rejected alternative - an outbox table written at game end
 and drained on boot - buys nothing here that the grace window does not: the write
 it protects is one short transaction against a database in the same compose
@@ -1040,12 +1049,14 @@ project. What it costs is a schema, a drain path, and a second way for a match t
 be recorded. Two things make the trade honest and both are checked: compose's
 `stop_grace_period` (80 s) must exceed the whole sequential drain (30 s SSH + 5 s
 session teardown + 5 s API + 2×15 s here + 6 s OTel = 76 s), or the runtime SIGKILLs the process
-mid-write; and the give-up is **not silent** - it logs at ERROR and counts
-`MatchFinalize(outcome="dropped")`, which is alertable. The residual risk is
-stated rather than removed: a match that finishes in the last seconds of a deploy,
-whose write then blocks for 30 seconds, is lost from history.
+mid-write; and the give-up is **not silent** - `waitForFinalizers` logs it at
+ERROR. (Before the revision below, a match the closed registry refused also counted
+`MatchFinalize(outcome="dropped")`; that refusal no longer exists, and `dropped` now
+counts only a finished match finalize itself could not write.) The residual risk is
+stated rather than removed: a match whose write blocks for 30 seconds, or whose
+table no teardown ends before the windows run out, is lost from history.
 
-**Where.** `cmd/server/main.go` `waitForFinalizers` and the shutdown timeout constants, whose comment is the record.
+**Where.** `cmd/server/main.go` `waitForFinalizers` and the shutdown timeout constants, whose comment is the record; `internal/lobby/finalize.go` `admitGame`, `BeginShutdown`, `WaitForFinalizers`.
 
 ---
 

@@ -44,8 +44,9 @@ func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
 	}}
 }
 
-// watchGame is the goroutine ToggleReady starts for every game: it counts engine
-// events, and when the game ends it reopens the table and persists the result.
+// watchGame is the goroutine ToggleReady starts, and counts in m.watchers, for every
+// game: it counts engine events, and when the game ends it reopens the table and
+// persists the result.
 //
 // It runs whether or not a match repository is configured: reopening the table and
 // giving up the seats it held for a reconnect are its job too, and
@@ -91,25 +92,16 @@ func (m *Manager) watchGame(l *Lobby, start gameStart) {
 // snapshotted by watchLocked when this game started, so a lobby that has since
 // reopened cannot rewrite what the finished match is recorded as.
 //
-// Register, reopen, persist - in that order. Reopening comes before the write, so a
-// 15s write does not pin InGame while the TUI is already back in the lobby; but it
-// waits on m.mu in releaseHeldSeats, and a shutdown that began inside that wait would
-// have refused the registration and dropped the match.
-//
-// The registration is taken before anything else: every statement between observing
-// the end and that call is a window for shutdown to begin, and a refusal then drops a
-// finished match with nothing left for WaitForFinalizers to wait on.
+// Reopen, then persist: a 15s write must not pin InGame while the TUI is already
+// back in the lobby. Both run on the watcher goroutine, which WaitForFinalizers has
+// counted since the game started, so a drain beginning anywhere in between still
+// waits for the write.
 //
 // The finish is counted here, where every end passes, so games started minus games
 // finished stays true across a drain and on a server with no match repository.
 func (m *Manager) requestFinalize(l *Lobby, engine *game.Engine, reason game.EndReason, req finalizeRequest) {
-	registered := m.registerFinalizer()
 	observability.GameFinished(m.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
 	m.releaseFinishedGame(l)
-	if !registered {
-		m.dropFinishedMatch(req)
-		return
-	}
 	m.finalizeFinishedGame(req, engine, reason)
 }

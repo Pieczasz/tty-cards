@@ -296,8 +296,9 @@ func (l *Lobby) unsubscribePlayerLocked(playerID string) {
 
 // toggleReady flips p's ready flag, and starts the game once every seat is ready.
 // The started game is returned for the manager to watch; its zero value means there
-// is nothing to watch. opts are the manager's, for the engine a start builds.
-func (l *Lobby) toggleReady(p *game.Player, opts ...game.EngineOption) (gameStart, error) {
+// is nothing to watch. canStart is false while the server drains; opts are the
+// manager's, for the engine a start builds.
+func (l *Lobby) toggleReady(p *game.Player, canStart bool, opts ...game.EngineOption) (gameStart, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.state == inGame {
@@ -314,6 +315,10 @@ func (l *Lobby) toggleReady(p *game.Player, opts ...game.EngineOption) (gameStar
 		return gameStart{}, nil
 	}
 
+	if !canStart {
+		l.broadcastLocked(Event{Type: EventPlayersUpdated})
+		return gameStart{}, errServerRestarting
+	}
 	start, err := l.startGameLocked(opts)
 	if err != nil {
 		// The ready flip is already committed, so the other clients have to see it even

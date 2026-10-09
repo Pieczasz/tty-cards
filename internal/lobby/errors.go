@@ -25,4 +25,6 @@ var (
 	errHostNotInLobby = errors.New("host is not in a lobby")
 	errKickSelf       = errors.New("cannot kick yourself")
 	errKickInGame     = errors.New("cannot kick during a game")
+	// errServerRestarting refuses a game that would start while the server drains.
+	errServerRestarting = errors.New("the server is restarting; no new games can start")
 )

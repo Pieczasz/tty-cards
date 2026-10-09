@@ -133,9 +133,9 @@ tty-cards/
 │   │   ├── manager.go          lobby registry, CreateLobby, codes, join limiter, leave, kick
 │   │   ├── errors.go           the sentinels (ErrLobbyFull, ErrNotLeader, …)
 │   │   ├── lobby.go            one table: roster, settings, ready, start
-│   │   ├── watch.go            the engine watcher: register, reopen, persist
+│   │   ├── watch.go            the engine watcher: reopen, persist
 │   │   ├── finalize.go         persist a finished match; the rating gate; the
-│   │   │                       finalizer registry, BeginShutdown, WaitForFinalizers
+│   │   │                       game gate, BeginShutdown, WaitForFinalizers
 │   │   ├── disconnect.go       the 90s mid-game grace state machine, ResumePlayer
 │   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies + the cache
 │   │   └── player.go           db.User -> game.Player, the only such place

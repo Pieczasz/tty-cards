@@ -21,22 +21,9 @@ type finalizeRequest struct {
 	startedAt time.Time
 }
 
-// dropFinishedMatch is the finalize for a match shutdown refused to register: nothing
-// is written, so it has to be said.
-func (m *Manager) dropFinishedMatch(req finalizeRequest) {
-	if m.matchRepo == nil {
-		return
-	}
-	ctx := m.appCtx
-	slog.ErrorContext(ctx, "finished match dropped; shutdown stopped new finalizers",
-		"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked)
-	observability.MatchFinalize(ctx, "dropped", req.isRanked)
-}
-
-// finalizeFinishedGame persists the result of a game that just ended. The caller has
-// already registered it with registerFinalizer, which this releases.
+// finalizeFinishedGame persists the result of a game that just ended. It runs on the
+// game's watcher, which WaitForFinalizers waits for.
 func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason) {
-	defer m.finalizing.Done()
 	if m.matchRepo == nil {
 		return
 	}
@@ -167,20 +154,21 @@ func leaverIDs(standings []game.Standing) []uuid.UUID {
 	return ids
 }
 
-// registerFinalizer accepts a finished-match write unless shutdown has started.
-func (m *Manager) registerFinalizer() bool {
-	m.finalizerMu.Lock()
-	defer m.finalizerMu.Unlock()
-	if m.finalizersStopped {
+// admitGame counts the watcher of a game ToggleReady may be about to start, unless
+// shutdown has closed the gate. A caller that starts no game gives the count back.
+func (m *Manager) admitGame() bool {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	if m.gateClosed {
 		return false
 	}
-	m.finalizing.Add(1)
+	m.watchers.Add(1)
 	return true
 }
 
-// BeginShutdown marks the process as going away without stopping finished-match
-// writes: a hand that ends while sessions are torn down still belongs in the
-// players' history, it just must not move anyone's rating.
+// BeginShutdown marks the process as going away and stops new games, without
+// stopping the ones in play: a hand that ends while sessions are torn down still
+// belongs in the players' history, it just must not move anyone's rating.
 //
 // Seats still held for a reconnect are given up here. Their timers would fire long
 // after the drain, so the lobby would never be removed and its engine never closed -
@@ -190,6 +178,9 @@ func (m *Manager) BeginShutdown() {
 		return
 	}
 	m.shuttingDown.Store(true)
+	m.gateMu.Lock()
+	m.gateClosed = true
+	m.gateMu.Unlock()
 	m.mu.Lock()
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
@@ -199,31 +190,35 @@ func (m *Manager) BeginShutdown() {
 	}
 }
 
-// WaitForFinalizers stops accepting finished-match writes, then blocks until all
-// previously registered writes finish or timeout elapses. A non-positive timeout
-// waits indefinitely.
+// WaitForFinalizers stops new games (BeginShutdown normally has already), then blocks
+// until every game's watcher - and the finalize it runs when its game ends - has
+// finished, or timeout elapses. A non-positive timeout waits indefinitely.
+//
+// Watchers are counted from game start, not from game end, so a table that a late
+// session teardown ends while this waits is still written rather than refused.
 //
 // The waiter goroutine is started once and reused, so a caller that times out and
-// calls again does not strand one waiter per attempt. Because finalizersStopped is
-// already set, the group only ever counts down, so that goroutine always exits.
+// calls again does not strand one waiter per attempt. Because the gate is already
+// closed, the group only ever counts down, so that goroutine exits once the last
+// game does.
 func (m *Manager) WaitForFinalizers(timeout time.Duration) bool {
 	if m == nil {
 		return true
 	}
 	m.shuttingDown.Store(true)
 
-	m.finalizerMu.Lock()
-	m.finalizersStopped = true
+	m.gateMu.Lock()
+	m.gateClosed = true
 	if m.drained == nil {
 		ch := make(chan struct{})
 		m.drained = ch
 		go func() {
-			m.finalizing.Wait()
+			m.watchers.Wait()
 			close(ch)
 		}()
 	}
 	drained := m.drained
-	m.finalizerMu.Unlock()
+	m.gateMu.Unlock()
 
 	if timeout <= 0 {
 		<-drained
