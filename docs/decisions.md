@@ -234,10 +234,12 @@ the façade buys is that the *default* path is the safe one, and the redaction i
 named, testable function. Since 2026-10-09 poker's lives in the rules, not the view:
 which hole cards a seat may see is a rule of poker (it changes with muck-on-loss or
 show-one), so `poker.SeatsFor(state, viewer)` decides it beside `RaiseBounds`, and a
-second front end would reuse it.
+second front end would reuse it. The catalog-wide check that no view prints another
+seat's cards (`TestGameViews_NeverShowAnotherSeatsCards`) no longer skips poker.
 
 **Where.** `internal/game/bound.go` (the comment on `Frame`),
-`internal/game/poker/seats.go` `SeatsFor`, `internal/game/poker/seats_test.go`.
+`internal/game/poker/seats.go` `SeatsFor`, `internal/game/poker/seats_test.go`,
+`internal/catalog/render_test.go`.
 
 **2026-09-30: the "any seat" half is closed.** The façade used to be advisory: the
 lobby's `EventGameStarted` carried the `*game.Engine`, `Lobby.ActiveGame()` returned
