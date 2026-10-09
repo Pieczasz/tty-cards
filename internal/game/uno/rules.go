@@ -31,9 +31,6 @@ var (
 	_ game.StandingScorer     = (*Rules)(nil)
 )
 
-func (r *Rules) InitialDeck() []deck.Card { return initialDeck() }
-func (r *Rules) InitialDealCount() int    { return 0 }
-
 // TimeoutAction draws: ValidateAction always accepts a draw, so it cannot be refused.
 func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 	return ActionDrawCard{}

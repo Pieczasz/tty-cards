@@ -599,7 +599,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
+	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}})
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -661,10 +661,8 @@ func TestRules_Knock_DefenderMeldsForTheBestLayoff(t *testing.T) {
 
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 	assert.Equal(t, 2, MinPlayers, "gin rummy is strictly heads-up")
 	assert.Equal(t, 2, MaxPlayers)
-	assert.Len(t, rules.InitialDeck(), 52)
 	assert.Equal(t, "ginrummy.DrawStock", ActionDrawStock{}.Name())
 	assert.Equal(t, "ginrummy.DrawDiscard", ActionDrawDiscard{}.Name())
 	assert.Equal(t, "ginrummy.Discard", ActionDiscard{}.Name())
@@ -781,7 +779,7 @@ func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}}
-		engine := game.NewEngine(rules, players, deck.Standard())
+		engine := game.NewEngine(rules, players)
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 
@@ -812,7 +810,7 @@ func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
 	rules := &Rules{}
 
 	rapid.Check(t, func(rt *rapid.T) {
-		engine := game.NewEngine(rules, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.Standard())
+		engine := game.NewEngine(rules, []*game.Player{{ID: "p1"}, {ID: "p2"}})
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

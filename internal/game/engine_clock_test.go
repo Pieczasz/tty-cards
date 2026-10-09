@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -140,13 +138,13 @@ func TestNewEngine_EnginesNeverShareSeats(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "a"}, {ID: "b"}}
 
-	finished := NewEngine(bindRules{}, players, deck.Standard())
+	finished := NewEngine(bindRules{}, players)
 	t.Cleanup(finished.Close)
 	require.NoError(t, finished.Start())
 	finished.RemovePlayer("b")
 	require.True(t, finished.IsFinished())
 
-	next := NewEngine(bindRules{}, players, deck.Standard())
+	next := NewEngine(bindRules{}, players)
 	t.Cleanup(next.Close)
 
 	var wg sync.WaitGroup

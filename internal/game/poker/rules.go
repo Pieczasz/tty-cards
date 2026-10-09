@@ -88,15 +88,6 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	return dealTurnDuration
 }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
-
-// InitialDealCount is zero because a match deals a fresh hand every round, not
-// once at the start: beginHand owns the deal so there is a single code path for
-// it, hand one included.
-func (r *Rules) InitialDealCount() int {
-	return 0
-}
-
 func (r *Rules) OnGameStart(state *game.State) error {
 	nPlayers := len(state.Players)
 	if nPlayers == 0 {

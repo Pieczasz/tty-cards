@@ -409,7 +409,7 @@ func TestRules_DrawCard_SuccessfulDrawClearsThePassCount(t *testing.T) {
 func TestRules_Init(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	assert.Len(t, rules.InitialDeck(), 108)
+	assert.Len(t, initialDeck(), 108)
 
 	t.Run("seven each from a full deck", func(t *testing.T) {
 		t.Parallel()
@@ -447,7 +447,7 @@ func TestSmoke_FullHandConservesTheDeck(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	players := []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	engine := game.NewEngine(rules, players, initialDeck())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -516,7 +516,7 @@ func TestRules_AfterPlayerRemoved_HonorsDirection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-			engine := game.NewEngine(&Rules{}, players, initialDeck())
+			engine := game.NewEngine(&Rules{}, players)
 			require.NoError(t, engine.Start())
 			t.Cleanup(engine.Close)
 
@@ -542,7 +542,7 @@ func TestRules_CardConservation(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
-		engine := game.NewEngine(rules, players, initialDeck())
+		engine := game.NewEngine(rules, players)
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 

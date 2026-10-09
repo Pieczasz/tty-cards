@@ -348,8 +348,6 @@ classDiagram
     direction LR
     class Rules {
         <<interface>>
-        InitialDeck() []Card
-        InitialDealCount() int
         OnGameStart(*State) error
         ValidateAction(*State, Action) error
         ApplyAction(*State, Action) error

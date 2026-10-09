@@ -197,7 +197,7 @@ func startedSession(t *testing.T) (*game.Engine, Session) {
 		{ID: testutil.SeatID(1), UserID: testutil.UID(1), Name: "alice"},
 		{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"},
 	}
-	engine := game.NewEngine(&crazyeight.Rules{}, players, deck.Standard())
+	engine := game.NewEngine(&crazyeight.Rules{}, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -489,7 +489,7 @@ func TestSyncBaseState_OpponentsExcludeTheHero(t *testing.T) {
 func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 	t.Parallel()
 
-	engine := game.NewEngine(&crazyeight.Rules{}, testutil.Players(4), deck.Standard())
+	engine := game.NewEngine(&crazyeight.Rules{}, testutil.Players(4))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

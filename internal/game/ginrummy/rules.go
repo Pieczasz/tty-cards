@@ -60,11 +60,6 @@ type ActionNextHand struct{}
 
 func (a ActionNextHand) Name() string { return "ginrummy.NextHand" }
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
-
-// InitialDealCount is zero: beginHand owns the deal for every hand of the match.
-func (r *Rules) InitialDealCount() int { return 0 }
-
 func (r *Rules) OnGameStart(state *game.State) error {
 	if len(state.Players) != 2 {
 		return fmt.Errorf("gin rummy requires exactly 2 players, got %d", len(state.Players))

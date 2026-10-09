@@ -126,7 +126,7 @@ func TestStandings_LeavingForfeitsScoresStay(t *testing.T) {
 		{ID: "p1"},
 		{ID: "p2"},
 	}
-	engine := game.NewEngine(rules, players, deck.Standard())
+	engine := game.NewEngine(rules, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -174,7 +174,7 @@ func TestHandResult_LogsOnceAHandThroughTheTableLogger(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	sink := &gametest.LogSink{}
-	engine := game.NewEngine(rules, twoPlayers(), deck.Standard(), game.WithLogger(sink.Logger()))
+	engine := game.NewEngine(rules, twoPlayers(), game.WithLogger(sink.Logger()))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

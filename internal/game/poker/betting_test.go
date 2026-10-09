@@ -777,7 +777,8 @@ func TestAfterPlayerRemoved_LeavesTheCursorOnARealSeat(t *testing.T) {
 		t.Run("removing "+victim, func(t *testing.T) {
 			t.Parallel()
 			engine := game.NewEngine(&Rules{},
-				[]*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}, deck.Standard())
+				[]*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}})
+
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.Start())
 

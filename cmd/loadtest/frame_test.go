@@ -95,10 +95,10 @@ func TestClassify_RealScreens(t *testing.T) {
 	l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("Crazy Eights"))
 	require.NoError(t, err)
 
-	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("a", "b"), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("a", "b"))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
-	over := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("a", "b"), deck.Standard())
+	over := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("a", "b"))
 	require.NoError(t, over.Start())
 	t.Cleanup(over.Close)
 	over.RemovePlayer(testutil.SeatID(2))
@@ -173,7 +173,7 @@ func sortedCards(cs []card) []card {
 // onto a second row, the discard's rank and the suit in play.
 func TestParseCrazy_ReadsWhatTheEngineHolds(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob"))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -218,7 +218,7 @@ func playable(engine *game.Engine, seat string) bool {
 func TestChoose_EveryMoveIsLegalAndPlaysWhenItCan(t *testing.T) {
 	t.Parallel()
 	for g := range 10 {
-		engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob", "carol"), deck.Standard())
+		engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob", "carol"))
 		require.NoError(t, engine.Start())
 		t.Cleanup(engine.Close)
 

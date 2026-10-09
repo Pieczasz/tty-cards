@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
@@ -123,7 +122,7 @@ func TestFeedEnd_UnobservedEndIsFinalizedWithTheEnginesReason(t *testing.T) {
 	l, err := m.CreateLobby(seats[0], WithCardGame("Mock"), WithRanked(true))
 	require.NoError(t, err)
 
-	engine := game.NewEngine(stubRules{}, seats, deck.Standard())
+	engine := game.NewEngine(stubRules{}, seats)
 	require.NoError(t, engine.Start())
 	engine.Close()
 	engine.RemovePlayer("a")
@@ -170,12 +169,6 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 	assert.Equal(t, "mock", rec["game"], "the slug, as every game metric labels it")
 }
 
-// bigDealRules deals more cards than a deck holds, so the engine refuses to start: a
-// defect in the rules, not something the players did.
-type bigDealRules struct{ stubRules }
-
-func (bigDealRules) InitialDealCount() int { return 60 }
-
 // The lobby view logs what ToggleReady returns at Debug, because a refusal (too few
 // players, game in progress) and a real failure look alike from there. Only the start
 // itself knows a broken registry or a rules set that cannot deal is not a refusal, so
@@ -195,7 +188,7 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			wantLog: true, gameKey: "game_name", wantGame: "Mock",
 		},
 		{
-			name: "engine cannot deal", registry: gameRegistry("Mock", bigDealRules{}),
+			name: "engine cannot deal", registry: gameRegistry("Mock", refusedStartRules{}),
 			wantLog: true, gameKey: "game", wantGame: "mock",
 		},
 		{name: "too few players is a refusal", registry: boundedRegistry("Mock", stubRules{}, 3, 9)},

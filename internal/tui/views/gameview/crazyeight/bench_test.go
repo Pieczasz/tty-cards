@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/crazyeight"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
@@ -20,7 +19,7 @@ import (
 // per-frame cost every client pays, so it is the number that decides table capacity.
 func benchTable(b *testing.B, n int) *model {
 	b.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.Players(n))
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 

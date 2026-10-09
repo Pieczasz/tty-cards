@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/crazyeight"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
@@ -186,7 +185,7 @@ func TestScreen_ReplaysTheRealRenderer(t *testing.T) {
 // apart.
 func gameFrames(t *testing.T, n int) []string {
 	t.Helper()
-	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob", "carol", "dave"), deck.Standard())
+	engine := game.NewEngine(&logic.Rules{}, testutil.NamedPlayers("alice", "bob", "carol", "dave"))
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 

@@ -64,7 +64,7 @@ func lobbyView(l *Lobby, ev Event, id string) {
 	// ruleid: tui-uses-server-engine-api
 	_ = game.Bind(l.engine, id)
 	// ruleid: tui-uses-server-engine-api
-	_ = game.NewEngine(nil, nil, nil)
+	_ = game.NewEngine(nil, nil)
 	// ruleid: tui-uses-server-engine-api
 	_ = l.ActiveGame()
 	// ok: tui-uses-server-engine-api

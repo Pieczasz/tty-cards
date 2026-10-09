@@ -38,10 +38,8 @@ func createTestState() *game.State {
 
 func TestRules_Metadata(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 	assert.Equal(t, 2, MinPlayers)
 	assert.Equal(t, 9, MaxPlayers)
-	assert.Equal(t, 0, rules.InitialDealCount(), "poker deals its own hole cards, once per hand")
 }
 
 func TestRules_ValidateAction(t *testing.T) {
@@ -292,7 +290,7 @@ func BenchmarkPlayFullMatch(b *testing.B) {
 
 			b.ReportAllocs()
 			for b.Loop() {
-				engine := game.NewEngine(&Rules{}, players, deck.Standard())
+				engine := game.NewEngine(&Rules{}, players)
 				if err := engine.Start(); err != nil {
 					b.Fatal(err)
 				}
@@ -409,7 +407,7 @@ func TestRules_TimeoutAction(t *testing.T) {
 func TestRules_TimeoutAction_IsAcceptedByValidateAction(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	engine := game.NewEngine(rules, []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}}, rules.InitialDeck())
+	engine := game.NewEngine(rules, []*game.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 

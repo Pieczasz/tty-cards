@@ -84,7 +84,7 @@ func TestEventType_String(t *testing.T) {
 
 func TestEngine_SubscribeKeepsTheSentinel(t *testing.T) {
 	t.Parallel()
-	e := NewEngine(bindRules{}, []*Player{{ID: "p1"}}, nil)
+	e := NewEngine(bindRules{}, []*Player{{ID: "p1"}})
 	e.Close()
 	_, err := e.Subscribe()
 	require.ErrorIs(t, err, broadcaster.ErrClosed)

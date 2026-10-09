@@ -29,9 +29,6 @@ var (
 	_ game.StandingScorer      = (*Rules)(nil)
 )
 
-func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
-func (r *Rules) InitialDealCount() int    { return 0 }
-
 // ActionPassCards hands exactly three cards to the seat PassDirection names.
 type ActionPassCards struct {
 	Cards []deck.Card

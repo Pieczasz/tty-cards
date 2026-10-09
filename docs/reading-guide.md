@@ -174,8 +174,9 @@ view can publish on a table's feed or close it
 ([`decisions.md` #51](decisions.md#51-the-engine-hands-out-subscriptions-not-its-broadcaster)).
 
 *Seats are copies.* `NewEngine` copies each `*Player` with `Cards` cleared, so two
-engines never share a seat, and `Start` has no rollback: the lobby builds a new
-engine per attempt.
+engines never share a seat. `Start` deals nothing - `OnGameStart` owns the deal -
+and moves to `Playing` only once it succeeded; past that it has no rollback, so the
+lobby builds a new engine per attempt.
 
 *The registry is fixed at construction.* `game.NewRegistry(mods...)` panics on a
 half-declared module, impossible seat bounds, or a display name or slug declared twice, so a wiring bug fails the

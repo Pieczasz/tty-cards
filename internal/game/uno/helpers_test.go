@@ -14,6 +14,7 @@ var suite = gametest.Shed{
 	Rules:      &Rules{},
 	MinPlayers: MinPlayers,
 	MaxPlayers: MaxPlayers,
+	Deck:       initialDeck,
 	NewExtra:   func(top deck.Card) any { return &State{CurrentColor: top.Suit, Direction: 1} },
 	ShedState:  func(e any) *shed.State { return &e.(*State).State },
 	Opens:      func(c deck.Card) bool { return !IsWild(c) },

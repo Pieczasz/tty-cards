@@ -5,8 +5,6 @@ import (
 	"errors"
 	"slices"
 	"time"
-
-	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 var (
@@ -27,10 +25,10 @@ type Action interface {
 // Rules is one card game, driven by the Engine. Every method runs with the engine lock
 // held and receives only *State, so it may mutate the state freely and can never call
 // back into the Engine.
+//
+// OnGameStart sets a table up, the deal included: the engine hands it the seats and
+// the first seat on turn, and nothing else.
 type Rules interface {
-	InitialDeck() []deck.Card
-	InitialDealCount() int
-
 	OnGameStart(state *State) error
 
 	ValidateAction(state *State, action Action) error

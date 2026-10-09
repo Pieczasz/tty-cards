@@ -32,6 +32,8 @@ type Shed struct {
 	// MinPlayers and MaxPlayers are the game's seat range, as its catalog Module
 	// declares it.
 	MinPlayers, MaxPlayers int
+	// Deck is the game's full deck, which Table deals from.
+	Deck func() []deck.Card
 	// NewExtra is the rules' Extra for a table whose card in play is top.
 	NewExtra func(top deck.Card) any
 	// ShedState reaches the deadlock counter inside an Extra NewExtra built.
@@ -50,7 +52,7 @@ type Shed struct {
 // a table whose hand sizes it chose.
 func (s Shed) Table(t testing.TB, hands ...int) *game.State {
 	t.Helper()
-	stock := deck.New(s.Rules.InitialDeck())
+	stock := deck.New(s.Deck())
 	stock.Shuffle()
 
 	players := make([]*game.Player, 0, len(hands))
@@ -150,7 +152,7 @@ func standingsTiesAreStable(t *testing.T, s Shed) {
 // slice position and the seat that sorted first takes rating off the seat that did not.
 func tiedSeatsShareAPlace(t *testing.T, s Shed) {
 	players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}
-	engine := game.NewEngine(s.Rules, players, s.Rules.InitialDeck())
+	engine := game.NewEngine(s.Rules, players)
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -292,7 +294,7 @@ func SoakTimeoutIsAlwaysLegal(t *testing.T, s Shed) {
 		for i := range players {
 			players[i] = &game.Player{ID: fmt.Sprintf("p%d", i+1)}
 		}
-		engine := game.NewEngine(s.Rules, players, s.Rules.InitialDeck())
+		engine := game.NewEngine(s.Rules, players)
 		require.NoError(rt, engine.Start())
 		defer engine.Close()
 
