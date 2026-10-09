@@ -25,8 +25,8 @@ import (
 func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
 	ch, err := engine.Subscribe()
 	if err != nil {
-		observability.SubscribeFailure(l.manager.shutdownCtx(), "game")
-		slog.ErrorContext(l.manager.shutdownCtx(),
+		observability.SubscribeFailure(l.manager.appCtx, "game")
+		slog.ErrorContext(l.manager.appCtx,
 			"cannot watch game for completion; result will not be persisted",
 			"error", err, "lobby", l.code, "game", ref.Slug)
 		return
@@ -44,7 +44,7 @@ func (l *Lobby) watchGameLocked(engine *game.Engine, ref db.GameRef) {
 }
 
 func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req finalizeRequest) {
-	ctx := l.manager.shutdownCtx()
+	ctx := l.manager.appCtx
 	slug := req.game.Slug
 	defer func() {
 		if n := engine.Dropped(); n > 0 {
@@ -97,7 +97,7 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 // finished stays true across a drain and on a server with no match repository.
 func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req finalizeRequest) {
 	registered := l.manager.registerFinalizer()
-	observability.GameFinished(l.manager.shutdownCtx(), req.game.Slug, req.isRanked, reason.String(),
+	observability.GameFinished(l.manager.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
 	l.releaseFinishedGame()
 	if !registered {

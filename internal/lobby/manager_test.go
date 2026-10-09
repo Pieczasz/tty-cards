@@ -10,6 +10,9 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"github.com/Pieczasz/tty-cards/internal/testutil"
+
+	"uuid"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -345,33 +348,38 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 	})
 }
 
-// The manager holds the app context so a finalizing write can be cut short at shutdown.
-func TestManager_ShutdownCtx(t *testing.T) {
+func TestManager_NilContextStillYieldsAUsableOne(t *testing.T) {
 	t.Parallel()
+	var missing context.Context
+	m := NewManager(missing, nil)
 
-	t.Run("carries the context it was built with", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithCancel(t.Context())
-		m := NewManager(ctx, nil)
+	require.NotNil(t, m.appCtx)
+	assert.NoError(t, m.appCtx.Err(), "and it must not arrive already cancelled")
+}
 
-		cancel()
+// A finished-match write must outlive the app context: the drain exists to let it
+// land, so a context cancelled at shutdown must not reach the repository.
+func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
+	t.Parallel()
+	seats := []*game.Player{mockPlayer("a", testutil.UID(1)), mockPlayer("b", testutil.UID(2))}
+	repo := new(MockMatchRepo)
+	repo.On("RecordCasualMatch", mock.MatchedBy(func(ctx context.Context) bool {
+		_, hasDeadline := ctx.Deadline()
+		return ctx.Err() == nil && hasDeadline
+	}), gameRef("Mock"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).Return(nil).Once()
 
-		select {
-		case <-m.shutdownCtx().Done():
-		case <-time.After(time.Second):
-			t.Fatal("cancelling the app context must reach the manager")
-		}
-	})
+	ctx, cancel := context.WithCancel(t.Context())
+	m := NewManager(ctx, repo)
+	cancel()
+	engine := game.NewEngine(&stubRules{}, seats, deck.Standard())
+	t.Cleanup(engine.Close)
 
-	t.Run("a nil context still yields a usable one", func(t *testing.T) {
-		t.Parallel()
-		var missing context.Context
-		m := NewManager(missing, nil)
+	require.True(t, m.registerFinalizer())
+	m.finalizeFinishedGame(finalizeRequest{
+		lobbyCode: "FFFFFFFF", game: gameRef("Mock"), startedAt: time.Now(),
+	}, engine, game.EndReasonWin)
 
-		ctx := m.shutdownCtx()
-		require.NotNil(t, ctx)
-		assert.NoError(t, ctx.Err(), "and it must not arrive already cancelled")
-	})
+	repo.AssertExpectations(t)
 }
 
 // A non-positive timeout means "wait as long as it takes", so the only thing worth

@@ -499,7 +499,7 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 
 	// The two failures logged here are defects, not refusals: the lobby view logs what
 	// ToggleReady returns at Debug, since from there "too few players" looks the same.
-	ctx := l.manager.shutdownCtx()
+	ctx := l.manager.appCtx
 	rules, err := registry.Create(l.options.cardGame)
 	if err != nil {
 		err = fmt.Errorf("create game rules: %w", err)
