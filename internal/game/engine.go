@@ -345,11 +345,8 @@ func (e *Engine) applyActionLocked(current *Player, action Action) error {
 		return fmt.Errorf("after action: %w", err)
 	}
 
-	e.broadcaster.Broadcast(Event{
-		Type:     EventActionApplied,
-		PlayerID: current.ID,
-	})
-
+	// One cue per settled move - EventTurnAdvanced, or EventGameEnded on a win: every
+	// view re-reads its whole frame on any event, so a second one only doubles that.
 	if e.state.Rules.CheckWinCondition(e.state) {
 		e.finishGameLocked(current, EndReasonWin)
 		return nil

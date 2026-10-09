@@ -1,7 +1,7 @@
 package game
 
 // Event is one message on a table's feed. PlayerID names the seat it is about, when
-// there is one: the actor, the winner, or the seat that timed out, idled or left.
+// there is one: the winner, or the seat that timed out, idled or left.
 type Event struct {
 	Type     EventType
 	PlayerID string
@@ -15,7 +15,6 @@ type EventType uint8
 const (
 	EventUnknown EventType = iota
 	EventTurnAdvanced
-	EventActionApplied
 	EventGameEnded
 	EventGameStarted
 	EventTurnTimedOut
@@ -59,8 +58,6 @@ func (t EventType) String() string {
 	switch t {
 	case EventTurnAdvanced:
 		return "turn_advanced"
-	case EventActionApplied:
-		return "action_applied"
 	case EventGameEnded:
 		return "game_ended"
 	case EventGameStarted:
