@@ -66,12 +66,21 @@ func (e *Engine) stopTurnTimerLocked() {
 	e.clock.deadline = time.Time{}
 }
 
-// onTurnTimeout settles an expired turn in one lock hold: it charges the miss, then
+// onTurnTimeout is the timer's callback. A seat taken for idling is reported to
+// WithOnIdleRemoved only here, once the engine lock is released.
+func (e *Engine) onTurnTimeout(seq uint64) {
+	if idle := e.expireTurn(seq); idle != "" && e.onIdleRemoved != nil {
+		e.onIdleRemoved(idle)
+	}
+}
+
+// expireTurn settles an expired turn in one lock hold: it charges the miss, then
 // plays the rules' safe move for the seat or, once the seat has missed MaxMissedTurns
 // in a row, takes it. Nothing is decided under one hold and acted on under another,
 // so a player's own move either lands before this takes the lock - and moved the
-// generation on - or after it has settled the turn.
-func (e *Engine) onTurnTimeout(seq uint64) {
+// generation on - or after it has settled the turn. It returns the seat it took for
+// idling, or "".
+func (e *Engine) expireTurn(seq uint64) (idle string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
@@ -86,11 +95,11 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 	// A fired AfterFunc cannot be stopped: one that waited on the lock while the turn
 	// moved on, the table ended or the engine closed finds a newer generation.
 	if seq != e.clock.seq || e.state.Phase != Playing {
-		return
+		return ""
 	}
 	current := e.currentPlayerLocked()
 	if current == nil {
-		return
+		return ""
 	}
 
 	// One miss per seat-turn, not per expiry: a turn that carries on after an
@@ -100,15 +109,14 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 		e.clock.missCharged = true
 	}
 	if e.clock.missed[current.ID] >= MaxMissedTurns {
-		e.takeIdleSeatLocked(current.ID)
-		return
+		return e.takeIdleSeatLocked(current.ID)
 	}
-	e.autoPlayLocked(current)
+	return e.autoPlayLocked(current)
 }
 
-// autoPlayLocked plays the rules' safe move for current, whose turn just expired.
-// Caller holds e.mu.
-func (e *Engine) autoPlayLocked(current *Player) {
+// autoPlayLocked plays the rules' safe move for current, whose turn just expired, and
+// returns current's ID if it took the seat instead. Caller holds e.mu.
+func (e *Engine) autoPlayLocked(current *Player) (idle string) {
 	// armTurnTimerLocked never arms without a TurnTimeoutHandler and Rules is set once
 	// at construction, so a missing handler here is a wiring bug. It falls into the
 	// "no safe move" path below - the seat goes, the table does not panic.
@@ -122,8 +130,7 @@ func (e *Engine) autoPlayLocked(current *Player) {
 		e.state.Logger().Warn("rules returned no safe timeout move; taking the seat",
 			"player_id", current.ID, "phase", e.state.Phase)
 		e.clock.missed[current.ID] = MaxMissedTurns
-		e.takeIdleSeatLocked(current.ID)
-		return
+		return e.takeIdleSeatLocked(current.ID)
 	}
 	e.broadcaster.Broadcast(Event{Type: EventTurnTimedOut, PlayerID: current.ID})
 
@@ -138,22 +145,25 @@ func (e *Engine) autoPlayLocked(current *Player) {
 			"error", err, "player_id", current.ID, "action", safe.Name())
 		e.clock.missCharged = false
 		e.armTurnTimerLocked()
-		return
+		return ""
 	}
 	if err := e.applyActionLocked(current, safe); err != nil {
 		e.state.Logger().Error("auto-play ended the table on a rules error",
 			"error", err, "player_id", current.ID, "action", safe.Name())
 	}
+	return ""
 }
 
-// takeIdleSeatLocked removes a seat that stopped playing. Caller holds e.mu.
-func (e *Engine) takeIdleSeatLocked(playerID string) {
+// takeIdleSeatLocked removes a seat that stopped playing and returns its ID. Caller
+// holds e.mu.
+func (e *Engine) takeIdleSeatLocked(playerID string) string {
 	// EventPlayerIdle ends the player's ssh session through the view, so this is the
 	// only server-side record that a seat was taken for idling.
 	e.state.Logger().Info("removing idle player",
 		"player_id", playerID, "missed_turns", e.clock.missed[playerID])
 	e.broadcaster.Broadcast(Event{Type: EventPlayerIdle, PlayerID: playerID})
 	e.removePlayerLocked(playerID)
+	return playerID
 }
 
 // endOnRulesPanicLocked is the shared body of every recover. It ends the table without

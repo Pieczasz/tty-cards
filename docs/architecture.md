@@ -734,7 +734,10 @@ table ended, the engine closed) means a fired timer that waited on the lock does
 nothing; otherwise it charges the miss, then either broadcasts `EventTurnTimedOut`
 and auto-plays (`autoPlayLocked`) or takes the seat (`takeIdleSeatLocked`). Nothing
 is decided under one hold and acted on under another, so there is no gap for a
-player's move to land in. Only **accepted** actions clear a player's miss count
+player's move to land in. A taken seat is also handed to the
+`WithOnIdleRemoved` callback, once the lock is released: unlike `EventPlayerIdle`
+on the latest-wins feed it cannot be dropped, and outside the lock it may take the
+lobby's locks, which order before `Engine.mu`. `RemovePlayer` never calls it. Only **accepted** actions clear a player's miss count
 (`clock.missed`) - a move the rules reject
 does not, or spamming garbage would dodge removal forever.
 
