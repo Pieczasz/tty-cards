@@ -9,8 +9,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
-	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,42 +70,6 @@ func TestGlobalContext_RequestContext(t *testing.T) {
 	ctx := t.Context()
 	assert.Equal(t, ctx, GlobalContext{SessionCtx: ctx}.RequestContext(),
 		"the session context is what carries the disconnect")
-}
-
-// A reconnecting player is routed straight back into their lobby instead of home, and
-// the view still has to be built exactly once - twice is two listener goroutines
-// racing for one subscription channel.
-func TestRouter_SetInitialRouteIsWhatInitBuilds(t *testing.T) {
-	t.Parallel()
-
-	var home, lobby int
-	table := &internallobby.Lobby{}
-	r := New(GlobalContext{})
-	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return countingModel{inits: &home} })
-	r.Register(RouteLobby, func(_ GlobalContext, p Payload) tea.Model {
-		assert.Same(t, table, p.Lobby, "the payload handed to SetInitialRoute reaches the factory")
-		return countingModel{inits: &lobby}
-	})
-
-	r.SetInitialRoute(RouteLobby, Payload{Lobby: table})
-	r.Init()
-
-	assert.Equal(t, RouteLobby, r.activeKey, "the session opens where it was told to")
-	assert.Equal(t, 1, lobby, "the first view is armed exactly once")
-	assert.Zero(t, home, "the default route is not built on the way past")
-}
-
-// An initial route nobody registered must not leave the session on a blank screen
-// silently - it leaves no active view, which View reports.
-func TestRouter_InitWithAnUnknownInitialRoute(t *testing.T) {
-	t.Parallel()
-
-	r := New(GlobalContext{Width: 100, Height: 40})
-	r.SetInitialRoute("nowhere", Payload{})
-
-	assert.NotNil(t, r.Init(), "the tick and the background query are armed regardless")
-	assert.Nil(t, r.active)
-	assert.Contains(t, r.View().Content, "No active view")
 }
 
 // A session idling at a menu is a parked SSH connection and a subscriber slot, so it

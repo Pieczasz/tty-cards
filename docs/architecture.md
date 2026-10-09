@@ -355,10 +355,11 @@ closing the outgoing view if it implements `router.Closer`. Routes are a typed
 otherwise), so a wrong payload is a compile error rather than a failed cast. A
 factory whose field is nil falls back to home.
 
-Initial route: `tui.ResumeSeat` -> `Manager.ResumePlayer` -> a mid-game reconnect
-lands back at the table (through the lobby view, which routes onward into a running
-game); otherwise home. The ssh layer calls `ResumeSeat` separately from `tui.New`,
-once the session owns its tracker slot (§3.2).
+Initial route: always home, and that is what resumes a seat. `tui.ResumeSeat` ->
+`Manager.ResumePlayer` only cancels the disconnect grace; the home route is built
+through `seatedOr`, which finds the seat still indexed and opens its lobby view, and
+that routes onward into a running game. The ssh layer calls `ResumeSeat` separately
+from `tui.New`, once the session owns its tracker slot (§3.2).
 
 Game routes come from `catalog.Games` via `router.GameRoute(slug)` ->
 `"game_<slug>"`, and each entry's `View(global, table, slug)` is handed that same
@@ -555,8 +556,9 @@ carries ([`decisions.md` #49](decisions.md#49-the-game_type-metric-label-is-the-
 
 **Mid-game disconnect.** `DisconnectPlayer` arms **`disconnectGrace` (90 s)** in
 `m.grace`, a `graceTimers` (`disconnect.go`: `pending` timers -> `expiring` claim ->
-`LeaveLobby`). `ResumePlayer` cancels a pending leave, or returns the seat on a
-takeover with no pending leave. Waiting-lobby seats and any seat during shutdown
+`LeaveLobby`). `ResumePlayer` cancels a pending leave; the seat stays indexed, so
+the session's first route finds it (on a takeover there is no leave to cancel and
+the seat is simply still there). Waiting-lobby seats and any seat during shutdown
 still leave immediately. `expireLeave` moves `pending` -> `expiring` under the
 manager lock so a reconnect cannot resume a seat about to vanish.
 
@@ -566,7 +568,7 @@ manager lock so a reconnect cannot resume a seat about to vanish.
   makes sense mid-hand. Once the table is `waiting` again, a still-armed timer
   keeps the player out of every other table, and this one unable to reach
   all-ready, for up to 90 s. It claims the grace the way the timer would, so a
-  racing `ResumePlayer` is refused rather than resuming a seat already gone.
+  racing `ResumePlayer` cancels nothing rather than resuming a seat already gone.
 - `BeginShutdown` (`finalize.go`) - those timers would fire long after the drain, leaving the
   lobby un-removed and its engine un-closed. The player is not coming back to a
   process that is exiting.

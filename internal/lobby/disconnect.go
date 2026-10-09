@@ -125,29 +125,19 @@ func (m *Manager) expireLeave(p *game.Player) {
 	m.LeaveLobby(p)
 }
 
-// ResumePlayer cancels a pending disconnect leave and returns the lobby the player
-// still occupies, or nil. A reconnecting session calls it before routing, so the
-// player lands back at their table instead of a fresh home screen.
-//
-// A takeover (second SSH session while the first is half-open) finds the seat still
-// mapped with no pending leave: return that lobby so unclean disconnects can resume.
-func (m *Manager) ResumePlayer(p *game.Player) *Lobby {
+// ResumePlayer cancels a pending disconnect leave, so a reconnecting session keeps
+// its seat. Routing back to the table is the caller's: the seat stays indexed, and
+// FindLobbyByPlayer finds it. A grace whose expiry is already running is not
+// cancelled - that seat is as good as gone.
+func (m *Manager) ResumePlayer(p *game.Player) {
 	if p == nil {
-		return nil
+		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if cancelled, blocked := m.grace.tryCancel(p.ID); blocked {
-		return nil
-	} else if cancelled {
+	if cancelled, _ := m.grace.tryCancel(p.ID); cancelled {
 		slog.InfoContext(m.appCtx, "player reconnected inside the grace window", "player_id", p.ID)
 	}
-	// Same re-validation FindLobbyByPlayer and CreateLobby do: a stale index entry would
-	// route the reconnect into a lobby whose roster no longer holds them.
-	if !m.playerInLobbyLocked(p) {
-		return nil
-	}
-	return m.playerLobby[p.ID]
 }
 
 // releaseHeldSeats gives up every seat this table is holding for a dropped session.

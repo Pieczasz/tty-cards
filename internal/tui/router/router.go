@@ -130,8 +130,6 @@ type Router struct {
 	views        map[Route]ViewFactory
 	active       tea.Model
 	activeKey    Route
-	initialRoute Route
-	initial      Payload
 	lastActivity time.Time
 }
 
@@ -143,16 +141,8 @@ func New(global GlobalContext) *Router {
 	return &Router{
 		Global:       global,
 		views:        make(map[Route]ViewFactory),
-		initialRoute: RouteHome,
 		lastActivity: time.Now(),
 	}
-}
-
-// SetInitialRoute picks the first view Init builds. A reconnecting player starts
-// at their lobby instead of home; everyone else keeps the default.
-func (r *Router) SetInitialRoute(name Route, p Payload) {
-	r.initialRoute = name
-	r.initial = p
 }
 
 // Register makes factory the builder for name, replacing any earlier one.
@@ -224,7 +214,7 @@ func (r *Router) Init() tea.Cmd {
 	// Goto is what runs a view's Init, so the first view is built here rather than at
 	// construction: doing both armed every command twice, which for a view holding a
 	// subscription is two listener goroutines racing for one channel.
-	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(r.initialRoute, r.initial))
+	return tea.Batch(tick(), tea.RequestBackgroundColor, r.Goto(RouteHome, Payload{}))
 }
 
 // Update handles the session-wide messages and hands the rest to the active view.

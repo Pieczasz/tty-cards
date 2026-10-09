@@ -592,8 +592,8 @@ func TestManager_NilPlayerIsANoOp(t *testing.T) {
 	assert.NotPanics(t, func() {
 		m.LeaveLobby(nil)
 		m.DisconnectPlayer(nil)
+		m.ResumePlayer(nil)
 	})
-	assert.Nil(t, m.ResumePlayer(nil))
 
 	var none *Manager
 	assert.NotPanics(t, none.BeginShutdown, "the server can shut down before it built a manager")

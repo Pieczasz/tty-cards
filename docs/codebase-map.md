@@ -219,7 +219,7 @@ sequenceDiagram
     S->>T: Connect(userID) -> generation
     Note right of T: second session displaces<br/>AND closes the first
     S->>TUI: ResumeSeat, only once the slot is owned
-    TUI->>M: ResumePlayer (reconnect lands at table)
+    TUI->>M: ResumePlayer (cancels the grace; home finds the seat)
     P->>TUI: create / browse / join by code
     TUI->>M: CreateLobby / JoinLobbyByCode / ToggleReady
     M->>E: all ready -> NewEngine + Start
