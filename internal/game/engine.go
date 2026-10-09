@@ -33,6 +33,8 @@ type Engine struct {
 	closed      bool
 	clock       turnClock
 	endReason   EndReason
+	// onIdleRemoved is set once at construction, so it is read without the lock.
+	onIdleRemoved func(playerID string)
 }
 
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
@@ -55,6 +57,16 @@ type EngineOption func(*Engine)
 func WithLogger(l *slog.Logger) EngineOption {
 	return func(e *Engine) {
 		e.state.logger = l
+	}
+}
+
+// WithOnIdleRemoved is told each seat the turn clock takes for idling - unlike
+// EventPlayerIdle on the latest-wins feed, it cannot be dropped. It runs on the timer
+// goroutine after the engine lock is released, so it may take locks that order before
+// Engine.mu; RemovePlayer never calls it, because its caller may hold them.
+func WithOnIdleRemoved(fn func(playerID string)) EngineOption {
+	return func(e *Engine) {
+		e.onIdleRemoved = fn
 	}
 }
 

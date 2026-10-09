@@ -502,3 +502,55 @@ func TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable(t *testing.T) {
 	require.NotNil(t, ended, "the end is announced so the lobby can finalize")
 	assert.Equal(t, EndReasonRulesError, ended.Reason, "a panic is a rules error: the match is not rated")
 }
+
+// The idle signal is what keeps the lobby's roster in step with the engine, so it is
+// lossless and arrives once per taken seat. It runs after the engine lock is released,
+// because the lobby's locks order before it.
+func TestEngine_TurnTimeout_OnIdleRemovedNamesEachTakenSeat(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var (
+			mu      sync.Mutex
+			removed []string
+		)
+		var engine *Engine
+		engine = NewEngine(&timeoutRules{safe: nil}, []*Player{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+			deck.Standard(), WithTurnTimeout(20*time.Millisecond), WithOnIdleRemoved(func(id string) {
+				// Nothing else runs while the bubble's clock is stopped on this goroutine.
+				unlocked := engine.mu.TryLock()
+				assert.True(t, unlocked, "the hook ran under the engine lock")
+				if unlocked {
+					engine.mu.Unlock()
+				}
+				mu.Lock()
+				removed = append(removed, id)
+				mu.Unlock()
+			}))
+		t.Cleanup(engine.Close)
+		require.NoError(t, engine.Start())
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		require.True(t, engine.IsFinished(), "two seats taken leaves one, who wins by forfeit")
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, removed, 2)
+		assert.NotEqual(t, removed[0], removed[1])
+	})
+}
+
+// RemovePlayer's callers (the lobby, a disconnect grace timer) may hold the lobby's
+// locks, so a leave never reaches the idle hook.
+func TestEngine_RemovePlayer_DoesNotCallOnIdleRemoved(t *testing.T) {
+	t.Parallel()
+	called := false
+	engine := NewEngine(&timeoutRules{safe: namedAction{name: "safe"}}, []*Player{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+		deck.Standard(), WithTurnTimeout(time.Hour), WithOnIdleRemoved(func(string) { called = true }))
+	t.Cleanup(engine.Close)
+	require.NoError(t, engine.Start())
+
+	engine.RemovePlayer("a")
+
+	assert.False(t, called)
+}
