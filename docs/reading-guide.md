@@ -527,7 +527,7 @@ to be chosen explicitly, and with `PROXY_TRUSTED_CIDRS` set the header is
 believed only from the proxy's networks. The API makes no spans. Both limiters key
 on `ratelimit.NetKey`, which collapses IPv6 to its /64, because one customer is
 routinely handed 2^64 addresses. `httpapi.NewServer` refuses to build without its
-session counter, lobby counter and leaderboard (`ErrMissingDeps`) rather than
+session counter, lobby counter, leaderboard and health probe (`ErrMissingDeps`) rather than
 serving zeros. `config.Load` refuses an unknown `ENV` and, in production, a
 `DB_SSLMODE` that can fall back to plaintext; it reads booleans with
 `strconv.ParseBool`, so `PROXY_PROTOCOL=off` fails the boot

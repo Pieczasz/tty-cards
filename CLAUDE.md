@@ -118,7 +118,8 @@ leaderboard does not already show any visitor. That is what makes it safe
 unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
 `lobby.Manager.Stats`, so `ssh.NewServer` requires the `Tracker` it shares with the stats API
 (`ErrNoTracker` without one), and `httpapi.NewServer(addr, httpapi.Deps{...})` refuses a
-missing `Sessions`, `Lobbies` or `Users` with `ErrMissingDeps` rather than serving zeros.
+missing `Sessions`, `Lobbies`, `Users` or `Health` with `ErrMissingDeps` rather than serving zeros
+(or a `/healthz` that cannot fail).
 
 `API_TRUST_PROXY` makes the per-network limiter read `X-Forwarded-For`, and with
 `PROXY_TRUSTED_CIDRS` set only from a peer inside those networks (6970 is reachable from

@@ -387,7 +387,7 @@ func TestStartStatsAPI_BindFailureIsReported(t *testing.T) {
 	t.Cleanup(func() { _ = taken.Close() })
 
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIPort: taken.Addr().(*net.TCPAddr).Port, APIRequestsPerMinute: 1}
-	stop, serveErr, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, nil)
+	stop, serveErr, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
 	require.NoError(t, err)
 	t.Cleanup(stop)
 
