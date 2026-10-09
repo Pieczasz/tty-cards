@@ -37,7 +37,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 	t.Parallel()
 
 	for range 200 {
-		manager := lobby.NewManager(t.Context(), nil)
+		manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 		user := &db.User{ID: testutil.UID(7), Username: "comeback"}
 		player := lobby.NewPlayer(user)
 		host := lobby.NewPlayer(&db.User{ID: testutil.UID(8), Username: "host"})
@@ -82,7 +82,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	user := &db.User{ID: testutil.UID(9), Username: "refused"}
 	player := lobby.NewPlayer(user)
 	host := lobby.NewPlayer(&db.User{ID: testutil.UID(10), Username: "host"})

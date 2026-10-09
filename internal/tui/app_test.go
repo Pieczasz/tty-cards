@@ -45,7 +45,7 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.User) {
 	t.Helper()
 
-	manager := internallobby.NewManager(t.Context(), nil)
+	manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 	registry := catalog.NewRegistry()
 
@@ -161,7 +161,7 @@ func TestModel_AWrongPayloadFallsBackToHome(t *testing.T) {
 func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		manager := internallobby.NewManager(t.Context(), nil)
+		manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 		registry := catalog.NewRegistry()
 
 		user := &db.User{ID: testutil.UID(1), Username: "alice"}

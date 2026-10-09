@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/elo"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -40,10 +41,16 @@ func testRegistry() *game.Registry {
 	})
 }
 
+// newManager is a manager offering every game in the catalog, the way the server's is.
+func newManager(tb testing.TB) *lobby.Manager {
+	tb.Helper()
+	return lobby.NewManager(tb.Context(), nil, catalog.NewRegistry())
+}
+
 // leaderView returns the lobby view as seen by the lobby's leader.
 func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	t.Helper()
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := newManager(t)
 	leaderUser := testUser(1, "alice")
 	leader := lobby.NewPlayer(leaderUser)
 

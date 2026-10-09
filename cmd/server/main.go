@@ -20,6 +20,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -134,11 +135,12 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	observability.RegisterDBStats(sqlDB)
 
 	userRepo := repository.NewUserRepository(database)
-	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database))
+	games := catalog.NewRegistry()
+	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database), games)
 	defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)
 
 	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := newSSHServer(cfg, userRepo, lobbyManager, tracker)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, games, tracker)
 	if err != nil {
 		return err
 	}
@@ -191,6 +193,7 @@ func newSSHServer(
 	cfg *config.Config,
 	userRepo db.UserRepository,
 	lobbyManager *lobby.Manager,
+	games *game.Registry,
 	tracker *ssh.SessionTracker,
 ) (*ssh.Server, error) {
 	server, err := ssh.NewServer(ssh.Deps{
@@ -199,7 +202,7 @@ func newSSHServer(
 		Profiles:     userRepo,
 		Leaderboard:  userRepo,
 		LobbyManager: lobbyManager,
-		GameRegistry: catalog.NewRegistry(),
+		GameRegistry: games,
 		Tracker:      tracker,
 	})
 	if err != nil {

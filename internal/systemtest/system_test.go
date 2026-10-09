@@ -25,7 +25,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 	t.Parallel()
 
 	repo := newRankedFinalizeRecorder()
-	manager := lobby.NewManager(t.Context(), repo)
+	manager := lobby.NewManager(t.Context(), repo, catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
@@ -100,7 +100,7 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 
 	leader := newPlayer(testutil.UID(1), "alice")
@@ -123,7 +123,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
 	leader := newPlayer(testutil.UID(1), "alice")
 	guest := newPlayer(testutil.UID(2), "bob")
 

@@ -90,7 +90,7 @@ func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         &db.User{ID: id, Username: "hero"},
-		LobbyManager: lobby.NewManager(t.Context(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil, game.NewRegistry()),
 	}
 	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "uno").(*model)
 	require.True(t, ok)

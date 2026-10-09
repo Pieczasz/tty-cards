@@ -65,30 +65,33 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		setup func(t *testing.T) *Manager
+		setup func(t *testing.T, games *game.Registry) *Manager
 	}{
 		{
-			name:  "no match repository",
-			setup: func(t *testing.T) *Manager { t.Helper(); return newTestManager(t, nil) },
+			name: "no match repository",
+			setup: func(t *testing.T, games *game.Registry) *Manager {
+				t.Helper()
+				return newManagerFor(t, nil, games)
+			},
 		},
 		{
 			name: "dropped by shutdown",
-			setup: func(t *testing.T) *Manager {
+			setup: func(t *testing.T, games *game.Registry) *Manager {
 				t.Helper()
-				m := newTestManager(t, new(MockMatchRepo))
+				m := newManagerFor(t, new(MockMatchRepo), games)
 				require.True(t, m.WaitForFinalizers(time.Second), "nothing is in flight yet")
 				return m
 			},
 		},
 		{
 			name: "persisted",
-			setup: func(t *testing.T) *Manager {
+			setup: func(t *testing.T, games *game.Registry) *Manager {
 				t.Helper()
 				repo := new(MockMatchRepo)
 				// Rated or not depends on whether the drain below began before the write.
 				repo.On("FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				repo.On("RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-				return newTestManager(t, repo)
+				return newManagerFor(t, repo, games)
 			},
 		},
 	}
@@ -96,7 +99,7 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			name := "Finished " + tt.name
-			m := tt.setup(t)
+			m := tt.setup(t, gameRegistry(name, stubRules{}))
 			// The counter is process-wide and cumulative, so -count=N sees earlier runs.
 			before := gamesFinished(t, strings.ToLower(name))
 

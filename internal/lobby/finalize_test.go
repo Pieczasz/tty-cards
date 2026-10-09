@@ -206,14 +206,15 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	m := newTestManager(t, nil)
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Unregistered"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Mock"))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	observer, err := l.Subscribe("observer")
 	require.NoError(t, err)
 
-	// The registry has no rules under this name, so the start fails after both flips.
+	// The registry handed to the start has no rules under this name, so it fails after
+	// both flips.
 	require.NoError(t, l.ToggleReady(leader, game.NewRegistry()))
 	require.Error(t, l.ToggleReady(guest, game.NewRegistry()))
 

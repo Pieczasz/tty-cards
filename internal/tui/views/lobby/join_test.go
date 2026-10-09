@@ -53,7 +53,7 @@ func pressJoin(t *testing.T, m *joinModel, key string) {
 // The list is built per refresh, so a new table has to arrive on the tick.
 func TestJoin_RefreshPicksUpNewTables(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	view := newJoinModel(t, m)
 	require.Empty(t, view.entries, "nothing is open yet")
 
@@ -70,7 +70,7 @@ func TestJoin_RefreshPicksUpNewTables(t *testing.T) {
 // A table in play is not joinable, so it leaves the list.
 func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	l := openPublicTable(t, m, "host", testutil.UID(1), testGameName, lobby.WithMaxPlayers(2))
 	guest := &game.Player{ID: "guest", UserID: testutil.UID(2), Name: "guest"}
 	_, err := m.JoinLobbyByCode(l.Code(), guest)
@@ -101,7 +101,7 @@ func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 // Rows vanish under the cursor, so it is clamped on every refresh.
 func TestJoin_CursorSurvivesAShrinkingList(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	tables := make([]*lobby.Lobby, 0, 3)
 	for i, name := range []string{"a", "b", "c"} {
 		tables = append(tables, openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameName))
@@ -130,7 +130,7 @@ func TestJoin_BrowsingKeys(t *testing.T) {
 
 	t.Run("the cursor stops at both ends", func(t *testing.T) {
 		t.Parallel()
-		m := lobby.NewManager(t.Context(), nil)
+		m := newManager(t)
 		for i, name := range []string{"a", "b"} {
 			openPublicTable(t, m, name, testutil.UID(byte(i+1)), testGameName)
 		}
@@ -149,7 +149,7 @@ func TestJoin_BrowsingKeys(t *testing.T) {
 	for _, key := range []string{"esc", "q"} {
 		t.Run(key+" goes home", func(t *testing.T) {
 			t.Parallel()
-			view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+			view := newJoinModel(t, newManager(t))
 			_, cmd := view.Update(tuitest.Key(key))
 			assert.Equal(t, router.RouteHome, routeOf(t, cmd))
 		})
@@ -163,7 +163,7 @@ func TestJoin_FiltersCycle(t *testing.T) {
 	// silently change what the next is counting.
 	newBrowser := func(t *testing.T) *joinModel {
 		t.Helper()
-		m := lobby.NewManager(t.Context(), nil)
+		m := newManager(t)
 		openPublicTable(t, m, "poker", testutil.UID(1), "Poker")
 		openPublicTable(t, m, "eights", testutil.UID(2), testGameName, lobby.WithRanked(true))
 		view := newJoinModel(t, m)
@@ -224,7 +224,7 @@ func TestJoin_FiltersCycle(t *testing.T) {
 // Waiting for the next tick would read as the key not working.
 func TestJoin_FilterAppliesImmediatelyAndResetsTheCursor(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	openPublicTable(t, m, "poker", testutil.UID(1), "Poker")
 	openPublicTable(t, m, "eights", testutil.UID(2), testGameName)
 
@@ -241,7 +241,7 @@ func TestJoin_FilterAppliesImmediatelyAndResetsTheCursor(t *testing.T) {
 // A filter pinned to a game with no tables shows an empty list for no visible reason.
 func TestJoin_GameFilterWithNoTablesFallsBackToAny(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	view := newJoinModel(t, m)
 	view.filter.GameName = "Poker"
 
@@ -255,7 +255,7 @@ func TestJoin_GameFilterWithNoTablesFallsBackToAny(t *testing.T) {
 // still work after the leader flipped the table private.
 func TestJoin_ViewShowsTheColumns(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	ranked := openPublicTable(t, m, "poker", testutil.UID(1), "Poker", lobby.WithRanked(true), lobby.WithMaxPlayers(4))
 
 	view := newJoinModel(t, m)
@@ -276,7 +276,7 @@ func TestJoin_ViewShowsTheColumns(t *testing.T) {
 // player who had opened the code prompt could not quit without disconnecting.
 func TestJoin_GlobalKeysSurviveTheCodePrompt(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	view := newJoinModel(t, m)
 
 	pressJoin(t, view, "c")
@@ -295,7 +295,7 @@ func TestJoin_GlobalKeysSurviveTheCodePrompt(t *testing.T) {
 // theme and resizes, and a letter it claimed would be a letter never typed.
 func TestJoin_TypingReachesTheCodeField(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	view := newJoinModel(t, m)
 
 	pressJoin(t, view, "c")
@@ -308,7 +308,7 @@ func TestJoin_TypingReachesTheCodeField(t *testing.T) {
 
 func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	view := newJoinModel(t, m)
 
 	rendered := tuitest.StripANSI(view.View().Content)
@@ -335,7 +335,7 @@ func TestJoin_ViewFitsTheTerminal(t *testing.T) {
 	for _, size := range tuitest.FitSizes {
 		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
-			m := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+			m := newJoinModel(t, newManager(t))
 			m.global.Width, m.global.Height = size.Width, size.Height
 			m.entries = manyTables(30)
 			m.cursor = 25 // deep in the list, so the window has to scroll
@@ -354,7 +354,7 @@ func TestJoin_ViewFitsTheTerminal(t *testing.T) {
 // list is a snapshot of whatever was open when the screen opened.
 func TestJoin_InitStartsTheRefreshLoop(t *testing.T) {
 	t.Parallel()
-	view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+	view := newJoinModel(t, newManager(t))
 
 	assert.NotNil(t, view.Init())
 }
@@ -363,7 +363,7 @@ func TestJoin_InitStartsTheRefreshLoop(t *testing.T) {
 // Update actually matches - a plain time.Time would be ignored and the list would freeze.
 func TestJoin_RefreshTickProducesARefreshMsg(t *testing.T) {
 	t.Parallel()
-	view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+	view := newJoinModel(t, newManager(t))
 
 	assert.Equal(t, refreshMsg{owner: view}, view.refreshTick()())
 }
@@ -373,7 +373,7 @@ func TestJoin_RefreshTickProducesARefreshMsg(t *testing.T) {
 // the old tick to the new screen, which re-armed it: two refresh chains, then three.
 func TestJoin_AStaleRefreshIsDroppedWithoutRearming(t *testing.T) {
 	t.Parallel()
-	m := lobby.NewManager(t.Context(), nil)
+	m := newManager(t)
 	left, current := newJoinModel(t, m), newJoinModel(t, m)
 
 	_, cmd := current.Update(refreshMsg{owner: left})
@@ -386,7 +386,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 
 	t.Run("an empty code is not a join attempt", func(t *testing.T) {
 		t.Parallel()
-		view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+		view := newJoinModel(t, newManager(t))
 
 		_, cmd := view.joinByCode("")
 
@@ -398,7 +398,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 	// refusal has to be on screen next to a list that is current again.
 	t.Run("an unknown code says so and re-reads the list", func(t *testing.T) {
 		t.Parallel()
-		m := lobby.NewManager(t.Context(), nil)
+		m := newManager(t)
 		view := newJoinModel(t, m)
 		openPublicTable(t, m, "host", testutil.UID(1), testGameName)
 
@@ -412,7 +412,7 @@ func TestJoin_JoinByCode(t *testing.T) {
 
 	t.Run("a good code seats the player and opens the lobby", func(t *testing.T) {
 		t.Parallel()
-		m := lobby.NewManager(t.Context(), nil)
+		m := newManager(t)
 		table := openPublicTable(t, m, "host", testutil.UID(1), testGameName)
 		view := newJoinModel(t, m)
 
@@ -435,7 +435,7 @@ func TestJoin_SelectingARowJoinsIt(t *testing.T) {
 	for _, key := range []string{"enter", "space"} {
 		t.Run("with "+key, func(t *testing.T) {
 			t.Parallel()
-			m := lobby.NewManager(t.Context(), nil)
+			m := newManager(t)
 			openPublicTable(t, m, "host", testutil.UID(1), testGameName)
 			view := newJoinModel(t, m)
 			require.Len(t, view.entries, 1)
@@ -457,7 +457,7 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 
 	t.Run("escape cancels without joining", func(t *testing.T) {
 		t.Parallel()
-		view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+		view := newJoinModel(t, newManager(t))
 		pressJoin(t, view, "c")
 		require.True(t, view.writingCode)
 		assert.Contains(t, tuitest.StripANSI(view.View().Content), "press ESC to cancel",
@@ -472,7 +472,7 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 
 	t.Run("backspace corrects a typo", func(t *testing.T) {
 		t.Parallel()
-		view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+		view := newJoinModel(t, newManager(t))
 		pressJoin(t, view, "c")
 		for _, key := range []string{"a", "b", "backspace"} {
 			pressJoin(t, view, key)
@@ -483,7 +483,7 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 
 	t.Run("enter submits what was typed", func(t *testing.T) {
 		t.Parallel()
-		m := lobby.NewManager(t.Context(), nil)
+		m := newManager(t)
 		table := openPublicTable(t, m, "host", testutil.UID(1), testGameName)
 		view := newJoinModel(t, m)
 
@@ -504,7 +504,7 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 // otherwise the caret stops moving the moment the prompt opens.
 func TestJoin_NonKeyMessagesReachTheFocusedField(t *testing.T) {
 	t.Parallel()
-	view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+	view := newJoinModel(t, newManager(t))
 
 	_, cmd := view.Update(struct{ tea.Msg }{})
 	assert.Nil(t, cmd, "while browsing there is nothing to forward it to")
@@ -534,7 +534,7 @@ func TestJoin_FilterLineNamesEveryFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			view := newJoinModel(t, lobby.NewManager(t.Context(), nil))
+			view := newJoinModel(t, newManager(t))
 			view.filter = tt.filter
 
 			assert.Equal(t, tt.want, tuitest.StripANSI(view.filterLine()))

@@ -56,8 +56,8 @@ type browseFixture struct {
 
 func newBrowseFixture(b *testing.B, n int) browseFixture {
 	b.Helper()
-	m := newTestManager(b, nil)
 	registry := benchRegistry()
+	m := newManagerFor(b, nil, registry)
 	f := browseFixture{m: m, browser: benchPlayer(2 * n)}
 	for i := range n {
 		leader, guest := benchPlayer(2*i), benchPlayer(2*i+1)

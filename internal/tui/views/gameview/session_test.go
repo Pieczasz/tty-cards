@@ -315,7 +315,10 @@ func TestSession_Leave(t *testing.T) {
 func seatedSession(t *testing.T) (*lobby.Manager, *game.Player, Session) {
 	t.Helper()
 	_, s := startedSession(t)
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := lobby.NewManager(t.Context(), nil, game.NewRegistry(game.Module{
+		Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers,
+		Factory: func() game.Rules { return &crazyeight.Rules{} },
+	}))
 	alice := lobby.NewPlayer(s.Global.User)
 	_, err := manager.CreateLobby(alice, lobby.WithCardGame("Crazy Eights"))
 	require.NoError(t, err)

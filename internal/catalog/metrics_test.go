@@ -28,7 +28,7 @@ func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 	registry := NewRegistry()
 	for _, entry := range Games {
 		t.Run(entry.Slug, func(t *testing.T) {
-			m := lobby.NewManager(t.Context(), nil)
+			m := lobby.NewManager(t.Context(), nil, NewRegistry())
 			players := testutil.Players(entry.MinPlayers)
 			l, err := m.CreateLobby(players[0], lobby.WithCardGame(entry.Name), lobby.WithMaxPlayers(len(players)))
 			require.NoError(t, err)

@@ -32,7 +32,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         testUser(),
-		LobbyManager: lobby.NewManager(t.Context(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil, game.NewRegistry()),
 		Width:        80,
 		Height:       40,
 	}
@@ -211,7 +211,7 @@ func tableOnTurn(t *testing.T) *model {
 	require.NoError(t, err)
 	global := router.GlobalContext{
 		User:         &db.User{ID: id, Username: "hero"},
-		LobbyManager: lobby.NewManager(t.Context(), nil),
+		LobbyManager: lobby.NewManager(t.Context(), nil, game.NewRegistry()),
 		Width:        80,
 		Height:       40,
 	}
