@@ -662,8 +662,8 @@ func TestRules_Knock_DefenderMeldsForTheBestLayoff(t *testing.T) {
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	assert.Equal(t, 2, rules.MinPlayers(), "gin rummy is strictly heads-up")
-	assert.Equal(t, 2, rules.MaxPlayers())
+	assert.Equal(t, 2, MinPlayers, "gin rummy is strictly heads-up")
+	assert.Equal(t, 2, MaxPlayers)
 	assert.Len(t, rules.InitialDeck(), 52)
 	assert.Equal(t, "ginrummy.DrawStock", ActionDrawStock{}.Name())
 	assert.Equal(t, "ginrummy.DrawDiscard", ActionDrawDiscard{}.Name())

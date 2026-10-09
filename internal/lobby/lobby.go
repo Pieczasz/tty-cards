@@ -151,15 +151,15 @@ func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int, registry *game.Regi
 		if limit < current {
 			return fmt.Errorf("max players cannot be below current roster (%d)", current)
 		}
-		rules, err := registry.Create(l.options.cardGame)
-		if err != nil {
-			return fmt.Errorf("look up game bounds: %w", err)
+		mod, ok := registry.Module(l.options.cardGame)
+		if !ok {
+			return fmt.Errorf("look up game bounds: game %q not found in registry", l.options.cardGame)
 		}
-		if limit < rules.MinPlayers() {
-			return fmt.Errorf("max players must be at least %d for this game", rules.MinPlayers())
+		if limit < mod.MinPlayers {
+			return fmt.Errorf("max players must be at least %d for this game", mod.MinPlayers)
 		}
-		if limit > rules.MaxPlayers() {
-			return fmt.Errorf("max players cannot exceed %d for this game", rules.MaxPlayers())
+		if limit > mod.MaxPlayers {
+			return fmt.Errorf("max players cannot exceed %d for this game", mod.MaxPlayers)
 		}
 		l.options.maxPlayers = limit
 		return nil
@@ -500,24 +500,23 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	// The two failures logged here are defects, not refusals: the lobby view logs what
 	// ToggleReady returns at Debug, since from there "too few players" looks the same.
 	ctx := l.manager.appCtx
-	rules, err := registry.Create(l.options.cardGame)
-	if err != nil {
-		err = fmt.Errorf("create game rules: %w", err)
+	mod, ok := registry.Module(l.options.cardGame)
+	if !ok {
+		err := fmt.Errorf("create game rules: game %q not found in registry", l.options.cardGame)
 		slog.ErrorContext(ctx, "cannot start game", "error", err, "lobby", l.code, "game_name", l.options.cardGame)
 		return err
 	}
 
 	totalPlayers := len(l.guests) + 1
-	if totalPlayers < rules.MinPlayers() {
-		return fmt.Errorf("need at least %d players to start", rules.MinPlayers())
+	if totalPlayers < mod.MinPlayers {
+		return fmt.Errorf("need at least %d players to start", mod.MinPlayers)
 	}
-	if totalPlayers > rules.MaxPlayers() {
+	if totalPlayers > mod.MaxPlayers {
 		return errTooManyPlayers
 	}
 
-	// The slug, not the display name, is what the match is persisted under. Create
-	// above already proved the module is registered.
-	mod, _ := registry.Module(l.options.cardGame)
+	// The slug, not the display name, is what the match is persisted under.
+	rules := mod.Factory()
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
 	engine := game.NewEngine(rules, players, rules.InitialDeck(), game.WithLogger(logger))

@@ -186,7 +186,8 @@ Order matters so deferred teardown runs correctly (LIFO):
    through
 7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose
    `GameRegistry` is `catalog.NewRegistry()` - `game.NewRegistry` over
-   `catalog.Games`, which panics on a module declared twice or half-declared. The
+   `catalog.Games`, which panics on a module declared twice, half-declared or
+   with impossible seat bounds. The
    one tracker is shared with the stats API; `NewServer` refuses to start without
    it (`errNoTracker`), because a second one counted nobody online
 8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
@@ -991,7 +992,7 @@ The two halves travel together as `db.GameRef{Slug, Name}`:
 
 ```
 catalog.Entry{Name, Slug}
-  -> game.Module{Name, Slug, Factory}     registry keyed by Name
+  -> game.Module{Name, Slug, MinPlayers, MaxPlayers, Factory}   registry keyed by Name
   -> lobby options.cardGame (Name)
   -> at start: db.GameRef{Slug: mod.Slug, Name: l.options.cardGame}
   -> repository getOrCreateGame: read by slug; upsert ON CONFLICT (slug) only on a
@@ -1255,7 +1256,7 @@ after.
 ## 7. Catalog - single registration point
 
 `internal/catalog/catalog.go` `Games` is the only place a game is declared. Each
-entry embeds a `game.Module` (`Name`, `Slug`, `Factory`) **and** carries the TUI
+entry embeds a `game.Module` (`Name`, `Slug`, `MinPlayers`, `MaxPlayers`, `Factory`) **and** carries the TUI
 view constructor, `View(global, table, slug)`, `table` a `*game.BoundEngine`.
 `cmd/server` builds the registry with `catalog.NewRegistry()`; `internal/tui/app.go` registers the routes. A missing
 field or duplicate slug fails `catalog_test.go`, and `game.NewRegistry` panics on
@@ -1265,6 +1266,7 @@ rules still compiles, so keep the pair in lockstep by hand.
 | Field | Consumer |
 |---|---|
 | `Module.Name` | registry key, lobby option, `db.Game.Name` (display) |
+| `MinPlayers` / `MaxPlayers` | the lobby's seat bounds (`SetMaxPlayers`, the start check) and the create form's range - read off the module, no `Rules` built |
 | `Slug` | TUI route `game_<slug>`, **`games.slug`, the persisted identity**, and the `game_type` label on every game metric, lobby and view alike ([#49](decisions.md#49-the-game_type-metric-label-is-the-catalog-slug)) |
 
 ---

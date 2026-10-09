@@ -29,6 +29,9 @@ type ShedRules interface {
 // Shed describes one shedding game to the shared suite.
 type Shed struct {
 	Rules ShedRules
+	// MinPlayers and MaxPlayers are the game's seat range, as its catalog Module
+	// declares it.
+	MinPlayers, MaxPlayers int
 	// NewExtra is the rules' Extra for a table whose card in play is top.
 	NewExtra func(top deck.Card) any
 	// ShedState reaches the deadlock counter inside an Extra NewExtra built.
@@ -284,7 +287,7 @@ func SoakTimeoutIsAlwaysLegal(t *testing.T, s Shed) {
 	t.Helper()
 
 	rapid.Check(t, func(rt *rapid.T) {
-		n := rapid.IntRange(s.Rules.MinPlayers(), min(s.Rules.MaxPlayers(), 6)).Draw(rt, "players")
+		n := rapid.IntRange(s.MinPlayers, min(s.MaxPlayers, 6)).Draw(rt, "players")
 		players := make([]*game.Player, n)
 		for i := range players {
 			players[i] = &game.Player{ID: fmt.Sprintf("p%d", i+1)}

@@ -12,6 +12,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
+// Hearts is strictly four-handed.
+const (
+	MinPlayers = playerCount
+	MaxPlayers = playerCount
+)
+
 // Rules implements Hearts. It is strictly four-handed, so a leave ends the match.
 type Rules struct{}
 
@@ -22,9 +28,6 @@ var (
 	_ game.TurnDurationHandler = (*Rules)(nil)
 	_ game.StandingScorer      = (*Rules)(nil)
 )
-
-func (r *Rules) MinPlayers() int { return playerCount }
-func (r *Rules) MaxPlayers() int { return playerCount }
 
 func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 func (r *Rules) InitialDealCount() int    { return 0 }

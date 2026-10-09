@@ -25,11 +25,11 @@ func bothGamesRegistry(t *testing.T) *game.Registry {
 	t.Helper()
 	return game.NewRegistry(
 		game.Module{
-			Name: "Poker", Slug: "poker",
+			Name: "Poker", Slug: "poker", MinPlayers: poker.MinPlayers, MaxPlayers: poker.MaxPlayers,
 			Factory: func() game.Rules { return &poker.Rules{} },
 		},
 		game.Module{
-			Name: "Crazy Eights", Slug: "crazy_eights",
+			Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers,
 			Factory: func() game.Rules { return &crazyeight.Rules{} },
 		},
 	)
@@ -81,7 +81,7 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
 	t.Parallel()
 	r := game.NewRegistry(game.Module{
-		Name: "Hearts", Slug: "hearts",
+		Name: "Hearts", Slug: "hearts", MinPlayers: hearts.MinPlayers, MaxPlayers: hearts.MaxPlayers,
 		Factory: func() game.Rules { return &hearts.Rules{} },
 	})
 	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), GameRegistry: r}).(*createModel)
@@ -352,7 +352,7 @@ func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	assert.NoError(t, m.err)
 }
 
-// The registry is the only source of truth for seat counts, so a game it cannot build
+// The registry is the only source of truth for seat counts, so a game it does not hold
 // has to fall back to a bound rather than leave the row free to run away.
 func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
 	t.Parallel()

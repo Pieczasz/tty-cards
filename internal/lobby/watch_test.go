@@ -198,7 +198,7 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			name: "engine cannot deal", registry: gameRegistry("Mock", bigDealRules{}),
 			wantLog: true, gameKey: "game", wantGame: "mock",
 		},
-		{name: "too few players is a refusal", registry: gameRegistry("Mock", stubRules{minPlayers: 3})},
+		{name: "too few players is a refusal", registry: boundedRegistry("Mock", stubRules{}, 3, 9)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

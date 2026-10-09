@@ -12,6 +12,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game/shed"
 )
 
+// The seat range an Uno table deals for.
+const (
+	MinPlayers = 2
+	MaxPlayers = 10
+)
+
 // Rules implements Uno; see the Deviation notes for where it departs from the box.
 type Rules struct{}
 
@@ -21,9 +27,6 @@ var (
 	_ game.TurnTimeoutHandler = (*Rules)(nil)
 	_ game.StandingScorer     = (*Rules)(nil)
 )
-
-func (r *Rules) MinPlayers() int { return 2 }
-func (r *Rules) MaxPlayers() int { return 10 }
 
 func (r *Rules) InitialDeck() []deck.Card { return initialDeck() }
 func (r *Rules) InitialDealCount() int    { return 7 }

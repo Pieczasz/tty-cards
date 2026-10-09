@@ -12,6 +12,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
+// Gin rummy is strictly heads-up.
+const (
+	MinPlayers = 2
+	MaxPlayers = 2
+)
+
 // Rules implements Gin Rummy over a match of hands.
 type Rules struct{}
 
@@ -20,7 +26,7 @@ var (
 	_ game.TurnTimeoutHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
 	_ game.StandingScorer      = (*Rules)(nil)
-	// No PlayerLeaveHandler: gin is strictly 2-player (MinPlayers == MaxPlayers == 2).
+	// No PlayerLeaveHandler: gin is strictly 2-player (MinPlayers == MaxPlayers).
 	// When a player leaves mid-hand, the match ends immediately via the engine's
 	// last-player-standing path. There is no shared state to clean up.
 )
@@ -53,9 +59,6 @@ func (a ActionKnock) Name() string { return "ginrummy.Knock" }
 type ActionNextHand struct{}
 
 func (a ActionNextHand) Name() string { return "ginrummy.NextHand" }
-
-func (r *Rules) MinPlayers() int { return 2 }
-func (r *Rules) MaxPlayers() int { return 2 }
 
 func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 
