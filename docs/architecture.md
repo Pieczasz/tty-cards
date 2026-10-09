@@ -517,6 +517,10 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   (`withLeaderSettings`: broadcasts `EventSettingsUpdated` then `EventPlayersUpdated`) and
   any roster removal - a guest leaving or kicked, or the leader leaving and a guest
   promoted - clear every ready flag. A join does not.
+- `Lobby.Snapshot()` copies the table under one `RLock`: code, game and its seat
+  bounds, the settings, whether it is in a game, and the leader and guests each with
+  their Elo and ready flag. A frame drawn from it cannot show a promoted leader
+  twice, as one drawn from separate getters could.
 - `RemoveLobby` unmaps only the `playerLobby` entries still pointing at the removed
   lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
   seated at a newer table.
