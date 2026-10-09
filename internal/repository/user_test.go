@@ -443,7 +443,7 @@ func TestUserRepository_UserProfile(t *testing.T) {
 	assert.Equal(t, "ProfileGame", profile.Rankings[0].Game.Name)
 
 	_, err = repo.UserProfile(ctx, uuid.New())
-	assert.Error(t, err)
+	require.ErrorIs(t, err, db.ErrUserNotFound)
 }
 
 func TestUserRepository_UserMatchHistory(t *testing.T) {

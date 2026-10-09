@@ -1,9 +1,11 @@
 package profile
 
 import (
+	"fmt"
 	"log/slog"
 	"testing"
 
+	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -31,4 +33,20 @@ func TestDatabaseErrors_AreLoggedUnderTheSessionTrace(t *testing.T) {
 	for _, r := range errs {
 		assert.True(t, r.SameTrace(traced), "%q carries the session trace", r.Message)
 	}
+}
+
+// A missing account is not the database failing, so it stays out of ERROR.
+//
+//nolint:paralleltest // CaptureLogs swaps the process-wide slog.Default
+func TestUserNotFound_IsLoggedAtInfo(t *testing.T) {
+	logs := tuitest.CaptureLogs(t)
+
+	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40}
+	m, ok := New(global).(*model)
+	require.True(t, ok)
+	m.Update(profileLoadedMsg{err: fmt.Errorf("wrapped: %w", db.ErrUserNotFound)})
+	m.accountDeleted(accountDeletedMsg{err: db.ErrUserNotFound})
+
+	assert.Empty(t, logs.AtLeast(slog.LevelWarn))
+	assert.Len(t, logs.AtLeast(slog.LevelInfo), 2, "the profile and the delete")
 }

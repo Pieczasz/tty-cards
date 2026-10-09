@@ -286,9 +286,12 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 		Preload("Rankings.Game").
 		Where("id = ?", userID.String()).
 		First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// The contract's sentinel, so a caller tells absent from broken without
+		// importing gorm.
+		return nil, db.ErrUserNotFound
+	}
 	if err != nil {
-		// gorm.ErrRecordNotFound, wrapped: a second "not found" sentinel in this
-		// package only gave callers a second thing to compare against.
 		return nil, fmt.Errorf("get user profile: %w", err)
 	}
 	return &user, nil

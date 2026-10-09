@@ -4,6 +4,7 @@ package profile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -136,9 +137,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history = msg.history
 		m.err = msg.err
 		m.historyErr = msg.historyErr
-		if msg.err != nil {
-			slog.ErrorContext(m.global.RequestContext(), "database error while loading user profile", "error", msg.err)
-		}
+		logFailure(m.global.RequestContext(), "loading user profile", msg.err)
 		if msg.historyErr != nil {
 			slog.ErrorContext(m.global.RequestContext(), "database error while loading match history", "error", msg.historyErr)
 		}
@@ -410,9 +409,21 @@ func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// logFailure keeps ERROR for the database: an account gone from under its own
+// session (an operator soft-delete) is a fact about the account, not a fault.
+func logFailure(ctx context.Context, doing string, err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, db.ErrUserNotFound):
+		slog.InfoContext(ctx, "user not found while "+doing, "error", err)
+	default:
+		slog.ErrorContext(ctx, "database error while "+doing, "error", err)
+	}
+}
+
 func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		slog.ErrorContext(m.global.RequestContext(), "database error while deleting account", "error", msg.err)
+		logFailure(m.global.RequestContext(), "deleting account", msg.err)
 		m.phase = deleteConfirming
 		m.typed = ""
 		m.notice = "Could not delete the account. Please try again."

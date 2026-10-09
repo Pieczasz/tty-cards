@@ -26,7 +26,8 @@ type Authenticator interface {
 
 // Profiles is one player's own data: what the profile screen shows, and erasing it.
 type Profiles interface {
-	// UserProfile returns the account with its keys, rankings and their games.
+	// UserProfile returns the account with its keys, rankings and their games, or
+	// ErrUserNotFound for an id with no live user (never registered, or soft-deleted).
 	UserProfile(ctx context.Context, userID uuid.UUID) (*User, error)
 	// UserMatchHistory returns the player's newest limit participations, each with its
 	// match and game.
