@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -202,6 +203,20 @@ func TestHandleCommonMsg(t *testing.T) {
 		handled, _ = views.HandleCommonMsg(tea.BackgroundColorMsg{Color: color.Black}, &g)
 		assert.True(t, handled)
 		assert.True(t, g.Theme.Dark)
+	})
+
+	// The view on screen holds its own context too, and it seats, browses and leaves
+	// as SessionPlayer: a reseat it did not take would act with the login's ratings.
+	t.Run("a reseated player replaces the session's", func(t *testing.T) {
+		t.Parallel()
+		g := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
+		p := &game.Player{ID: testutil.UID(1).String(), UserID: testutil.UID(1), Name: "alice"}
+
+		handled, cmd := views.HandleCommonMsg(router.UpdatePlayer(p)(), &g)
+
+		assert.True(t, handled)
+		assert.Nil(t, cmd)
+		assert.Same(t, p, views.SessionPlayer(g))
 	})
 
 	t.Run("ctrl+c quits", func(t *testing.T) {

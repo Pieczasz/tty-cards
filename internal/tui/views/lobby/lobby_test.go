@@ -775,3 +775,27 @@ func TestView_AReadyMarkStaysOnItsPlayersRowAt80x24(t *testing.T) {
 		assert.Contains(t, strings.Split(out, "\n")[row], "- Ready", "%s's ready mark wrapped off its row:\n%s", name, out)
 	}
 }
+
+// A ranked match written while the player sits here reseats them with a copy carrying
+// the new ratings. The session's player has to follow, or the next screen - the join
+// list's matchmaking, a new table's seat - is built from the login's ratings again.
+func TestLobbyEvent_ReseatedPlayerUpdatesTheSession(t *testing.T) {
+	t.Parallel()
+	m, l := leaderView(t)
+	t.Cleanup(m.Close)
+	seat := l.Snapshot().Leader.Player
+	m.global.Player = lobby.NewPlayer(m.global.User) // the session's copy, before the reseat
+	require.NotSame(t, seat, m.global.Player)
+
+	_, cmd := m.Update(lobbyMsg{Type: lobby.EventPlayersUpdated, src: m.lobbyChan})
+
+	require.NotNil(t, cmd)
+	batch, ok := cmd().(tea.BatchMsg)
+	require.True(t, ok, "the feed listener and the player update")
+	require.Len(t, batch, 2)
+	// batch[0] is the feed listener, which blocks until the next event.
+	assert.Equal(t, router.PlayerUpdatedMsg{Player: seat}, batch[1]())
+	assert.Same(t, seat, m.global.Player, "the view acts as the reseated player at once")
+
+	assert.Nil(t, m.syncPlayer(), "an unchanged seat was announced again")
+}

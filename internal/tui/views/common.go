@@ -21,8 +21,13 @@ import (
 // RequestTimeout bounds one repository round trip a view makes on the player's behalf.
 const RequestTimeout = 5 * time.Second
 
-// SessionPlayer is the session user as a seat, or nil before the user is known.
+// SessionPlayer is the session user as a seat, or nil before the user is known. It
+// is GlobalContext.Player, which tui.New builds once and UpdatePlayer keeps current; a
+// context built without one - as tests do - seats User as it is.
 func SessionPlayer(g router.GlobalContext) *game.Player {
+	if g.Player != nil {
+		return g.Player
+	}
 	return lobby.NewPlayer(g.User)
 }
 
@@ -136,7 +141,8 @@ func SeatedFooter(t styles.Theme, localActions []string) string {
 }
 
 // HandleCommonMsg handles what every view handles the same way - resizes, the theme
-// switch and ctrl+c - and reports whether msg was one of them.
+// switch, a reseated session player and ctrl+c - and reports whether msg was one of
+// them.
 func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -147,6 +153,9 @@ func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) 
 		// The router updates its own copy for views built later; this one is on screen
 		// now, so a mid-session theme switch lands without navigating away.
 		global.Theme = styles.NewTheme(msg.IsDark())
+		return true, nil
+	case router.PlayerUpdatedMsg:
+		global.Player = msg.Player
 		return true, nil
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {

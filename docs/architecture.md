@@ -348,6 +348,13 @@ bound. Over either, the session closes with a notice and outcome `input_limit`.
 - `Games []game.Module` - the games on offer, in menu order, taken from the
   `tui.Deps.Games` entries the routes are registered from, so a menu cannot list a
   game with no route or one the manager refuses
+- `Player *game.Player` - the session's seat, built once from `User`
+  (`lobby.NewPlayer`); `views.SessionPlayer` returns it. A ranked finalize reseats a
+  player with a copy carrying the new ratings, and the lobby view, seeing its
+  snapshot's seat hold a different pointer, returns `router.UpdatePlayer(seat)`: the
+  router stores it and forwards it, so the screen on display and every one built
+  later act with the new ratings. A player seated nowhere when the write commits
+  keeps the login's ratings until they reconnect
 - `SessionCtx`, `Width`, `Height`, `Theme`
 
 There is **no `MatchRepository` on the TUI**. Persistence is owned by

@@ -79,10 +79,25 @@ func navigate(route Route, p Payload) tea.Cmd {
 	return func() tea.Msg { return ChangeViewMsg{ViewName: route, Payload: p} }
 }
 
+// PlayerUpdatedMsg replaces the session's player, in the router's GlobalContext and
+// the active view's copy. See UpdatePlayer.
+type PlayerUpdatedMsg struct{ Player *game.Player }
+
+// UpdatePlayer is the command a view returns when the lobby has reseated the
+// session's player with fresh ratings, so the screens built after it - and the
+// matchmaking they ask for - read those rather than the login's.
+func UpdatePlayer(p *game.Player) tea.Cmd {
+	return func() tea.Msg { return PlayerUpdatedMsg{Player: p} }
+}
+
 // GlobalContext is the session state every view is built from. Each view holds its own
 // copy, so a change a view makes to it is local until the router rebuilds the view.
 type GlobalContext struct {
-	User         *db.User
+	User *db.User
+	// Player is the session's seat, built once from User. Its ratings are the login's
+	// until a ranked match reseats it with new ones: UpdatePlayer carries that copy
+	// here and to the active view.
+	Player       *game.Player
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
 	LobbyManager *lobby.Manager
@@ -239,6 +254,9 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// mid-session. Views hold their own copy of GlobalContext, so the message
 		// falls through to the active view too (see views.HandleCommonMsg).
 		r.Global.Theme = styles.NewTheme(msg.IsDark())
+	case PlayerUpdatedMsg:
+		// Falls through to the active view as the theme does.
+		r.Global.Player = msg.Player
 	case ChangeViewMsg:
 		cmd := r.Goto(msg.ViewName, msg.Payload)
 		return r, cmd

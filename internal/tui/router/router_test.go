@@ -63,6 +63,28 @@ func TestRouter_WindowSize(t *testing.T) {
 	assert.Equal(t, 200, newModel.(*Router).Global.Height)
 }
 
+// A reseated player has to reach the views built later through the router's copy,
+// and the one on screen through the message itself.
+func TestRouter_UpdatePlayerStoresAndForwards(t *testing.T) {
+	t.Parallel()
+	r := New(GlobalContext{})
+	var built []*game.Player
+	r.Register("mock", func(g GlobalContext, _ Payload) tea.Model {
+		built = append(built, g.Player)
+		return MockModel{}
+	})
+	r.Goto("mock", Payload{})
+	p := &game.Player{ID: "p1", Ratings: map[string]uint32{"poker": 1516}}
+
+	msg := UpdatePlayer(p)()
+	r.Update(msg)
+	assert.Equal(t, msg, r.active.(MockModel).handledMsg, "the view on screen never heard")
+	r.Goto("mock", Payload{})
+
+	assert.Same(t, p, r.Global.Player)
+	assert.Equal(t, []*game.Player{nil, p}, built)
+}
+
 func TestRouter_ChangeViewMsg(t *testing.T) {
 	t.Parallel()
 	r := New(GlobalContext{})
