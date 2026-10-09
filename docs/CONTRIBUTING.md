@@ -92,7 +92,10 @@ var _ game.Rules = (*Rules)(nil)
 
 `TimeoutAction` is one of its methods, not an option: it is the move the turn clock
 plays for a player who stopped playing, and without it a player who walks away
-would freeze the table.
+would freeze the table. `Standings` returns places, not just an order: rank every
+seated player, then every leaver below them, and let a draw share a place within
+either group but never across it. A game ranked on one number gets all of that
+from `game.RankByScore(state, score)`.
 
 Add the optional interfaces you actually need, each with its own compile-time
 assertion:
@@ -101,7 +104,6 @@ assertion:
 |---|---|
 | `game.PlayerLeaveHandler` | mid-hand disconnects change your state (`OnPlayerLeave` before removal, `AfterPlayerRemoved` after seat indices shift) |
 | `game.TurnDurationHandler` | one phase needs longer than 30s (hearts' pass, the between-hands deal) |
-| `game.StandingScorer` | equal results should share a place rather than break the tie by seat order |
 
 Two rules that have each cost a bug:
 

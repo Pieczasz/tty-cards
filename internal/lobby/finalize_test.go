@@ -697,7 +697,7 @@ func TestFinalize_AbandonedRankedMatchIsRecordedWithoutElo(t *testing.T) {
 // abandoned table, or a Standings that panicked, leaves behind.
 type noStandingsRules struct{ stubRules }
 
-func (noStandingsRules) Standings(*game.State) []*game.Player { return nil }
+func (noStandingsRules) Standings(*game.State) []game.Standing { return nil }
 
 // The finish metric is labelled with EndReason.String(). These are the labels the
 // dashboards already group by, so a rename there splits every series in two, and a

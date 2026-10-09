@@ -291,10 +291,11 @@ func TestStandings_FewestCardsFirstAndTiesStable(t *testing.T) {
 	standings := Standings(state)
 
 	require.Len(t, standings, 3)
-	assert.Equal(t, []string{"p2", "p1", "p3"}, []string{standings[0].ID, standings[1].ID, standings[2].ID},
+	assert.Equal(t, []string{"p2", "p1", "p3"},
+		[]string{standings[0].Player.ID, standings[1].Player.ID, standings[2].Player.ID},
 		"ties keep seat order so the ranking is reproducible")
-	assert.Equal(t, Score(standings[1]), Score(standings[2]),
-		"Standings and StandingScore have to agree, or a draw is split by seat")
+	assert.Equal(t, []int{1, 2, 2}, []int{standings[0].Place, standings[1].Place, standings[2].Place},
+		"a draw shares a place rather than being split by seat")
 }
 
 func TestLeave(t *testing.T) {

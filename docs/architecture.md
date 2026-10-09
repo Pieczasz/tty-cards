@@ -600,8 +600,8 @@ taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
    `WaitForFinalizers` to wait on. A refused registration goes to
    `dropFinishedMatch` instead; `finalizeFinishedGame` takes the result
 2. A 15-second timeout context
-3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (ties share
-   a place where the rules implement `StandingScorer`) and whether they `Left`;
+3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (the rules'
+   own `Standings` decides it, draws sharing one) and whether they `Left`;
    its `Player` is a copy of the seat's identity (`ID`, `UserID`, `Name`), safe to
    read after the engine lock, and finalize needs no `WithState` to find the leavers
 4. The rating gate (§6.4)
@@ -634,7 +634,7 @@ engine's.
   without asking `Standings` (state may be half-applied) -> **unrated** persistence. Anything checkable up front belongs in
   `ValidateAction`.
 - Optional, probed by type assertion: `PlayerLeaveHandler`,
-  `TurnDurationHandler`, `StandingScorer`. `TimeoutAction` is not optional - it is
+  `TurnDurationHandler`. `TimeoutAction` is not optional - it is
   on `Rules` itself - because a table without it freezes on a player who walks away.
 
 Per-game state lives in `State.Extra` (`*crazyeight.State`, `*poker.State`,
@@ -1135,13 +1135,14 @@ leavers' `matches_played` goes up by one. The match is stored `ranked = true`, s
 it counts towards the pair cap. A shutdown still overrides it to casual, like any
 ranked match.
 
-**Leavers rank strictly below seated players.** `standingsLocked` appends
-`LeftPlayers` after the seats the rules placed (reverse leave order among
-themselves), and `placesLocked` guards the tie branch with
-`left[p.ID] == left[standings[i-1].ID]`: a leaver's `StandingScore` was measured
-against a state they are no longer in, so tying it with a seated player would turn
-a rage-quit into a rated draw. Two leavers with the same score do still share a
-place, because splitting them mints Elo between two people who both quit.
+**Leavers rank strictly below seated players.** `Rules.Standings` returns the places
+itself, and `game.RankByScore` (hearts, gin rummy, the shedding games) ranks the
+seated players, then the leavers (last to leave first on a tie), sharing places
+only within each group: a leaver's score was measured against a state they are no
+longer in, so tying it with a seated player would turn a rage-quit into a rated
+draw. Two leavers with the same score do still share a place, because splitting
+them mints Elo between two people who both quit. Poker's `rankPlayers` splits its
+tie groups at the same boundary.
 
 ### 6.5 Ranked finalize - one transaction
 

@@ -60,8 +60,19 @@ func (m *MockRules) TimeoutAction(state *game.State) game.Action {
 	action, _ := m.Called(state).Get(0).(game.Action)
 	return action
 }
-func (m *MockRules) Standings(state *game.State) []*game.Player {
-	return m.Called(state).Get(0).([]*game.Player)
+
+// Standings takes the order a test expects as players, one place each.
+func (m *MockRules) Standings(state *game.State) []game.Standing {
+	return ranked(m.Called(state).Get(0).([]*game.Player))
+}
+
+// ranked places players one each, in the order given: a ranking with no draws.
+func ranked(players []*game.Player) []game.Standing {
+	out := make([]game.Standing, len(players))
+	for i, p := range players {
+		out[i] = game.Standing{Player: p, Place: i + 1}
+	}
+	return out
 }
 
 type MockMatchRepo struct {
@@ -764,7 +775,11 @@ type stubRules struct{}
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
 func (stubRules) ValidateAction(*game.State, game.Action) error { return nil }
 func (stubRules) CheckWinCondition(s *game.State) bool          { return s.Extra == stubWin }
-func (stubRules) Standings(s *game.State) []*game.Player        { return s.Players }
+func (stubRules) Standings(s *game.State) []game.Standing {
+	left := slices.Clone(s.LeftPlayers)
+	slices.Reverse(left)
+	return ranked(slices.Concat(s.Players, left))
+}
 
 // TimeoutAction passes, so an expired turn moves on.
 func (stubRules) TimeoutAction(*game.State) game.Action { return stubAction("pass") }

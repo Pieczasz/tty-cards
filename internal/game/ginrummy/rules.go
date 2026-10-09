@@ -24,7 +24,6 @@ type Rules struct{}
 var (
 	_ game.Rules               = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
-	_ game.StandingScorer      = (*Rules)(nil)
 	// No PlayerLeaveHandler: gin is strictly 2-player (MinPlayers == MaxPlayers).
 	// When a player leaves mid-hand, the match ends immediately via the engine's
 	// last-player-standing path. There is no shared state to clean up.
@@ -364,14 +363,13 @@ func (r *Rules) CheckWinCondition(state *game.State) bool {
 }
 
 // Standings ranks by cumulative score descending: gin rummy is a high-score-wins
-// game and StandingsByScore sorts ascending, so the score is negated.
-func (r *Rules) Standings(state *game.State) []*game.Player {
-	if _, ok := state.Extra.(*State); !ok {
+// game and RankByScore ranks ascending, so the score is negated.
+func (r *Rules) Standings(state *game.State) []game.Standing {
+	extra, ok := state.Extra.(*State)
+	if !ok {
 		return nil
 	}
-	return game.StandingsByScore(state.Players, func(p *game.Player) int {
-		return -r.StandingScore(state, p)
-	})
+	return game.RankByScore(state, func(p *game.Player) int { return -extra.CumulativeScores[p.ID] })
 }
 
 func (r *Rules) TimeoutAction(state *game.State) game.Action {
@@ -454,14 +452,4 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 		return 0
 	}
 	return handOverTurnDuration
-}
-
-// StandingScore is the value Standings sorted by. Only equality is read, so the
-// descending order Standings applies does not need repeating here.
-func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return 0
-	}
-	return extra.CumulativeScores[p.ID]
 }

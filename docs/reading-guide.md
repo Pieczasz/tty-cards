@@ -102,10 +102,11 @@ optional hooks), `event.go` (86, `Event`, `EventType`, `EndReason` and their
 **Understand.**
 
 *The contract.* `Rules` (six methods: `OnGameStart`, `ValidateAction`,
-`ApplyAction`, `CheckWinCondition`, `Standings`, `TimeoutAction`) plus three optional
-hooks probed by type assertion: `TurnDurationHandler` (`TurnDuration`),
-`PlayerLeaveHandler` (`OnPlayerLeave` / `AfterPlayerRemoved`) and `StandingScorer`
-(`StandingScore`, so equal results share a place).
+`ApplyAction`, `CheckWinCondition`, `Standings` - places, draws sharing one, the
+leavers below the seated; `game.RankByScore` does both for a game ranked on one
+number - and `TimeoutAction`) plus two optional hooks probed by type assertion:
+`TurnDurationHandler` (`TurnDuration`) and `PlayerLeaveHandler` (`OnPlayerLeave` /
+`AfterPlayerRemoved`).
 
 *One mutex.* `Engine.mu` covers the clock fields **and** `*State`; `State` has no
 lock of its own. Every `Rules` method and every `WithState`/`Frame` callback runs

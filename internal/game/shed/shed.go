@@ -90,8 +90,8 @@ type State struct {
 func Score(p *game.Player) int { return len(p.Cards) }
 
 // Standings is Rules.Standings for a shedding game.
-func Standings(state *game.State) []*game.Player {
-	return game.StandingsByScore(state.Players, Score)
+func Standings(state *game.State) []game.Standing {
+	return game.RankByScore(state, Score)
 }
 
 // Leave is a shedding game's OnPlayerLeave: the hand goes back to the stock and

@@ -59,7 +59,7 @@ Named here so you recognise them on sight, not as an inventory.
 | Snapshot / DTO | `game.StateSnapshot`, `game.PlayerSnapshot`, `lobby.BrowseEntry` - built under one lock, rendered lock-free |
 | Double-checked locking with TTL | `repository.BestPlayers` (5 min) |
 | Dirty-flag cache invalidation | `Manager.cacheDirty atomic.Bool` + a 2 s TTL - atomic specifically to avoid inverting lock order |
-| Optional interface (capability probe) | `game.PlayerLeaveHandler`, `TurnDurationHandler`, `StandingScorer`, `router.Closer` |
+| Optional interface (capability probe) | `game.PlayerLeaveHandler`, `TurnDurationHandler`, `router.Closer` |
 | Sentinel errors | `broadcaster.ErrClosed`/`ErrAtCapacity`, `db.ErrUsernameTaken`… |
 
 Idiomatic Go habits worth matching: `context.Context` first on every repository

@@ -330,7 +330,7 @@ func TestStandings_ChopStableByID(t *testing.T) {
 	extra.Seats["p3"].Chips = 1000
 
 	standings := (&Rules{}).Standings(state)
-	assert.Equal(t, []string{"p1", "p2", "p3"}, []string{standings[0].ID, standings[1].ID, standings[2].ID})
+	assert.Equal(t, []string{"p1", "p2", "p3"}, []string{standings[0].Player.ID, standings[1].Player.ID, standings[2].Player.ID})
 }
 
 func TestSmoke_PassiveHands(t *testing.T) {
@@ -862,12 +862,11 @@ func TestAwardUncontested_NoRefundWhenWinnerRiskedMost(t *testing.T) {
 	assert.Zero(t, extra.Pool)
 }
 
-// Standings is a total order for rendering, but the engine reads StandingScore to
-// tell a genuine draw from a tiebreak by ID - and a draw split into places i and i+1
-// moves Elo from one seat to the other for nothing.
-func TestStandingScore_DrawsShareAGroup(t *testing.T) {
+// Standings is a total order for rendering, but the places tell a genuine draw from a
+// tiebreak by ID - and a draw split into places i and i+1 moves Elo from one seat to
+// the other for nothing.
+func TestStandings_DrawsShareAPlace(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 
 	t.Run("a board that plays is a three-way draw", func(t *testing.T) {
 		t.Parallel()
@@ -885,8 +884,7 @@ func TestStandingScore_DrawsShareAGroup(t *testing.T) {
 			extra.Seats[id].Chips = 1000
 		}
 
-		s1, s2, s3 := rules.StandingScore(state, state.Players[0]),
-			rules.StandingScore(state, state.Players[1]), rules.StandingScore(state, state.Players[2])
+		s1, s2, s3 := placeOf(t, state, "p1"), placeOf(t, state, "p2"), placeOf(t, state, "p3")
 		assert.Equal(t, s1, s2)
 		assert.Equal(t, s2, s3, "identical stacks and identical hands are one place")
 	})
@@ -901,12 +899,12 @@ func TestStandingScore_DrawsShareAGroup(t *testing.T) {
 			"p3": {BustedAtHand: 4},
 		}
 
-		assert.Equal(t, rules.StandingScore(state, state.Players[1]), rules.StandingScore(state, state.Players[2]),
+		assert.Equal(t, placeOf(t, state, "p2"), placeOf(t, state, "p3"),
 			"both went out on hand 4 - chips alone would call this a tie, and so should we")
-		assert.NotEqual(t, rules.StandingScore(state, state.Players[0]), rules.StandingScore(state, state.Players[1]))
+		assert.NotEqual(t, placeOf(t, state, "p1"), placeOf(t, state, "p2"))
 
 		extra.Seats["p3"].BustedAtHand = 7
-		assert.NotEqual(t, rules.StandingScore(state, state.Players[1]), rules.StandingScore(state, state.Players[2]),
+		assert.NotEqual(t, placeOf(t, state, "p2"), placeOf(t, state, "p3"),
 			"p3 lasted three hands longer: equal chips, but not a draw")
 	})
 }
@@ -1113,9 +1111,8 @@ func TestAwardUncontested_DeadMoneyGoesToTheWinner(t *testing.T) {
 // Hole cards only separate two equal stacks when they were actually shown down, and
 // only between players still at the table: a pot won face-down and a leaver's hand
 // were never contested, so ranking on them splits a draw by cards nobody played.
-func TestStandingScore_HandsOnlySeparateSeatedShowdowns(t *testing.T) {
+func TestStandings_HandsOnlySeparateSeatedShowdowns(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
 
 	tests := []struct {
 		name      string
@@ -1145,20 +1142,21 @@ func TestStandingScore_HandsOnlySeparateSeatedShowdowns(t *testing.T) {
 				state.LeftPlayers = state.Players[1:]
 				state.Players = state.Players[:1]
 			}
-			p2, p3 := findPlayer(state, "p2"), findPlayer(state, "p3")
-
-			shared := rules.StandingScore(state, p2) == rules.StandingScore(state, p3)
+			shared := placeOf(t, state, "p2") == placeOf(t, state, "p3")
 
 			assert.Equal(t, tt.wantShare, shared)
 		})
 	}
 }
 
-func findPlayer(state *game.State, id string) *game.Player {
-	for _, p := range slices.Concat(state.Players, state.LeftPlayers) {
-		if p.ID == id {
-			return p
+// placeOf is id's finishing place in the rules' standings.
+func placeOf(t *testing.T, state *game.State, id string) int {
+	t.Helper()
+	for _, s := range (&Rules{}).Standings(state) {
+		if s.Player.ID == id {
+			return s.Place
 		}
 	}
-	return nil
+	t.Fatalf("%s is not ranked", id)
+	return 0
 }

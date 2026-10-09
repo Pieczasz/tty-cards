@@ -462,8 +462,8 @@ func TestRankPlayers_Order(t *testing.T) {
 		ranked := rankPlayers(state, extra)
 
 		require.Len(t, ranked, 2)
-		assert.Equal(t, "p1", ranked[0].ID, "900 beats 100")
-		assert.Equal(t, "p0", ranked[1].ID)
+		assert.Equal(t, "p1", ranked[0].Player.ID, "900 beats 100")
+		assert.Equal(t, "p0", ranked[1].Player.ID)
 	})
 
 	// Two players who finish level on chips are separated by the hand they were
@@ -486,7 +486,7 @@ func TestRankPlayers_Order(t *testing.T) {
 
 		ranked := rankPlayers(state, extra)
 
-		assert.Equal(t, "p1", ranked[0].ID, "trip aces on the flop outranks nothing")
+		assert.Equal(t, "p1", ranked[0].Player.ID, "trip aces on the flop outranks nothing")
 	})
 }
 

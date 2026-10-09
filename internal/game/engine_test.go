@@ -46,9 +46,18 @@ func (m *MockRules) CheckWinCondition(state *State) bool {
 	return args.Bool(0)
 }
 
-func (m *MockRules) Standings(state *State) []*Player {
-	args := m.Called(state)
-	return args.Get(0).([]*Player)
+// Standings takes the order a test expects as players, one place each.
+func (m *MockRules) Standings(state *State) []Standing {
+	return inOrder(m.Called(state).Get(0).([]*Player))
+}
+
+// inOrder places players one each, in the order given: a ranking with no draws.
+func inOrder(players []*Player) []Standing {
+	out := make([]Standing, len(players))
+	for i, p := range players {
+		out[i] = Standing{Player: p, Place: i + 1}
+	}
+	return out
 }
 
 // dealEach is the deal a test rules set's OnGameStart makes, the rules owning the
@@ -440,43 +449,26 @@ func TestEngine_Snapshot(t *testing.T) {
 	})
 }
 
-// Standings feeds match persistence, so a player who left has to appear exactly once: twice
-// inflates their placement, never means the lobby records the wrong result.
-func TestEngine_Standings_PlacesPlayersWhoLeft(t *testing.T) {
+// Finalize charges the leavers it finds marked Left, and the rules rank them on
+// what they did - poker on the chips they walked out with - so the engine marks the
+// seats the rules placed rather than placing anyone itself.
+func TestEngine_Standings_MarksThePlayersWhoLeft(t *testing.T) {
 	t.Parallel()
+	stayed := &Player{ID: "p1"}
+	left := &Player{ID: "p2"}
 
-	t.Run("players the rules did not place are appended, latest leave first", func(t *testing.T) {
-		t.Parallel()
-		stayed := &Player{ID: "p1"}
-		leftFirst := &Player{ID: "p2"}
-		leftLast := &Player{ID: "p3"}
+	m := setupMockRules()
+	m.On("Standings", mock.Anything).Return([]*Player{stayed, left})
+	engine := NewEngine(m, []*Player{stayed})
+	t.Cleanup(engine.Close)
+	engine.WithState(func(state *State) { state.LeftPlayers = []*Player{left} })
 
-		m := setupMockRules()
-		m.On("Standings", mock.Anything).Return([]*Player{stayed})
-		engine := NewEngine(m, []*Player{stayed})
-		t.Cleanup(engine.Close)
-		engine.WithState(func(state *State) {
-			state.LeftPlayers = []*Player{leftFirst, leftLast}
-		})
+	standings := engine.Standings()
 
-		assert.Equal(t, []string{"p1", "p3", "p2"}, standingIDs(engine))
-	})
-
-	t.Run("players the rules placed themselves are not repeated", func(t *testing.T) {
-		t.Parallel()
-		stayed := &Player{ID: "p1"}
-		left := &Player{ID: "p2"}
-
-		m := setupMockRules()
-		// Poker ranks a departed player on the chips they walked out with, so the
-		// engine must not append them a second time.
-		m.On("Standings", mock.Anything).Return([]*Player{stayed, left})
-		engine := NewEngine(m, []*Player{stayed})
-		t.Cleanup(engine.Close)
-		engine.WithState(func(state *State) { state.LeftPlayers = []*Player{left} })
-
-		assert.Equal(t, []string{"p1", "p2"}, standingIDs(engine))
-	})
+	assert.Equal(t, []string{"p1", "p2"}, standingIDs(engine))
+	require.Len(t, standings, 2)
+	assert.False(t, standings[0].Left)
+	assert.True(t, standings[1].Left)
 }
 
 // An ID that is not seated must match no seat at all.
@@ -626,89 +618,6 @@ func TestEngine_ConcurrentOperations(t *testing.T) {
 		assert.Less(t, state.CurrentTurn, len(state.Players))
 	})
 	require.NotPanics(t, func() { _ = engine.CurrentPlayerID() })
-}
-
-// tiedScorer reports the same standing score for everyone, which is what every seat
-// looks like before the first hand is scored.
-type tiedScorer struct{ *MockRules }
-
-func (tiedScorer) StandingScore(*State, *Player) int { return 0 }
-
-// A player who walked out must never share a place with a seated one: finalize feeds
-// places straight into Elo, and an equal place is recorded as a draw. Hearts reaches
-// this on any hand-1 disconnect, where every CumulativeScore is still zero.
-//
-// Both halves of the mix matter: without a StandingScorer nothing may tie at all, and
-// with one only the seats that played may.
-func TestEngine_Places_LeaverNeverTiesASeatedPlayer(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		rules func(*MockRules) Rules
-		want  []int
-	}{
-		{
-			name:  "rules that score standings",
-			rules: func(m *MockRules) Rules { return tiedScorer{m} },
-			want:  []int{1, 1, 3},
-		},
-		{
-			// No StandingScorer: the engine cannot know two seats drew, so places
-			// count up strictly rather than guessing a tie.
-			name:  "rules without a scorer",
-			rules: func(m *MockRules) Rules { return m },
-			want:  []int{1, 2, 3},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			stayed := &Player{ID: "p1"}
-			alsoStayed := &Player{ID: "p2"}
-			quitter := &Player{ID: "p3"}
-
-			m := setupMockRules()
-			m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-			engine := NewEngine(tt.rules(m), []*Player{stayed, alsoStayed})
-			t.Cleanup(engine.Close)
-			engine.WithState(func(state *State) { state.LeftPlayers = []*Player{quitter} })
-
-			standings := engine.Standings()
-
-			require.Len(t, standings, 3)
-			assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine))
-			assert.Equal(t, tt.want, places(standings), "the quitter always places last on their own")
-			assert.Equal(t, []bool{false, false, true}, []bool{standings[0].Left, standings[1].Left, standings[2].Left},
-				"finalize charges the leavers it reads off Left")
-		})
-	}
-}
-
-// Two leavers with the same StandingScore are a draw with each other. Splitting them
-// into consecutive places moves Elo between people who both walked out.
-func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
-	t.Parallel()
-
-	stayed := &Player{ID: "p1"}
-	alsoStayed := &Player{ID: "p2"}
-	quitFirst := &Player{ID: "p3"}
-	quitSecond := &Player{ID: "p4"}
-
-	m := setupMockRules()
-	m.On("Standings", mock.Anything).Return([]*Player{stayed, alsoStayed})
-	engine := NewEngine(tiedScorer{m}, []*Player{stayed, alsoStayed})
-	t.Cleanup(engine.Close)
-	engine.WithState(func(state *State) {
-		state.LeftPlayers = []*Player{quitFirst, quitSecond}
-	})
-
-	standings := engine.Standings()
-
-	require.Len(t, standings, 4)
-	assert.Equal(t, []string{"p1", "p2", "p4", "p3"}, standingIDs(engine))
-	assert.Equal(t, []int{1, 1, 3, 3}, places(standings))
 }
 
 // Standings outlive the engine lock - finalize reads them on its own goroutine - so

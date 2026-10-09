@@ -27,7 +27,6 @@ type Rules struct{}
 var (
 	_ game.Rules              = (*Rules)(nil)
 	_ game.PlayerLeaveHandler = (*Rules)(nil)
-	_ game.StandingScorer     = (*Rules)(nil)
 )
 
 // TimeoutAction draws. ValidateAction always accepts a draw, and on an exhausted
@@ -167,6 +166,4 @@ func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) {}
 // Standings ranks by fewest cards held. Deviation: the paper game scores a hand by
 // the pip value of the cards left in each hand, which needs a running match total
 // this table does not keep - one hand, and the shortest hand takes it.
-func (r *Rules) Standings(state *game.State) []*game.Player { return shed.Standings(state) }
-
-func (r *Rules) StandingScore(_ *game.State, p *game.Player) int { return shed.Score(p) }
+func (r *Rules) Standings(state *game.State) []game.Standing { return shed.Standings(state) }

@@ -36,7 +36,11 @@ type Rules interface {
 	// ends the table as a rules error.
 	ApplyAction(state *State, action Action) error
 	CheckWinCondition(state *State) bool
-	Standings(state *State) []*Player
+	// Standings ranks everyone who sat down, best first, each with a 1-based Place
+	// that players who drew share. The leavers come after every seated player and
+	// never share a place with one (RankByScore does both); Left is the engine's to
+	// fill in.
+	Standings(state *State) []Standing
 
 	// TimeoutAction is the move played for a seat whose turn ran out; it must be one
 	// ValidateAction accepts, and nil means there is none, which takes the seat. It
@@ -59,15 +63,17 @@ type PlayerLeaveHandler interface {
 	AfterPlayerRemoved(state *State, removedIndex int)
 }
 
-// StandingScorer reports the value Standings ordered a player by, so
-// Engine.Standings can turn a tie into equal finishing places. Without it a
-// draw is split by slice position and the seat that sorted first takes rating off the
-// other.
-//
-// Only equality is read, so sign and direction do not matter. A rules set whose
-// ordering is already total can skip this.
-type StandingScorer interface {
-	StandingScore(state *State, p *Player) int
+// Standing is one player's finishing position.
+type Standing struct {
+	// Player is the seat. From Engine.Standings it is a copy of the seat's identity -
+	// ID, UserID and Name - and nothing the table still writes, so it is safe to read
+	// once the engine lock is gone.
+	Player *Player
+	// Place is 1-based. Players who drew share one.
+	Place int
+	// Left marks a seat that walked out before the end; it places below every seat
+	// still at the table.
+	Left bool
 }
 
 // AnyScoreAtLeast is the match-target check for games played to a score.
@@ -80,13 +86,28 @@ func AnyScoreAtLeast(scores map[string]int, target int) bool {
 	return false
 }
 
-// StandingsByScore orders players by score ascending, ties stable by seat order, so a
-// rules set's Standings and StandingScore cannot disagree. Negate the score to sort
-// descending.
-func StandingsByScore(players []*Player, score func(*Player) int) []*Player {
-	standings := slices.Clone(players)
-	slices.SortStableFunc(standings, func(a, b *Player) int {
-		return cmp.Compare(score(a), score(b))
-	})
-	return standings
+// RankByScore is Standings for a game ranked on one number, lowest first; negate the
+// score to rank highest first. Equal scores share a place and keep seat order. The
+// leavers rank below every seated player, the last to leave first on a tie, and share
+// a place only among themselves: a leaver's score was measured against a table they
+// left, so a tie with a seated player would turn a rage-quit into a rated draw, while
+// splitting two leavers would move Elo between people who both quit.
+func RankByScore(state *State, score func(*Player) int) []Standing {
+	left := slices.Clone(state.LeftPlayers)
+	slices.Reverse(left)
+	seated := rankGroup(slices.Clone(state.Players), score, 1)
+	return append(seated, rankGroup(left, score, len(seated)+1)...)
+}
+
+// rankGroup sorts players by score and places them from first on.
+func rankGroup(players []*Player, score func(*Player) int, first int) []Standing {
+	slices.SortStableFunc(players, func(a, b *Player) int { return cmp.Compare(score(a), score(b)) })
+	out := make([]Standing, len(players))
+	for i, p := range players {
+		out[i] = Standing{Player: p, Place: first + i}
+		if i > 0 && score(p) == score(players[i-1]) {
+			out[i].Place = out[i-1].Place
+		}
+	}
+	return out
 }

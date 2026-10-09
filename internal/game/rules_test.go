@@ -32,49 +32,75 @@ func TestAnyScoreAtLeast(t *testing.T) {
 	}
 }
 
-// Standings and StandingScore have to agree or Engine.Standings records a tie the
-// rules never meant, so four games share this sort. Stability is the contract: equal
-// scores keep seat order, which is what makes the places deterministic.
-func TestStandingsByScore(t *testing.T) {
+// RankByScore is three games' Standings, and its places go straight into Elo: an
+// equal place is a draw. Stability is the contract too - equal scores keep seat order,
+// which is what makes the order deterministic.
+func TestRankByScore(t *testing.T) {
 	t.Parallel()
 
-	a := &Player{ID: "a"}
-	b := &Player{ID: "b"}
-	c := &Player{ID: "c"}
-	players := []*Player{a, b, c}
-	ids := func(in []*Player) []string {
+	ids := func(in []Standing) []string {
 		out := make([]string, 0, len(in))
-		for _, p := range in {
-			out = append(out, p.ID)
+		for _, s := range in {
+			out = append(out, s.Player.ID)
 		}
 		return out
 	}
+	table := func(seated, left string) *State {
+		s := &State{}
+		for _, id := range seated {
+			s.Players = append(s.Players, &Player{ID: string(id)})
+		}
+		for _, id := range left {
+			s.LeftPlayers = append(s.LeftPlayers, &Player{ID: string(id)})
+		}
+		return s
+	}
+	scores := map[string]int{"a": 3, "b": 1, "c": 2}
+	byScore := func(p *Player) int { return scores[p.ID] }
+	tied := func(*Player) int { return 0 }
 
 	t.Run("ascending by score", func(t *testing.T) {
 		t.Parallel()
-		scores := map[string]int{"a": 3, "b": 1, "c": 2}
-		got := StandingsByScore(players, func(p *Player) int { return scores[p.ID] })
+		got := RankByScore(table("abc", ""), byScore)
 		assert.Equal(t, []string{"b", "c", "a"}, ids(got))
+		assert.Equal(t, []int{1, 2, 3}, places(got))
 	})
 
-	t.Run("a negated score sorts descending", func(t *testing.T) {
+	t.Run("a negated score ranks descending", func(t *testing.T) {
 		t.Parallel()
-		scores := map[string]int{"a": 3, "b": 1, "c": 2}
-		got := StandingsByScore(players, func(p *Player) int { return -scores[p.ID] })
+		got := RankByScore(table("abc", ""), func(p *Player) int { return -scores[p.ID] })
 		assert.Equal(t, []string{"a", "c", "b"}, ids(got))
 	})
 
-	t.Run("ties keep seat order", func(t *testing.T) {
+	t.Run("a tie shares a place and keeps seat order", func(t *testing.T) {
 		t.Parallel()
-		got := StandingsByScore(players, func(*Player) int { return 0 })
+		got := RankByScore(table("abc", ""), tied)
 		assert.Equal(t, []string{"a", "b", "c"}, ids(got))
+		assert.Equal(t, []int{1, 1, 1}, places(got))
 	})
 
-	t.Run("the caller's slice is left alone", func(t *testing.T) {
+	t.Run("the caller's seats are left alone", func(t *testing.T) {
 		t.Parallel()
-		scores := map[string]int{"a": 3, "b": 1, "c": 2}
-		StandingsByScore(players, func(p *Player) int { return scores[p.ID] })
-		assert.Equal(t, []string{"a", "b", "c"}, ids(players),
-			"sorting standings must not reorder the seats at the table")
+		state := table("abc", "")
+		RankByScore(state, byScore)
+		assert.Equal(t, "a", state.Players[0].ID, "ranking must not reorder the seats at the table")
+	})
+
+	// Hearts reaches this on any hand-1 disconnect, where every score is still zero:
+	// a leaver sharing a seated player's place is a rage-quit recorded as a draw.
+	t.Run("a leaver never ties a seated player", func(t *testing.T) {
+		t.Parallel()
+		got := RankByScore(table("ab", "c"), tied)
+		assert.Equal(t, []string{"a", "b", "c"}, ids(got))
+		assert.Equal(t, []int{1, 1, 3}, places(got), "the quitter places last on their own")
+	})
+
+	// Splitting two leavers into consecutive places moves Elo between people who
+	// both walked out; the last to leave ranks first among them.
+	t.Run("leavers with an equal score share a place", func(t *testing.T) {
+		t.Parallel()
+		got := RankByScore(table("ab", "cd"), tied)
+		assert.Equal(t, []string{"a", "b", "d", "c"}, ids(got))
+		assert.Equal(t, []int{1, 1, 3, 3}, places(got))
 	})
 }

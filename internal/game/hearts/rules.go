@@ -25,7 +25,6 @@ var (
 	_ game.Rules               = (*Rules)(nil)
 	_ game.PlayerLeaveHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
-	_ game.StandingScorer      = (*Rules)(nil)
 )
 
 // ActionPassCards hands exactly three cards to the seat PassDirection names.
@@ -266,13 +265,12 @@ func (r *Rules) CheckWinCondition(state *game.State) bool {
 
 // Standings ranks by cumulative score ascending: hearts is a low-score-wins game,
 // so the seat that took the fewest points is first.
-func (r *Rules) Standings(state *game.State) []*game.Player {
-	if _, ok := state.Extra.(*State); !ok {
+func (r *Rules) Standings(state *game.State) []game.Standing {
+	extra, ok := state.Extra.(*State)
+	if !ok {
 		return nil
 	}
-	return game.StandingsByScore(state.Players, func(p *game.Player) int {
-		return r.StandingScore(state, p)
-	})
+	return game.RankByScore(state, func(p *game.Player) int { return standingScore(extra, p) })
 }
 
 func (r *Rules) TimeoutAction(state *game.State) game.Action {
@@ -327,15 +325,11 @@ func (r *Rules) OnPlayerLeave(state *game.State, _ string) {
 
 func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) {}
 
-// StandingScore is the value Standings sorted by, so players who finished the match
+// standingScore is the total Standings ranks by, so players who finished the match
 // on the same total are reported as the draw they are. Mid-hand - a table that ended
 // on a disconnect - the live hand's points count too, or the winner is whoever sat
 // first. Once scoreHand has folded them into the totals they must not count twice.
-func (r *Rules) StandingScore(state *game.State, p *game.Player) int {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return 0
-	}
+func standingScore(extra *State, p *game.Player) int {
 	if extra.HandComplete() {
 		return extra.CumulativeScores[p.ID]
 	}

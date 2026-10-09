@@ -349,27 +349,30 @@ func chipsInPlay(extra *State) uint {
 // rankPlayers ranks everyone who sat down, with the players who walked out last.
 // Leaving mid-match forfeits the match, so no leaver places above someone who saw
 // it through - but leavers are still ranked against each other on what they won
-// while they were playing, not on who happened to quit first.
-func rankPlayers(state *game.State, extra *State) []*game.Player {
-	byResult := resultOrder(state, extra)
-
-	seated := slices.Clone(state.Players)
-	left := slices.Clone(state.LeftPlayers)
-	slices.SortFunc(seated, byResult)
-	slices.SortFunc(left, byResult)
-	return slices.Concat(seated, left)
+// while they were playing, not on who happened to quit first. Players resultLevel
+// cannot separate share a place - two who busted on the same hand are a draw, not
+// places i and i+1 split by whose ID sorts first - but never across the seated and
+// left groups.
+func rankPlayers(state *game.State, extra *State) []game.Standing {
+	level := resultLevel(state, extra)
+	seated := placeByResult(slices.Clone(state.Players), level, 1)
+	return append(seated, placeByResult(slices.Clone(state.LeftPlayers), level, len(seated)+1)...)
 }
 
-// resultOrder is resultLevel with the ID as a final tiebreak, so Standings is a total
-// order and a chop renders in a stable sequence.
-func resultOrder(state *game.State, extra *State) func(a, b *game.Player) int {
-	level := resultLevel(state, extra)
-	return func(a, b *game.Player) int {
-		if c := level(a, b); c != 0 {
-			return c
+// placeByResult sorts players by level, the ID as a final tiebreak so a chop renders
+// in a stable sequence, and places them from first on.
+func placeByResult(players []*game.Player, level func(a, b *game.Player) int, first int) []game.Standing {
+	slices.SortFunc(players, func(a, b *game.Player) int {
+		return cmp.Or(level(a, b), cmp.Compare(a.ID, b.ID))
+	})
+	out := make([]game.Standing, len(players))
+	for i, p := range players {
+		out[i] = game.Standing{Player: p, Place: first + i}
+		if i > 0 && level(players[i-1], p) == 0 {
+			out[i].Place = out[i-1].Place
 		}
-		return cmp.Compare(a.ID, b.ID)
 	}
+	return out
 }
 
 // resultLevel compares two players by what they actually did: chips desc, bust-out
