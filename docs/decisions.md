@@ -531,7 +531,10 @@ the backstop that takes the seat even inside the grace window.
 `Manager.ResumePlayer` - reached through `tui.ResumeSeat`, which the ssh layer
 calls only once the session owns its tracker slot
 ([#45](#45-the-session-tracker-lock-comes-before-the-managers)) - cancels a
-pending leave and lands the player back at the table.
+pending leave. The player lands back at the table through the session's first
+route: home is built through `seatedOr`, which finds the still-indexed seat and
+opens its lobby view (until 2026-10-09 the router also had a `SetInitialRoute` that
+said the same thing).
 
 **Consequences.** The other players are never made to wait: three 30-second
 auto-played turns is the worst case, and the clock keeps running. A waiting-lobby

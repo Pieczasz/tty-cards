@@ -78,7 +78,7 @@ Settling the cursor also arms a per-turn timer (`DefaultTurnTimeout`, 30s). The 
 
 The game view quits its bubbletea program on its own `EventPlayerIdle`, which is what ends the ssh session through the ordinary `releaseSession` path - the engine never reaches into the session layer.
 
-A dropped session calls `Manager.DisconnectPlayer`, not `LeaveLobby`: a mid-game seat survives for `disconnectGrace` (90s, with the engine auto-playing and its idle removal as the backstop) so a reconnect - `Manager.ResumePlayer`, reached through `tui.ResumeSeat`, which the ssh layer calls only once the session owns its tracker slot - resumes the match instead of forfeiting it. A waiting-lobby seat and any seat during shutdown still leave immediately.
+A dropped session calls `Manager.DisconnectPlayer`, not `LeaveLobby`: a mid-game seat survives for `disconnectGrace` (90s, with the engine auto-playing and its idle removal as the backstop) so a reconnect - `Manager.ResumePlayer`, reached through `tui.ResumeSeat`, which the ssh layer calls only once the session owns its tracker slot - cancels the grace and resumes the match instead of forfeiting it (the session's home route finds the still-indexed seat through `seatedOr`). A waiting-lobby seat and any seat during shutdown still leave immediately.
 
 ### BoundEngine, not Engine, in views
 

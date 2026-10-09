@@ -95,7 +95,8 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 			return
 		}
 		close(displaced)
-		if resumed := manager.ResumePlayer(guestPlayer); resumed != table {
+		manager.ResumePlayer(guestPlayer)
+		if resumed := manager.FindLobbyByPlayer(guestPlayer); resumed != table {
 			t.Errorf("takeover did not resume the waiting seat: got %v", resumed)
 		}
 	}

@@ -321,8 +321,8 @@ func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int)
 }
 
 // The grace timer firing and the player reconnecting are the same seat from two
-// goroutines. Whoever loses must lose completely: a resume that hands back a lobby the
-// expiry has already emptied drops the player into a table that does not hold them.
+// goroutines. Whoever loses must lose completely: a resume that cancels nothing while
+// the expiry empties the seat, or an expiry that runs after a resume kept it.
 func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 	t.Parallel()
 
@@ -333,9 +333,8 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			m.DisconnectPlayer(guest)
 
 			var (
-				wg      sync.WaitGroup
-				gate    = make(chan struct{})
-				resumed *Lobby
+				wg   sync.WaitGroup
+				gate = make(chan struct{})
 			)
 			wg.Add(2)
 			go func() {
@@ -346,23 +345,19 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				resumed = m.ResumePlayer(guest)
+				m.ResumePlayer(guest)
 			}()
 			close(gate)
 			wg.Wait()
 
 			seatInvariant(t, m, l, guest, i)
-			if resumed != nil {
-				assert.True(t, l.HasPlayer(guest), "iter %d: resumed into a seat that was given up", i)
-				assert.Equal(t, l, resumed, "iter %d: resumed into the wrong table", i)
-			}
 		}
 	})
 }
 
 // Two sessions for one account can both reach ResumePlayer - a takeover overlaps the
 // old session's teardown. Exactly one may cancel the grace, and neither may leave one
-// armed or come back with a lobby the player is not in.
+// armed or lose the seat.
 func TestConcurrent_ReconnectTwice(t *testing.T) {
 	t.Parallel()
 
@@ -375,23 +370,18 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
-				got  [2]*Lobby
 			)
-			for slot := range got {
-				wg.Add(1)
-				go func(slot int) {
-					defer wg.Done()
+			for range 2 {
+				wg.Go(func() {
 					<-gate
-					got[slot] = m.ResumePlayer(guest)
-				}(slot)
+					m.ResumePlayer(guest)
+				})
 			}
 			close(gate)
 			wg.Wait()
 
 			seatInvariant(t, m, l, guest, i)
-			for _, resumed := range got {
-				assert.Equal(t, l, resumed, "iter %d: a reconnecting session lost its own table", i)
-			}
+			assert.Equal(t, l, m.FindLobbyByPlayer(guest), "iter %d: a reconnecting session lost its own table", i)
 		}
 	})
 }

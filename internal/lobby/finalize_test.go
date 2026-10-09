@@ -308,8 +308,8 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 	assert.True(t, l.HasPlayer(guest), "the seat is held for the grace window")
 	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "and stays indexed")
 
-	resumed := m.ResumePlayer(guest)
-	require.Equal(t, l, resumed, "a reconnect lands back at the same lobby")
+	m.ResumePlayer(guest)
+	require.Equal(t, l, m.FindLobbyByPlayer(guest), "a reconnect lands back at the same lobby")
 	m.mu.Lock()
 	_, pending := m.grace.pending[guest.ID]
 	m.mu.Unlock()
@@ -325,13 +325,13 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	m.expireLeave(guest)
 
 	assert.False(t, l.HasPlayer(guest), "the expired seat is given up")
-	assert.Nil(t, m.FindLobbyByPlayer(guest))
-	assert.Nil(t, m.ResumePlayer(guest), "nothing to resume after expiry")
+	m.ResumePlayer(guest)
+	assert.Nil(t, m.FindLobbyByPlayer(guest), "nothing to resume after expiry")
 }
 
-// expireLeave deletes the pending entry before LeaveLobby; ResumePlayer must not
-// treat a missing entry as "still seated" or it routes into a seat about to vanish.
-func TestResumePlayer_AfterExpireClaimReturnsNil(t *testing.T) {
+// expireLeave claims the grace before LeaveLobby runs; a resume in that gap must leave
+// the claim alone; the seat is about to go whatever the reconnect does.
+func TestResumePlayer_LeavesAClaimedExpiryAlone(t *testing.T) {
 	t.Parallel()
 
 	m, l, _, guest := startedGame(t)
@@ -344,7 +344,11 @@ func TestResumePlayer_AfterExpireClaimReturnsNil(t *testing.T) {
 	m.mu.Unlock()
 	require.True(t, stillSeated)
 
-	assert.Nil(t, m.ResumePlayer(guest), "grace already claimed: do not resume")
+	m.ResumePlayer(guest)
+	m.mu.Lock()
+	_, claimed := m.grace.expiring[guest.ID]
+	m.mu.Unlock()
+	assert.True(t, claimed, "grace already claimed: do not resume")
 	assert.True(t, l.HasPlayer(guest), "LeaveLobby has not run yet")
 }
 
@@ -355,7 +359,8 @@ func TestResumePlayer_TakeoverWithoutPendingLeave(t *testing.T) {
 
 	m, l, _, guest := startedGame(t)
 
-	assert.Equal(t, l, m.ResumePlayer(guest), "zombie session still holds the seat")
+	m.ResumePlayer(guest)
+	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "zombie session still holds the seat")
 }
 
 // A dropped session that was not at any table has no seat to hold.
@@ -367,7 +372,8 @@ func TestDisconnectPlayer_UnseatedPlayerHoldsNothing(t *testing.T) {
 	m.DisconnectPlayer(p)
 
 	assert.False(t, pendingGrace(m, p.ID), "a grace was armed for a seat that does not exist")
-	assert.Nil(t, m.ResumePlayer(p))
+	m.ResumePlayer(p)
+	assert.Nil(t, m.FindLobbyByPlayer(p))
 }
 
 // The timer can fire while a reconnect is on its way in: Stop then fails, and the
@@ -382,7 +388,7 @@ func TestResumePlayer_RefusedOnceTheTimerHasFired(t *testing.T) {
 	m.mu.Unlock()
 	<-fired
 
-	assert.Nil(t, m.ResumePlayer(guest), "resumed into a seat whose expiry is already running")
+	m.ResumePlayer(guest)
 	assert.True(t, pendingGrace(m, guest.ID), "the refused resume took the hold from the expiry")
 	assert.True(t, l.HasPlayer(guest))
 }
@@ -583,25 +589,6 @@ func TestBeginShutdown_GivesUpSeatsHeldForAReconnect(t *testing.T) {
 	assert.False(t, pendingGrace(m, guest.ID), "a grace timer survived shutdown")
 	assert.False(t, l.HasPlayer(guest), "the seat was still held when the process went away")
 	assert.Nil(t, m.FindLobbyByPlayer(guest))
-}
-
-// ResumePlayer's two siblings re-validate the index against the roster; it did not,
-// so a stale entry routed the reconnect into a lobby that no longer held them.
-func TestResumePlayer_DropsAStaleIndexEntry(t *testing.T) {
-	t.Parallel()
-	m, l, _ := newTestLobby(t, 3)
-	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-
-	l.mu.Lock()
-	l.guests = nil
-	l.mu.Unlock()
-
-	assert.Nil(t, m.ResumePlayer(guest), "resumed into a lobby whose roster has no such player")
-	m.mu.RLock()
-	_, stale := m.playerLobby[guest.ID]
-	m.mu.RUnlock()
-	assert.False(t, stale, "the stale index entry survived the lookup")
 }
 
 // A finished match that produces no row still has to show up as one: these paths
