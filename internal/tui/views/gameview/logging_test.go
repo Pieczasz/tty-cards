@@ -32,7 +32,7 @@ func TestNewSession_SubscriptionFailureIsLoggedUnderTheSessionTraceAndCounted(t 
 	}
 	broken, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")
 	require.Error(t, err)
-	assert.Nil(t, broken.Events)
+	assert.Nil(t, broken.events)
 
 	errs := logs.AtLeast(slog.LevelError)
 	require.Len(t, errs, 1)

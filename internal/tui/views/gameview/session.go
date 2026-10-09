@@ -37,7 +37,7 @@ type EventMsg struct {
 type Session struct {
 	Global router.GlobalContext
 	Bound  *game.BoundEngine
-	Events <-chan game.Event
+	events <-chan game.Event
 	// slug is the catalog slug, the game_type label every game metric carries.
 	slug string
 
@@ -75,7 +75,7 @@ func NewSession(global router.GlobalContext, table *game.BoundEngine, slug strin
 		s.ActionErr = fmt.Errorf("live table updates unavailable, leave and rejoin: %w", err)
 		return s, s.ActionErr
 	}
-	s.Events = ch
+	s.events = ch
 	return s, nil
 }
 
@@ -87,20 +87,28 @@ func (s *Session) Init() tea.Cmd {
 
 // Listen delivers the next engine event as an EventMsg tagged with this session's feed.
 func (s *Session) Listen() tea.Cmd {
-	ch := s.Events
+	ch := s.events
 	return views.ListenOn(ch, func(ev game.Event) tea.Msg { return EventMsg{Event: ev, Source: ch} })
 }
 
 // clockTick starts this session's countdown before any deadline is known, which is
 // what a view's Init has to work with.
 func (s *Session) clockTick() tea.Cmd {
-	return clockTickFrom(s.Events, 0, false)
+	return clockTickFrom(s.events, 0, false)
+}
+
+// HeroID is the seat this session plays, or "" for a view with no table bound.
+func (s *Session) HeroID() string {
+	if s.Bound == nil {
+		return ""
+	}
+	return s.Bound.PlayerID()
 }
 
 // IdleRemoved is this session's own player losing their seat; anyone else's removal is
 // just another state change.
 func (s *Session) IdleRemoved(ev game.Event) bool {
-	return ev.Type == game.EventPlayerIdle && s.Bound != nil && ev.PlayerID == s.Bound.PlayerID()
+	return ev.Type == game.EventPlayerIdle && s.Bound != nil && ev.PlayerID == s.HeroID()
 }
 
 // Sync refreshes the cached engine state and keeps the cursor inside the hand. fn
@@ -129,12 +137,12 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func()) (tea.Cmd, bool) {
 	// session's chain ended with it, and this one runs its own.
 	switch msg := msg.(type) {
 	case EventMsg:
-		if msg.Source != s.Events {
+		if msg.Source != s.events {
 			return nil, true
 		}
 		return s.handleEvent(msg.Event, sync), true
 	case ClockTickMsg:
-		if msg.Source != s.Events {
+		if msg.Source != s.events {
 			return nil, true
 		}
 		return s.handleClockTick(sync), true
@@ -158,7 +166,7 @@ func (s *Session) handleEvent(ev game.Event, sync func()) tea.Cmd {
 	// tick, so the clock has to be re-armed once the table starts playing or it never
 	// runs again for that player.
 	if !wasPlaying && s.Base.Phase == game.Playing {
-		cmds = append(cmds, clockTickFrom(s.Events, s.Base.TurnRemaining, s.Base.MyTurn))
+		cmds = append(cmds, clockTickFrom(s.events, s.Base.TurnRemaining, s.Base.MyTurn))
 	}
 	return tea.Batch(cmds...)
 }
@@ -168,7 +176,7 @@ func (s *Session) handleClockTick(sync func()) tea.Cmd {
 	if s.Base.Phase != game.Playing {
 		return nil
 	}
-	return clockTickFrom(s.Events, s.Base.TurnRemaining, s.Base.MyTurn)
+	return clockTickFrom(s.events, s.Base.TurnRemaining, s.Base.MyTurn)
 }
 
 var errNotSeated = errors.New("you are not seated at this table")
@@ -224,9 +232,9 @@ func (s *Session) SelectDigit(key string) {
 
 // unsubscribe releases the engine subscription. Safe to call more than once.
 func (s *Session) unsubscribe() {
-	if s.Bound != nil && s.Events != nil {
-		s.Bound.Unsubscribe(s.Events)
-		s.Events = nil
+	if s.Bound != nil && s.events != nil {
+		s.Bound.Unsubscribe(s.events)
+		s.events = nil
 	}
 }
 

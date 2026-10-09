@@ -82,7 +82,7 @@ func TestHandleFrame_ReArmsTheClockWhenTheTableStartsPlaying(t *testing.T) {
 	s := &Session{Base: BaseState{Phase: game.Waiting}}
 	events := make(chan game.Event, 1)
 	events <- game.Event{Type: game.EventGameStarted}
-	s.Events = events
+	s.events = events
 
 	// The sync a real view would run: the engine has started by the time the event
 	// lands, so the cached phase moves to Playing.

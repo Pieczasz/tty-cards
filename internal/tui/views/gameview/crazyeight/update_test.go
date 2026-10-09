@@ -108,7 +108,7 @@ func TestSyncState_ClosesTheSuitPickerWhenTheTurnIsLost(t *testing.T) {
 
 	m.Picker.Open = true
 	m.Picker.Cursor = 2
-	require.NoError(t, engine.SubmitAction(m.Bound.PlayerID(), logic.ActionDrawCard{}))
+	require.NoError(t, engine.SubmitAction(m.HeroID(), logic.ActionDrawCard{}))
 	m.syncState()
 
 	require.False(t, m.Base.MyTurn, "drawing passes the turn on")

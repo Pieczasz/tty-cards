@@ -273,7 +273,7 @@ func TestSubmitPass_RefusalClearsOnceThePassIsMade(t *testing.T) {
 	_, _ = m.Update(tuitest.Key("enter"))
 	require.ErrorIs(t, m.ActionErr, errNeedThreeCards)
 
-	hero := m.Bound.PlayerID()
+	hero := m.HeroID()
 	require.NoError(t, engine.SubmitAction(hero, logic.ActionPassCards{Cards: m.Base.Hand[:3]}))
 	m.syncState()
 
@@ -301,7 +301,7 @@ func TestSubmitPass_SendsTheThreeStagedCards(t *testing.T) {
 	engine.WithState(func(state *game.State) {
 		s, ok := state.Extra.(*logic.State)
 		require.True(t, ok)
-		assert.ElementsMatch(t, staged, s.PendingPasses[m.Bound.PlayerID()])
+		assert.ElementsMatch(t, staged, s.PendingPasses[m.HeroID()])
 	})
 }
 
