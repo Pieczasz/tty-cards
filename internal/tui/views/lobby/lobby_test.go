@@ -167,7 +167,7 @@ func TestAdjustSetting_MaxPlayersRespectsRulesBounds(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 
-	rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.Slug())
+	rulesMin, rulesMax := m.snap.MinPlayers, m.snap.MaxPlayers
 	require.Equal(t, 2, rulesMin)
 	require.Equal(t, 6, rulesMax)
 
@@ -175,13 +175,13 @@ func TestAdjustSetting_MaxPlayersRespectsRulesBounds(t *testing.T) {
 	for range 10 {
 		press(m, "l")
 	}
-	assert.Equal(t, rulesMax, m.maxPlayers)
+	assert.Equal(t, rulesMax, m.snap.Limit)
 	assert.Equal(t, rulesMax, l.MaxPlayers(), "the lobby is updated, not just the view")
 
 	for range 10 {
 		press(m, "h")
 	}
-	assert.Equal(t, rulesMin, m.maxPlayers)
+	assert.Equal(t, rulesMin, m.snap.Limit)
 }
 
 func TestAdjustSetting_TogglesVisibilityAndMode(t *testing.T) {
@@ -190,12 +190,12 @@ func TestAdjustSetting_TogglesVisibilityAndMode(t *testing.T) {
 
 	m.cursor = cursorVisibility
 	press(m, "l")
-	assert.True(t, m.isPrivate)
+	assert.True(t, m.snap.Private)
 	assert.True(t, l.IsPrivate())
 
 	m.cursor = cursorMode
 	press(m, "l")
-	assert.True(t, m.isRanked)
+	assert.True(t, m.snap.Ranked)
 	assert.True(t, l.IsRanked())
 }
 
@@ -273,7 +273,14 @@ func addGuest(t *testing.T, m *model, l *lobby.Lobby, id uint64, name string) *g
 	g := lobby.NewPlayer(testUser(id, name))
 	_, err := m.global.LobbyManager.JoinLobbyByCode(l.Code(), g)
 	require.NoError(t, err)
+	rosterChanged(m)
 	return g
+}
+
+// rosterChanged hands the view the event its feed would deliver for a change a test
+// made to the lobby behind its back: the view draws from the snapshot it last took.
+func rosterChanged(m *model) {
+	m.Update(lobbyMsg{Type: lobby.EventPlayersUpdated, src: m.lobbyChan})
 }
 
 // The router closes the active view on navigation and the ssh layer closes the whole
@@ -345,34 +352,6 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat resumed is this session's own")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
-}
-
-func TestRating(t *testing.T) {
-	t.Parallel()
-	m, _ := leaderView(t)
-	t.Cleanup(m.Close)
-
-	def := elo.ToUint32(elo.DefaultRating)
-
-	tests := []struct {
-		name   string
-		player *game.Player
-		want   uint32
-	}{
-		{name: "no player at all", player: nil, want: def},
-		{name: "rated for this game", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameSlug: 1750}}, want: 1750},
-		{name: "rated only for another game", player: &game.Player{ID: "9", Ratings: map[string]uint32{"Poker": 1750}}, want: def},
-		{name: "never played anything", player: &game.Player{ID: "9"}, want: def},
-		// The lobby matches a stored zero as unrated, so the roster has to show it as one.
-		{name: "a stored zero", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameSlug: 0}}, want: def},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, m.rating(tt.player))
-		})
-	}
 }
 
 // The bounds decide how far the max-players setting may travel. A missing registry or a
@@ -459,9 +438,9 @@ func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 			_, cmd := m.Update(lobbyMsg{Type: evType, src: m.lobbyChan})
 
 			require.NotNil(t, cmd, "the listener stays armed")
-			assert.True(t, m.isPrivate)
-			assert.True(t, m.isRanked)
-			assert.Equal(t, 5, m.maxPlayers)
+			assert.True(t, m.snap.Private)
+			assert.True(t, m.snap.Ranked)
+			assert.Equal(t, 5, m.snap.Limit)
 			assert.Equal(t, cursorMode, m.cursor, "with no guests the last row is the mode row")
 		})
 	}
@@ -594,8 +573,8 @@ func TestHandleKey_ReadyTogglesAndReportsFailure(t *testing.T) {
 	})
 }
 
-// The view moves the setting first and asks the lobby second, so a rejection has to put
-// it back or the form shows a value the server never accepted.
+// A rejected setting must leave the form where the lobby left it, or it shows a value
+// the server never accepted.
 func TestAdjustSetting_RevertsWhenTheLobbyRejects(t *testing.T) {
 	t.Parallel()
 
@@ -608,21 +587,21 @@ func TestAdjustSetting_RevertsWhenTheLobbyRejects(t *testing.T) {
 			name: "max players", cursor: cursorMaxPlayers,
 			check: func(t *testing.T, m *model) {
 				t.Helper()
-				assert.Equal(t, 4, m.maxPlayers)
+				assert.Equal(t, 4, m.snap.Limit)
 			},
 		},
 		{
 			name: "visibility", cursor: cursorVisibility,
 			check: func(t *testing.T, m *model) {
 				t.Helper()
-				assert.False(t, m.isPrivate)
+				assert.False(t, m.snap.Private)
 			},
 		},
 		{
 			name: "mode", cursor: cursorMode,
 			check: func(t *testing.T, m *model) {
 				t.Helper()
-				assert.False(t, m.isRanked)
+				assert.False(t, m.snap.Ranked)
 			},
 		},
 	}
@@ -657,7 +636,7 @@ func TestAdjustSetting_MaxPlayersStopsAtTheSeatedRoster(t *testing.T) {
 		press(m, "h")
 	}
 
-	assert.Equal(t, 3, m.maxPlayers, "the floor is the roster, not the rules minimum")
+	assert.Equal(t, 3, m.snap.Limit, "the floor is the roster, not the rules minimum")
 	assert.Equal(t, 3, l.MaxPlayers())
 }
 
@@ -704,6 +683,7 @@ func TestRenderPlayerList(t *testing.T) {
 	bob := addGuest(t, m, l, 2, "bob")
 	addGuest(t, m, l, 3, "carol")
 	require.NoError(t, m.global.LobbyManager.ToggleReady(bob))
+	rosterChanged(m)
 
 	m.cursor = cursorFirstGuest // bob's row
 
@@ -812,6 +792,7 @@ func TestView_AReadyMarkStaysOnItsPlayersRowAt80x24(t *testing.T) {
 		g := addGuest(t, m, l, uint64(i), fmt.Sprintf("load_%04d", i))
 		require.NoError(t, m.global.LobbyManager.ToggleReady(g))
 	}
+	rosterChanged(m)
 	m.global.Theme = styles.NewTheme(true)
 	m.global.Width, m.global.Height = 80, 24
 

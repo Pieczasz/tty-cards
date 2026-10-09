@@ -72,7 +72,7 @@ func TestUserRefusals_AreShownNotLoggedAsErrors(t *testing.T) {
 		press(m, "l")
 
 		require.NoError(t, m.actionErr)
-		assert.True(t, m.isPrivate)
+		assert.True(t, m.snap.Private)
 	})
 }
 

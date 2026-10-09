@@ -5,7 +5,6 @@ package lobby
 import (
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
 
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -30,7 +29,11 @@ type lobbyMsg struct {
 type model struct {
 	global       router.GlobalContext
 	currentLobby *lobby.Lobby
-	lobbyChan    <-chan lobby.Event
+	// snap is the table this view draws and decides from: taken when it is built, on
+	// every lobby event and after each of its own actions, so one frame is one moment
+	// and the form never shows a setting the lobby refused.
+	snap      lobby.Snapshot
+	lobbyChan <-chan lobby.Event
 
 	// leaving is set once this view has asked the router to take the player
 	// somewhere else, so it asks once rather than on every message that arrives
@@ -38,9 +41,6 @@ type model struct {
 	leaving bool
 
 	cursor           int
-	isPrivate        bool
-	isRanked         bool
-	maxPlayers       int
 	showLeaveConfirm bool
 	actionErr        error
 }
@@ -56,7 +56,7 @@ func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
 	if activeLobby == nil {
 		return m
 	}
-	m.syncSettings()
+	m.refresh()
 	playerID := views.SessionPlayerID(global)
 	ch, err := activeLobby.Subscribe(playerID)
 	if err != nil {
@@ -72,11 +72,8 @@ func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
 	return m
 }
 
-// syncSettings copies the lobby's settings onto the form.
-func (m *model) syncSettings() {
-	m.isPrivate = m.currentLobby.IsPrivate()
-	m.isRanked = m.currentLobby.IsRanked()
-	m.maxPlayers = m.currentLobby.MaxPlayers()
+func (m *model) refresh() {
+	m.snap = m.currentLobby.Snapshot()
 }
 
 func (m *model) Init() tea.Cmd {
@@ -86,17 +83,10 @@ func (m *model) Init() tea.Cmd {
 	if m.currentLobby != nil {
 		if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
 			m.unsubscribe()
-			return router.NavigateToGame(m.currentLobby.Slug(), table)
+			return router.NavigateToGame(m.snap.Slug, table)
 		}
 	}
 	return listenToLobbyBroadcaster(m.lobbyChan)
-}
-
-// rating comes from the ratings the player was seated with, which are the snapshot
-// taken when they logged in - not a live read. A rating that changes mid-session shows
-// up the next time they connect.
-func (m *model) rating(p *game.Player) uint32 {
-	return lobby.Rating(p, m.currentLobby.Slug())
 }
 
 func (m *model) unsubscribe() {
@@ -108,7 +98,7 @@ func (m *model) unsubscribe() {
 
 // maxCursor is the last row the cursor can sit on: the settings, then one row per guest.
 func (m *model) maxCursor() int {
-	return cursorMode + len(m.currentLobby.Guests())
+	return cursorMode + len(m.snap.Guests)
 }
 
 const (
@@ -156,8 +146,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.actionErr != nil {
 			slog.DebugContext(m.global.RequestContext(), "ready refused", "error", m.actionErr)
 		}
+		m.refresh()
 	default:
-		if m.currentLobby.IsLeader(self) {
+		if m.snap.IsLeader(self) {
 			m.handleLeaderKey(self, msg.String())
 		}
 	}
@@ -176,9 +167,9 @@ func (m *model) handleLeaderKey(self *game.Player, key string) {
 	case "right", "l":
 		m.adjustSetting(self, +1)
 	case "enter":
-		guests := m.currentLobby.Guests()
-		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(guests) {
-			m.actionErr = m.global.LobbyManager.Kick(self, guests[i])
+		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(m.snap.Guests) {
+			m.actionErr = m.global.LobbyManager.Kick(self, m.snap.Guests[i].Player)
+			m.refresh()
 		}
 	}
 }
@@ -207,34 +198,28 @@ func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// adjustSetting changes the highlighted setting, and the form follows only once the
-// lobby has accepted it.
+// adjustSetting asks the lobby to change the highlighted setting. The form is the
+// snapshot taken after, so it shows what the lobby kept, not what was asked for.
 func (m *model) adjustSetting(self *game.Player, delta int) {
 	var err error
-	switch m.cursor {
+	switch s := m.snap; m.cursor {
 	case cursorMaxPlayers:
-		rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.Slug())
-		next := m.maxPlayers + delta
-		if next < max(rulesMin, m.currentLobby.CurrentPlayers()) || next > rulesMax {
+		next := s.Limit + delta
+		if next < max(s.MinPlayers, s.Players()) || next > s.MaxPlayers {
 			return
 		}
-		if err = m.currentLobby.SetMaxPlayers(self, next); err == nil {
-			m.maxPlayers = next
-		}
+		err = m.currentLobby.SetMaxPlayers(self, next)
 	case cursorVisibility:
-		if err = m.currentLobby.SetPrivate(self, !m.isPrivate); err == nil {
-			m.isPrivate = !m.isPrivate
-		}
+		err = m.currentLobby.SetPrivate(self, !s.Private)
 	case cursorMode:
-		if err = m.currentLobby.SetRanked(self, !m.isRanked); err == nil {
-			m.isRanked = !m.isRanked
-		}
+		err = m.currentLobby.SetRanked(self, !s.Ranked)
 	default:
 		// cursorGame and the guest rows: the game is fixed once a lobby exists and a
 		// guest row has no left/right adjustment, so both rows ignore it.
 		return
 	}
 	m.actionErr = err
+	m.refresh()
 }
 
 func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
@@ -250,15 +235,14 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			return m, listenToLobbyBroadcaster(m.lobbyChan)
 		}
 		m.unsubscribe()
-		return m, router.NavigateToGame(m.currentLobby.Slug(), table)
+		return m, router.NavigateToGame(m.snap.Slug, table)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
-		self := views.SessionPlayer(m.global)
-		if !m.currentLobby.Leader().Equal(self) && !slices.ContainsFunc(m.currentLobby.Guests(), self.Equal) {
+		m.refresh()
+		if !m.snap.Seated(views.SessionPlayer(m.global)) {
 			m.unsubscribe()
 			cmd := m.goHome()
 			return m, cmd
 		}
-		m.syncSettings()
 		m.cursor = components.StepCursor(m.cursor, 0, m.maxCursor())
 	}
 	return m, listenToLobbyBroadcaster(m.lobbyChan)
@@ -277,7 +261,7 @@ func (m *model) View() tea.View {
 		}
 
 		innerWidth := styles.InnerWidth(m.global.Width)
-		isLeader := m.currentLobby.IsLeader(views.SessionPlayer(m.global))
+		isLeader := m.snap.IsLeader(views.SessionPlayer(m.global))
 		if m.actionErr == nil {
 			return m.renderForm(isLeader, innerWidth, height)
 		}
@@ -347,24 +331,24 @@ func (m *model) renderSettings(isLeader bool) string {
 	on := func(row int) bool { return isLeader && m.cursor == row }
 	return styles.JoinVertical(lg.Left,
 		"  "+t.SectionHeading.Render("Settings"),
-		"  Lobby Code: "+t.LobbyCode.Render(m.currentLobby.Code()),
-		renderOption(t, on(cursorGame), "Game", m.currentLobby.GameName()),
-		renderOption(t, on(cursorMaxPlayers), "Max Players", strconv.Itoa(m.maxPlayers)),
-		renderOption(t, on(cursorVisibility), "Visibility", visibilityLabel(m.isPrivate)),
-		renderOption(t, on(cursorMode), "Mode", modeLabel(m.isRanked)),
+		"  Lobby Code: "+t.LobbyCode.Render(m.snap.Code),
+		renderOption(t, on(cursorGame), "Game", m.snap.GameName),
+		renderOption(t, on(cursorMaxPlayers), "Max Players", strconv.Itoa(m.snap.Limit)),
+		renderOption(t, on(cursorVisibility), "Visibility", visibilityLabel(m.snap.Private)),
+		renderOption(t, on(cursorMode), "Mode", modeLabel(m.snap.Ranked)),
 	)
 }
 
 // renderPlayerList returns the heading, the leader row, then one row per guest.
 // Only the leader gets a cursor, since only they can kick.
 func (m *model) renderPlayerList(isLeader bool) []string {
-	guests := m.currentLobby.Guests()
+	guests := m.snap.Guests
 	rows := make([]string, 0, 2+len(guests))
 	rows = append(rows, "  "+m.global.Theme.SectionHeading.Render("Players"))
 
-	leader := m.currentLobby.Leader()
+	leader := m.snap.Leader
 	rows = append(rows, fmt.Sprintf("  %s %s (Elo: %d)%s",
-		m.global.Theme.HostTag.Render("[Leader]"), leader.DisplayName(), m.rating(leader), m.readyMark(leader)))
+		m.global.Theme.HostTag.Render("[Leader]"), leader.Player.DisplayName(), leader.Elo, m.readyMark(leader)))
 
 	for i, g := range guests {
 		cursor := "  "
@@ -373,7 +357,7 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 			cursor = "> "
 		}
 		row := fmt.Sprintf("%s%s %s (Elo: %d)%s",
-			cursor, m.global.Theme.GuestTag.Render("[Guest] "), g.DisplayName(), m.rating(g), m.readyMark(g))
+			cursor, m.global.Theme.GuestTag.Render("[Guest] "), g.Player.DisplayName(), g.Elo, m.readyMark(g))
 		if isSelected {
 			row = m.global.Theme.PlayerItemSelected.Render(row)
 		}
@@ -382,8 +366,8 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 	return rows
 }
 
-func (m *model) readyMark(p *game.Player) string {
-	if !m.currentLobby.IsReady(p) {
+func (m *model) readyMark(seat lobby.SeatView) string {
+	if !seat.Ready {
 		return ""
 	}
 	return m.global.Theme.SuccessText.Render(" - Ready")
