@@ -102,9 +102,13 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		return game.ErrInvalidState
 	}
 
-	if _, isNextHand := action.(ActionNextHand); isNextHand {
+	switch action.(type) {
+	case ActionNextHand:
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
 		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)
+	case ActionPassCards, ActionPlayCard:
+	default:
+		return game.ErrUnknownAction
 	}
 
 	switch extra.Phase {
