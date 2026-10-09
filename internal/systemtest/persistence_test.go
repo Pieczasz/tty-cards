@@ -28,7 +28,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := newSignallingMatchRepo(repository.NewMatchRepository(gormDB))
-	manager := lobby.NewManager(ctx, matchRepo)
+	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 3)
@@ -98,7 +98,7 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := repository.NewMatchRepository(gormDB)
-	manager := lobby.NewManager(ctx, matchRepo)
+	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 
 	players := make([]*game.Player, 0, 2)

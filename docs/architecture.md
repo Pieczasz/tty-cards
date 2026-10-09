@@ -180,14 +180,15 @@ Order matters so deferred teardown runs correctly (LIFO):
 3. `otelsetup.Setup` (defer shutdown; the SDK and its gRPC exporters live in
    `internal/observability/otelsetup`, so only `cmd/server` links them)
 4. `repository.Connect(cfg.DSN(), repository.Pool{...})` (defer close)
-5. Repositories -> `lobby.NewManager(ctx, matchRepo)`
+5. Repositories -> `catalog.NewRegistry()` - `game.NewRegistry` over
+   `catalog.Games`, which panics on a module declared twice, half-declared or with
+   impossible seat bounds -> `lobby.NewManager(ctx, matchRepo, games)`, which
+   panics on a nil registry
 6. `defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)` - registered **after** the DB-close
    defer, so LIFO drains match writes before closing the handle they write
    through
 7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose
-   `GameRegistry` is `catalog.NewRegistry()` - `game.NewRegistry` over
-   `catalog.Games`, which panics on a module declared twice, half-declared or
-   with impossible seat bounds. The
+   `GameRegistry` is that same registry. The
    one tracker is shared with the stats API; `NewServer` refuses to start without
    it (`errNoTracker`), because a second one counted nobody online
 8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
@@ -490,9 +491,12 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
 
 - `Manager.CreateLobby(leader, opts...)` generates an 8-character code from
   `[A-Z0-9]` using `crypto/rand`, retried up to 10 times against collisions.
-  Defaults: `maxPlayers` 4, private, casual. `WithCardGame(name)` takes the
-  **display name**, which is the `game.Registry` key; the persisted identity is
-  the slug, resolved at game start (§6.1).
+  Defaults: `maxPlayers` 4 clamped to the game's `[MinPlayers, MaxPlayers]`,
+  private, casual. `WithCardGame(name)` takes the **display name**, which is the
+  `game.Registry` key; the persisted identity is the slug (§6.1). The game is
+  resolved here, against the manager's registry, and kept on the lobby: an unknown
+  game or a `WithMaxPlayers` outside the game's range is refused before there is a
+  table.
 - `BrowseLobbies(player, BrowseFilter)` lists public `waiting` tables, sorted by
   absolute Elo distance from the player (an unrated player is matched at 1500),
   ties broken by code so the list cannot reshuffle under a cursor. Default limit

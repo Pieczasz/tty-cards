@@ -346,10 +346,19 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 func TestManager_NilContextStillYieldsAUsableOne(t *testing.T) {
 	t.Parallel()
 	var missing context.Context
-	m := NewManager(missing, nil)
+	m := NewManager(missing, nil, testGames)
 
 	require.NotNil(t, m.appCtx)
 	assert.NoError(t, m.appCtx.Err(), "and it must not arrive already cancelled")
+}
+
+// A manager with no games could open no table, and every create would fail at the
+// player rather than the boot.
+func TestNewManager_ANilRegistryIsAWiringBug(t *testing.T) {
+	t.Parallel()
+	assert.PanicsWithValue(t, "lobby.NewManager: nil game registry", func() {
+		NewManager(t.Context(), nil, nil)
+	})
 }
 
 // A finished-match write must outlive the app context: the drain exists to let it
@@ -364,7 +373,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 	}), gameRef("Mock"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).Return(nil).Once()
 
 	ctx, cancel := context.WithCancel(t.Context())
-	m := NewManager(ctx, repo)
+	m := NewManager(ctx, repo, testGames)
 	cancel()
 	engine := game.NewEngine(&stubRules{}, seats)
 	t.Cleanup(engine.Close)
@@ -599,16 +608,59 @@ func TestManager_NilPlayerIsANoOp(t *testing.T) {
 	assert.NotPanics(t, none.BeginShutdown, "the server can shut down before it built a manager")
 }
 
-func TestManager_CreateLobby_RefusesATableForOne(t *testing.T) {
+// A table is held to its game from the start: a seat count the game cannot deal, or a
+// game the server does not offer, used to be accepted here and fail only once every
+// seat was ready.
+func TestManager_CreateLobby_HoldsTheTableToItsGame(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
-	leader := mockPlayer("p1", testutil.UID(1))
+	games := game.NewRegistry(
+		game.Module{Name: "Duel", Slug: "duel", MinPlayers: 2, MaxPlayers: 2, Factory: func() game.Rules { return stubRules{} }},
+		game.Module{Name: "Table", Slug: "table", MinPlayers: 3, MaxPlayers: 6, Factory: func() game.Rules { return stubRules{} }},
+	)
+	tests := []struct {
+		name      string
+		opts      []Option
+		wantSeats int
+		wantErr   string
+		wantIs    error
+	}{
+		{name: "the default fits a game that deals for fewer", opts: []Option{WithCardGame("Duel")}, wantSeats: 2},
+		{name: "the default inside the range is kept", opts: []Option{WithCardGame("Table")}, wantSeats: 4},
+		{name: "the game's minimum is allowed", opts: []Option{WithCardGame("Table"), WithMaxPlayers(3)}, wantSeats: 3},
+		{name: "the game's maximum is allowed", opts: []Option{WithCardGame("Table"), WithMaxPlayers(6)}, wantSeats: 6},
+		{
+			name: "below the game's minimum", opts: []Option{WithCardGame("Table"), WithMaxPlayers(2)},
+			wantErr: "between 3 and 6",
+		},
+		{
+			name: "above the game's maximum", opts: []Option{WithCardGame("Duel"), WithMaxPlayers(3)},
+			wantErr: "between 2 and 2",
+		},
+		{name: "a game the server does not offer", opts: []Option{WithCardGame("Missing")}, wantIs: errUnknownGame},
+		{name: "no game at all", wantIs: errNoCardGame},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := newManagerFor(t, nil, games)
+			leader := mockPlayer("p1", testutil.UID(1))
 
-	l, err := m.CreateLobby(leader, WithCardGame("Mock"), WithMaxPlayers(1))
+			l, err := m.CreateLobby(leader, tt.opts...)
 
-	require.ErrorContains(t, err, "at least 2")
-	assert.Nil(t, l)
-	assert.Nil(t, m.FindLobbyByPlayer(leader), "a refused table still seated its leader")
+			if tt.wantSeats > 0 {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantSeats, l.MaxPlayers())
+				return
+			}
+			if tt.wantIs != nil {
+				require.ErrorIs(t, err, tt.wantIs)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+			assert.Nil(t, l)
+			assert.Nil(t, m.FindLobbyByPlayer(leader), "a refused table still seated its leader")
+		})
+	}
 }
 
 func TestManager_FindLobbyByCode_RefusesAMalformedCode(t *testing.T) {

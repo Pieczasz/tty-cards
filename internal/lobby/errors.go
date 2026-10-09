@@ -19,6 +19,7 @@ var (
 
 var (
 	errNoCardGame     = errors.New("card game is required")
+	errUnknownGame    = errors.New("no such game on this server")
 	errNotAccepting   = errors.New("lobby is not accepting players")
 	errSettingsLocked = errors.New("cannot change settings while a game is in progress")
 	errHostNotInLobby = errors.New("host is not in a lobby")

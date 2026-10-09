@@ -563,7 +563,7 @@ TUI view constructor, which is handed the slug. `catalog.NewRegistry` builds the
 `game.Registry` from it; `internal/tui/app.go` registers routes from it. `main.go`
 now reads as a summary of everything above: `config.Load` -> OTel
 (`otelsetup.Setup`) -> `repository.Connect` -> repositories ->
-`lobby.NewManager` -> tracker -> `ssh.NewServer` (with `catalog.NewRegistry`) ->
+`lobby.NewManager` (with `catalog.NewRegistry`) -> tracker -> `ssh.NewServer` (the same registry) ->
 `httpapi.NewServer` -> `serve`, with the `defer`s ordered so LIFO unwinding drains match writes before
 closing the DB handle they write through.
 

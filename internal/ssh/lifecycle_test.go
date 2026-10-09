@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
@@ -39,7 +40,7 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 	user := &db.User{ID: testutil.UID(11), Username: "shared"}
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
-	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil), Tracker: tracker}
+	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), Tracker: tracker}
 	reg := &sessionRegistry{}
 
 	// Both channels of one connection, so they would share an ssh.Context.
@@ -67,12 +68,12 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	host := &db.User{ID: testutil.UID(1), Username: "host"}
 	guest := &db.User{ID: testutil.UID(2), Username: "guest"}
 	guestPlayer := lobby.NewPlayer(guest)
 
-	table, err := manager.CreateLobby(lobby.NewPlayer(host), lobby.WithCardGame("Mock"))
+	table, err := manager.CreateLobby(lobby.NewPlayer(host), lobby.WithCardGame(catalog.Games[0].Name))
 	require.NoError(t, err)
 	_, err = manager.JoinLobbyByCode(table.Code(), guestPlayer)
 	require.NoError(t, err)

@@ -39,7 +39,7 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	// A real repository, not nil: a nil db.MatchRepository is a shape the server can
 	// never have, so measuring against one measures something that does not exist -
 	// and any path that starts touching it turns this into a nil dereference.
-	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder())
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 
 	warm := openTable(t, manager, registry, 0, seatsPerTable)

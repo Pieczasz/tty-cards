@@ -20,8 +20,11 @@ import (
 
 // Lobby is one table.
 type Lobby struct {
-	mu           sync.RWMutex
-	manager      *Manager
+	mu      sync.RWMutex
+	manager *Manager
+	// game is what the table plays. CreateLobby sets it and nothing changes it, so it
+	// is read without l.mu.
+	game         game.Module
 	broadcaster  *broadcaster.Broadcaster[Event]
 	leader       *game.Player
 	guests       []*game.Player
@@ -86,7 +89,12 @@ func WithCardGame(name string) Option {
 	}
 }
 
-// WithMaxPlayers caps the table, leader included. The default is 4.
+// defaultMaxPlayers is a table's size when WithMaxPlayers is not given, clamped to
+// the seats its game deals for.
+const defaultMaxPlayers = 4
+
+// WithMaxPlayers caps the table, leader included, within the seats its game deals
+// for. The default is defaultMaxPlayers, clamped to that range.
 func WithMaxPlayers(limit int) Option {
 	return func(o *options) {
 		o.maxPlayers = limit
@@ -109,9 +117,8 @@ func WithRanked(isRanked bool) Option {
 
 func setupDefaultOptions() *options {
 	return &options{
-		maxPlayers: 4,
-		isPrivate:  true,
-		isRanked:   false,
+		isPrivate: true,
+		isRanked:  false,
 	}
 }
 
@@ -333,9 +340,7 @@ func (l *Lobby) Code() string { return l.code }
 
 // GameName is the display name of the game the table plays.
 func (l *Lobby) GameName() string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.options.cardGame
+	return l.game.Name
 }
 
 // MaxPlayers is the seat cap, leader included.

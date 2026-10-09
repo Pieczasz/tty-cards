@@ -58,7 +58,7 @@ func TestBots_PlayWholeGamesThroughTheRealTUI(t *testing.T) {
 // playTable runs one table of seats bots until it has finished games games.
 func playTable(t *testing.T, seats, games int) *recorder {
 	t.Helper()
-	mgr := lobby.NewManager(t.Context(), nil)
+	mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	registry := catalog.NewRegistry()
 	stats := &recorder{}
 	tbl := newTable()

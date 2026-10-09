@@ -104,13 +104,36 @@ func gameRef(name string) db.GameRef {
 	return db.GameRef{Slug: strings.ToLower(name), Name: name}
 }
 
-// newTestManager is NewManager with teardown. A started game parks a watcher
+// testGames is what newTestManager opens tables for: every game these tests name,
+// dealt by stubRules and seating 1 to 10, so a table's size is the test's to choose.
+var testGames = func() *game.Registry {
+	names := []string{
+		"TestGame", "TestGame2", "Game", "Mock", "Mock2", "MockGame", "NeverStarts",
+		"CrazyEights", "Crazy Eights", "Poker", "Uno", "Hidden",
+	}
+	mods := make([]game.Module, len(names))
+	for i, name := range names {
+		mods[i] = game.Module{
+			Name: name, Slug: strings.ToLower(name), MinPlayers: 1, MaxPlayers: 10,
+			Factory: func() game.Rules { return stubRules{} },
+		}
+	}
+	return game.NewRegistry(mods...)
+}()
+
+// newTestManager is newManagerFor over testGames.
+func newTestManager(tb testing.TB, repo db.MatchRepository) *Manager {
+	tb.Helper()
+	return newManagerFor(tb, repo, testGames)
+}
+
+// newManagerFor is NewManager with teardown. A started game parks a watcher
 // goroutine on the engine feed, and closing the engine - which only RemoveLobby does -
 // is what ends it. Production always gets there; a test that drops the manager on the
 // floor would strand the goroutine and trip goleak.
-func newTestManager(tb testing.TB, repo db.MatchRepository) *Manager {
+func newManagerFor(tb testing.TB, repo db.MatchRepository, games *game.Registry) *Manager {
 	tb.Helper()
-	m := NewManager(tb.Context(), repo)
+	m := NewManager(tb.Context(), repo, games)
 	tb.Cleanup(func() {
 		m.mu.RLock()
 		codes := slices.Collect(maps.Keys(m.lobbies))
@@ -331,12 +354,12 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	err = l.ToggleReady(guest3, registry) // This triggers start game and should fail due to max players!
 	require.ErrorIs(t, err, errTooManyPlayers)
 
-	// Missing game in registry
+	// A game the manager does not offer is refused before there is a table.
 	leader2 := mockPlayer("p4", testutil.UID(4))
-	l2, err := m.CreateLobby(leader2, WithCardGame("Missing"))
+	_, err = m.CreateLobby(leader2, WithCardGame("Missing"))
+	require.ErrorIs(t, err, errUnknownGame)
+	l2, err := m.CreateLobby(leader2, WithCardGame("Game"))
 	require.NoError(t, err)
-	err = l2.ToggleReady(leader2, registry) // Should fail on create game rules
-	require.ErrorContains(t, err, "create game rules")
 
 	// Game already in progress
 	mockRules2 := new(MockRules)
@@ -903,7 +926,7 @@ func TestLobby_ReleaseFinishedGameIsANoOpOtherwise(t *testing.T) {
 // The watcher runs after the game ends, by which point the lobby may have reopened
 // and been reconfigured. The finished match must still be recorded as the game that
 // was actually played: snapshotting at finalize time wrote a ranked result to the
-// casual path, or onto another game's ladder entirely.
+// casual path.
 func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	t.Parallel()
 	repo := new(MockMatchRepo)
@@ -929,7 +952,6 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	// way to the watcher.
 	l.mu.Lock()
 	l.options.isRanked = false
-	l.options.cardGame = "Something Else"
 	l.mu.Unlock()
 
 	endHand(engine, stubWin)

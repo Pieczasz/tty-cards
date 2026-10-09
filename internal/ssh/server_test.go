@@ -68,7 +68,7 @@ func setupTestEnvironment(t *testing.T) testEnv {
 		Auth:         userRepo,
 		Profiles:     userRepo,
 		Leaderboard:  userRepo,
-		LobbyManager: lobby.NewManager(t.Context(), matchRepo),
+		LobbyManager: lobby.NewManager(t.Context(), matchRepo, game.NewRegistry()),
 		GameRegistry: game.NewRegistry(),
 		Tracker:      NewSessionTracker(0),
 	}

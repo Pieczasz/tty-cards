@@ -299,7 +299,7 @@ func TestCreate_CursorStaysInBounds(t *testing.T) {
 func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
+	m.global.LobbyManager = newManager(t)
 	m.maxPlayers = 5
 	m.isPrivate = false
 	m.isRanked = true
@@ -324,7 +324,7 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 // screen the button would simply look broken.
 func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	t.Parallel()
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := newManager(t)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
 	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
@@ -343,7 +343,7 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
+	m.global.LobbyManager = newManager(t)
 	m.cursor = createCursorVisibility
 
 	_, cmd := m.Update(tuitest.Key("enter"))

@@ -45,6 +45,7 @@ type Manager struct {
 	mu                  sync.RWMutex
 	lobbies             map[string]*Lobby
 	playerLobby         map[string]*Lobby
+	games               *game.Registry
 	cachedPublicLobbies []*Lobby
 	cacheLastUpdated    time.Time
 	// cacheDirty is set by anything that changes which lobbies are public, a lobby
@@ -79,15 +80,22 @@ type Manager struct {
 // keeps a seat for someone who never comes back between hands.
 const disconnectGrace = 90 * time.Second
 
-// NewManager is a Manager whose finished matches are written to matchRepo, or
-// nowhere when it is nil. ctx is the process lifetime, not a request.
-func NewManager(ctx context.Context, matchRepo db.MatchRepository) *Manager {
+// NewManager is a Manager opening tables for the games in games, whose finished
+// matches are written to matchRepo, or nowhere when it is nil. ctx is the process
+// lifetime, not a request. A nil games panics, the way game.NewRegistry does on a
+// half-declared module: a manager that can open no table is a wiring bug, and it
+// should fail the boot rather than every player's first create.
+func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.Registry) *Manager {
+	if games == nil {
+		panic("lobby.NewManager: nil game registry")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return &Manager{
 		lobbies:     make(map[string]*Lobby),
 		playerLobby: make(map[string]*Lobby),
+		games:       games,
 		grace:       newGraceTimers(),
 		matchRepo:   matchRepo,
 		appCtx:      ctx,
@@ -131,8 +139,9 @@ func (m *Manager) playerInLobbyLocked(p *game.Player) bool {
 	return false
 }
 
-// CreateLobby opens a table with leader in seat 0. The defaults are 4 seats, private
-// and casual; WithCardGame is required.
+// CreateLobby opens a table with leader in seat 0. WithCardGame is required and must
+// name a game the manager offers; the defaults are 4 seats (clamped to what the game
+// deals for), private and casual.
 func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, error) {
 	options := setupDefaultOptions()
 	for _, opt := range opts {
@@ -142,8 +151,16 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	if options.cardGame == "" {
 		return nil, errNoCardGame
 	}
-	if options.maxPlayers < 2 {
-		return nil, errors.New("max players must be at least 2")
+	mod, ok := m.games.Module(options.cardGame)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", errUnknownGame, options.cardGame)
+	}
+	if options.maxPlayers == 0 {
+		options.maxPlayers = min(max(defaultMaxPlayers, mod.MinPlayers), mod.MaxPlayers)
+	}
+	if options.maxPlayers < mod.MinPlayers || options.maxPlayers > mod.MaxPlayers {
+		return nil, fmt.Errorf("max players must be between %d and %d for %s",
+			mod.MinPlayers, mod.MaxPlayers, mod.Name)
 	}
 
 	m.mu.Lock()
@@ -160,6 +177,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 
 	lobby := &Lobby{
 		manager:     m,
+		game:        mod,
 		leader:      leader,
 		guests:      nil,
 		options:     options,
