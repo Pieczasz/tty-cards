@@ -33,6 +33,8 @@ type Engine struct {
 	closed      bool
 	clock       turnClock
 	endReason   EndReason
+	// winner is the engine's to set, at the end: no rules hook can reach it.
+	winner *Player
 	// onIdleRemoved is set once at construction, so it is read without the lock.
 	onIdleRemoved func(playerID string)
 }
@@ -367,7 +369,7 @@ func (e *Engine) finishGameLocked(fallback *Player, reason EndReason) {
 func (e *Engine) endGameLocked(winner *Player, reason EndReason) {
 	e.state.Phase = Finished
 	e.stopTurnTimerLocked()
-	e.state.Winner = winner
+	e.winner = winner
 	e.endReason = reason
 
 	winnerID := ""
@@ -458,8 +460,8 @@ func (e *Engine) snapshotLocked() StateSnapshot {
 			snap.TopDiscard = top
 		}
 	}
-	if state.Winner != nil {
-		snap.WinnerName = state.Winner.DisplayName()
+	if e.winner != nil {
+		snap.WinnerName = e.winner.DisplayName()
 	}
 	if current := e.currentPlayerLocked(); current != nil {
 		snap.CurrentPlayerName = current.DisplayName()

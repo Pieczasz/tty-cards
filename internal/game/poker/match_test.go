@@ -76,10 +76,7 @@ func TestStandings_LeavingForfeitsTheMatchButNotTheChipsWon(t *testing.T) {
 	assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine),
 		"between leavers the bigger stack still places higher")
 
-	engine.WithState(func(s *game.State) {
-		require.NotNil(t, s.Winner)
-		assert.Equal(t, "p1", s.Winner.ID, "the last player standing wins the match")
-	})
+	assert.Equal(t, "p1", engine.Snapshot().WinnerName, "the last player standing wins the match")
 }
 
 func TestMatch_NextHandRejectedWhileTheHandIsLive(t *testing.T) {
