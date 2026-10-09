@@ -490,10 +490,13 @@ dirty flag):
 | `inGame` | `waiting` | `releaseFinishedGameLocked`, once the engine `IsFinished()` |
 | any | `closed` | `detachPlayerLocked`: the leader leaves and there are no guests |
 
-`closed` is terminal - `Subscribe`, `addGuest` and `Kick` all refuse. The refusals a
-caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
-`ErrLobbyFull`, `ErrGameInProgress`, `ErrNotLeader` and the rest), compared with
-`errors.Is`.
+`closed` is terminal - `Subscribe`, `addGuest` and `Kick` all refuse. Every refusal
+the player caused (a full table, too few players, not the leader, a bound outside the
+game's seats) matches `errors.Is(err, lobby.ErrRefused)`, and its text is what the
+player reads (`errors.go`: an unexported `refusal`, built by `refuse` or, with
+numeric detail, `refusalf`). Anything else is a failure, returned wrapped and never
+logged by the lobby: the TUI's `views.PlayerError` shows a refusal as it is and
+logs a failure once, at Error under the session's trace, behind a generic line.
 
 - `Manager.CreateLobby(leader, opts...)` generates an 8-character code from
   `[A-Z0-9]` using `crypto/rand`, retried up to 10 times against collisions.

@@ -163,13 +163,13 @@ func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int) error {
 	return l.withLeaderSettings(actor, func() error {
 		current := 1 + len(l.guests)
 		if limit < current {
-			return fmt.Errorf("max players cannot be below current roster (%d)", current)
+			return refusalf("max players cannot be below current roster (%d)", current)
 		}
 		if limit < l.game.MinPlayers {
-			return fmt.Errorf("max players must be at least %d for this game", l.game.MinPlayers)
+			return refusalf("max players must be at least %d for this game", l.game.MinPlayers)
 		}
 		if limit > l.game.MaxPlayers {
-			return fmt.Errorf("max players cannot exceed %d for this game", l.game.MaxPlayers)
+			return refusalf("max players cannot exceed %d for this game", l.game.MaxPlayers)
 		}
 		l.options.maxPlayers = limit
 		return nil
@@ -180,7 +180,7 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 	l.mu.Lock()
 	if !l.leader.Equal(actor) {
 		l.mu.Unlock()
-		return fmt.Errorf("%w change settings", ErrNotLeader)
+		return fmt.Errorf("%w change settings", errNotLeader)
 	}
 	if l.state != waiting {
 		l.mu.Unlock()
@@ -258,7 +258,7 @@ func (l *Lobby) Subscribe(playerID string) (<-chan Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.broadcaster == nil || l.state == closed {
-		return nil, ErrLobbyClosed
+		return nil, errLobbyClosed
 	}
 	ch, err := l.broadcaster.Subscribe()
 	if err != nil {
@@ -302,10 +302,10 @@ func (l *Lobby) toggleReady(p *game.Player, canStart bool, opts ...game.EngineOp
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.state == inGame {
-		return gameStart{}, ErrGameInProgress
+		return gameStart{}, errGameInProgress
 	}
 	if !l.hasPlayerLocked(p) {
-		return gameStart{}, ErrNotInLobby
+		return gameStart{}, errNotInLobby
 	}
 
 	l.ready[p.ID] = !l.ready[p.ID]
@@ -410,11 +410,11 @@ func (l *Lobby) addGuest(p *game.Player) error {
 	}
 
 	if 1+len(l.guests) >= l.options.maxPlayers {
-		return ErrLobbyFull
+		return errLobbyFull
 	}
 
 	if l.hasPlayerLocked(p) {
-		return ErrAlreadyInLobby
+		return errAlreadyInLobby
 	}
 
 	l.guests = append(l.guests, p)
@@ -445,7 +445,7 @@ func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 
 	mod := l.game
 	if totalPlayers := len(l.guests) + 1; totalPlayers < mod.MinPlayers {
-		return gameStart{}, fmt.Errorf("need at least %d players to start", mod.MinPlayers)
+		return gameStart{}, refusalf("need at least %d players to start", mod.MinPlayers)
 	}
 
 	// The slug, not the display name, is what the match is persisted under.
@@ -454,12 +454,10 @@ func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
 	engine := game.NewEngine(rules, players, append(opts, game.WithLogger(logger))...)
 
-	// A defect, not a refusal: the lobby view logs what ToggleReady returns at Debug,
-	// since from there "too few players" looks the same.
+	// A failure, not a refusal, and the caller logs it: the error names the table,
+	// since that is all the log line will know of it.
 	if err := engine.Start(); err != nil {
-		err = fmt.Errorf("start game engine: %w", err)
-		logger.ErrorContext(context.Background(), "cannot start game", "error", err)
-		return gameStart{}, err
+		return gameStart{}, fmt.Errorf("start game engine for lobby %s (%s): %w", l.code, mod.Slug, err)
 	}
 
 	// Before watchLocked, which snapshots it for the finalize.
@@ -520,11 +518,11 @@ func (l *Lobby) kickableGuestLocked(host, target *game.Player) (int, error) {
 	case l.state == inGame:
 		return -1, errKickInGame
 	case !l.leader.Equal(host):
-		return -1, fmt.Errorf("%w kick players", ErrNotLeader)
+		return -1, fmt.Errorf("%w kick players", errNotLeader)
 	}
 	idx := slices.IndexFunc(l.guests, func(g *game.Player) bool { return g.Equal(target) })
 	if idx == -1 {
-		return -1, ErrNotInLobby
+		return -1, errNotInLobby
 	}
 	return idx, nil
 }

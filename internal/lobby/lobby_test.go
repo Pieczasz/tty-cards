@@ -339,10 +339,10 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	require.NoError(t, m.ToggleReady(leader))
 	require.NoError(t, m.ToggleReady(guest)) // Starts game!
 
-	require.ErrorIs(t, m.ToggleReady(leader), ErrGameInProgress)
+	require.ErrorIs(t, m.ToggleReady(leader), errGameInProgress)
 
 	// A player seated nowhere has no table to be ready at.
-	require.ErrorIs(t, m.ToggleReady(nobody), ErrNotInLobby)
+	require.ErrorIs(t, m.ToggleReady(nobody), errNotInLobby)
 
 	// Removing a player who is in no lobby is a no-op and closes nothing.
 	m.LeaveLobby(nobody)
@@ -549,7 +549,7 @@ func TestLobby_SurvivesATornDownBroadcaster(t *testing.T) {
 	})
 
 	_, err := l.Subscribe("p1")
-	require.ErrorIs(t, err, ErrLobbyClosed)
+	require.ErrorIs(t, err, errLobbyClosed)
 }
 
 // A table can be re-used for a second hand once the first is over, but never while one is
@@ -564,7 +564,7 @@ func TestLobby_ToggleReadyAfterAFinishedGame(t *testing.T) {
 	require.NoError(t, m.ToggleReady(guest))
 	require.Equal(t, inGame, l.state)
 
-	require.ErrorIs(t, m.ToggleReady(l.Snapshot().Leader.Player), ErrGameInProgress,
+	require.ErrorIs(t, m.ToggleReady(l.Snapshot().Leader.Player), errGameInProgress,
 		"an unfinished game holds the table")
 
 	l.mu.RLock()
@@ -946,8 +946,11 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 		min       int
 		withGuest bool
 		wantErr   string
+		// refused is whether the player caused it: a deal the rules cannot make is a
+		// failure the TUI logs, not a refusal it shows as it is.
+		refused bool
 	}{
-		{name: "too few players", rules: stubRules{}, min: 2, wantErr: "need at least 2 players"},
+		{name: "too few players", rules: stubRules{}, min: 2, wantErr: "need at least 2 players", refused: true},
 		{name: "the rules refuse the deal", rules: refusedStartRules{}, withGuest: true, wantErr: "start game engine"},
 	}
 	for _, tt := range tests {
@@ -964,7 +967,9 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 			for _, p := range seats[:len(seats)-1] {
 				require.NoError(t, m.ToggleReady(p))
 			}
-			require.ErrorContains(t, m.ToggleReady(seats[len(seats)-1]), tt.wantErr)
+			err = m.ToggleReady(seats[len(seats)-1])
+			require.ErrorContains(t, err, tt.wantErr)
+			assert.Equal(t, tt.refused, errors.Is(err, ErrRefused))
 
 			assert.True(t, isWaiting(l), "a failed start left the table out of Waiting")
 			assert.Nil(t, l.ActiveGame())
@@ -980,7 +985,7 @@ func TestLobby_ClosedTableCannotStart(t *testing.T) {
 	leader := l.Snapshot().Leader.Player
 	m.LeaveLobby(leader)
 
-	require.ErrorIs(t, m.ToggleReady(leader), ErrNotInLobby)
+	require.ErrorIs(t, m.ToggleReady(leader), errNotInLobby)
 	assert.Nil(t, l.ActiveGame())
 }
 
@@ -994,9 +999,10 @@ func TestLobby_OnlyTheLeaderChangesSettings(t *testing.T) {
 	events, err := l.Subscribe(l.Snapshot().Leader.Player.ID)
 	require.NoError(t, err)
 
-	require.ErrorIs(t, l.SetPrivate(guest, false), ErrNotLeader)
-	require.ErrorIs(t, l.SetRanked(guest, true), ErrNotLeader)
-	require.ErrorIs(t, l.SetMaxPlayers(guest, 2), ErrNotLeader)
+	require.ErrorIs(t, l.SetPrivate(guest, false), errNotLeader)
+	require.ErrorIs(t, l.SetRanked(guest, true), errNotLeader)
+	require.ErrorIs(t, l.SetMaxPlayers(guest, 2), errNotLeader)
+	require.ErrorIs(t, l.SetMaxPlayers(guest, 2), ErrRefused, "wrapped with what was tried, still a refusal")
 
 	assert.True(t, l.Snapshot().Private)
 	assert.False(t, l.Snapshot().Ranked)
@@ -1031,7 +1037,7 @@ func TestLobby_AddGuestRefusesASeatedPlayer(t *testing.T) {
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	require.ErrorIs(t, l.addGuest(l.Snapshot().Leader.Player), ErrAlreadyInLobby)
-	require.ErrorIs(t, l.addGuest(guest), ErrAlreadyInLobby)
+	require.ErrorIs(t, l.addGuest(l.Snapshot().Leader.Player), errAlreadyInLobby)
+	require.ErrorIs(t, l.addGuest(guest), errAlreadyInLobby)
 	assert.Len(t, l.Snapshot().Guests, 1)
 }

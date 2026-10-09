@@ -356,8 +356,8 @@ until it is pinned `NOT NULL`.
 
 ## 6. The lobby
 
-**Files, in this order.** `internal/lobby/errors.go` (28, the sentinels callers
-match on), `manager.go` (404), `disconnect.go` (174), `lobby.go` (626) -
+**Files, in this order.** `internal/lobby/errors.go` (50, `ErrRefused` and
+the refusals it matches), `manager.go` (404), `disconnect.go` (174), `lobby.go` (626) -
 specifically `CreateLobby`'s table and `startGameLocked` - `watch.go` (100) for
 `watchLocked`, the manager's `watchGame` and `requestFinalize`, `finalize.go` (242),
 `browse.go` (193), `player.go` (27).

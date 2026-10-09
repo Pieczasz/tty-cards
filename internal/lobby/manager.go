@@ -148,7 +148,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 		options.maxPlayers = min(max(defaultMaxPlayers, mod.MinPlayers), mod.MaxPlayers)
 	}
 	if options.maxPlayers < mod.MinPlayers || options.maxPlayers > mod.MaxPlayers {
-		return nil, fmt.Errorf("max players must be between %d and %d for %s",
+		return nil, refusalf("max players must be between %d and %d for %s",
 			mod.MinPlayers, mod.MaxPlayers, mod.Name)
 	}
 
@@ -156,7 +156,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	defer m.mu.Unlock()
 
 	if _, seated := m.playerLobby[leader.ID]; seated {
-		return nil, ErrAlreadyInLobby
+		return nil, errAlreadyInLobby
 	}
 
 	code, err := m.generateLobbyCodeLocked()
@@ -188,7 +188,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 func (m *Manager) ToggleReady(p *game.Player) error {
 	l := m.FindLobbyByPlayer(p)
 	if l == nil {
-		return ErrNotInLobby
+		return errNotInLobby
 	}
 	// Before toggleReady takes l.mu: this takes it itself, then m.mu via
 	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
@@ -216,12 +216,12 @@ func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
 	ctx := m.appCtx
 	if !validCode(code) {
 		observability.LobbyJoin(ctx, "invalid_code")
-		return nil, ErrInvalidCode
+		return nil, errInvalidCode
 	}
 	if !m.joinLimiter.Allow("join:" + p.ID) {
 		observability.LobbyJoin(ctx, "rate_limited")
 		observability.RateLimitReject(ctx, "lobby_join")
-		return nil, ErrJoinRateLimited
+		return nil, errJoinRateLimited
 	}
 
 	m.mu.Lock()
@@ -229,13 +229,13 @@ func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
 
 	if _, seated := m.playerLobby[p.ID]; seated {
 		observability.LobbyJoin(ctx, "already_in_lobby")
-		return nil, ErrAlreadyInLobby
+		return nil, errAlreadyInLobby
 	}
 
 	lobby, exists := m.lobbies[code]
 	if !exists {
 		observability.LobbyJoin(ctx, "not_found")
-		return nil, ErrLobbyNotFound
+		return nil, errLobbyNotFound
 	}
 
 	if err := lobby.addGuest(p); err != nil {
@@ -259,14 +259,14 @@ func (m *Manager) FindLobbyByPlayer(p *game.Player) *Lobby {
 // FindLobbyByCode is the open lobby holding code.
 func (m *Manager) FindLobbyByCode(code string) (*Lobby, error) {
 	if !validCode(code) {
-		return nil, ErrInvalidCode
+		return nil, errInvalidCode
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	lobby, exists := m.lobbies[code]
 	if !exists {
-		return nil, ErrLobbyNotFound
+		return nil, errLobbyNotFound
 	}
 	return lobby, nil
 }

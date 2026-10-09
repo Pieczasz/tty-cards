@@ -109,7 +109,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 			case err == nil:
 				g.joined = true
 				successes.Add(1)
-			case errors.Is(err, ErrLobbyFull):
+			case errors.Is(err, errLobbyFull):
 				fullErrs.Add(1)
 			default:
 				otherErrs.Add(1)
@@ -185,7 +185,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	// Lobby must be gone from the manager entirely.
 	_, err = m.FindLobbyByCode(l.Code())
-	require.ErrorIs(t, err, ErrLobbyNotFound, "empty lobby must be removed")
+	require.ErrorIs(t, err, errLobbyNotFound, "empty lobby must be removed")
 
 	// No ghost membership: the manager's playerLobby map is the authoritative
 	// membership index, and no player may still resolve to a lobby through it.
