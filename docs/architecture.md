@@ -708,10 +708,9 @@ legal card, and deals the next hand; gin rummy draws, knocks when a discard leav
 it gin, otherwise sheds its priciest deadwood, and deals. `TimeoutAction` must
 return something `ValidateAction` accepts - gin rummy's `autoDiscard` skips the
 card the upcard rule forbids for exactly this reason. A refused auto-play is a
-rules bug: `submitTimedOutAction` re-arms the clock **on the same lock hold** that
-refused it (after it is dropped, a player's own move may already have armed the
-next seat's clock), as a fresh chargeable turn with the 10 s floor, so each refused
-expiry still costs a miss and a rules set that always refuses loses the seat.
+rules bug: `autoPlayLocked` re-arms the clock as a fresh chargeable turn with the
+10 s floor, so each refused expiry still costs a miss and a rules set that always
+refuses loses the seat.
 
 **A turn that carries on keeps its deadline**
 ([`decisions.md` #38](decisions.md#38-the-turn-clock-keeps-a-seats-deadline-while-its-turn-carries-on)).
@@ -729,17 +728,15 @@ The clock's fields are one `turnClock` value on the engine (`clock`), guarded by
 `Engine.mu` like the rest. `clock.seq` fences stale timers
 ([`decisions.md` #4](decisions.md#4-clockseq-a-generation-counter-fences-the-turn-clock)):
 `stopTurnTimerLocked` increments it and `armTurnTimerLocked` calls that first, so
-every cursor change invalidates timers already in flight, and an auto-play carries
-the generation it was computed for. `resolveTurnTimeout` decides what an expiry
-means as a `timeoutOutcome` - `timeoutIgnored` (a stale timer or a finished table),
-`timeoutAutoPlay` or `timeoutTakeSeat` - and `onTurnTimeout` acts on it once the
-lock is dropped. Only **accepted** actions clear a player's miss count
+every cursor change invalidates timers already in flight. `onTurnTimeout` settles
+an expiry in **one** lock hold: a generation that moved on (the player acted, the
+table ended, the engine closed) means a fired timer that waited on the lock does
+nothing; otherwise it charges the miss, then either broadcasts `EventTurnTimedOut`
+and auto-plays (`autoPlayLocked`) or takes the seat (`takeIdleSeatLocked`). Nothing
+is decided under one hold and acted on under another, so there is no gap for a
+player's move to land in. Only **accepted** actions clear a player's miss count
 (`clock.missed`) - a move the rules reject
 does not, or spamming garbage would dodge removal forever.
-
-`EventTurnTimedOut` is broadcast **inside** `resolveTurnTimeout`'s lock hold, on
-the same hold that charged the miss. Outside it, a player whose action lands in
-the gap gets the miss refunded while the "timed out" they disproved still ships.
 
 `OverrideNextTurn` also keeps a last-seat-standing hand open (a poker heads-up
 all-in leave still contests the pot) - `settleAfterLeaveLocked` checks for it
@@ -754,10 +751,9 @@ timeout re-arming a timer on a closed engine.
 
 **A rules panic ends one table, not the process.** `onTurnTimeout` runs on a
 `time.AfterFunc` goroutine and nothing above it recovers, so a panic in a rules
-hook would take down every table for one game's defect. `Engine.recoverRulesPanic`
-is a direct `defer` on that goroutine and re-takes `e.mu` (the locked helpers
-release it in their own defers as the panic unwinds); `SubmitAction` has its own
-direct deferred `recover`, which runs before its unlock. Both call
+hook would take down every table for one game's defect. `onTurnTimeout`,
+`SubmitAction` and `RemovePlayer` each defer a `recover` directly after taking
+`e.mu`, so it runs before their unlock. All three call
 `endOnRulesPanicLocked`, which logs the panic with a stack and calls
 `endGameLocked(nil, EndReasonRulesError)` - on a closed engine too, where the
 broadcast is a no-op but the engine still records the reason for the watcher. It deliberately does **not** call
@@ -906,9 +902,9 @@ metrics carry. An event is a **cue to re-read a snapshot**, never the state itse
 | `EventGameStarted` | `Engine.Start` | views begin rendering the table |
 | `EventActionApplied` | `applyActionLocked`, after `AfterAction` | re-sync |
 | `EventTurnAdvanced` | `applyActionLocked`, `settleAfterLeaveLocked` | re-sync |
-| `EventTurnTimedOut` | `resolveTurnTimeout` | re-sync; a safe move was played |
+| `EventTurnTimedOut` | `autoPlayLocked` (from `onTurnTimeout`) | re-sync; a safe move was played |
 | `EventPlayerLeft` | `removePlayerLocked` | re-sync |
-| `EventPlayerIdle` | `removeIfStillIdle` | **the named player's own view quits its program**, which ends the SSH session through the ordinary `releaseSession` path |
+| `EventPlayerIdle` | `takeIdleSeatLocked` (from `onTurnTimeout`) | **the named player's own view quits its program**, which ends the SSH session through the ordinary `releaseSession` path |
 | `EventGameEnded` | `endGameLocked`, reached from `finishGameLocked`, `applyActionLocked` (a rules error), `settleAfterLeaveLocked` and `endOnRulesPanicLocked` | views show the result; the lobby's watcher persists it |
 | `EventUnknown` | - | zero value, never sent |
 
@@ -1545,9 +1541,9 @@ carries none, and CI asserts the URL carries none.
     enforcement - see §5.
 15. `TimeoutAction` must return a move the same package's `ValidateAction`
     accepts.
-16. A rules panic must end the table, not the process - `recoverRulesPanic`
-    stays a **direct** defer in `onTurnTimeout`, `SubmitAction`'s recover stays a
-    direct defer, and neither asks the rules for standings.
+16. A rules panic must end the table, not the process - the recovers in
+    `onTurnTimeout`, `SubmitAction` and `RemovePlayer` stay **direct** defers taken
+    under the lock, and none asks the rules for standings.
 17. The same seat with the same turn length keeps its deadline (10 s floor), and a
     miss is charged once per seat-turn.
 18. Every TUI feed message carries the channel that delivered it; a view drops one

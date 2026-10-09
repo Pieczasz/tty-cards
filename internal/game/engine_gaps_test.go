@@ -32,27 +32,6 @@ func TestEngine_Snapshot_ShowsTheCardInPlay(t *testing.T) {
 	assert.Equal(t, top, engine.Snapshot().TopDiscard)
 }
 
-// The auto-play is computed under one lock hold and applied under the next. A player
-// who acts in between has already moved the turn on; playing the stale move too would
-// be a double play.
-func TestEngine_TurnTimeout_StaleAutoPlayIsNotApplied(t *testing.T) {
-	t.Parallel()
-	rules := &timeoutRules{safe: namedAction{name: "safe"}}
-	engine := newTimeoutEngine(t, rules, "a", "b")
-	engine.mu.Lock()
-	seq := engine.clock.seq
-	engine.mu.Unlock()
-
-	outcome, playerID, action := engine.resolveTurnTimeout(seq)
-	require.Equal(t, timeoutAutoPlay, outcome)
-	require.NoError(t, engine.SubmitAction(playerID, namedAction{name: "real"}))
-
-	err := engine.submitTimedOutAction(playerID, action, seq)
-
-	require.ErrorIs(t, err, errStaleTurn)
-	assert.Equal(t, []string{playerID + ":real"}, rules.appliedActions())
-}
-
 type applyFailsRules struct{ *timeoutRules }
 
 func (*applyFailsRules) ApplyAction(*State, Action) error { return errors.New("rules bug") }

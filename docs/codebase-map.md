@@ -274,18 +274,18 @@ sequenceDiagram
     participant Ru as Rules (TurnTimeoutHandler)
     participant Bc as Broadcaster
 
-    Tm->>E: onTurnTimeout(seq)
-    Note over E: defer recoverRulesPanic:<br/>a panic ends this table only
-    E->>E: resolveTurnTimeout: lock, seq == clock.seq? else timeoutIgnored
+    Tm->>E: onTurnTimeout(seq): lock once, defer recover<br/>(a panic ends this table only)
+    E->>E: seq == clock.seq and Playing? else return
     E->>E: clock.missed[player]++ once per seat-turn (clock.missCharged)
-    E->>Ru: TimeoutAction(state)
-    E->>Bc: EventTurnTimedOut (same lock hold)
-    E->>E: submitTimedOutAction(seq) -> ValidateAction...
-    Note over E: refused: re-arm on the same hold,<br/>chargeable again, 10 s floor
-    alt clock.missed >= 3 (timeoutTakeSeat)
-        E->>E: removeIfStillIdle (re-check under lock)
-        E->>Bc: EventPlayerIdle
+    alt clock.missed >= 3, or no safe move
+        E->>E: takeIdleSeatLocked
+        E->>Bc: EventPlayerIdle, then removePlayerLocked
         Note right of Bc: that player's own view quits,<br/>ending the SSH session
+    else autoPlayLocked
+        E->>Ru: TimeoutAction(state)
+        E->>Bc: EventTurnTimedOut
+        E->>Ru: ValidateAction, then applyActionLocked
+        Note over E: refused: re-arm,<br/>chargeable again, 10 s floor
     end
 ```
 
