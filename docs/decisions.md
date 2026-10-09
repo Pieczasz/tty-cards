@@ -1269,7 +1269,8 @@ a player losing badly paid only the ordinary loss for walking out.
 `State.Interrupted`, and `removePlayerLocked` reports that reason instead of
 `EndReasonWin` when the removal ends the game with it set; the engine knows nothing
 about ratings. The lobby routes a ranked interrupted match to
-`FinalizeInterruptedMatch` with the engine's `LeftPlayers` as leavers. Elo is
+`FinalizeInterruptedMatch` with the engine's leavers (since 2026-10-09, the
+standings marked `Left`) as leavers. Elo is
 computed over the whole table, leavers ranked last as always, but only the
 leavers' rows are written, and only downwards (`min(new, old)`). Seated players
 keep their rating and their `matches_played`; a seated player without a ranking row

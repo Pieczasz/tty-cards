@@ -601,7 +601,9 @@ taken at game start) -> **`Manager.finalizeFinishedGame`** (`finalize.go`):
    `dropFinishedMatch` instead; `finalizeFinishedGame` takes the result
 2. A 15-second timeout context
 3. `Engine.Standings`, a `[]game.Standing` carrying each player's place (ties share
-   a place where the rules implement `StandingScorer`)
+   a place where the rules implement `StandingScorer`) and whether they `Left`;
+   its `Player` is a copy of the seat's identity (`ID`, `UserID`, `Name`), safe to
+   read after the engine lock, and finalize needs no `WithState` to find the leavers
 4. The rating gate (§6.4)
 5. `recordFinishedMatch`: `RecordCasualMatch` for an unrated match,
    `FinalizeInterruptedMatch` for a ranked `EndReasonInterrupted`, otherwise
@@ -1125,7 +1127,7 @@ An unrated ranked match goes through `RecordCasualMatch`, so it is history with
 **An interrupted match is rated only against its leavers**
 ([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
 A ranked `EndReasonInterrupted` goes through `FinalizeInterruptedMatch` with the
-engine's `LeftPlayers` as the leavers. Elo is computed over the whole table, the
+standings marked `Left` as the leavers. Elo is computed over the whole table, the
 leavers already ranked last, but only the leavers' rows are written, and only
 downwards (`min(new, old)`): seated players keep their rating and their
 `matches_played`, and a seated player with no ranking row is not seeded one. The

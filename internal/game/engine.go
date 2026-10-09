@@ -85,6 +85,9 @@ func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 		if p != nil {
 			seat := *p
 			seat.Cards = nil
+			// Ratings are the lobby's, read off its own roster; a map shared with it
+			// would be one the lobby rewrites while the table runs.
+			seat.Ratings = nil
 			seats[i] = &seat
 		}
 	}
@@ -259,17 +262,18 @@ func (e *Engine) IsFinished() bool {
 
 // Standing is one player's finishing position.
 type Standing struct {
+	// Player is a copy of the seat's identity - ID, UserID and Name - and nothing the
+	// table still writes, so it is safe to read once the engine lock is gone.
 	Player *Player
 	// Place is 1-based. Players the rules scored equally share one.
 	Place int
+	// Left marks a seat that walked out before the end; it places below every seat
+	// still at the table.
+	Left bool
 }
 
 // Standings returns the finishing order, best first, in one lock hold. Players the
 // rules scored equally share a place; everything else counts up strictly.
-//
-// The *Player values alias live engine state, so only the fields nothing writes after
-// the seat was taken - ID, UserID, Name - are safe to read once the lock is gone.
-// Cards and anything the rules keep may change under a caller that holds them.
 //
 // A rules panic returns nil, which finalize drops as unrecordable: the lobby's
 // finalize goroutine has nothing above it to recover.
@@ -287,14 +291,18 @@ func (e *Engine) Standings() (standings []Standing) {
 	places := e.placesLocked(players)
 	standings = make([]Standing, len(players))
 	for i, p := range players {
-		standings[i] = Standing{Player: p, Place: places[i]}
+		standings[i] = Standing{Place: places[i]}
+		if p != nil {
+			standings[i].Player = &Player{ID: p.ID, UserID: p.UserID, Name: p.Name}
+			standings[i].Left = slices.ContainsFunc(e.state.LeftPlayers, func(l *Player) bool { return l.ID == p.ID })
+		}
 	}
 	return standings
 }
 
 // WithState runs fn with the engine lock held. fn must not call back into the engine:
-// every Engine method takes the same lock, so it would deadlock. Server side only (the
-// lobby reads a finished table's leavers through it); views read through Frame.
+// every Engine method takes the same lock, so it would deadlock. It is how a test
+// reads or rigs a table; views read through Frame, and finalize through Standings.
 func (e *Engine) WithState(fn func(state *State)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
