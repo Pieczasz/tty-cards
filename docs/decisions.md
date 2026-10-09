@@ -996,7 +996,7 @@ it protects is one short transaction against a database in the same compose
 project. What it costs is a schema, a drain path, and a second way for a match to
 be recorded. Two things make the trade honest and both are checked: compose's
 `stop_grace_period` (80 s) must exceed the whole sequential drain (30 s SSH + 5 s
-API + 2×15 s here + 6 s OTel = 71 s), or the runtime SIGKILLs the process
+session teardown + 5 s API + 2×15 s here + 6 s OTel = 76 s), or the runtime SIGKILLs the process
 mid-write; and the give-up is **not silent** - it logs at ERROR and counts
 `MatchFinalize(outcome="dropped")`, which is alertable. The residual risk is
 stated rather than removed: a match that finishes in the last seconds of a deploy,

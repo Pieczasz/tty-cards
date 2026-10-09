@@ -201,10 +201,14 @@ runs before the deferred telemetry flush.
 `serve` stacks `tcp -> LimitListener -> proxyproto.Listener`, runs `Serve` in a
 goroutine, and blocks on a signal, an accept error or an API error. Every exit
 path calls `drainServer` (`BeginShutdown` + graceful SSH stop), so ranked matches
-interrupted by a deploy are recorded **without** Elo.
+interrupted by a deploy are recorded **without** Elo. The SSH stop is `Shutdown`,
+then `Close`, then `WaitSessions`: charm ssh runs session handlers on goroutines
+neither of the first two waits for, and their teardown is what ends a table and
+registers its finalize, so the finalizer drain must not start before it is done.
 
-Shutdown is sequential and budgeted: 30 s SSH `Shutdown` + 5 s stats API + 15 s
-finalizers + a second 15 s finalizer window + 6 s OTel (2 s per provider) = 71 s worst case.
+Shutdown is sequential and budgeted: 30 s SSH `Shutdown` + 5 s session teardown + 5 s
+stats API + 15 s finalizers + a second 15 s finalizer window + 6 s OTel (2 s per
+provider) = 76 s worst case.
 `compose.yaml` sets `stop_grace_period: 80s` against exactly that arithmetic, and
 the comment on the shutdown timeouts in `cmd/server/main.go` says the two numbers
 depend on each other.
