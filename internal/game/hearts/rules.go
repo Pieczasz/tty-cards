@@ -266,7 +266,6 @@ func afterPlay(state *game.State, extra *State) {
 
 	if game.AnyScoreAtLeast(extra.CumulativeScores, extra.TargetScore) {
 		extra.MatchComplete = true
-		state.OverrideNextTurn = nil
 		return
 	}
 

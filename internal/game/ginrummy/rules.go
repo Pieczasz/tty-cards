@@ -268,7 +268,6 @@ func closeHand(state *game.State, extra *State, result *HandResult) {
 
 	if matchOver(extra) {
 		extra.MatchComplete = true
-		state.OverrideNextTurn = nil
 		return
 	}
 	extra.FirstActor = otherSeat(extra.FirstActor)

@@ -182,7 +182,6 @@ func finishHand(state *game.State, extra *State) {
 	recordBustouts(state, extra)
 	if extra.HandNumber >= extra.HandsTotal || fundedSeats(state, extra) <= 1 {
 		extra.MatchComplete = true
-		state.OverrideNextTurn = nil
 		return
 	}
 	state.SetTurn(nextFundedSeat(state, extra, extra.DealerIndex))
