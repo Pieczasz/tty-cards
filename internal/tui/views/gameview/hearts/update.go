@@ -93,7 +93,7 @@ func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m *model) submitPass() (tea.Model, tea.Cmd) {
 	if len(m.passSelected) != 3 {
-		m.ActionErr = errNeedThreeCards
+		m.Refuse(errNeedThreeCards)
 		return m, nil
 	}
 	return m.submit(logic.ActionPassCards{Cards: slices.Collect(maps.Keys(m.passSelected))})

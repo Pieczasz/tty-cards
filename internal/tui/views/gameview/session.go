@@ -176,6 +176,13 @@ func (s *Session) handleClockTick(sync func()) tea.Cmd {
 
 var errNotSeated = errors.New("you are not seated at this table")
 
+// Refuse shows err as a move the view itself turned down before the engine saw it.
+// Like an engine refusal it belongs to this turn, so Sync drops it once the turn moves
+// on - set by hand, it outlived a pass the auto-play then made for the player.
+func (s *Session) Refuse(err error) {
+	s.ActionErr, s.refusedOn = err, s.Base.CurrentPlayerID
+}
+
 // Submit sends action as this session's player and keeps the outcome in ActionErr, so
 // an accepted move clears the last complaint. The error is rendered to the player
 // as-is, hence no wrap.

@@ -261,6 +261,26 @@ func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	return engine, m
 }
 
+// The refusal belongs to the pass it refused: once the pass is made without the
+// player - the auto-pass - it has nothing left to say and must not sit through the
+// trick play that follows.
+func TestSubmitPass_RefusalClearsOnceThePassIsMade(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t)
+	require.Equal(t, logic.PhasePassing, m.phase)
+	m.Selected = 0
+	_, _ = m.Update(tuitest.Key("space"))
+	_, _ = m.Update(tuitest.Key("enter"))
+	require.ErrorIs(t, m.ActionErr, errNeedThreeCards)
+
+	hero := m.Bound.PlayerID()
+	require.NoError(t, engine.SubmitAction(hero, logic.ActionPassCards{Cards: m.Base.Hand[:3]}))
+	m.syncState()
+
+	require.NotEqual(t, hero, m.Base.CurrentPlayerID, "the pass moved the turn on")
+	assert.NoError(t, m.ActionErr)
+}
+
 // Three staged cards and enter is the pass. An accepted one clears the staging, or the
 // markers would sit over the cards the next hand deals into those positions.
 func TestSubmitPass_SendsTheThreeStagedCards(t *testing.T) {
