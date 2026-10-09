@@ -166,14 +166,14 @@ func (q *MatchRepository) RecordCasualMatch(
 // FinalizeRankedMatch implements db.MatchRepository.
 func (q *MatchRepository) FinalizeRankedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int,
-) error {
+) (map[uuid.UUID]uint32, error) {
 	return q.finalizeRanked(ctx, ref, orderedUserIDs, places, rating.EverySeat())
 }
 
 // FinalizeInterruptedMatch implements db.MatchRepository.
 func (q *MatchRepository) FinalizeInterruptedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
-) error {
+) (map[uuid.UUID]uint32, error) {
 	return q.finalizeRanked(ctx, ref, orderedUserIDs, places, rating.LeaversOnly(leavers))
 }
 
@@ -186,11 +186,12 @@ func finalizeOp(scope rating.Scope) (span, msg string) {
 	return "db.FinalizeRankedMatch", "finalize ranked match"
 }
 
+// finalizeRanked returns the rating it wrote for each seat whose row it wrote.
 func (q *MatchRepository) finalizeRanked(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int, scope rating.Scope,
-) (err error) {
+) (_ map[uuid.UUID]uint32, err error) {
 	if len(orderedUserIDs) == 0 {
-		return nil
+		return map[uuid.UUID]uint32{}, nil
 	}
 
 	spanName, op := finalizeOp(scope)
@@ -199,32 +200,42 @@ func (q *MatchRepository) finalizeRanked(
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	if err = checkDistinctPlayers(orderedUserIDs); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	var damped bool
+	var result rating.Result
 	if err = transactRetrying(ctx, q.db, func(tx *gorm.DB) error {
-		damped = false
+		// Per attempt: a retried transaction must not report what a rolled-back one decided.
+		result = rating.Result{}
 		game, err := getOrCreateGame(tx, ref)
 		if err != nil {
 			return err
 		}
-
-		var deltas map[uuid.UUID]int
-		var rated bool
-		deltas, rated, damped, err = updateRankings(ctx, tx, game.ID, orderedUserIDs, places, scope)
-		if err != nil {
+		if result, err = updateRankings(ctx, tx, game.ID, orderedUserIDs, places, scope); err != nil {
 			return err
 		}
-		return recordMatch(tx, game.ID, orderedUserIDs, places, deltas, rated)
+		return recordMatch(tx, game.ID, orderedUserIDs, places, deltasOf(result.Writes), result.Rated())
 	}); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	// Counted once committed: a rolled-back finalize damped nothing.
-	if damped {
+	if result.Damped {
 		observability.MatchDamped(ctx, ref.Slug)
 	}
-	return nil
+	written := make(map[uuid.UUID]uint32, len(result.Writes))
+	for _, w := range result.Writes {
+		written[w.UserID] = w.Elo
+	}
+	return written, nil
+}
+
+// deltasOf is the rating change each write records in history.
+func deltasOf(writes []rating.Write) map[uuid.UUID]int {
+	deltas := make(map[uuid.UUID]int, len(writes))
+	for _, w := range writes {
+		deltas[w.UserID] = w.Delta
+	}
+	return deltas
 }
 
 // seedRankingRows gives fetchRankings something to lock. A first-time (user_id, game_id)
@@ -259,62 +270,60 @@ func seedRankingRows(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) error {
 }
 
 // updateRankings rates the table: rating.Rate decides, this reads what it needs under
-// the locks and stores what it decided. rated is whether any seat's row was written,
-// damped whether the anti-farm cap stopped the match paying.
+// the locks and stores what it decided, which it returns.
 func updateRankings(
 	ctx context.Context, tx *gorm.DB, gameID uint, orderedUserIDs []uuid.UUID, places []int, scope rating.Scope,
-) (deltas map[uuid.UUID]int, rated, damped bool, err error) {
+) (rating.Result, error) {
 	// Serialize same-pairing finalizes across every game: ranking row locks are
 	// per (user, game), so A-B farming Poker and Hearts concurrently would both
 	// see an undamped count without this.
 	if err := lockPairing(tx, orderedUserIDs); err != nil {
-		return nil, false, false, err
+		return rating.Result{}, err
 	}
 
 	// Read under the seat locks eraseUser also takes, so an erasure either
 	// committed before this or waits for this transaction to finish.
 	seats, err := unerasedSeats(tx, orderedUserIDs, places)
 	if err != nil {
-		return nil, false, false, err
+		return rating.Result{}, err
 	}
 	seatIDs := rating.IDs(seats)
 	written := scope.Written(seatIDs)
 	if len(written) == 0 {
-		return map[uuid.UUID]int{}, false, false, nil
+		return rating.Result{}, nil
 	}
 
 	// Only rows about to be written are seeded: a seated player with no ranking yet
 	// would otherwise land on the leaderboard from a match that did not count for them.
 	// rating.Rate reads a missing row as the starting rating anyway.
 	if err := seedRankingRows(tx, gameID, written); err != nil {
-		return nil, false, false, err
+		return rating.Result{}, err
 	}
 
 	rankingMap, err := fetchRankings(tx, gameID, seatIDs)
 	if err != nil {
-		return nil, false, false, fmt.Errorf("fetch rankings: %w", err)
+		return rating.Result{}, fmt.Errorf("fetch rankings: %w", err)
 	}
 	pairings, err := repeatedPairCountLast24h(tx, seatIDs)
 	if err != nil {
-		return nil, false, false, err
+		return rating.Result{}, err
 	}
 
 	result, err := rating.Rate(rating.Table{
 		Seats: seats, Current: standings(rankingMap), RecentPairings: pairings, Scope: scope,
 	})
 	if err != nil {
-		return nil, false, false, fmt.Errorf("rate game %d: %w", gameID, err)
+		return rating.Result{}, fmt.Errorf("rate game %d: %w", gameID, err)
 	}
 	if result.Damped {
 		// The anti-farm cap doing its job, not a fault: Info, not Warn.
 		slog.InfoContext(ctx, "ranked match damped: these players have already met inside 24h",
 			"user_ids", seatIDs, "game_id", gameID, "recent_pairings", pairings)
 	}
-	deltas, err = applyRatings(tx, rankingMap, result.Writes)
-	if err != nil {
-		return nil, false, false, err
+	if err := applyRatings(tx, rankingMap, result.Writes); err != nil {
+		return rating.Result{}, err
 	}
-	return deltas, result.Rated(), result.Damped, nil
+	return result, nil
 }
 
 // standings is the ranking rows as rating.Rate reads them.
@@ -326,17 +335,15 @@ func standings(rankingMap map[uuid.UUID]*db.Ranking) map[uuid.UUID]rating.Standi
 	return out
 }
 
-// applyRatings stores each write and returns the deltas history records. rating.Rate
-// only writes seats it found a row for, so every write has one here.
-func applyRatings(tx *gorm.DB, rankingMap map[uuid.UUID]*db.Ranking, writes []rating.Write) (map[uuid.UUID]int, error) {
-	deltas := make(map[uuid.UUID]int, len(writes))
+// applyRatings stores each write. rating.Rate only writes seats it found a row for, so
+// every write has one here.
+func applyRatings(tx *gorm.DB, rankingMap map[uuid.UUID]*db.Ranking, writes []rating.Write) error {
 	for _, w := range writes {
 		if err := writeRanking(tx, rankingMap[w.UserID], w.Elo); err != nil {
-			return nil, err
+			return err
 		}
-		deltas[w.UserID] = w.Delta
 	}
-	return deltas, nil
+	return nil
 }
 
 // writeRanking stores one seat's rating.

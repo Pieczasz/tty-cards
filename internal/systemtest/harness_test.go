@@ -67,9 +67,9 @@ func (r *rankedFinalizeRecorder) FinalizeRankedMatch(
 	ref db.GameRef,
 	orderedUserIDs []uuid.UUID,
 	_ []int,
-) error {
+) (map[uuid.UUID]uint32, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	r.mu.Lock()
@@ -80,7 +80,7 @@ func (r *rankedFinalizeRecorder) FinalizeRankedMatch(
 	r.mu.Unlock()
 
 	r.fire()
-	return nil
+	return map[uuid.UUID]uint32{}, nil
 }
 
 func (r *rankedFinalizeRecorder) calls() []finalizedMatch {

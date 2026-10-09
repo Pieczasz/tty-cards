@@ -86,14 +86,24 @@ func (m *MockMatchRepo) RecordCasualMatch(
 
 func (m *MockMatchRepo) FinalizeRankedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int,
-) error {
-	return m.Called(ctx, ref, orderedUserIDs, places).Error(0)
+) (map[uuid.UUID]uint32, error) {
+	return finalized(m.Called(ctx, ref, orderedUserIDs, places))
 }
 
 func (m *MockMatchRepo) FinalizeInterruptedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int, leavers []uuid.UUID,
-) error {
-	return m.Called(ctx, ref, orderedUserIDs, places, leavers).Error(0)
+) (map[uuid.UUID]uint32, error) {
+	return finalized(m.Called(ctx, ref, orderedUserIDs, places, leavers))
+}
+
+// finalized reads a finalize expectation: Return(err) for a test that does not care
+// what was written, or Return(ratings, err) for one that does.
+func finalized(args mock.Arguments) (map[uuid.UUID]uint32, error) {
+	if len(args) == 1 {
+		return nil, args.Error(0)
+	}
+	ratings, _ := args.Get(0).(map[uuid.UUID]uint32)
+	return ratings, args.Error(1)
 }
 
 // gameRef mirrors what registerGame put in the registry: the persisted key is the

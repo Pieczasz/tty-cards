@@ -61,13 +61,15 @@ func TestFinalize_ErrorsNameTheirOwnPath(t *testing.T) {
 	}{
 		{
 			name: "ranked",
-			call: func() error { return repo.FinalizeRankedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil) },
+			call: func() error {
+				return finalizeErr(repo.FinalizeRankedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil))
+			},
 			want: "finalize ranked match: duplicate user id",
 		},
 		{
 			name: "interrupted",
 			call: func() error {
-				return repo.FinalizeInterruptedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil, nil)
+				return finalizeErr(repo.FinalizeInterruptedMatch(t.Context(), db.GameRef{Slug: "x"}, dup, nil, nil))
 			},
 			want: "finalize interrupted match: duplicate user id",
 		},
@@ -153,3 +155,6 @@ func TestIsUniqueViolation(t *testing.T) {
 		})
 	}
 }
+
+// finalizeErr drops what a finalize wrote, for a test that asserts only its error.
+func finalizeErr(_ map[uuid.UUID]uint32, err error) error { return err }

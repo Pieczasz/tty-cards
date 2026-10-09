@@ -133,14 +133,16 @@ func (m *Manager) persistFinishedMatch(
 //
 //nolint:wrapcheck // wrapping it again logged "finalize ranked match: finalize ranked match"
 func (m *Manager) recordFinishedMatch(ctx context.Context, res matchResult, rated bool) error {
+	var err error
 	switch {
 	case !rated:
-		return m.matchRepo.RecordCasualMatch(ctx, res.ref, res.userIDs)
+		err = m.matchRepo.RecordCasualMatch(ctx, res.ref, res.userIDs)
 	case res.interrupted:
-		return m.matchRepo.FinalizeInterruptedMatch(ctx, res.ref, res.userIDs, res.places, res.leavers)
+		_, err = m.matchRepo.FinalizeInterruptedMatch(ctx, res.ref, res.userIDs, res.places, res.leavers)
 	default:
-		return m.matchRepo.FinalizeRankedMatch(ctx, res.ref, res.userIDs, res.places)
+		_, err = m.matchRepo.FinalizeRankedMatch(ctx, res.ref, res.userIDs, res.places)
 	}
+	return err
 }
 
 // leaverIDs is who left the finished table, as its standings mark them.
