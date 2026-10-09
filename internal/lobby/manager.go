@@ -179,7 +179,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 // JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
 // does not look the code up a second time - by when the table may be gone.
 func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
-	ctx := m.shutdownCtx()
+	ctx := m.appCtx
 	if !validCode(code) {
 		observability.LobbyJoin(ctx, "invalid_code")
 		return nil, ErrInvalidCode
@@ -281,10 +281,6 @@ func (m *Manager) LeaveLobby(p *game.Player) {
 	if leave.closeLobby {
 		m.RemoveLobby(code)
 	}
-}
-
-func (m *Manager) shutdownCtx() context.Context {
-	return m.appCtx
 }
 
 // Stats counts lobbies by state for the public stats endpoint: how many hands are
@@ -393,7 +389,7 @@ func (m *Manager) RemoveLobby(code string) {
 	}
 	if bc != nil {
 		if n := bc.Dropped(); n > 0 {
-			observability.BroadcastDropped(m.shutdownCtx(), "lobby", n)
+			observability.BroadcastDropped(m.appCtx, "lobby", n)
 		}
 		bc.Close()
 	}

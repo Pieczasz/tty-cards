@@ -108,7 +108,7 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 	}
 	m.grace.arm(p.ID, disconnectGrace, func() { m.expireLeave(p) })
 	m.mu.Unlock()
-	slog.InfoContext(m.shutdownCtx(), "session dropped mid-game, holding the seat",
+	slog.InfoContext(m.appCtx, "session dropped mid-game, holding the seat",
 		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
@@ -121,7 +121,7 @@ func (m *Manager) expireLeave(p *game.Player) {
 		return
 	}
 	m.mu.Unlock()
-	slog.InfoContext(m.shutdownCtx(), "disconnect grace expired, giving up the seat", "player_id", p.ID)
+	slog.InfoContext(m.appCtx, "disconnect grace expired, giving up the seat", "player_id", p.ID)
 	m.LeaveLobby(p)
 }
 
@@ -140,7 +140,7 @@ func (m *Manager) ResumePlayer(p *game.Player) *Lobby {
 	if cancelled, blocked := m.grace.tryCancel(p.ID); blocked {
 		return nil
 	} else if cancelled {
-		slog.InfoContext(m.shutdownCtx(), "player reconnected inside the grace window", "player_id", p.ID)
+		slog.InfoContext(m.appCtx, "player reconnected inside the grace window", "player_id", p.ID)
 	}
 	// Same re-validation FindLobbyByPlayer and CreateLobby do: a stale index entry would
 	// route the reconnect into a lobby whose roster no longer holds them.

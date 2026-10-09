@@ -27,7 +27,7 @@ func (m *Manager) dropFinishedMatch(req finalizeRequest) {
 	if m.matchRepo == nil {
 		return
 	}
-	ctx := m.shutdownCtx()
+	ctx := m.appCtx
 	slog.ErrorContext(ctx, "finished match dropped; shutdown stopped new finalizers",
 		"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked)
 	observability.MatchFinalize(ctx, "dropped", req.isRanked)
@@ -40,7 +40,7 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 	if m.matchRepo == nil {
 		return
 	}
-	parentCtx := m.shutdownCtx()
+	parentCtx := m.appCtx
 
 	if req.game.Slug == "" {
 		// Every other bail-out says so; this one used to drop a finished match in
@@ -52,7 +52,10 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(parentCtx, finalizeTimeout)
+	// The write is detached from the app context on purpose: WaitForFinalizers exists so
+	// a match that ends during the drain is still recorded, and a parent cancelled at
+	// shutdown would abort exactly those writes. finalizeTimeout is its only deadline.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), finalizeTimeout)
 	defer cancel()
 	m.persistFinishedMatch(ctx, engine, reason, req)
 }
