@@ -146,7 +146,7 @@ comment in `startSession` states the reason.
 
 What remains: the username on `ssh.session` for 48h, and `user_id` on repository spans
 (`internal/repository/user.go`, including `db.DeleteAccount`). Every span is sampled
-(`internal/observability/otel.go`); the resource names the service
+(`internal/observability/otelsetup/otelsetup.go`); the resource names the service
 (`tty-cards-server`), its version, `deployment.environment.name` and the SDK's own
 name and version - no host name and no `service.instance.id`.
 

@@ -177,7 +177,8 @@ Order matters so deferred teardown runs correctly (LIFO):
    variable at once (`errors.Join`), not just the first
 2. `installLogging(cfg.LogLevel)` (`cmd/server/logging.go`), at the level config
    read, so nothing is logged at a level that is later overwritten
-3. `observability.Setup` (defer shutdown)
+3. `otelsetup.Setup` (defer shutdown; the SDK and its gRPC exporters live in
+   `internal/observability/otelsetup`, so only `cmd/server` links them)
 4. `repository.Connect(cfg.DSN(), repository.Pool{...})` (defer close)
 5. Repositories -> `lobby.NewManager(ctx, matchRepo)`
 6. `defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)` - registered **after** the DB-close

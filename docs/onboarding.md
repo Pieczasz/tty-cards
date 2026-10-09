@@ -140,7 +140,7 @@ tty-cards/
 │   │   ├── browse.go           BrowseEntry/BrowseFilter/BrowseLobbies + the cache
 │   │   └── player.go           db.User -> game.Player, the only such place
 │   ├── observability/
-│   │   ├── otel.go             Setup: logs + traces + metrics over OTLP gRPC
+│   │   ├── otelsetup/          Setup: logs + traces + metrics over OTLP gRPC (cmd/server only)
 │   │   └── metrics.go          counters + histograms; metrics_test pins the attrs
 │   ├── ratelimit/
 │   │   ├── limiter.go          SlidingWindow (New); a full table evicts, it does not refuse

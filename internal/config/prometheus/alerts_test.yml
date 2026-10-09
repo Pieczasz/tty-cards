@@ -1,6 +1,6 @@
 # promtool unit tests for alerts.yml; the command is at the top of that file.
 # The series are what the backend pushes: one sample a minute, and the zero
-# observability.Setup seeds for every series an increase() alert watches.
+# otelsetup.Setup seeds for every series an increase() alert watches.
 rule_files:
   - alerts.yml
 

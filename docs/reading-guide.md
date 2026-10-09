@@ -516,7 +516,7 @@ land between the two nor have a refused session cancel its grace timer.
 ## 9. The edges
 
 **Files.** `internal/httpapi/httpapi.go` (313), `internal/ratelimit/limiter.go`
-(105) + `netkey.go` (24), `internal/observability/otel.go` (139) +
+(105) + `netkey.go` (24), `internal/observability/otelsetup/otelsetup.go` (145) +
 `metrics.go` (198), `internal/config/config.go` (349).
 
 **Understand.** The stats API is read-only, unauthenticated, and returns nothing
@@ -558,7 +558,7 @@ entry embeds a `game.Module` (name, slug, rules `Factory`) **and** carries the
 TUI view constructor, which is handed the slug. `catalog.NewRegistry` builds the
 `game.Registry` from it; `internal/tui/app.go` registers routes from it. `main.go`
 now reads as a summary of everything above: `config.Load` -> OTel
-(`observability.Setup`) -> `repository.Connect` -> repositories ->
+(`otelsetup.Setup`) -> `repository.Connect` -> repositories ->
 `lobby.NewManager` -> tracker -> `ssh.NewServer` (with `catalog.NewRegistry`) ->
 `httpapi.NewServer` -> `serve`, with the `defer`s ordered so LIFO unwinding drains match writes before
 closing the DB handle they write through.

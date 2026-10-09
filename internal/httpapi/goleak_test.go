@@ -20,7 +20,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	// What observability.Setup installs in production: without it a test could not
+	// What otelsetup.Setup installs in production: without it a test could not
 	// tell a handler that ignores a visitor's traceparent from one that never saw it.
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(testSpans)))

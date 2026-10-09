@@ -9,7 +9,7 @@ import (
 )
 
 // installLogging sends every record at level or above both to stderr as JSON and to
-// the OTLP pipeline observability.Setup installs.
+// the OTLP pipeline otelsetup.Setup installs.
 func installLogging(level slog.Level) {
 	slog.SetDefault(slog.New(slog.NewMultiHandler(
 		slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}),

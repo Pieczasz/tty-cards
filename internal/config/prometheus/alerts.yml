@@ -3,8 +3,8 @@
 #
 # The backend pushes over OTLP every 60s (the SDK's periodic reader), so one sample a
 # minute per series. The increase() alerts can fire on the first event after a boot
-# because observability.Setup exports a zero for each series they watch
-# (seedAlertedSeries): a counter otherwise has no series until its first event, and
+# because otelsetup.Setup exports a zero for each series they watch
+# (observability.SeedAlertedSeries): a counter otherwise has no series until its first event, and
 # increase() needs two samples. The zero reaches Prometheus with the first export, so
 # an event in the process's first minute is still that first sample and is missed.
 #
