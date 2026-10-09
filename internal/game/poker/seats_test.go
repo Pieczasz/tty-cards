@@ -1,21 +1,22 @@
 package poker
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
-	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 )
 
-// buildSeats is the one place the view decides whose cards a player may see, and it
-// reaches past BoundEngine into whole-table state to do it. Every branch of that
-// decision is a hand somebody could otherwise read for free, so each one is pinned
-// here rather than left to whichever branch the engine happens to walk.
-func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
+// SeatsFor is the one place that decides whose cards a player may see, from
+// whole-table state. Every branch of that decision is a hand somebody could otherwise
+// read for free, so each one is pinned here rather than left to whichever branch the
+// engine happens to walk.
+func TestSeatsFor_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 	t.Parallel()
 
 	hole := func(a, b deck.Card) []deck.Card { return []deck.Card{a, b} }
@@ -33,9 +34,9 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 			},
 		}
 	}
-	newExtra := func() *logic.State {
-		return &logic.State{
-			Seats: map[string]*logic.Seat{
+	newExtra := func() *State {
+		return &State{
+			Seats: map[string]*Seat{
 				"hero": {Chips: 100},
 				// Both non-hero seats have their stack in the middle: an all-in run-out
 				// is exactly the case where the cards go face up before anyone acts again.
@@ -97,10 +98,11 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 			state, extra := newState(tt.phase), newExtra()
 			extra.ReachedShowdown = tt.showdown
 
-			seats := buildSeats(state, extra, "hero")
+			state.Extra = extra
+			seats := SeatsFor(state, "hero")
 			require.Len(t, seats, 3)
 
-			byID := map[string]seat{}
+			byID := map[string]SeatView{}
 			for _, s := range seats {
 				byID[s.PlayerID] = s
 			}
@@ -118,7 +120,7 @@ func TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo(t *testing.T) {
 	}
 }
 
-func assertHole(t *testing.T, s seat, want []deck.Card, revealed bool, who string) {
+func assertHole(t *testing.T, s SeatView, want []deck.Card, revealed bool, who string) {
 	t.Helper()
 	if revealed {
 		assert.Equal(t, want, s.Hole, "%s is shown down", who)
@@ -130,17 +132,17 @@ func assertHole(t *testing.T, s seat, want []deck.Card, revealed bool, who strin
 // The revealed cards are copied out of the engine's own player, so a later deal into
 // the same backing array cannot rewrite a hand the view is still drawing - under -race
 // reading it at all would be a race.
-func TestBuildSeats_CopiesTheHoleCardsItReveals(t *testing.T) {
+func TestSeatsFor_CopiesTheHoleCardsItReveals(t *testing.T) {
 	t.Parallel()
 
 	cards := []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}, {Rank: deck.King, Suit: deck.Spades}}
 	state := &game.State{
 		Phase:   game.Finished,
 		Players: []*game.Player{{ID: "hero", Name: "alice", Cards: cards}},
+		Extra:   &State{},
 	}
-	extra := &logic.State{}
 
-	seats := buildSeats(state, extra, "hero")
+	seats := SeatsFor(state, "hero")
 	require.Len(t, seats, 1)
 
 	cards[0] = deck.Card{Rank: deck.Two, Suit: deck.Clubs}
@@ -149,14 +151,58 @@ func TestBuildSeats_CopiesTheHoleCardsItReveals(t *testing.T) {
 
 // A seat that left mid-hand is a nil entry in State.Players. Skipping it is what keeps
 // the table from panicking on a disconnect the engine has not finished cleaning up.
-func TestBuildSeats_SkipsAnEmptySeat(t *testing.T) {
+func TestSeatsFor_SkipsAnEmptySeat(t *testing.T) {
 	t.Parallel()
 
 	state := &game.State{
 		Phase:   game.Playing,
 		Players: []*game.Player{{ID: "hero", Name: "alice"}, nil},
+		Extra:   &State{},
 	}
-	extra := &logic.State{}
 
-	assert.Len(t, buildSeats(state, extra, "hero"), 1)
+	assert.Len(t, SeatsFor(state, "hero"), 1)
+}
+
+// A view calls SeatsFor inside Frame, which has no recover: a table whose Extra is not
+// poker's yet has no seats to show rather than a panic.
+func TestSeatsFor_AStateThatIsNotPokersHasNoSeats(t *testing.T) {
+	t.Parallel()
+	state := &game.State{Players: []*game.Player{{ID: "hero"}}}
+
+	assert.Empty(t, SeatsFor(state, "hero"))
+}
+
+// Whatever the betting did, the viewer sees their own cards, nobody's before a
+// showdown, and never a folded seat's.
+func TestSeatsFor_RevealsNoOtherHandBeforeAShowdownAndNoFoldedHandEver(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(t *rapid.T) {
+		n := rapid.IntRange(MinPlayers, MaxPlayers).Draw(t, "players")
+		stock := deck.New(deck.Standard())
+		stock.Shuffle()
+		state := &game.State{Phase: game.Playing}
+		extra := &State{Seats: map[string]*Seat{}, ReachedShowdown: rapid.Bool().Draw(t, "showdown")}
+		for i := range n {
+			id := fmt.Sprintf("p%d", i+1)
+			hole, _ := stock.DrawN(2)
+			state.Players = append(state.Players, &game.Player{ID: id, Cards: hole})
+			extra.Seats[id] = &Seat{Folded: rapid.Bool().Draw(t, "folded "+id), AllIn: rapid.Bool().Draw(t, "all-in "+id)}
+		}
+		state.Extra = extra
+		viewer := rapid.SampledFrom(state.Players).Draw(t, "viewer").ID
+
+		for i, s := range SeatsFor(state, viewer) {
+			cards := state.Players[i].Cards
+			switch {
+			case s.PlayerID == viewer:
+				require.Equal(t, cards, s.Hole, "the viewer sees their own hand")
+			case !extra.ReachedShowdown:
+				require.Empty(t, s.Hole, "%s's hand before any showdown", s.PlayerID)
+			case s.Folded:
+				require.Empty(t, s.Hole, "%s folded and mucked", s.PlayerID)
+			default:
+				require.Equal(t, cards, s.Hole, "%s is shown down", s.PlayerID)
+			}
+		}
+	})
 }

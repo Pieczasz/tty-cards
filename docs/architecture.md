@@ -809,8 +809,10 @@ either: there is no `Engine.Broadcaster()`, and the feed is reached only through
 ([`decisions.md` #51](decisions.md#51-the-engine-hands-out-subscriptions-not-its-broadcaster)). It is **not** a capability boundary:
 `Frame`'s callback hands the view the live, unredacted `*State`, and a poker table
 reads every seat from it. There is no `Engine()` escape hatch; what the view shows
-from that state is the view's stated job (`buildSeats`, which has its own test
-file).
+from that state is filtered by a named function. Which hole cards a poker seat may
+see is a rule of poker, so it is the rules' `poker.SeatsFor(state, viewer)`
+(`internal/game/poker/seats.go`, with its own test file), and the view only renders
+the seats it returns.
 
 The TUI never holds a `*game.Engine`, so it cannot act as another seat. The lobby
 makes the handle: `Lobby.Seat(playerID)` (nil unless that player still holds a seat at
