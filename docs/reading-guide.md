@@ -116,8 +116,7 @@ into the engine. That holds structurally today: `Rules` methods receive only
 `ValidateAction`) -> clear the missed-turn count -> `applyActionLocked`:
 `ApplyAction` -> `AfterAction` -> broadcast `EventActionApplied` ->
 `CheckWinCondition` -> `advanceTurnLocked` -> broadcast `EventTurnAdvanced`. The
-timer's auto-play runs the same two halves, `submitTimedOutAction` minus the
-clear. An error from `ApplyAction` or `AfterAction`
+timer's auto-play (`autoPlayLocked`) runs the same two halves, minus the clear. An error from `ApplyAction` or `AfterAction`
 ends the game as `EndReasonRulesError`, with no winner since the state may be half-applied, so
 **anything checkable up front belongs in `ValidateAction`**.
 
@@ -133,19 +132,17 @@ with `State.SetTurn` (on turn now, and after the action) or `State.OverrideTurn`
 *A turn that carries on keeps its clock.* `armTurnTimerLocked` keeps the running
 deadline when the seat on turn and the turn length are unchanged - gin's draw then
 discard, a re-armed auto-play, somebody else leaving - floored at
-`minTurnRemaining` (10 s), and `resolveTurnTimeout` charges one miss per seat-turn
+`minTurnRemaining` (10 s), and `onTurnTimeout` charges one miss per seat-turn
 (`clock.missCharged`), not per expiry
 ([`decisions.md` #38](decisions.md#38-the-turn-clock-keeps-a-seats-deadline-while-its-turn-carries-on)).
 
 *`clock.seq` is the fence.* The clock fields live together in one `turnClock`
 struct under `Engine.mu`. `stopTurnTimerLocked` increments `seq`, and
 `armTurnTimerLocked` calls `stopTurnTimerLocked` first - so every cursor change
-invalidates timers already in flight. An auto-play carries the generation it was
-computed for (`submitTimedOutAction` refuses on a mismatch with `errStaleTurn`),
-and `removeIfStillIdle` re-checks the same generation under the lock before it
-takes a seat. `resolveTurnTimeout` says what an expiry means as a `timeoutOutcome`:
-ignored, auto-play or take the seat. That is why a player who acted as their clock ran out is neither
-charged a miss nor double-played.
+invalidates timers already in flight. `onTurnTimeout` settles an expiry in one
+lock hold - charge the miss, then auto-play or take the seat - and does nothing if
+the generation it was armed for has moved on. That is why a player who acted as
+their clock ran out is neither charged a miss nor double-played.
 
 *Only accepted actions clear a miss.* `delete(e.clock.missed, playerID)` sits
 after `checkTurnLocked`, not before. Clearing on any keypress would let a client
@@ -156,8 +153,8 @@ without arming. There is nothing safe to play for an absent player, so they get
 no clock rather than a silent removal.
 
 *A rules panic ends one table.* `onTurnTimeout` runs on a `time.AfterFunc`
-goroutine with nothing above it to recover, so `recoverRulesPanic` is a direct
-`defer` there; `SubmitAction` has its own direct deferred `recover`. Both end the
+goroutine with nothing above it to recover, so it defers a `recover` directly
+under the lock, as `SubmitAction` and `RemovePlayer` do. All of them end the
 game through `endOnRulesPanicLocked` -> `endGameLocked`, the one primitive every
 end goes through, as `EndReasonRulesError` - without asking the
 rules for standings, since a second panic inside a recover would take the process
@@ -656,7 +653,7 @@ Engine.endGameLocked --broadcast--> Lobby.handleGameEvents
   -> requestFinalize -> Manager.finalizeFinishedGame -> MatchRepository
 
 Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
-  -> resolveTurnTimeout -> submitTimedOutAction / removeIfStillIdle
+  -> autoPlayLocked / takeIdleSeatLocked
 ```
 
 ### Habits that work on this repo
@@ -682,7 +679,7 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | How is a game registered? | `catalog/catalog.go` `Games`; `game.NewRegistry` panics on a duplicate |
 | What do crazy eights and Uno share? | `game/shed/shed.go`; their shared tests in `game/gametest/shed.go` |
 | Who acts next? | `game/engine.go` `advanceTurnLocked` / `settleTurnLocked`; rules set it with `State.SetTurn` / `OverrideTurn` (`game/turn.go`) |
-| Turn auto-play / idle kick? | `game/turnclock.go` (`armTurnTimerLocked`, `resolveTurnTimeout`, `timeoutOutcome`) |
+| Turn auto-play / idle kick? | `game/turnclock.go` (`armTurnTimerLocked`, `onTurnTimeout`) |
 | Why is a game split in two on a dashboard? | it should not be: `game_type` is the catalog slug everywhere (`catalog/metrics_test.go`) |
 | Why did esc not leave the table? | `views/gameview/session.go` `HandleLeaveKey` - mid-game it asks first |
 | TUI reading engine state? | `gameview.Session.Sync` -> `BoundEngine.Frame` |

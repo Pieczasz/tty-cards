@@ -182,9 +182,17 @@ turn they took, and the auto-play lands as a second move.
 **Decision.** `stopTurnTimerLocked` increments `clock.seq` (it was the engine
 field `turnSeq` until the clock fields were grouped into `turnClock`, 2026-09-23,
 `46318fe`), and `armTurnTimerLocked` calls it first - so every cursor change invalidates timers
-already in flight. A timer captures the generation when armed;
-`submitTimedOutAction` refuses a mismatch with `errStaleTurn`, and
-`removeIfStillIdle` re-checks the same generation before taking a seat.
+already in flight. A timer captures the generation when armed, and `onTurnTimeout`
+does nothing on a mismatch.
+
+*Revised 2026-10-09:* an expiry is now settled in **one** lock hold - charge the
+miss, then auto-play or take the seat - so the gap described above is gone. The
+two-hold shape was left over from the engine's two-lock design (auto-play went
+through the public `SubmitAction`), and nothing between the holds needed the lock
+released. `errStaleTurn`, `errActionRefused`, `timeoutOutcome`, the second re-check
+and the recover that re-took the lock went with it. The fence stays: a fired
+`AfterFunc` cannot be stopped, and one that waited on the lock while the player
+acted must still find the turn moved on.
 
 **Consequences.** `clock.seq` is the whole re-check, and that is deliberate: every
 path that clears a miss count also settles the cursor, and settling the cursor
@@ -192,8 +200,7 @@ bumps the sequence. So a matching sequence proves the count was not cleared. A
 *rejected* action clears nothing and bumps nothing, which is exactly why spamming
 garbage cannot dodge removal.
 
-**Where.** `internal/game/turnclock.go` - the comment on `removeIfStillIdle`
-states the argument in full; the `turnClock` struct is in
+**Where.** `internal/game/turnclock.go` `onTurnTimeout`; the `turnClock` struct is in
 `internal/game/engine.go`. Tests: `internal/game/engine_timeout_test.go`.
 
 ---
@@ -1175,9 +1182,10 @@ nothing above it recovers. A panic in any rules hook reached from there -
 would take the whole process down: every table in memory, for one game package's
 defect.
 
-**Decision.** `Engine.recoverRulesPanic` is a direct `defer` on that goroutine and
-re-takes `e.mu`; `SubmitAction` has its own direct deferred `recover`, which runs
-before the unlock. Both call `endOnRulesPanicLocked`, which logs the panic with
+**Decision.** `onTurnTimeout` defers a `recover` directly after taking `e.mu`, so it
+runs before the unlock, as `SubmitAction` and `RemovePlayer` do. (Until 2026-10-09
+the timer took the lock twice, and its `recoverRulesPanic` had to re-take it; see
+#4.) All of them call `endOnRulesPanicLocked`, which logs the panic with
 `debug.Stack()` and calls `endGameLocked(nil,
 EndReasonRulesError)` - on a closed engine too, which broadcasts nothing but still
 records the reason `Engine.EndReason` hands the lobby's watcher - the one primitive that ends a table: `Phase = Finished`, the
@@ -1194,8 +1202,7 @@ running on half-applied state.
 **Consequences.** A rules panic now gets the treatment a rules error gets: the
 table ends, the match is recorded **unrated**
 (§[11](#11-three-end-states-are-recorded-without-elo)), and every other table
-keeps playing. Re-taking the lock in the recover is safe because the locked
-helpers release `e.mu` in their own defers as the panic unwinds. This is a
+keeps playing. This is a
 backstop, not a licence: rules are still expected not to panic, and the
 `TestSoak_TimeoutActionIsAlwaysLegal` soaks (for crazy eights and uno, through the
 shared `gametest.SoakTimeoutIsAlwaysLegal`) and `FuzzBestMeldSplit` exist to keep
@@ -1204,7 +1211,7 @@ them from doing so. `bestSplitBy`'s over-long-hand guard in
 than panicking; its comment predates this recover and now understates the
 blast-radius reduction, but the guard itself is still the right behaviour.
 
-**Where.** `internal/game/turnclock.go` `onTurnTimeout` / `recoverRulesPanic` /
+**Where.** `internal/game/turnclock.go` `onTurnTimeout` /
 `endOnRulesPanicLocked`, `internal/game/engine.go` `SubmitAction` /
 `endGameLocked` / `Standings`. Tests:
 `internal/game/engine_timeout_test.go`
@@ -1230,9 +1237,9 @@ running deadline, floored at `minTurnRemaining` (10 seconds, or the whole timeou
 that is shorter), so it never lands on a clock already at zero. A different seat or
 a different length (a `TurnDurationHandler` stretch) is a fresh turn at full
 length. A miss is charged once per seat-turn: `clock.missCharged` is set by
-`resolveTurnTimeout` and cleared only on a fresh turn. An auto-play the rules refuse
-re-arms on the same lock hold as a chargeable turn with the floor
-(`submitTimedOutAction`), so a rules set that always refuses still loses the seat.
+`onTurnTimeout` and cleared only on a fresh turn. An auto-play the rules refuse
+re-arms as a chargeable turn with the floor (`autoPlayLocked`), so a rules set that
+always refuses still loses the seat.
 
 **Consequences.** An absent gin player loses the seat after three turns, as the
 rule says. A seat that keeps the turn keeps its clock too, down to the floor -
@@ -1241,8 +1248,7 @@ decision is keyed on seat id and length rather than on who acted, so the engine
 does not need to know why the cursor settled where it did.
 
 **Where.** `internal/game/turnclock.go` `armTurnTimerLocked`,
-`resolveTurnTimeout`, `minTurnRemaining`; `internal/game/engine.go`
-`submitTimedOutAction`. Tests: `internal/game/engine_clock_test.go`.
+`onTurnTimeout`, `autoPlayLocked`, `minTurnRemaining`. Tests: `internal/game/engine_clock_test.go`.
 
 ---
 

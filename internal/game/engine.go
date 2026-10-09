@@ -22,10 +22,8 @@ import (
 var ErrInvalidState = errors.New("invalid state type")
 
 var (
-	errClosed        = errors.New("game is closed")
-	errNoGame        = errors.New("no active game")
-	errStaleTurn     = errors.New("turn already settled")
-	errActionRefused = errors.New("auto-play refused")
+	errClosed = errors.New("game is closed")
+	errNoGame = errors.New("no active game")
 )
 
 type Engine struct {
@@ -293,32 +291,6 @@ func (e *Engine) WithState(fn func(state *State)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	fn(e.state)
-}
-
-// submitTimedOutAction plays a move resolveTurnTimeout computed for turn generation
-// seq. The lock was dropped in between, so a moved-on generation means the player acted
-// themselves and applying the stale move would be a double play.
-func (e *Engine) submitTimedOutAction(playerID string, action Action, seq uint64) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if seq != e.clock.seq {
-		return errStaleTurn
-	}
-	// The miss count is left alone: this timeout is already counted, and clearing it
-	// would mean somebody who never comes back is never removed.
-	current, err := e.checkTurnLocked(playerID, action)
-	if err != nil {
-		// A matching seq rules out a closed or finished table and a wrong seat - each
-		// of those stopped or re-armed the clock - so ValidateAction refused the move.
-		// Re-armed on this lock hold, because after it is dropped a player's own move
-		// may already have armed the next seat's clock, and re-arming then would reset
-		// it. The re-armed turn is chargeable again, or a rules set that always refuses
-		// would never lose the seat.
-		e.clock.missCharged = false
-		e.armTurnTimerLocked()
-		return fmt.Errorf("%w: %w", errActionRefused, err)
-	}
-	return e.applyActionLocked(current, action)
 }
 
 // checkTurnLocked is everything an action is refused on before it touches the state:

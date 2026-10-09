@@ -77,7 +77,7 @@ func recovers(reg *registry, s Session) {
 	// ok: recover-helper-not-directly-deferred
 	defer reg.recoverSession(s)
 	// ok: recover-helper-not-directly-deferred
-	defer recoverRulesPanic()
+	defer recoverSession(s)
 	defer func() {
 		// ruleid: recover-helper-not-directly-deferred
 		reg.reportPanic(s)
