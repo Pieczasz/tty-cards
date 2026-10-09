@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
@@ -180,8 +180,10 @@ type Deps struct {
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
 	LobbyManager *lobby.Manager
-	GameRegistry *game.Registry
-	Tracker      *SessionTracker
+	// Games is what the menus offer and the game routes render; the lobby manager's
+	// registry has to be built from the same entries.
+	Games   []catalog.Entry
+	Tracker *SessionTracker
 }
 
 // Server is the wish server plus the one thing charm ssh does not track: the session
@@ -388,7 +390,7 @@ func sessionModel(
 			Profiles:     deps.Profiles,
 			Leaderboard:  deps.Leaderboard,
 			LobbyManager: deps.LobbyManager,
-			GameRegistry: deps.GameRegistry,
+			Games:        deps.Games,
 		})
 		// The connection, not the session: closing a channel leaves the socket and any
 		// other channel on it up until the peer notices.

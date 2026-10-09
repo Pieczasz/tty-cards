@@ -7,7 +7,6 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
@@ -27,7 +26,9 @@ type Deps struct {
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
 	LobbyManager *internallobby.Manager
-	GameRegistry *game.Registry
+	// Games is the catalog the menus list and the game routes render, the same entries
+	// the lobby manager's registry was built from.
+	Games []catalog.Entry
 }
 
 // New builds the session's root model. It returns the router itself rather than a
@@ -39,7 +40,7 @@ func New(deps Deps) *router.Router {
 		Profiles:     deps.Profiles,
 		Leaderboard:  deps.Leaderboard,
 		LobbyManager: deps.LobbyManager,
-		GameRegistry: deps.GameRegistry,
+		Games:        catalog.Modules(deps.Games),
 		SessionCtx:   deps.SessionCtx,
 	}
 
@@ -70,7 +71,7 @@ func New(deps Deps) *router.Router {
 		return lobby.New(g, p.Lobby)
 	})
 
-	registerGameViews(r)
+	registerGameViews(r, deps.Games)
 
 	// No Goto here: the router builds its first view in Init, so that view's Init
 	// runs exactly once. See Router.Init.
@@ -89,8 +90,8 @@ func ResumeSeat(r *router.Router) {
 // registerGameViews is where a seat reaches a view, so it is where the handle is held
 // to the session's own player: a table bound to anyone else is not this session's to
 // render or play.
-func registerGameViews(r *router.Router) {
-	for _, e := range catalog.Games {
+func registerGameViews(r *router.Router, games []catalog.Entry) {
+	for _, e := range games {
 		r.Register(router.GameRoute(e.Slug), func(g router.GlobalContext, p router.Payload) tea.Model {
 			if p.Table == nil || p.Table.PlayerID() != views.SessionPlayerID(g) {
 				return home.New(g)

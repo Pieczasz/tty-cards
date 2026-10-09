@@ -34,14 +34,14 @@ func testUser(id uint64, name string) *db.User {
 	return &db.User{ID: testutil.UID(id), Username: name}
 }
 
-func testRegistry() *game.Registry {
-	return game.NewRegistry(game.Module{
+func testGames() []game.Module {
+	return []game.Module{{
 		Name:       testGameName,
 		Slug:       testGameSlug,
 		MinPlayers: crazyeight.MinPlayers,
 		MaxPlayers: crazyeight.MaxPlayers,
 		Factory:    func() game.Rules { return &crazyeight.Rules{} },
-	})
+	}}
 }
 
 // newManager is a manager offering every game in the catalog, the way the server's is.
@@ -67,7 +67,7 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	global := router.GlobalContext{
 		User:         leaderUser,
 		LobbyManager: manager,
-		GameRegistry: testRegistry(),
+		Games:        testGames(),
 		Width:        120,
 		Height:       40,
 	}
@@ -352,36 +352,6 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat resumed is this session's own")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
-}
-
-// The bounds decide how far the max-players setting may travel. A missing registry or a
-// game it does not hold must fall back rather than leave the row unbounded.
-func TestGamePlayerBounds(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name             string
-		registry         *game.Registry
-		wantMin, wantMax int
-	}{
-		{name: "a registered game", registry: testRegistry(), wantMin: 2, wantMax: 6},
-		{name: "no registry at all", registry: nil, wantMin: fallbackMinPlayers, wantMax: fallbackMaxPlayers},
-		{
-			name:     "a game the registry does not hold",
-			registry: game.NewRegistry(),
-			wantMin:  fallbackMinPlayers, wantMax: fallbackMaxPlayers,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			minP, maxP := gamePlayerBounds(tt.registry, testGameSlug)
-
-			assert.Equal(t, tt.wantMin, minP)
-			assert.Equal(t, tt.wantMax, maxP)
-		})
-	}
 }
 
 // The whole point of the lobby screen is that it hands the player over when the game

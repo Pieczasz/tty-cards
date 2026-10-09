@@ -560,10 +560,11 @@ Then `internal/ratelimit/netkey_test.go`
 **Understand.** `catalog.Games` is the only place a game is declared, and each
 entry embeds a `game.Module` (name, slug, seat bounds, rules `Factory`) **and** carries the
 TUI view constructor, which is handed the slug. `catalog.NewRegistry` builds the
-`game.Registry` from it; `internal/tui/app.go` registers routes from it. `main.go`
+`game.Registry` from it for the lobby manager; `internal/tui/app.go` registers routes
+and fills `GlobalContext.Games` from the same entries, handed in through `ssh.Deps`. `main.go`
 now reads as a summary of everything above: `config.Load` -> OTel
 (`otelsetup.Setup`) -> `repository.Connect` -> repositories ->
-`lobby.NewManager` (with `catalog.NewRegistry`) -> tracker -> `ssh.NewServer` (the same registry) ->
+`lobby.NewManager` (with `catalog.NewRegistry`) -> tracker -> `ssh.NewServer` (`catalog.Games`) ->
 `httpapi.NewServer` -> `serve`, with the `defer`s ordered so LIFO unwinding drains match writes before
 closing the DB handle they write through.
 

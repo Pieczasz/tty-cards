@@ -246,7 +246,7 @@ func (f fakeUsers) BestPlayers(ctx context.Context, gameName string, limit int) 
 func TestNew_BuildsAFilterPerCatalogGame(t *testing.T) {
 	t.Parallel()
 
-	m, ok := New(router.GlobalContext{GameRegistry: catalog.NewRegistry()}).(*model)
+	m, ok := New(router.GlobalContext{Games: catalog.Modules(catalog.Games)}).(*model)
 	require.True(t, ok)
 
 	require.Len(t, m.filters, 1+len(catalog.Games))

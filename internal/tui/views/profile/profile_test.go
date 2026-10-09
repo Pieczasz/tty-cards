@@ -30,7 +30,7 @@ var errQuery = errors.New("query failed")
 func loaded(t *testing.T, msg profileLoadedMsg) *model {
 	t.Helper()
 	global := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 40,
-		GameRegistry: catalog.NewRegistry()}
+		Games: catalog.Modules(catalog.Games)}
 	updated, _ := New(global).Update(msg)
 	m, ok := updated.(*model)
 	require.True(t, ok)

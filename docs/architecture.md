@@ -187,8 +187,8 @@ Order matters so deferred teardown runs correctly (LIFO):
 6. `defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)` - registered **after** the DB-close
    defer, so LIFO drains match writes before closing the handle they write
    through
-7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose
-   `GameRegistry` is that same registry. The
+7. `ssh.NewSessionTracker` -> `ssh.NewServer(ssh.Deps{...})`, whose `Games` are
+   the `catalog.Games` entries that registry was built from. The
    one tracker is shared with the stats API; `NewServer` refuses to start without
    it (`errNoTracker`), because a second one counted nobody online
 8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
@@ -342,7 +342,10 @@ bound. Over either, the session closes with a notice and outcome `input_limit`.
   interface is **gone**: it had one implementation and one consumer, so it bought
   nothing and had to be edited every time a view needed a method
   ([`decisions.md` #25](decisions.md#25-lobbysessionapi-was-deleted))
-- `GameRegistry`, `SessionCtx`, `Width`, `Height`, `Theme`
+- `Games []game.Module` - the games on offer, in menu order, taken from the
+  `tui.Deps.Games` entries the routes are registered from, so a menu cannot list a
+  game with no route or one the manager refuses
+- `SessionCtx`, `Width`, `Height`, `Theme`
 
 There is **no `MatchRepository` on the TUI**. Persistence is owned by
 `lobby.Manager` after a game ends, and absence is the boundary.
@@ -362,7 +365,7 @@ through `seatedOr`, which finds the seat still indexed and opens its lobby view,
 that routes onward into a running game. The ssh layer calls `ResumeSeat` separately
 from `tui.New`, once the session owns its tracker slot (§3.2).
 
-Game routes come from `catalog.Games` via `router.GameRoute(slug)` ->
+Game routes come from `tui.Deps.Games` (`catalog.Games`) via `router.GameRoute(slug)` ->
 `"game_<slug>"`, and each entry's `View(global, table, slug)` is handed that same
 slug and a `*game.BoundEngine` - never the engine. The game-route factory
 (`registerGameViews`) refuses a table bound to anyone but the session's own player.
@@ -1308,7 +1311,7 @@ after.
 `internal/catalog/catalog.go` `Games` is the only place a game is declared. Each
 entry embeds a `game.Module` (`Name`, `Slug`, `MinPlayers`, `MaxPlayers`, `Factory`) **and** carries the TUI
 view constructor, `View(global, table, slug)`, `table` a `*game.BoundEngine`.
-`cmd/server` builds the registry with `catalog.NewRegistry()`; `internal/tui/app.go` registers the routes. A missing
+`cmd/server` builds the registry with `catalog.NewRegistry()` and hands the same entries to `ssh.Deps.Games`, from which `internal/tui/app.go` registers the routes and lists the menus. A missing
 field or duplicate slug fails `catalog_test.go`, and `game.NewRegistry` panics on
 either at boot. Copying an entry and changing only the
 rules still compiles, so keep the pair in lockstep by hand.

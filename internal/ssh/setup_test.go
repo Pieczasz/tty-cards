@@ -318,7 +318,6 @@ func newSessionDeps(tb testing.TB, repo db.Authenticator) Deps {
 		Config:       &config.Config{},
 		Auth:         repo,
 		LobbyManager: lobby.NewManager(tb.Context(), nil, game.NewRegistry()),
-		GameRegistry: game.NewRegistry(),
 	}
 }
 

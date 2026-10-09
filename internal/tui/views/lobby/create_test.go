@@ -19,29 +19,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bothGamesRegistry offers Poker (max 9) and Crazy Eights (max 6), so switching
-// between them exercises the clamp.
-func bothGamesRegistry(t *testing.T) *game.Registry {
-	t.Helper()
-	return game.NewRegistry(
-		game.Module{
-			Name: "Poker", Slug: "poker", MinPlayers: poker.MinPlayers, MaxPlayers: poker.MaxPlayers,
-			Factory: func() game.Rules { return &poker.Rules{} },
-		},
-		game.Module{
-			Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers,
-			Factory: func() game.Rules { return &crazyeight.Rules{} },
-		},
-	)
+// bothGames offers Poker (max 9) and Crazy Eights (max 6), so switching between them
+// exercises the clamp.
+func bothGames() []game.Module {
+	return []game.Module{
+		{Name: "Poker", Slug: "poker", MinPlayers: poker.MinPlayers, MaxPlayers: poker.MaxPlayers},
+		{Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers},
+	}
 }
 
 func newCreateModel(t *testing.T) *createModel {
 	t.Helper()
 	global := router.GlobalContext{
-		User:         testUser(1, "alice"),
-		GameRegistry: bothGamesRegistry(t),
-		Width:        120,
-		Height:       40,
+		User:   testUser(1, "alice"),
+		Games:  bothGames(),
+		Width:  120,
+		Height: 40,
 	}
 	m, ok := NewCreate(global).(*createModel)
 	require.True(t, ok)
@@ -80,11 +73,8 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 // table set to three seats is a lobby its rules can never start.
 func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
 	t.Parallel()
-	r := game.NewRegistry(game.Module{
-		Name: "Hearts", Slug: "hearts", MinPlayers: hearts.MinPlayers, MaxPlayers: hearts.MaxPlayers,
-		Factory: func() game.Rules { return &hearts.Rules{} },
-	})
-	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), GameRegistry: r}).(*createModel)
+	heartsOnly := []game.Module{{Name: "Hearts", Slug: "hearts", MinPlayers: hearts.MinPlayers, MaxPlayers: hearts.MaxPlayers}}
+	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), Games: heartsOnly}).(*createModel)
 	require.True(t, ok)
 	m.cursor = createCursorPlayers
 
@@ -117,15 +107,14 @@ func TestCreate_ClampLeavesValidValueAlone(t *testing.T) {
 
 // The form used to fall back to a hardcoded "Crazy Eights" when the registry came
 // back empty, which made this a second place a game was declared and offered a
-// game the registry could not build. An empty registry now offers nothing.
-func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
+// game the registry could not build. No games on offer now means nothing offered.
+func TestCreate_OffersOnlyWhatTheSessionHas(t *testing.T) {
 	t.Parallel()
 
 	global := router.GlobalContext{
-		User:         testUser(1, "alice"),
-		GameRegistry: game.NewRegistry(),
-		Width:        120,
-		Height:       40,
+		User:   testUser(1, "alice"),
+		Width:  120,
+		Height: 40,
 	}
 	m, ok := NewCreate(global).(*createModel)
 	require.True(t, ok)
@@ -141,13 +130,13 @@ func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
 	assert.ErrorIs(t, m.err, errNoGames)
 }
 
-// Every registered game must be on the form, in the registry's order.
+// Every game on offer must be on the form, in menu order.
 func TestCreate_OffersEveryRegisteredGame(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
 
 	var want, got []string
-	for _, mod := range m.global.GameRegistry.Modules() {
+	for _, mod := range m.global.Games {
 		want = append(want, mod.Slug)
 	}
 	for _, mod := range m.gameOptions {
@@ -227,7 +216,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				_, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
+				_, maxP := m.playerBounds()
 				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
@@ -359,14 +348,14 @@ func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	assert.NoError(t, m.err)
 }
 
-// The registry is the only source of truth for seat counts, so a game it does not hold
-// has to fall back to a bound rather than leave the row free to run away.
-func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
+// The selected game is the only source of truth for seat counts, so a form with none to
+// select has to fall back to a bound rather than leave the row free to run away.
+func TestCreate_MaxPlayersFallsBackWithNoGameToSelect(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.GameRegistry = game.NewRegistry()
+	m.gameOptions = nil
 
-	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
+	minP, maxP := m.playerBounds()
 	assert.Equal(t, fallbackMinPlayers, minP)
 	assert.Equal(t, fallbackMaxPlayers, maxP)
 }
