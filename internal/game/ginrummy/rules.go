@@ -113,6 +113,12 @@ var (
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	extra := extraOf(state)
 
+	// Another game's move is unknown in every phase, between hands included.
+	switch action.(type) {
+	case ActionDrawStock, ActionDrawDiscard, ActionDiscard, ActionKnock, ActionNextHand:
+	default:
+		return game.ErrUnknownAction
+	}
 	if _, isNext := action.(ActionNextHand); isNext {
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
 		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)

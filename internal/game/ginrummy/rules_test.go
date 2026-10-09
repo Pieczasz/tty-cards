@@ -738,3 +738,10 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	assert.Equal(t, 64, extra.CumulativeScores["p1"])
 	assert.Zero(t, extra.CumulativeScores["p2"], "the loser of a plain knock scores nothing")
 }
+
+func TestRules_ValidateAction_ForeignMoveIsUnknownBetweenHands(t *testing.T) {
+	t.Parallel()
+	state, extra := startedState(t)
+	extra.Phase = PhaseHandOver
+	require.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
+}
