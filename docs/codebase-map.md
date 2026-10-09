@@ -530,7 +530,7 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | Middleware chain | `wish.WithMiddleware` (runs last-first), `withCORS`/`withRateLimit` | |
 | Elm architecture | every `tui/views/**` model | Bubble Tea |
 | TTL cache + singleflight + generation | `repository.BestPlayers` (5 min; concurrent misses share one query; erasure bumps the generation) | a cold board is read by every lobby screen and the site at once, and an erased name must not be re-cached |
-| TTL cache + dirty flag | public lobby list (2 s, atomic dirty flag, each entry re-checked on read) | the atomic flag exists to avoid inverting lock order |
+| TTL cache + dirty flag | public lobby list (2 s, atomic dirty flag, each entry re-checked on read) | the atomic flag is shared with every lobby, which sets it under its own lock without reaching for the manager's |
 | Single mutex per engine | `Engine.mu` | clock + state are always read together ([#1](decisions.md#1-one-mutex-per-engine)) |
 
 Lock order, which every concurrency argument rests on: **tracker account `a.mu` ->

@@ -734,7 +734,7 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("p1", testutil.UID(1))})
 	t.Cleanup(engine.Close)
 
-	l.requestFinalize(engine, game.EndReasonWin, finalizeRequest{
+	m.requestFinalize(l, engine, game.EndReasonWin, finalizeRequest{
 		lobbyCode: l.code,
 		game:      gameRef("Mock"),
 		isRanked:  true,

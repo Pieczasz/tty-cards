@@ -359,7 +359,7 @@ until it is pinned `NOT NULL`.
 **Files, in this order.** `internal/lobby/errors.go` (28, the sentinels callers
 match on), `manager.go` (404), `disconnect.go` (174), `lobby.go` (626) -
 specifically `CreateLobby`'s table and `startGameLocked` - `watch.go` (100) for
-`watchGameLocked`, `handleGameEvents` and `requestFinalize`, `finalize.go` (242),
+`watchLocked`, the manager's `watchGame` and `requestFinalize`, `finalize.go` (242),
 `browse.go` (193), `player.go` (27).
 
 **Understand.**
@@ -367,7 +367,7 @@ specifically `CreateLobby`'s table and `startGameLocked` - `watch.go` (100) for
 *The lobby is the only thing that knows both a table and a database exist.* The
 engine broadcasts; the lobby's watcher goroutine listens and persists.
 
-*The finalize snapshot is taken when the game **starts**.* `watchGameLocked`
+*The finalize snapshot is taken when the game **starts**.* `watchLocked`
 builds `finalizeRequest{lobbyCode, game, isRanked, startedAt}` at subscribe time.
 By the time the game ends the lobby may have reopened and been reconfigured, and
 the result would be written under the new ranked flag, the new game and the next
@@ -382,9 +382,10 @@ out of every other table and this one unable to reach all-ready) and
 removal clears every ready flag; a join does not.
 
 *Lock order is manager (`m.mu`) then lobby (`l.mu`), never inverted* - below the
-ssh layer's per-account tracker lock, which comes first. The browse
-cache uses an `atomic.Bool` dirty flag specifically so a `Lobby` can mark it while
-holding its own lock without reaching for the manager's.
+ssh layer's per-account tracker lock, which comes first. A `Lobby` is a leaf: it
+takes only its own lock and has no pointer to its manager, so only `Manager` nests
+two locks. The browse cache's dirty flag is an `atomic.Bool` the lobby shares, so it
+marks it under its own lock without reaching for the manager's.
 
 **Invariant to check.** A mid-game drop calls `DisconnectPlayer`, never
 `LeaveLobby`. A waiting-lobby seat and any seat during shutdown still leave
@@ -657,7 +658,7 @@ CALLS edges, so a `no_path` result across a broadcaster or a timer means "dynami
 hop", not "dead code". The two that matter:
 
 ```
-Engine.endGameLocked --broadcast--> Lobby.handleGameEvents
+Engine.endGameLocked --broadcast--> Manager.watchGame
   -> requestFinalize -> Manager.finalizeFinishedGame -> MatchRepository
 
 Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout

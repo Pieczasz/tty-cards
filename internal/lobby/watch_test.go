@@ -133,9 +133,9 @@ func TestFeedEnd_UnobservedEndIsFinalizedWithTheEnginesReason(t *testing.T) {
 
 	closedFeed := make(chan game.Event)
 	close(closedFeed)
-	l.handleGameEvents(closedFeed, engine, finalizeRequest{
+	m.watchGame(l, gameStart{engine: engine, feed: closedFeed, req: finalizeRequest{
 		lobbyCode: l.Code(), game: gameRef("Mock"), isRanked: true, startedAt: time.Now(),
-	})
+	}})
 
 	require.True(t, m.WaitForFinalizers(2*time.Second))
 	repo.AssertExpectations(t)

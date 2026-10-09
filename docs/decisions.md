@@ -107,7 +107,8 @@ from another. That is acceptable because everything under the lock is in-memory
 map and slice work; nothing does I/O. In exchange there is exactly one lock order
 to remember (tracker account -> manager -> lobby -> engine, see
 [#45](#45-the-session-tracker-lock-comes-before-the-managers)) and nothing below
-the engine.
+the engine. Above it, a `Lobby` takes only its own lock and holds no pointer to its
+manager, so only `Manager` ever nests two locks.
 
 **Where.** `internal/game/engine.go` - the comment on the `Engine` struct says it,
 and the clock fields are grouped in its `turnClock`. `internal/game/state.go` says
@@ -513,18 +514,18 @@ two people who both quit.
 change the game, flip ranked off, and start again. The finalize for the *previous*
 hand may still be in flight.
 
-**Decision.** `watchGameLocked` builds `finalizeRequest{lobbyCode, game, isRanked,
+**Decision.** `watchLocked` builds `finalizeRequest{lobbyCode, game, isRanked,
 startedAt}` at **subscribe** time, before the first card is dealt, and
-`startGameLocked` sets `l.startedAt` immediately before that. The watcher carries
-the snapshot to `Manager.finalizeFinishedGame`.
+`startGameLocked` sets `l.startedAt` immediately before that. The manager's watcher
+carries the snapshot to `Manager.finalizeFinishedGame`.
 
 **Consequences.** A reconfiguration after the hand ends cannot rewrite the
 finished match's game, ranked flag or duration. The cost is one small struct
 copied per match, and the discipline that nothing in the finalize path may read
 live lobby settings.
 
-**Where.** `internal/lobby/lobby.go` `startGameLocked` / `watchGameLocked`,
-`internal/lobby/finalize.go`.
+**Where.** `internal/lobby/lobby.go` `startGameLocked`, `internal/lobby/watch.go`
+`watchLocked`, `internal/lobby/finalize.go`.
 
 ---
 
@@ -1497,6 +1498,14 @@ player's seat.
 The seat resume moved out of the constructor into `tui.ResumeSeat`, which the ssh layer
 calls only after `Connect` has handed it the slot. The lock order is therefore
 the account's tracker lock -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu`.
+
+*Made structural in the 2026-09 review (`lobby` F1).* A `Lobby` used to keep a
+pointer to its `Manager` and call up into it - to invalidate the browse cache under
+`l.mu`, and from the game watcher it owned. It no longer has one: the cache's dirty
+flag is a shared `*atomic.Bool`, and the watcher, the reopen and finalize are
+`Manager` methods (`watchGame`, started by `ToggleReady` with the feed `toggleReady`
+subscribed under `l.mu`). `Manager` is the only type that ever holds two of these
+locks, so nothing a lobby does under its own can reach for the manager's.
 
 *Narrowed in the 2026-09 review (`transport-and-root` F3).* The lock `fn` runs under
 was one `SessionTracker.mu` for every account, so every `Connect` on the server waited

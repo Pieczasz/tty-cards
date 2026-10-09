@@ -49,9 +49,9 @@ type Manager struct {
 	cachedPublicLobbies []*Lobby
 	cacheLastUpdated    time.Time
 	// cacheDirty is set by anything that changes which lobbies are public, a lobby
-	// marking itself in-game included. It is atomic rather than guarded by m.mu: a
-	// lobby sets it while holding its own lock, and reaching for the manager lock
-	// there would invert the documented manager-then-lobby order.
+	// marking itself in-game included. It is atomic rather than guarded by m.mu
+	// because each lobby shares it (Lobby.cacheDirty) and sets it under its own lock,
+	// where taking the manager lock would invert the manager-then-lobby order.
 	cacheDirty  atomic.Bool
 	matchRepo   db.MatchRepository
 	appCtx      context.Context
@@ -176,7 +176,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	}
 
 	lobby := &Lobby{
-		manager:     m,
+		cacheDirty:  &m.cacheDirty,
 		game:        mod,
 		leader:      leader,
 		guests:      nil,
@@ -204,7 +204,11 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// Before toggleReady takes l.mu: this takes it itself, then m.mu via
 	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
 	m.releaseFinishedGame(l)
-	return l.toggleReady(p)
+	start, err := l.toggleReady(p)
+	if start.engine != nil {
+		go m.watchGame(l, start)
+	}
+	return err
 }
 
 // JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
