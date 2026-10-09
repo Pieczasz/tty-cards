@@ -495,7 +495,8 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
 - `BrowseLobbies(player, BrowseFilter)` lists public `waiting` tables, sorted by
   absolute Elo distance from the player (an unrated player is matched at 1500),
   ties broken by code so the list cannot reshuffle under a cursor. Default limit
-  20, hard cap 200. Backed by a 2-second cache of lobby pointers; `browseEntry`
+  20, hard cap 200. Backed by a 2-second cache of lobby pointers (measured:
+  [#62](decisions.md#62-the-public-lobby-cache-stays-it-halves-a-browse-and-the-manager-lock-with-it)); `browseEntry`
   re-checks each one under its own lock, because a miss that scanned just before a
   table went private or started stores it anyway.
 - `JoinLobbyByCode` is rate limited per **player id**, 10 per second, because the
