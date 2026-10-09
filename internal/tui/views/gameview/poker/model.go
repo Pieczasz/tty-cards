@@ -80,6 +80,9 @@ func (m *model) syncState() {
 	// hold as Base.MyTurn - a split Sync+WithState let an opponent act between them.
 	var t table
 	m.Sync(func(state *game.State) { t = readTable(state, heroID) })
+	if t.winnerName == "" {
+		t.winnerName = m.Base.WinnerName
+	}
 	m.table = t
 
 	// A half-built raise belongs to the hero's turn: once the action has moved on,
@@ -97,9 +100,6 @@ func (m *model) syncState() {
 func readTable(state *game.State, heroID string) table {
 	finished := state.Phase == game.Finished
 	t := table{matchComplete: finished, handComplete: finished}
-	if state.Winner != nil {
-		t.winnerName = state.Winner.DisplayName()
-	}
 
 	e, ok := state.Extra.(*logic.State)
 	if !ok || e == nil {
@@ -116,7 +116,7 @@ func readTable(state *game.State, heroID string) table {
 	t.handNumber = e.HandNumber
 	t.handsTotal = e.HandsTotal
 	// Winners holds whoever took the last pot; the match itself is won by the
-	// biggest stack, which is the winner the engine settles on.
+	// biggest stack, which is the winner the engine settles on (Base.WinnerName).
 	if len(e.Winners) > 0 && !t.matchComplete {
 		t.winnerName = e.Winners[0].DisplayName()
 	}

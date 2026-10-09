@@ -765,6 +765,8 @@ owed whenever it named the next seat; it now means only who acts next.
 
 Every way a table ends goes through `endGameLocked(winner, reason)`: `Finished`, the
 clock stopped, the winner recorded and `EventGameEnded` broadcast, in one place.
+The winner is the engine's own field, not `State`'s: no rules hook can write it, and
+views read it as the snapshot's `WinnerName`.
 `finishGameLocked` asks the rules for the winner first (a win); `settleAfterLeaveLocked`
 (abandoned, forfeit), a rules error and the panic path do not. `stopTurnTimerLocked` also runs from
 `Close`. The engine's `closed` flag is what stops a concurrently-resolved

@@ -394,7 +394,6 @@ classDiagram
         CurrentTurn int
         OverrideNextTurn *int
         Phase
-        Winner *Player
         Deck *Pile
         Discard *Pile
         Extra any

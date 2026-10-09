@@ -195,10 +195,9 @@ func TestEngine_SubmitAction_SetsWinnerFromStandings(t *testing.T) {
 	err := engine.SubmitAction(currentPlayerID, action)
 	require.NoError(t, err)
 
-	engine.WithState(func(state *State) {
-		assert.Equal(t, Finished, state.Phase)
-		assert.Equal(t, "p2", state.Winner.ID)
-	})
+	snap := engine.Snapshot()
+	assert.Equal(t, Finished, snap.Phase)
+	assert.Equal(t, "p2", snap.WinnerName)
 }
 
 func TestEngine_RemovePlayer(t *testing.T) {
@@ -222,8 +221,8 @@ func TestEngine_RemovePlayer(t *testing.T) {
 	engine.WithState(func(state *State) {
 		assert.Len(t, state.Players, 1)
 		assert.Equal(t, Finished, state.Phase)
-		assert.Equal(t, "p1", state.Winner.ID)
 	})
+	assert.Equal(t, "p1", engine.Snapshot().WinnerName)
 
 	m.AssertExpectations(t)
 }
@@ -400,7 +399,7 @@ func TestEngine_Snapshot(t *testing.T) {
 		engine := newStartedEngine(t, "p1", "p2")
 		engine.WithState(func(state *State) {
 			state.Phase = Finished
-			state.Winner = state.Players[1]
+			engine.winner = state.Players[1]
 		})
 
 		assert.Equal(t, "p2", engine.Snapshot().WinnerName)
@@ -831,7 +830,7 @@ func TestEngine_RemovePlayer_AnOverrideAloneDoesNotKeepTheHandOpen(t *testing.T)
 }
 
 // The winner is settled from the standings, but a rules set that ranks nobody still
-// has to leave somebody named: every view reads Winner to draw the end screen.
+// has to leave somebody named: every view reads WinnerName to draw the end screen.
 func TestEngine_FinishWithoutStandingsFallsBackToASeat(t *testing.T) {
 	t.Parallel()
 
@@ -846,11 +845,9 @@ func TestEngine_FinishWithoutStandingsFallsBackToASeat(t *testing.T) {
 	// the only candidate left.
 	engine.RemovePlayer("p2")
 
-	engine.WithState(func(state *State) {
-		assert.Equal(t, Finished, state.Phase)
-		require.NotNil(t, state.Winner)
-		assert.Equal(t, "p1", state.Winner.ID)
-	})
+	snap := engine.Snapshot()
+	assert.Equal(t, Finished, snap.Phase)
+	assert.Equal(t, "p1", snap.WinnerName)
 }
 
 func TestEngine_StartRefusesAnEmptyOrClosedTable(t *testing.T) {
@@ -912,10 +909,9 @@ func TestEngine_RemovePlayer_OutsideThePlayingPhase(t *testing.T) {
 
 		engine.RemovePlayer("p2")
 
-		engine.WithState(func(state *State) {
-			assert.Equal(t, Waiting, state.Phase, "nobody wins a hand that was never dealt")
-			assert.Nil(t, state.Winner)
-		})
+		snap := engine.Snapshot()
+		assert.Equal(t, Waiting, snap.Phase, "nobody wins a hand that was never dealt")
+		assert.Empty(t, snap.WinnerName)
 		m.AssertNotCalled(t, "CheckWinCondition", mock.Anything)
 	})
 }

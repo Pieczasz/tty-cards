@@ -39,7 +39,7 @@ func beginHandOrFinish(state *game.State, extra *State, dealer int) error {
 // everyone still holding chips, button and blinds moved on. A busted player is
 // marked folded for the rest of the match so the turn cursor skips their seat.
 func beginHand(state *game.State, extra *State, dealer int) error {
-	resetForHand(state, extra)
+	resetForHand(extra)
 	extra.HandNumber++
 	extra.handStartChips = chipsInPlay(extra)
 
@@ -78,7 +78,7 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	return nil
 }
 
-func resetForHand(state *game.State, extra *State) {
+func resetForHand(extra *State) {
 	for _, seat := range extra.Seats {
 		seat.resetForHand()
 	}
@@ -90,7 +90,6 @@ func resetForHand(state *game.State, extra *State) {
 	extra.MinRaise = extra.BigBlind
 	extra.Phase = PhasePreFlop
 	extra.ReachedShowdown = false
-	state.Winner = nil
 }
 
 func dealHoleCards(state *game.State, extra *State) error {
