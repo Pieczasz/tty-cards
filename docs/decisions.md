@@ -542,7 +542,7 @@ expects. The close happens **outside** the tracker lock: a wedged peer must not
 hold a `Connect` behind it (the lock is per account since #45 was narrowed). A displaced session's teardown
 must touch neither the seat nor the slot, or the new session loses both -
 `ReleaseWith` does nothing for a stale generation. Capacity is still refused, with
-a distinct `ErrServerFull`.
+a distinct `errServerFull`.
 
 The per-connection channel cap (`maxSessionsPerConnection`, 2) that bounds the
 overlap lives in the `session` `ChannelHandler` and rejects the extra channel with
@@ -616,7 +616,7 @@ refunds the narrower ones, or a flood filling the global ceiling would also spen
 every real player's own network budget on their retries.
 
 **Decision B - "taken" says nothing, "invalid" says why.** `mapRegisterError`
-folds `db.ErrUsernameTaken` into `ErrNameUnavailable`. An invalid name returns
+folds `db.ErrUsernameTaken` into `errNameUnavailable`. An invalid name returns
 `db.ErrInvalidUsername` wrapped with the validation reason. The first version
 folded both, which left a player with a name that was too long or held a bad
 character guessing.
@@ -633,7 +633,7 @@ could not learn by connecting again. Since usernames are unique case-insensitive
 ([#42](#42-usernames-are-unique-case-insensitively)), "taken" also covers a name
 that differs only by case.
 
-**Where.** `internal/ssh/auth.go` (the comments on `ErrNameUnavailable` and
+**Where.** `internal/ssh/auth.go` (the comments on `errNameUnavailable` and
 `LoadOrRegisterUser`, `mapRegisterError`), `internal/ssh/server.go`
 `allowRegistration` / `registrationBudget`, `internal/config/config.go`
 `RegistrationLimit` / `RegistrationLimitWide` / `RegistrationGlobalLimit` /
@@ -1436,7 +1436,7 @@ as two steps. In between, a reconnect could take the slot and resume the seat, a
 the old session's `DisconnectPlayer` then armed a grace timer on the seat the
 replacement was playing. On the other side, resuming inside the TUI's constructor
 (now `tui.New`) meant a
-session refused with `ErrServerFull` still cancelled the grace timer holding the
+session refused with `errServerFull` still cancelled the grace timer holding the
 player's seat.
 
 **Decision.** `SessionTracker.ReleaseWith(userID, gen, fn)` runs `fn` - the

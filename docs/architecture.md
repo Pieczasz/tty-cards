@@ -141,7 +141,7 @@ new address is picked up without restarting the proxy.
 The two connection caps are deliberately different numbers.
 `netutil.LimitListener` sits at **twice** `MAX_CONNECTIONS` and only backstops
 handshake floods by silently refusing to accept; `SessionTracker` is the
-player-visible capacity at `MAX_CONNECTIONS` and refuses with `ErrServerFull` and
+player-visible capacity at `MAX_CONNECTIONS` and refuses with `errServerFull` and
 a message.
 
 Every network limit keys on `ratelimit.NetKey`, which collapses IPv6 to its /64 -
@@ -188,7 +188,7 @@ Order matters so deferred teardown runs correctly (LIFO):
    `GameRegistry` is `catalog.NewRegistry()` - `game.NewRegistry` over
    `catalog.Games`, which panics on a module declared twice or half-declared. The
    one tracker is shared with the stats API; `NewServer` refuses to start without
-   it (`ErrNoTracker`), because a second one counted nobody online
+   it (`errNoTracker`), because a second one counted nobody online
 8. `observability.RegisterSessionGauge(tracker.Count)` - the gauge reads the
    tracker's own count - then `httpapi.NewServer`, which refuses a missing
    dependency (`ErrMissingDeps`), then `serve(...)`
@@ -258,7 +258,7 @@ the OTLP handler.
 3. **`tracker.Connect(userID, conn)` -> generation.** A second session for the
    same account **displaces** the first *and closes its connection*, outside the
    account's tracker lock (a wedged peer must not hold that account's next
-   `Connect` behind it). Capacity -> `ErrServerFull`. The TUI model is built **before** the
+   `Connect` behind it). Capacity -> `errServerFull`. The TUI model is built **before** the
    slot is claimed, so a panic there cannot strand a slot nothing releases.
 4. **`tui.ResumeSeat(model)`** runs only once the slot is owned: a refused session
    (server full) must not cancel the grace timer holding this player's seat, and
@@ -279,14 +279,14 @@ Auth sentinels (`db.ErrUsernameTaken`, …) live in `internal/db/errors.go`.
 `internal/ssh` depends on the `db` contract package, not on `internal/repository`.
 
 **A taken name is deliberately uninformative; an invalid one is not.**
-`mapRegisterError` folds `db.ErrUsernameTaken` into `ErrNameUnavailable`; the
-comment on `ErrNameUnavailable` says why (a distinguishable message turns the login
+`mapRegisterError` folds `db.ErrUsernameTaken` into `errNameUnavailable`; the
+comment on `errNameUnavailable` says why (a distinguishable message turns the login
 banner into a "does this account exist" oracle over every username). An invalid
 name is a fixed rule, not a fact about other accounts, so `LoadOrRegisterUser`
 returns `db.ErrInvalidUsername` wrapped with the validation reason, before the
 registration budget is consulted. Taken is compared case-insensitively
 (`lower(username)`, migration `000006`). The rate-limit refusal is its own string,
-`ErrTooManyRegistrations`, and `db.ErrKeyAlreadyRegistered` passes through
+`errTooManyRegistrations`, and `db.ErrKeyAlreadyRegistered` passes through
 verbatim because the key is the caller's own.
 
 **A TUI panic reaches the player, in two layers.** `recoverSession` is a
@@ -1339,7 +1339,7 @@ Deliberately narrow: no writes, no auth, no per-user data, nothing the TUI
 leaderboard does not already show any visitor. That is what makes it safe
 unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
 `lobby.Manager.Stats`, and `ssh.NewServer` requires the tracker the two share
-(`ErrNoTracker`). `httpapi.NewServer(addr, Deps)` builds the `*http.Server` and
+(`errNoTracker`). `httpapi.NewServer(addr, Deps)` builds the `*http.Server` and
 refuses to start with `Sessions`, `Lobbies`, `Users` or `Health` missing
 (`ErrMissingDeps`): a nil counter or repository would otherwise serve zeros or an
 empty leaderboard forever, and a nil probe a `/healthz` that cannot fail. `Deps.AllowOrigin` and `Deps.RequestsPerMinute` are required too:

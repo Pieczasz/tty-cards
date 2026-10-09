@@ -9,8 +9,8 @@ import (
 	"uuid"
 )
 
-// ErrServerFull is Connect's capacity refusal.
-var ErrServerFull = errors.New("server is at capacity")
+// errServerFull is Connect's capacity refusal.
+var errServerFull = errors.New("server is at capacity")
 
 // account is one account's slot. Its mu is what orders a session's teardown before
 // that account's reconnect; no other account ever waits on it.
@@ -120,7 +120,7 @@ func (t *SessionTracker) claim(a *account) (uint64, error) {
 	defer t.mu.Unlock()
 	if a.gen == 0 {
 		if t.maxSessions > 0 && t.live.Load() >= int64(t.maxSessions) {
-			return 0, ErrServerFull
+			return 0, errServerFull
 		}
 		t.live.Add(1)
 	}

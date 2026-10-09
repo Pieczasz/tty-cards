@@ -48,7 +48,7 @@ func TestNewServer_RequiresATracker(t *testing.T) {
 	_, err := NewServer(Deps{
 		Config: &config.Config{SSHKeyPath: t.TempDir() + "/id_ed25519", RateLimitCount: 5, RateLimitWindow: time.Second},
 	})
-	require.ErrorIs(t, err, ErrNoTracker)
+	require.ErrorIs(t, err, errNoTracker)
 }
 
 func TestNewServer_SetsConnectionTimeouts(t *testing.T) {
@@ -406,7 +406,7 @@ func TestFailSessionf_MarksTheSessionSpan(t *testing.T) {
 	reg := &sessionRegistry{}
 	reg.store(s, &sessionState{traceCtx: ctx, span: span})
 
-	reg.failSessionf(s, "rejected_full", ErrServerFull, "full\n")
+	reg.failSessionf(s, "rejected_full", errServerFull, "full\n")
 	span.End()
 
 	ended := recorder.Ended()
