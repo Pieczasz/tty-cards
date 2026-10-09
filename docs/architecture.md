@@ -257,8 +257,8 @@ the OTLP handler.
    accounts are never re-validated.
 3. **`tracker.Connect(userID, conn)` -> generation.** A second session for the
    same account **displaces** the first *and closes its connection*, outside the
-   tracker lock (a wedged peer must not hold every other account's `Connect`
-   behind it). Capacity -> `ErrServerFull`. The TUI model is built **before** the
+   account's tracker lock (a wedged peer must not hold that account's next
+   `Connect` behind it). Capacity -> `ErrServerFull`. The TUI model is built **before** the
    slot is claimed, so a panic there cannot strand a slot nothing releases.
 4. **`tui.ResumeSeat(model)`** runs only once the slot is owned: a refused session
    (server full) must not cancel the grace timer holding this player's seat, and
@@ -270,7 +270,7 @@ the OTLP handler.
 6. **Teardown** is `closeSessionModel` -> `releaseSession` -> `recoverSession` ->
    `finishSession`. `releaseSession` calls
    `tracker.ReleaseWith(userID, gen, DisconnectPlayer)`: the seat is given up and
-   the slot freed as one step **under the tracker lock**, so a reconnect cannot
+   the slot freed as one step **under the account's tracker lock**, so a reconnect cannot
    take the slot and resume the seat in between and then have this session's
    `DisconnectPlayer` arm a grace timer on the seat it is playing. A displaced
    generation touches neither.
@@ -848,13 +848,15 @@ slot until the engine closes.
 
 ### 4.6 Lock order
 
-`SessionTracker.mu` -> Manager (`m.mu`) -> lobby (`l.mu`) -> engine
+The tracker's per-account lock -> Manager (`m.mu`) -> lobby (`l.mu`) -> engine
 (`Engine.mu`). Never invert. `State` has no lock, so there is no fifth level.
 
-The tracker is first because `ReleaseWith` runs `Manager.DisconnectPlayer` under
-it, so a session's teardown and a reconnect's resume are serialised
+The account lock is first because `ReleaseWith` runs `Manager.DisconnectPlayer`
+under it, so a session's teardown and that account's reconnect are serialised
 ([`decisions.md` #45](decisions.md#45-the-session-tracker-lock-comes-before-the-managers)).
-Nothing below it ever calls back into the tracker.
+`SessionTracker.mu` guards only the account map, the generation counter and the
+cap: it is taken after an account's lock and never held across a teardown, so other
+accounts' logins never wait on one. Nothing below it ever calls back into the tracker.
 
 In Postgres the order is the per-seat advisory lock before any row lock: a ranked
 finalize and an erasure both take `pg_advisory_xact_lock` for the seat first
@@ -1517,7 +1519,7 @@ carries none, and CI asserts the URL carries none.
 2. `sessionLifecycle` outermost; recover is a **direct** defer; the bubbletea
    path is `reportingModel` -> `s.Stderr()`.
 3. A displaced session must not `LeaveLobby` or free the tracker slot. `Connect`
-   closes the displaced connection **outside** the tracker lock. Teardown gives up
+   closes the displaced connection **outside** the account's lock. Teardown gives up
    the seat and the slot as one step under it (`ReleaseWith`), and `ResumeSeat`
    runs only once the slot is owned.
 4. A mid-game drop calls `DisconnectPlayer`, not `LeaveLobby`. The hold is
@@ -1531,7 +1533,7 @@ carries none, and CI asserts the URL carries none.
 8. Any view that subscribes implements `router.Closer`; the router and
    `releaseSession` call it.
 9. Anything kept after `Frame`/`Sync` must be copied, not aliased.
-10. Lock order is tracker -> manager -> lobby -> engine. `State` has no lock.
+10. Lock order is tracker account -> manager -> lobby -> engine. `State` has no lock.
 11. A catalog entry is rules **and** view; the slug is persisted, so changing one
     is a data migration.
 12. An accept-loop or API failure still runs `drainServer`.
@@ -1582,7 +1584,7 @@ side. A reconnect race is what happens when they disagree.
 
 ```
 releaseSession
-  -> SessionTracker.ReleaseWith (owning generation only, under t.mu)
+  -> SessionTracker.ReleaseWith (owning generation only, under the account's mu)
   -> Manager.DisconnectPlayer
       -> m.grace.arm (mid-game, disconnectGrace)
       -> OR LeaveLobby / expireLeave -> departure.notify

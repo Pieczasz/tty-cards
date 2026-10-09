@@ -730,7 +730,7 @@ func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
 }
 
 // releaseSession gives up the seat and the tracker slot as one step under the
-// tracker lock. Separately, a reconnect could take the slot and resume the seat in
+// account's tracker lock. Separately, a reconnect could take the slot and resume the seat in
 // between, and this session's DisconnectPlayer would then arm a grace timer on the
 // seat the replacement is playing. A displaced session (stale generation) touches
 // neither.

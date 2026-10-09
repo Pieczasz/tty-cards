@@ -225,9 +225,58 @@ func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
 	assert.False(t, ran, "and ran its teardown against the live session's seat")
 }
 
+// The teardown ReleaseWith holds the account's lock across goes all the way down to a
+// table's engine. Only that account's reconnect has to wait for it: under one lock
+// for every account, any slow disconnect stalled every login on the server.
+func TestSessionTracker_ATeardownDoesNotHoldOffOtherAccounts(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(0)
+	gen, err := tracker.Connect(testutil.UID(41), nil)
+	require.NoError(t, err)
+
+	inTeardown, finish := make(chan struct{}), make(chan struct{})
+	released := make(chan struct{})
+	go func() {
+		tracker.ReleaseWith(testutil.UID(41), gen, func() { close(inTeardown); <-finish })
+		close(released)
+	}()
+	<-inTeardown
+
+	connected := make(chan error, 1)
+	go func() {
+		_, err := tracker.Connect(testutil.UID(42), nil)
+		connected <- err
+	}()
+	select {
+	case err := <-connected:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("another account's login waited for this account's teardown")
+	}
+	close(finish)
+	<-released
+	assert.Equal(t, 1, tracker.Count())
+}
+
+// An entry outlives its session only while someone is waiting on it, or a server
+// that has seen every account once would keep one per account forever.
+func TestSessionTracker_ForgetsAnAccountOnceItsSessionEnds(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(1)
+	gen, err := tracker.Connect(testutil.UID(51), nil)
+	require.NoError(t, err)
+	_, err = tracker.Connect(testutil.UID(52), nil)
+	require.ErrorIs(t, err, ErrServerFull)
+	require.True(t, release(tracker, testutil.UID(51), gen))
+
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	assert.Empty(t, tracker.accounts, "a released or refused account kept its entry")
+}
+
 // Count is what the public stats API reads on every poll. ReleaseWith holds the
-// tracker lock across a teardown that goes all the way down to a table's engine, so
-// a Count that took that lock left /v1/stats waiting on the slowest disconnect.
+// account's lock across a teardown that goes all the way down to a table's engine,
+// so a Count that waited on it left /v1/stats behind the slowest disconnect.
 func TestSessionTracker_CountDoesNotWaitForATeardown(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(0)

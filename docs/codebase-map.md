@@ -232,7 +232,7 @@ sequenceDiagram
     E-->>M: EventGameEnded (lobby watcher)
     M->>M: register finalizer, reopen table, persist
     P--xS: disconnect
-    S->>T: ReleaseWith(gen, fn) - under the tracker lock
+    S->>T: ReleaseWith(gen, fn) - under the account's tracker lock
     T->>M: fn = DisconnectPlayer (90 s grace mid-game)
 ```
 
@@ -544,8 +544,8 @@ Owner: [`architecture.md` §6](architecture.md#6-persistence-elo-and-the-anti-fa
 | TTL cache + dirty flag | public lobby list (2 s, atomic dirty flag, each entry re-checked on read) | the atomic flag exists to avoid inverting lock order |
 | Single mutex per engine | `Engine.mu` | clock + state are always read together ([#1](decisions.md#1-one-mutex-per-engine)) |
 
-Lock order, which every concurrency argument rests on: **tracker `t.mu` -> manager
-`m.mu` -> lobby `l.mu` -> engine `e.mu`**. `State` has no lock. In Postgres, the
+Lock order, which every concurrency argument rests on: **tracker account `a.mu` ->
+manager `m.mu` -> lobby `l.mu` -> engine `e.mu`**. `State` has no lock. In Postgres, the
 per-seat advisory lock comes before any row lock. See
 [`architecture.md` §4.6](architecture.md#46-lock-order) and
 [#45](decisions.md#45-the-session-tracker-lock-comes-before-the-managers).
