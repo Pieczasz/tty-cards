@@ -74,7 +74,7 @@ func TestEndReason_String(t *testing.T) {
 func TestEventType_String(t *testing.T) {
 	t.Parallel()
 	for typ, want := range map[EventType]string{
-		EventUnknown: "unknown", EventTurnAdvanced: "turn_advanced", EventActionApplied: "action_applied",
+		EventUnknown: "unknown", EventTurnAdvanced: "turn_advanced",
 		EventGameEnded: "game_ended", EventGameStarted: "game_started", EventTurnTimedOut: "turn_timed_out",
 		EventPlayerIdle: "player_idle", EventPlayerLeft: "player_left", EventType(250): "unknown",
 	} {

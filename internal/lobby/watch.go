@@ -66,7 +66,7 @@ func (l *Lobby) handleGameEvents(ch <-chan game.Event, engine *game.Engine, req 
 			l.requestFinalize(engine, event.Reason, req)
 			return
 		default:
-			// Turn and action events are the views' business; the lobby counts nothing.
+			// Turn and leave events are the views' business; the lobby counts nothing.
 		}
 	}
 

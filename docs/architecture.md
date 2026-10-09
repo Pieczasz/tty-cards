@@ -903,8 +903,7 @@ metrics carry. An event is a **cue to re-read a snapshot**, never the state itse
 | `EventType` | Emitted by | Consumer behaviour |
 |---|---|---|
 | `EventGameStarted` | `Engine.Start` | views begin rendering the table |
-| `EventActionApplied` | `applyActionLocked`, after `AfterAction` | re-sync |
-| `EventTurnAdvanced` | `applyActionLocked`, `settleAfterLeaveLocked` | re-sync |
+| `EventTurnAdvanced` | `applyActionLocked` (the one cue per accepted move that did not win), `settleAfterLeaveLocked` | re-sync |
 | `EventTurnTimedOut` | `autoPlayLocked` (from `onTurnTimeout`) | re-sync; a safe move was played |
 | `EventPlayerLeft` | `removePlayerLocked` | re-sync |
 | `EventPlayerIdle` | `takeIdleSeatLocked` (from `onTurnTimeout`) | **the named player's own view quits its program**, which ends the SSH session through the ordinary `releaseSession` path |

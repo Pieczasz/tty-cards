@@ -114,8 +114,9 @@ into the engine. That holds structurally today: `Rules` methods receive only
 
 *The order inside `SubmitAction`.* `checkTurnLocked` (closed, phase, turn,
 `ValidateAction`) -> clear the missed-turn count -> `applyActionLocked`:
-`ApplyAction` -> `AfterAction` -> broadcast `EventActionApplied` ->
-`CheckWinCondition` -> `advanceTurnLocked` -> broadcast `EventTurnAdvanced`. The
+`ApplyAction` -> `AfterAction` -> `CheckWinCondition` (a win broadcasts
+`EventGameEnded`) -> `advanceTurnLocked` -> broadcast `EventTurnAdvanced`, one cue
+per move. The
 timer's auto-play (`autoPlayLocked`) runs the same two halves, minus the clear. An error from `ApplyAction` or `AfterAction`
 ends the game as `EndReasonRulesError`, with no winner since the state may be half-applied, so
 **anything checkable up front belongs in `ValidateAction`**.
