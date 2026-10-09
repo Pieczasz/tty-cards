@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -116,33 +117,68 @@ func (m *Manager) persistFinishedMatch(
 		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
 	}
 
-	if err := m.recordFinishedMatch(ctx, res, rated); err != nil {
+	written, err := m.recordFinishedMatch(ctx, res, rated)
+	if err != nil {
 		slog.ErrorContext(ctx, "record finished match",
 			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated)
 		observability.MatchFinalize(ctx, "error", req.isRanked)
 		return
 	}
 	observability.MatchFinalize(ctx, "ok", req.isRanked)
+	m.refreshRatings(req.game.Slug, written)
+}
+
+// refreshRatings puts the ratings a ranked finalize wrote on the seats of those
+// players, at whichever table each sits at now - by the time the write commits the
+// table has reopened, and a player may have moved on. Matchmaking, the table's
+// average and the waiting room all read a seat's ratings, which would otherwise stay
+// the ones its session logged in with. A player seated nowhere is not refreshed: the
+// next login reads the stored rating.
+//
+// m.mu is held, read-only, across each lobby's update so no player can change tables
+// between the index lookup and the seat write; the broadcasts wait for both locks to
+// be released.
+func (m *Manager) refreshRatings(slug string, written map[uuid.UUID]uint32) {
+	if len(written) == 0 {
+		return
+	}
+	m.mu.RLock()
+	tables := make(map[*Lobby]struct{}, len(written))
+	for id := range written {
+		if l := m.playerLobby[id.String()]; l != nil {
+			tables[l] = struct{}{}
+		}
+	}
+	var changed []*broadcaster.Broadcaster[Event]
+	for l := range tables {
+		if bc := l.refreshRatings(slug, written); bc != nil {
+			changed = append(changed, bc)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, bc := range changed {
+		bc.Broadcast(Event{Type: EventPlayersUpdated})
+	}
 }
 
 // recordFinishedMatch picks the write. An interrupted match (decision D-1) is rated
 // only against its leavers: the seats still playing did not finish, so nothing moves
 // for them, but quitting a losing match must not be free.
 //
-// The repository's error already names the write, so it is returned as it is.
+// It returns the ratings the write stored, none for a casual one. The repository's
+// error already names the write, so it is returned as it is.
 //
 //nolint:wrapcheck // wrapping it again logged "finalize ranked match: finalize ranked match"
-func (m *Manager) recordFinishedMatch(ctx context.Context, res matchResult, rated bool) error {
-	var err error
+func (m *Manager) recordFinishedMatch(ctx context.Context, res matchResult, rated bool) (map[uuid.UUID]uint32, error) {
 	switch {
 	case !rated:
-		err = m.matchRepo.RecordCasualMatch(ctx, res.ref, res.userIDs)
+		return nil, m.matchRepo.RecordCasualMatch(ctx, res.ref, res.userIDs)
 	case res.interrupted:
-		_, err = m.matchRepo.FinalizeInterruptedMatch(ctx, res.ref, res.userIDs, res.places, res.leavers)
+		return m.matchRepo.FinalizeInterruptedMatch(ctx, res.ref, res.userIDs, res.places, res.leavers)
 	default:
-		_, err = m.matchRepo.FinalizeRankedMatch(ctx, res.ref, res.userIDs, res.places)
+		return m.matchRepo.FinalizeRankedMatch(ctx, res.ref, res.userIDs, res.places)
 	}
-	return err
 }
 
 // leaverIDs is who left the finished table, as its standings mark them.

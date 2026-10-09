@@ -5,10 +5,11 @@ import "github.com/Pieczasz/tty-cards/internal/game"
 // SeatView is one seated player as a Snapshot shows it.
 type SeatView struct {
 	// Player is shared with the roster, not copied: nothing writes a seated
-	// *game.Player once it is seated (the engine deals into copies of its own).
+	// *game.Player once it is seated (the engine deals into copies of its own, and a
+	// rating refresh seats a new one).
 	Player *game.Player
-	// Elo is the player's rating in the table's game, unrated at the starting rating.
-	// It is the one they logged in with, not a live read.
+	// Elo is the player's rating in the table's game, unrated at the starting rating:
+	// the one they logged in with, or what their last ranked match here wrote.
 	Elo   uint32
 	Ready bool
 }
