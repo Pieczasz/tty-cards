@@ -10,7 +10,8 @@ rules:
       writing CurrentTurn or OverrideNextTurn. The engine alone moves the cursor
       (advanceTurnLocked / settleTurnLocked clamp it and arm the turn clock), and
       OverrideTurn points at its own copy of the seat, never into Extra, which can
-      move under it. Clearing the override with nil is the one allowed write.
+      move under it. Not even a clear with nil: the engine consumes the override, and
+      once the match is won nothing reads it.
     paths:
       exclude:
         - /internal/game/engine.go
@@ -24,7 +25,6 @@ rules:
           - pattern: $S.CurrentTurn++
           - pattern: $S.CurrentTurn--
           - pattern: $S.OverrideNextTurn = $X
-      - pattern-not: $S.OverrideNextTurn = nil
 
   - id: tui-uses-server-engine-api
     languages: [go]

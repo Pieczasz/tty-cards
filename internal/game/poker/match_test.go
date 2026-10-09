@@ -191,7 +191,6 @@ func TestBeginHandOrFinish_ClosesAHandTheDealAlreadyFinished(t *testing.T) {
 	// on turn - never leaves OverrideNextTurn nil while the match is still live.
 	if extra.MatchComplete {
 		assert.True(t, (&Rules{}).CheckWinCondition(state))
-		assert.Nil(t, state.OverrideNextTurn)
 	} else {
 		require.NotNil(t, state.OverrideNextTurn, "a live match needs a dealer for NextHand")
 		assert.Equal(t, *state.OverrideNextTurn, state.CurrentTurn)

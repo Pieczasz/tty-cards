@@ -23,7 +23,7 @@ func turnCursor(state *State, extra *Extra) {
 	state.CurrentTurn -= 1
 	// ruleid: turn-cursor-written-by-hand
 	state.OverrideNextTurn = &extra.Dealer
-	// ok: turn-cursor-written-by-hand
+	// ruleid: turn-cursor-written-by-hand
 	state.OverrideNextTurn = nil
 	// ok: turn-cursor-written-by-hand
 	state.SetTurn(extra.Dealer)
