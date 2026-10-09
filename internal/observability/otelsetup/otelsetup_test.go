@@ -1,4 +1,4 @@
-package observability
+package otelsetup
 
 import (
 	"context"
@@ -170,8 +170,8 @@ func TestOTel_Integration(t *testing.T) {
 }
 
 // An alert on increase() needs a sample before the first event, and a counter has no
-// series until its first Add. The instruments here record into testReader, which
-// TestMain installed first; the metric tests never record these combinations.
+// series until its first Add. observability's instruments record into testReader,
+// which TestMain installed first, and nothing else here records them.
 func assertAlertedSeriesSeeded(t *testing.T) {
 	t.Helper()
 	finalize, drops := map[string]bool{}, map[string]bool{}

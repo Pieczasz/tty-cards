@@ -1,3 +1,6 @@
+// Package observability owns the app's own metric instruments, each behind a small
+// function so callers cannot attach an unbounded attribute. The OTLP providers they
+// record into are installed by otelsetup.
 package observability
 
 import (
@@ -12,7 +15,7 @@ import (
 )
 
 // meter uses the otel global, which delegates: instruments created before
-// Setup installs the real provider start recording once it does.
+// otelsetup.Setup installs the real provider start recording once it does.
 var meter = otel.Meter("tty-cards")
 
 // must panics only on a malformed instrument name or a callback over another
@@ -211,4 +214,22 @@ func RegisterDBStats(db *sql.DB) {
 		o.ObserveInt64(waits, s.WaitCount)
 		return nil
 	}, inUse, idle, maxOpen, waits))
+}
+
+// SeedAlertedSeries exports a zero for every series an alert watches with
+// increase(), for the attribute values its callers use (internal/lobby, internal/ssh).
+// A counter has no series until its first Add, and increase() needs two samples, so
+// without the zero the first lost match or panic after a boot is the series' first
+// sample and never fires.
+func SeedAlertedSeries(ctx context.Context) {
+	for _, outcome := range []string{"dropped", "error"} {
+		for _, ranked := range []bool{false, true} {
+			matchFinalize.Add(ctx, 0, metric.WithAttributes(
+				attribute.String("outcome", outcome), attribute.Bool("ranked", ranked)))
+		}
+	}
+	for _, stream := range []string{"game", "lobby"} {
+		broadcastDrops.Add(ctx, 0, metric.WithAttributes(attribute.String("stream", stream)))
+	}
+	sshPanics.Add(ctx, 0)
 }

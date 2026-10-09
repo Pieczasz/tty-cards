@@ -1,7 +1,7 @@
-// Package observability owns the process's telemetry: the OTLP providers Setup
-// installs, and the app's own metric instruments, each behind a small function so
-// callers cannot attach an unbounded attribute.
-package observability
+// Package otelsetup installs the process's OTLP providers. It is apart from
+// observability so the packages that only record metrics do not link the SDK, its
+// exporters and gRPC: only the composition root imports this one.
+package otelsetup
 
 import (
 	"context"
@@ -11,15 +11,14 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/config"
+	"github.com/Pieczasz/tty-cards/internal/observability"
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -81,31 +80,13 @@ func Setup(ctx context.Context, cfg *config.Config) (shutdown func(context.Conte
 	}
 	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
 	otel.SetMeterProvider(meterProvider)
-	seedAlertedSeries(ctx)
+	observability.SeedAlertedSeries(ctx)
 
 	if err := runtime.Start(runtime.WithMeterProvider(meterProvider)); err != nil {
 		return nil, fmt.Errorf("start runtime metrics: %w", err)
 	}
 
 	return cleanup, nil
-}
-
-// seedAlertedSeries exports a zero for every series an alert watches with
-// increase(), for the attribute values its callers use (internal/lobby, internal/ssh).
-// A counter has no series until its first Add, and increase() needs two samples, so
-// without the zero the first lost match or panic after a boot is the series' first
-// sample and never fires.
-func seedAlertedSeries(ctx context.Context) {
-	for _, outcome := range []string{"dropped", "error"} {
-		for _, ranked := range []bool{false, true} {
-			matchFinalize.Add(ctx, 0, metric.WithAttributes(
-				attribute.String("outcome", outcome), attribute.Bool("ranked", ranked)))
-		}
-	}
-	for _, stream := range []string{"game", "lobby"} {
-		broadcastDrops.Add(ctx, 0, metric.WithAttributes(attribute.String("stream", stream)))
-	}
-	sshPanics.Add(ctx, 0)
 }
 
 // newResource is resource.Default with the service identity on top. A set keeps the

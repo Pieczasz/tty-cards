@@ -23,6 +23,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/observability/otelsetup"
 	"github.com/Pieczasz/tty-cards/internal/repository"
 	"github.com/Pieczasz/tty-cards/internal/ssh"
 
@@ -33,7 +34,7 @@ import (
 
 // compose's stop_grace_period (80s) has to outlast the whole sequential drain:
 // ssh, then the stats api, then two finalizer windows, then otel, whose three
-// providers get 2s each (observability.Setup). See docs/decisions.md #29 for why a
+// providers get 2s each (otelsetup.Setup). See docs/decisions.md #29 for why a
 // match write gets windows rather than an outbox.
 const (
 	sshDrainTimeout      = 30 * time.Second
@@ -154,7 +155,7 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 }
 
 func setupOTel(ctx context.Context, cfg *config.Config) (func(), error) {
-	shutdown, err := observability.Setup(ctx, cfg)
+	shutdown, err := otelsetup.Setup(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("setup otel: %w", err)
 	}
