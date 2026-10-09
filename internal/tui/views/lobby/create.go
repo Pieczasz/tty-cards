@@ -44,7 +44,7 @@ func NewCreate(global router.GlobalContext) tea.Model {
 		global:      global,
 		cursor:      0,
 		isPrivate:   true,
-		isRanked:    false, // casual default - matches lobby.setupDefaultOptions
+		isRanked:    false, // casual, the lobby's own default
 		maxPlayers:  defaultMaxPlayers,
 		gameOptions: gameOptions,
 		gameIndex:   0,
@@ -145,8 +145,8 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 	return m, router.NavigateToLobby(l)
 }
 
-// defaultMaxPlayers is the seat count a lobby opens with, the same as
-// lobby.setupDefaultOptions.
+// defaultMaxPlayers is the seat count the form starts at, the same default the lobby
+// clamps to its game when WithMaxPlayers is not given.
 const defaultMaxPlayers = 4
 
 // The seat range for a game the registry does not hold. One pair for both screens, so
