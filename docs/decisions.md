@@ -104,7 +104,7 @@ an ordering to get right on every path.
 **Consequences.** Coarse: a `Frame` from one session briefly blocks a `Submit`
 from another. That is acceptable because everything under the lock is in-memory
 map and slice work; nothing does I/O. In exchange there is exactly one lock order
-to remember (tracker -> manager -> lobby -> engine, see
+to remember (tracker account -> manager -> lobby -> engine, see
 [#45](#45-the-session-tracker-lock-comes-before-the-managers)) and nothing below
 the engine.
 
@@ -539,7 +539,7 @@ tracker slot or give up the lobby seat (`ReleaseWith`; the test-only `Release` a
 
 **Consequences.** Reconnecting always works, which is the behaviour a player
 expects. The close happens **outside** the tracker lock: a wedged peer must not
-hold every other account's `Connect` behind it. A displaced session's teardown
+hold a `Connect` behind it (the lock is per account since #45 was narrowed). A displaced session's teardown
 must touch neither the seat nor the slot, or the new session loses both -
 `ReleaseWith` does nothing for a stale generation. Capacity is still refused, with
 a distinct `ErrServerFull`.
@@ -1443,17 +1443,27 @@ player's seat.
 `DisconnectPlayer` call - under the tracker lock, for the owning generation only.
 The seat resume moved out of the constructor into `tui.ResumeSeat`, which the ssh layer
 calls only after `Connect` has handed it the slot. The lock order is therefore
-`SessionTracker.mu` -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu`.
+the account's tracker lock -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu`.
+
+*Narrowed in the 2026-09 review (`transport-and-root` F3).* The lock `fn` runs under
+was one `SessionTracker.mu` for every account, so every `Connect` on the server waited
+behind every teardown, not just its own account's. It is now per account: each entry
+carries its own mutex, generation and connection, and `SessionTracker.mu` guards only
+the map, the generation counter and the cap. It is taken after an account's lock and
+never held across `fn`. An entry leaves the map once no session is live and no caller
+holds or waits on it.
 
 **Consequences.** Teardown and a reconnect's resume cannot interleave, and a
-refused session never touches the grace timer. The cost is that `Count` and
-`Connect` wait behind a teardown's `DisconnectPlayer`, which takes the manager lock
-and is in-memory work only. Nothing below the tracker may call back into it; that
-holds structurally, since `internal/lobby` does not import `internal/ssh`.
+refused session never touches the grace timer. The cost is that the same account's
+`Connect` waits behind its own teardown's `DisconnectPlayer`, which takes the manager
+lock and is in-memory work only; other accounts and `Count` never wait on it. Nothing
+below the tracker may call back into it; that holds structurally, since
+`internal/lobby` does not import `internal/ssh`.
 
 **Where.** `internal/ssh/tracker.go` `ReleaseWith`, `internal/ssh/server.go`
 `releaseSession` / `sessionModel`, `internal/tui/app.go` `ResumeSeat`. Tests:
 `internal/ssh/lifecycle_test.go` `TestSessionTracker_ReleaseWithHoldsOffTheReconnect`,
+`TestSessionTracker_ATeardownDoesNotHoldOffOtherAccounts`,
 `internal/ssh/teardown_race_test.go`.
 
 ---

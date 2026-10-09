@@ -380,7 +380,7 @@ out of every other table and this one unable to reach all-ready) and
 removal clears every ready flag; a join does not.
 
 *Lock order is manager (`m.mu`) then lobby (`l.mu`), never inverted* - below the
-ssh layer's `SessionTracker.mu`, which comes first. The browse
+ssh layer's per-account tracker lock, which comes first. The browse
 cache uses an `atomic.Bool` dirty flag specifically so a `Lobby` can mark it while
 holding its own lock without reaching for the manager's.
 
@@ -490,8 +490,8 @@ per-connection channel cap lives in the `session` channel handler and refuses
 before `Accept`.
 
 *A second session displaces the first* and closes its connection, outside the
-tracker lock - a wedged peer must not hold every other account's `Connect` behind
-it. Only the owning generation may free the slot and the seat.
+account's tracker lock - a wedged peer must not hold that account's next `Connect`
+behind it. Only the owning generation may free the slot and the seat.
 
 *A session's size and input are budgets.* bubbletea is told at most 120x40, at
 start and on every resize, because its renderer holds ~260 B per cell for the
@@ -500,7 +500,7 @@ session's life; `inputGuard` closes a session sending more than 1 KiB/s after a
 unterminated paste without bound.
 
 **Invariant to check.** `releaseSession` gives up the lobby seat and the tracker
-slot as one step under the tracker lock (`ReleaseWith`), and `tui.ResumeSeat` runs
+slot as one step under the account's tracker lock (`ReleaseWith`), and `tui.ResumeSeat` runs
 only once `Connect` has handed the session its slot, so a reconnect can neither
 land between the two nor have a refused session cancel its grace timer.
 
@@ -688,7 +688,7 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | TUI reading engine state? | `gameview.Session.Sync` -> `BoundEngine.Frame` |
 | Where is state redacted for the screen? | `views/gameview/poker/model.go` `buildSeats` |
 | Browse list sorting? | `lobby/browse.go` |
-| Lock order? | tracker -> manager -> lobby -> engine; `State` has no lock |
+| Lock order? | tracker account -> manager -> lobby -> engine; `State` has no lock |
 | Rate limiting on IPv6? | `ratelimit/netkey.go` (`NetKey` /64, `WideKey` /48); fail-closed in `ssh.clientHost` |
 | Why can I not register? | `REGISTRATION_LIMIT`, `_WIDE`, `REGISTRATION_GLOBAL_LIMIT` / `REGISTRATION_WINDOW` (`config/config.go`), `ssh.allowRegistration`; `db.ValidateUsername`; `mapRegisterError` |
 | Add a migration? | `make migrate-create`, files under `db/migrations/` |
