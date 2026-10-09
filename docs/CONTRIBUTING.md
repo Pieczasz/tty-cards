@@ -174,8 +174,9 @@ clockwise from the hero's left. Wire it the way `crazyeight` does:
 
 Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`). The
 `*State` you get is live and unredacted - filtering what the player may see is
-your job, and it should be a named function so a reviewer can find it
-(`buildSeats` in poker).
+your job, and it should be a named function so a reviewer can find it. Where
+what a seat may see is a rule of the game, that function lives in the rules
+package (`poker.SeatsFor`), not the view.
 
 ### 3. Register both together - `internal/catalog/catalog.go`
 

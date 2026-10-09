@@ -14,22 +14,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// seat is one player position around the table for rendering.
-type seat struct {
-	PlayerID string
-	Name     string
-	Chips    uint
-	Bet      uint
-	Folded   bool
-	AllIn    bool
-	IsDealer bool
-	IsSB     bool
-	IsBB     bool
-	IsTurn   bool
-	IsHero   bool
-	HandSize int
-	Hole     []deck.Card
-}
+// seat is one player position around the table, as the rules let the hero see it.
+type seat = logic.SeatView
 
 // table is everything syncState lifts out of the engine for one frame. It is rebuilt
 // whole on every sync, so nothing the engine stopped reporting can outlive the frame
@@ -122,48 +108,8 @@ func readTable(state *game.State, heroID string) table {
 	}
 
 	t.board = slices.Clone(e.Table)
-	t.seats = buildSeats(state, e, heroID)
+	t.seats = logic.SeatsFor(state, heroID)
 	return t
-}
-
-// buildSeats snapshots every seat for rendering. Hole cards are copied out only
-// for the hero, or for anyone still live once the hand is shown down - everyone
-// else gets a hand size and nothing more. A pot that nobody contested is won
-// face-down: with hands left to play, showing those cards would hand the table a
-// free read. The match ending is no exception: a last pot won face-down keeps its
-// cards hidden too. Caller must hold the state lock.
-func buildSeats(state *game.State, extra *logic.State, heroID string) []seat {
-	reveal := extra.ReachedShowdown
-
-	seats := make([]seat, 0, len(state.Players))
-	for i, p := range state.Players {
-		if p == nil {
-			continue
-		}
-		var money logic.Seat
-		if ls := extra.Seats[p.ID]; ls != nil {
-			money = *ls
-		}
-		s := seat{
-			PlayerID: p.ID,
-			Name:     p.DisplayName(),
-			Chips:    money.Chips,
-			Bet:      money.Bet,
-			Folded:   money.Folded,
-			AllIn:    money.AllIn,
-			IsDealer: i == extra.DealerIndex,
-			IsSB:     i == extra.SBIndex,
-			IsBB:     i == extra.BBIndex,
-			IsTurn:   state.Phase == game.Playing && state.CurrentTurn == i && !extra.HandComplete(),
-			IsHero:   p.ID == heroID,
-			HandSize: len(p.Cards),
-		}
-		if s.IsHero || (reveal && !s.Folded) {
-			s.Hole = slices.Clone(p.Cards)
-		}
-		seats = append(seats, s)
-	}
-	return seats
 }
 
 // clampRaise holds a raise-to amount within the band the rules accept.

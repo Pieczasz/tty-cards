@@ -406,7 +406,8 @@ Then `internal/lobby/finalize_test.go`
 `internal/tui/styles/common.go` (221) - `layoutHeights` above all -
 `internal/tui/views/gameview/session.go` (294), `layout.go` (357), `state.go` (89),
 `zones.go` (133), `frame.go` (105), `handover.go` (51), `choice.go` (68), then
-`internal/tui/views/gameview/poker/model.go` (219) for `buildSeats`. Skim the
+`internal/tui/views/gameview/poker/model.go` (162) and the `poker.SeatsFor` it
+renders (`internal/game/poker/seats.go`, 73). Skim the
 rest: `views/home`, `views/lobby`, `views/leaderboard`, `views/profile`,
 `styles/theme.go`, `components/card.go`, and `internal/tui/tuitest/tuitest.go`
 (64), the fit sizes and key helpers the view tests share.
@@ -442,17 +443,18 @@ picker (`ChoicePicker`) are shared too. A new game writes its rules rendering
 and nothing else. Read per-game state through `Sync`'s callback and **copy**
 anything you keep - the `*State` you get is live and unredacted.
 
-*`buildSeats` is the one redaction point.* Poker reads whole-table state through
-`Sync`'s callback because a showdown needs every seat, and so redaction becomes
-the view's named, testable job.
+*`poker.SeatsFor` is the one redaction point.* Poker reads whole-table state through
+`Sync`'s callback because a showdown needs every seat. Which hole cards a seat may
+see is a rule of poker, so the view hands that state to the rules'
+`SeatsFor(state, hero)` and renders what comes back.
 
 **Invariant to check.** Nothing kept after `Sync` returns aliases engine state
 (`maps.Clone`, `HandResult.Clone`).
 
 **Test.** `internal/tui/styles/layout_test.go`
 `TestRenderMainLayout_HonoursAvailableContentHeight`, and
-`internal/tui/views/gameview/poker/redaction_test.go`
-`TestBuildSeats_RevealsHoleCardsOnlyWhereTheRulesDo`.
+`internal/game/poker/seats_test.go`
+`TestSeatsFor_RevealsHoleCardsOnlyWhereTheRulesDo`.
 
 ---
 
@@ -688,7 +690,7 @@ Engine.armTurnTimerLocked --time.AfterFunc--> onTurnTimeout
 | Why is a game split in two on a dashboard? | it should not be: `game_type` is the catalog slug everywhere (`catalog/metrics_test.go`) |
 | Why did esc not leave the table? | `views/gameview/session.go` `HandleLeaveKey` - mid-game it asks first |
 | TUI reading engine state? | `gameview.Session.Sync` -> `BoundEngine.Frame` |
-| Where is state redacted for the screen? | `views/gameview/poker/model.go` `buildSeats` |
+| Where is state redacted for the screen? | `game/poker/seats.go` `SeatsFor` |
 | Browse list sorting? | `lobby/browse.go` |
 | Lock order? | tracker account -> manager -> lobby -> engine; `State` has no lock |
 | Rate limiting on IPv6? | `ratelimit/netkey.go` (`NetKey` /64, `WideKey` /48); fail-closed in `ssh.clientHost` |

@@ -230,13 +230,14 @@ and it hands the view the live, unredacted `*State`.
 **Consequences.** This is explicitly **not** a security boundary - a view that
 wants whole-table state has it through the `Frame` callback, because rendering a
 card table means rendering every seat, and poker reads every seat that way. What
-the façade buys is that the *default* path is the safe one, and the redaction is
-the view's named, testable job. In poker that function is `buildSeats`, and it has
-its own test file.
+the façade buys is that the *default* path is the safe one, and the redaction is a
+named, testable function. Since 2026-10-09 poker's lives in the rules, not the view:
+which hole cards a seat may see is a rule of poker (it changes with muck-on-loss or
+show-one), so `poker.SeatsFor(state, viewer)` decides it beside `RaiseBounds`, and a
+second front end would reuse it.
 
 **Where.** `internal/game/bound.go` (the comment on `Frame`),
-`internal/tui/views/gameview/poker/model.go` `buildSeats`,
-`internal/tui/views/gameview/poker/redaction_test.go`.
+`internal/game/poker/seats.go` `SeatsFor`, `internal/game/poker/seats_test.go`.
 
 **2026-09-30: the "any seat" half is closed.** The façade used to be advisory: the
 lobby's `EventGameStarted` carried the `*game.Engine`, `Lobby.ActiveGame()` returned
