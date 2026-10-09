@@ -33,7 +33,7 @@ func newJoinModel(t *testing.T, m *lobby.Manager) *joinModel {
 	global := router.GlobalContext{
 		User:         testUser(99, "browser"),
 		LobbyManager: m,
-		GameRegistry: testRegistry(),
+		Games:        testGames(),
 		Width:        120,
 		Height:       40,
 	}

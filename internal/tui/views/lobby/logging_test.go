@@ -86,7 +86,7 @@ func TestNew_SubscriptionFailureIsLoggedUnderTheSessionTraceAndCounted(t *testin
 	m.Close()
 	m.global.LobbyManager.RemoveLobby(l.Code())
 	global := router.GlobalContext{
-		User: m.global.User, LobbyManager: m.global.LobbyManager, GameRegistry: m.global.GameRegistry,
+		User: m.global.User, LobbyManager: m.global.LobbyManager, Games: m.global.Games,
 		SessionCtx: tuitest.TracedContext(t),
 	}
 	before := tuitest.Count(t, testMetrics, "ttycards.broadcaster.subscribe.failures", "stream", "lobby_view")

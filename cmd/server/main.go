@@ -20,7 +20,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
-	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -135,12 +134,13 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	observability.RegisterDBStats(sqlDB)
 
 	userRepo := repository.NewUserRepository(database)
-	games := catalog.NewRegistry()
-	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database), games)
+	// One catalog for both: the registry the manager checks a new table against, and
+	// the entries the menus offer and the routes render.
+	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database), catalog.NewRegistry())
 	defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)
 
 	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := newSSHServer(cfg, userRepo, lobbyManager, games, tracker)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, catalog.Games, tracker)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func newSSHServer(
 	cfg *config.Config,
 	userRepo db.UserRepository,
 	lobbyManager *lobby.Manager,
-	games *game.Registry,
+	games []catalog.Entry,
 	tracker *ssh.SessionTracker,
 ) (*ssh.Server, error) {
 	server, err := ssh.NewServer(ssh.Deps{
@@ -202,7 +202,7 @@ func newSSHServer(
 		Profiles:     userRepo,
 		Leaderboard:  userRepo,
 		LobbyManager: lobbyManager,
-		GameRegistry: games,
+		Games:        games,
 		Tracker:      tracker,
 	})
 	if err != nil {

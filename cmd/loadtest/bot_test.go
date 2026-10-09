@@ -59,7 +59,6 @@ func TestBots_PlayWholeGamesThroughTheRealTUI(t *testing.T) {
 func playTable(t *testing.T, seats, games int) *recorder {
 	t.Helper()
 	mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 	stats := &recorder{}
 	tbl := newTable()
 	stop := make(chan struct{})
@@ -67,7 +66,7 @@ func playTable(t *testing.T, seats, games int) *recorder {
 
 	for seat := range seats {
 		model := tui.New(tui.Deps{
-			SessionCtx: t.Context(), LobbyManager: mgr, GameRegistry: registry,
+			SessionCtx: t.Context(), LobbyManager: mgr, Games: catalog.Games,
 			User: db.User{ID: testutil.UID(seat + 1), Username: fmt.Sprintf("bot_%d", seat)},
 		})
 		_, scr, keys := startProgram(t, model)

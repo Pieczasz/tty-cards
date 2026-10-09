@@ -30,11 +30,16 @@ type Entry struct {
 
 // NewRegistry is the registry of every game in Games, in catalog order.
 func NewRegistry() *game.Registry {
-	mods := make([]game.Module, 0, len(Games))
-	for _, entry := range Games {
-		mods = append(mods, entry.Module)
+	return game.NewRegistry(Modules(Games)...)
+}
+
+// Modules is each entry's Module, in the entries' order.
+func Modules(entries []Entry) []game.Module {
+	mods := make([]game.Module, len(entries))
+	for i, entry := range entries {
+		mods[i] = entry.Module
 	}
-	return game.NewRegistry(mods...)
+	return mods
 }
 
 // Games is the single point of game registration: every entry carries both the

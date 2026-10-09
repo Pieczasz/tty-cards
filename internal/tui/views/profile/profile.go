@@ -84,13 +84,10 @@ type model struct {
 	notice string
 }
 
-// New builds the profile screen with one game filter per registered game.
+// New builds the profile screen with one game filter per game on offer.
 func New(global router.GlobalContext) tea.Model {
 	// The first is "All": no slug, so it matches every match.
-	gameFilters := []game.Module{{Name: filterAllGames}}
-	if global.GameRegistry != nil {
-		gameFilters = append(gameFilters, global.GameRegistry.Modules()...)
-	}
+	gameFilters := append([]game.Module{{Name: filterAllGames}}, global.Games...)
 	return &model{
 		global:        global,
 		gameFilters:   gameFilters,

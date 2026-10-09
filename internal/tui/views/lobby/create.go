@@ -35,18 +35,17 @@ type createModel struct {
 	gameIndex   int
 }
 
-// NewCreate builds the lobby form. The games on offer come from the registry and
+// NewCreate builds the lobby form. The games on offer come from global.Games and
 // nowhere else: a hardcoded fallback here would be a second place a game is
-// declared, and it would offer a game the registry cannot build.
+// declared, and it would offer a game the lobby manager refuses.
 func NewCreate(global router.GlobalContext) tea.Model {
-	gameOptions := global.GameRegistry.Modules()
 	return &createModel{
 		global:      global,
 		cursor:      0,
 		isPrivate:   true,
 		isRanked:    false, // casual, the lobby's own default
 		maxPlayers:  defaultMaxPlayers,
-		gameOptions: gameOptions,
+		gameOptions: global.Games,
 		gameIndex:   0,
 	}
 }
@@ -103,7 +102,7 @@ func (m *createModel) adjustSetting(delta int) {
 	case createCursorMode:
 		m.isRanked = !m.isRanked
 	case createCursorPlayers:
-		minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
+		minP, maxP := m.playerBounds()
 		if next := m.maxPlayers + delta; next >= minP && next <= maxP {
 			m.maxPlayers = next
 		}
@@ -112,7 +111,7 @@ func (m *createModel) adjustSetting(delta int) {
 	}
 }
 
-// errNoGames is what the form says when the registry is empty. It is a broken
+// errNoGames is what the form says when no game is on offer. It is a broken
 // deployment rather than a player mistake, but it still has to read as something.
 var errNoGames = errors.New("no games are available right now")
 
@@ -149,28 +148,24 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 // clamps to its game when WithMaxPlayers is not given.
 const defaultMaxPlayers = 4
 
-// The seat range for a game the registry does not hold. One pair for both screens, so
-// the create form and the lobby cannot disagree about how far the setting may travel.
+// The seat range with no game to select, so an empty form still shows a sane row.
 const (
 	fallbackMinPlayers = 2
 	fallbackMaxPlayers = 6
 )
 
-// gamePlayerBounds is the seat range of the game slug names, or the fallback range for
-// a game the registry does not hold.
-func gamePlayerBounds(registry *game.Registry, slug string) (minP, maxP int) {
-	if registry == nil {
-		return fallbackMinPlayers, fallbackMaxPlayers
-	}
-	mod, ok := registry.Module(slug)
-	if !ok {
+// playerBounds is the selected game's seat range, or the fallback range when there is
+// no game to select.
+func (m *createModel) playerBounds() (minP, maxP int) {
+	mod := m.selectedGame()
+	if mod.Slug == "" {
 		return fallbackMinPlayers, fallbackMaxPlayers
 	}
 	return mod.MinPlayers, mod.MaxPlayers
 }
 
 func (m *createModel) clampMaxPlayers() {
-	minP, maxP := gamePlayerBounds(m.global.GameRegistry, m.selectedGame().Slug)
+	minP, maxP := m.playerBounds()
 	// minP is applied last so it wins if a game's bounds ever cross.
 	m.maxPlayers = max(min(m.maxPlayers, maxP), minP)
 }

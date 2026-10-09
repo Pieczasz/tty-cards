@@ -31,7 +31,7 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 	t.Parallel()
 
 	r := router.New(router.GlobalContext{})
-	registerGameViews(r)
+	registerGameViews(r, catalog.Games)
 
 	for _, e := range catalog.Games {
 		assert.Truef(t, r.HasRoute(router.GameRoute(e.Slug)),
@@ -47,16 +47,29 @@ func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.Use
 
 	manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
-	registry := catalog.NewRegistry()
 
 	r := New(Deps{
 		SessionCtx:   t.Context(),
 		User:         *user,
 		LobbyManager: manager,
-		GameRegistry: registry,
+		Games:        catalog.Games,
 	})
 	r.Global.Width, r.Global.Height = 120, 50
 	return r, manager, user
+}
+
+// The menus and the routes read one list: a game offered with no route is a table the
+// player creates and can never sit down at.
+func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
+	t.Parallel()
+	only := catalog.Games[1:2]
+
+	r := New(Deps{User: db.User{ID: testutil.UID(1)}, Games: only})
+
+	require.Len(t, r.Global.Games, 1)
+	assert.Equal(t, only[0].Slug, r.Global.Games[0].Slug)
+	assert.True(t, r.HasRoute(router.GameRoute(only[0].Slug)))
+	assert.False(t, r.HasRoute(router.GameRoute(catalog.Games[0].Slug)), "a game not handed in has no route")
 }
 
 // Every route the views navigate to has to be registered, or Goto is a silent no-op
@@ -162,7 +175,6 @@ func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
-		registry := catalog.NewRegistry()
 
 		user := &db.User{ID: testutil.UID(1), Username: "alice"}
 		host := internallobby.NewPlayer(user)
@@ -188,7 +200,7 @@ func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 			SessionCtx:   t.Context(),
 			User:         *user,
 			LobbyManager: manager,
-			GameRegistry: registry,
+			Games:        catalog.Games,
 		})
 		r.Global.Width, r.Global.Height = 120, 50
 		ResumeSeat(r)

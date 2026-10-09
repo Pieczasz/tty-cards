@@ -278,7 +278,9 @@ and `game.NewRegistry` panics on a half-declared module or a name declared twice
 (2026-09-23, `4ce83fb`), so a wiring slip fails the boot rather than the first table.
 Since 2026-10-09 it also panics on a slug declared twice and on seat bounds no
 table can meet; the bounds moved off `Rules` onto the module, being the game's
-rather than a table's.
+rather than a table's. Since the same day the registry is the lobby manager's alone:
+the TUI takes the entries themselves (`tui.Deps.Games`) and reads both its routes and
+its menus from them.
 
 **Consequences.** A game cannot be registered without a view: `catalog_test.go`
 fails on a missing field or a duplicate slug. But **copying an entry and changing

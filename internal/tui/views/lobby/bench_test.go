@@ -16,7 +16,7 @@ import (
 func benchGlobal(m *lobby.Manager) router.GlobalContext {
 	return router.GlobalContext{
 		User: testUser(99, "browser"), LobbyManager: m,
-		GameRegistry: testRegistry(), Width: 120, Height: 40,
+		Games: testGames(), Width: 120, Height: 40,
 		Theme: styles.NewTheme(true),
 	}
 }

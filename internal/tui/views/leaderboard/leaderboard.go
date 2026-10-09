@@ -65,13 +65,12 @@ type model struct {
 	exhausted bool
 }
 
-// New builds the board with one filter per registered game, in registry order.
+// New builds the board with one filter per game on offer, in menu order.
 func New(global router.GlobalContext) tea.Model {
-	filters := []boardFilter{{label: filterAll}}
-	if reg := global.GameRegistry; reg != nil {
-		for _, mod := range reg.Modules() {
-			filters = append(filters, boardFilter{label: mod.Name, slug: mod.Slug})
-		}
+	filters := make([]boardFilter, 1, 1+len(global.Games))
+	filters[0] = boardFilter{label: filterAll}
+	for _, mod := range global.Games {
+		filters = append(filters, boardFilter{label: mod.Name, slug: mod.Slug})
 	}
 	return &model{global: global, filters: filters}
 }
