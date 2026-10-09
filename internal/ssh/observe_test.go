@@ -157,14 +157,14 @@ func TestFinishSession_RecordsHowTheSessionEnded(t *testing.T) {
 		{
 			name: "refused, server full",
 			setup: func(reg *sessionRegistry, s *stubSession, _ *sessionState) {
-				reg.failSessionf(s, "rejected_full", ErrServerFull, "full\n")
+				reg.failSessionf(s, "rejected_full", errServerFull, "full\n")
 			},
 			want: "rejected_full",
 		},
 		{
 			name: "refused at sign-in",
 			setup: func(reg *sessionRegistry, s *stubSession, _ *sessionState) {
-				reg.failSessionf(s, "auth_failed", ErrNoPublicKey, "no key\n")
+				reg.failSessionf(s, "auth_failed", errNoPublicKey, "no key\n")
 			},
 			want: "auth_failed",
 		},

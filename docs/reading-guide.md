@@ -474,7 +474,7 @@ registration budget (`registrationBudget`: `REGISTRATION_LIMIT` per /64,
 `REGISTRATION_WINDOW`).
 
 *"Taken" is uninformative on purpose.* `mapRegisterError` folds
-`db.ErrUsernameTaken` into `ErrNameUnavailable`, because a distinguishable message
+`db.ErrUsernameTaken` into `errNameUnavailable`, because a distinguishable message
 turns the login banner into a "does this account exist" oracle. An invalid name is
 a fixed rule, not a fact about other accounts, so the player is told why.
 

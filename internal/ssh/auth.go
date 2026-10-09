@@ -15,20 +15,20 @@ import (
 // The errors a refused session is shown. They are written to an unauthenticated
 // client, so none of them may say more than the client already knows.
 var (
-	// ErrNoPublicKey refuses a client that authenticated without a key.
-	ErrNoPublicKey = errors.New("SSH key authentication is required")
-	// ErrInternal stands in for a database failure while resolving the account.
-	ErrInternal = errors.New("internal server error")
-	// ErrRegistrationFailed stands in for any registration failure not mapped below.
-	ErrRegistrationFailed = errors.New("registration failed")
-	// ErrTooManyRegistrations refuses a *new* account, never a returning player.
-	ErrTooManyRegistrations = errors.New("too many new accounts from your network; please try again later")
-	// ErrNameUnavailable is what an unauthenticated client gets for a name that is
+	// errNoPublicKey refuses a client that authenticated without a key.
+	errNoPublicKey = errors.New("SSH key authentication is required")
+	// errInternal stands in for a database failure while resolving the account.
+	errInternal = errors.New("internal server error")
+	// errRegistrationFailed stands in for any registration failure not mapped below.
+	errRegistrationFailed = errors.New("registration failed")
+	// errTooManyRegistrations refuses a *new* account, never a returning player.
+	errTooManyRegistrations = errors.New("too many new accounts from your network; please try again later")
+	// errNameUnavailable is what an unauthenticated client gets for a name that is
 	// taken. Echoing db.ErrUsernameTaken turned the login banner into a "does this
 	// account exist" oracle over every username. An invalid name is not folded into
 	// it: that is a fixed rule, not a fact about other accounts, so the player is told
 	// why. LoadOrRegisterUser logs the real cause either way.
-	ErrNameUnavailable = errors.New("could not register that name; try another with ssh -l <name>")
+	errNameUnavailable = errors.New("could not register that name; try another with ssh -l <name>")
 )
 
 // SessionFingerprint is the SHA256 fingerprint of the key the session authenticated
@@ -36,7 +36,7 @@ var (
 func SessionFingerprint(s ssh.Session) (string, error) {
 	key := s.PublicKey()
 	if key == nil {
-		return "", ErrNoPublicKey
+		return "", errNoPublicKey
 	}
 	return gossh.FingerprintSHA256(key), nil
 }
@@ -52,7 +52,7 @@ func LoadOrRegisterUser(
 	user, key, err := userRepo.LoadUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		slog.ErrorContext(ctx, "database error while authenticating user", "error", err)
-		return nil, ErrInternal
+		return nil, errInternal
 	}
 
 	if user != nil {
@@ -69,7 +69,7 @@ func LoadOrRegisterUser(
 	}
 	if allowRegister != nil && !allowRegister() {
 		slog.WarnContext(ctx, "refused new account registration: network over its budget")
-		return nil, ErrTooManyRegistrations
+		return nil, errTooManyRegistrations
 	}
 	user, _, err = userRepo.RegisterUserWithSSHKey(ctx, sshUsername, fingerprint)
 	if err != nil {
@@ -88,12 +88,12 @@ func LoadOrRegisterUser(
 func mapRegisterError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrUsernameTaken):
-		return ErrNameUnavailable
+		return errNameUnavailable
 	case errors.Is(err, db.ErrKeyAlreadyRegistered):
 		// Not an oracle: the key is the caller's own, so this tells them nothing they
 		// could not find out by connecting again.
 		return err
 	default:
-		return ErrRegistrationFailed
+		return errRegistrationFailed
 	}
 }

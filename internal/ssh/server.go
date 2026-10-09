@@ -198,9 +198,9 @@ func (s *Server) WaitSessions(ctx context.Context) error {
 	return s.sessions.waitSessions(ctx)
 }
 
-// ErrNoTracker refuses a server with no session tracker. A default one used to be
+// errNoTracker refuses a server with no session tracker. A default one used to be
 // built here, and the stats API, holding its own, then counted nobody online.
-var ErrNoTracker = errors.New("ssh server needs a session tracker")
+var errNoTracker = errors.New("ssh server needs a session tracker")
 
 // NewServer builds the ssh server, creating its host key on first run. The caller
 // owns the listener and calls Serve on it.
@@ -210,7 +210,7 @@ func NewServer(deps Deps) (*Server, error) {
 
 func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 	if deps.Tracker == nil {
-		return nil, ErrNoTracker
+		return nil, errNoTracker
 	}
 	key, err := keygen.New(deps.Config.SSHKeyPath, keygen.WithKeyType(keygen.Ed25519))
 	if err != nil {
@@ -394,7 +394,7 @@ func sessionModel(
 		// other channel on it up until the peer notices.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
 		gen, err := deps.Tracker.Connect(user.ID, conn)
-		if err != nil { // ErrServerFull, Connect's only refusal
+		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
 				"The server is full right now - please try again in a few minutes.\n")

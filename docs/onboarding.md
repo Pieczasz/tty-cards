@@ -60,7 +60,7 @@ Named here so you recognise them on sight, not as an inventory.
 | Double-checked locking with TTL | `repository.BestPlayers` (5 min) |
 | Dirty-flag cache invalidation | `Manager.cacheDirty atomic.Bool` + a 2 s TTL - atomic specifically to avoid inverting lock order |
 | Optional interface (capability probe) | `game.PlayerLeaveHandler`, `TurnTimeoutHandler`, `TurnDurationHandler`, `StandingScorer`, `router.Closer` |
-| Sentinel errors | `broadcaster.ErrClosed`/`ErrAtCapacity`, `db.ErrUsernameTaken`…, `ssh.ErrNoPublicKey`… |
+| Sentinel errors | `broadcaster.ErrClosed`/`ErrAtCapacity`, `db.ErrUsernameTaken`… |
 
 Idiomatic Go habits worth matching: `context.Context` first on every repository
 method; `%w` wrapping with lowercase messages (`wrapcheck` is on); non-blocking

@@ -48,7 +48,7 @@ func TestSessionFingerprint_NoPublicKey(t *testing.T) {
 	t.Parallel()
 
 	_, err := SessionFingerprint(&stubSession{})
-	assert.ErrorIs(t, err, ErrNoPublicKey)
+	assert.ErrorIs(t, err, errNoPublicKey)
 }
 
 func TestLoadOrRegisterUser_LoadError(t *testing.T) {
@@ -57,7 +57,7 @@ func TestLoadOrRegisterUser_LoadError(t *testing.T) {
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, errors.New("db error"))
 
 	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ErrInternal)
+	assert.ErrorIs(t, err, errInternal)
 }
 
 func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
@@ -67,7 +67,7 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	repo.On("RegisterUserWithSSHKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("reg error"))
 
 	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
-	assert.ErrorIs(t, err, ErrRegistrationFailed)
+	assert.ErrorIs(t, err, errRegistrationFailed)
 }
 
 // The caller here is unauthenticated, so "that name is taken" must not be told apart
@@ -85,7 +85,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	}{
 		{
 			name: "a taken username", cause: db.ErrUsernameTaken,
-			want: ErrNameUnavailable, wantText: "could not register that name",
+			want: errNameUnavailable, wantText: "could not register that name",
 		},
 		{
 			name: "the caller's own key", cause: db.ErrKeyAlreadyRegistered,
@@ -93,7 +93,7 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 		},
 		{
 			name: "anything else", cause: errors.New("disk on fire"),
-			want: ErrRegistrationFailed, wantText: "registration failed",
+			want: errRegistrationFailed, wantText: "registration failed",
 		},
 	}
 
@@ -163,7 +163,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
 			func() bool { return false })
 
-		require.ErrorIs(t, err, ErrTooManyRegistrations)
+		require.ErrorIs(t, err, errTooManyRegistrations)
 		repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
 	})
 

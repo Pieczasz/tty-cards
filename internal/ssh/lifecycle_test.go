@@ -170,7 +170,7 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	gen, err := tracker.Connect(testutil.UID(2), nil)
 	require.NoError(t, err)
 	_, err = tracker.Connect(testutil.UID(3), nil)
-	require.ErrorIs(t, err, ErrServerFull)
+	require.ErrorIs(t, err, errServerFull)
 
 	// A second session for an already-connected account displaces rather than
 	// failing: half-open TCP otherwise blocks the mid-game reconnect grace.
@@ -266,7 +266,7 @@ func TestSessionTracker_ForgetsAnAccountOnceItsSessionEnds(t *testing.T) {
 	gen, err := tracker.Connect(testutil.UID(51), nil)
 	require.NoError(t, err)
 	_, err = tracker.Connect(testutil.UID(52), nil)
-	require.ErrorIs(t, err, ErrServerFull)
+	require.ErrorIs(t, err, errServerFull)
 	require.True(t, release(tracker, testutil.UID(51), gen))
 
 	tracker.mu.Lock()
