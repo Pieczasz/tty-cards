@@ -246,19 +246,16 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 		perGoTurns = 40
 	)
 
-	m := newTestManager(t, nil)
+	// A game needing one more player than ever sits down: an all-ready roster fails to
+	// start, so the lobby stays in Waiting and the ready map keeps churning.
+	m := newManagerFor(t, nil, boundedRegistry("NeverStarts", stubRules{}, members+1, members+1))
 	unlimitedJoins(m)
 	roster := testutil.Players(members)
-	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members), WithCardGame("NeverStarts"))
+	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("NeverStarts"))
 	require.NoError(t, err)
 	for _, g := range roster[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
-
-	// Rules requiring far more players than present: an all-ready roster fails to
-	// start, so the lobby stays in Waiting and the ready map keeps churning.
-	mockRules := new(MockRules)
-	registry := boundedRegistry("NeverStarts", mockRules, members+100, members+100)
 
 	var (
 		start = make(chan struct{})
@@ -274,7 +271,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 				// Error is expected sometimes (e.g. "need at least N players" when the
 				// toggle briefly makes everyone ready). We only care that it never
 				// races or deadlocks; correctness of the ready map is checked after.
-				_ = l.ToggleReady(p, registry)
+				_ = m.ToggleReady(p)
 			}
 		}(target)
 	}

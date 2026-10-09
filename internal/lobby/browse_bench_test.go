@@ -68,8 +68,8 @@ func newBrowseFixture(b *testing.B, n int) browseFixture {
 		case 0, 1:
 			f.public = append(f.public, l)
 		case 3:
-			require.NoError(b, l.ToggleReady(leader, registry))
-			require.NoError(b, l.ToggleReady(guest, registry))
+			require.NoError(b, m.ToggleReady(leader))
+			require.NoError(b, m.ToggleReady(guest))
 		}
 	}
 	require.NotZero(b, f.refresh(), "a browse that finds nothing measures nothing")

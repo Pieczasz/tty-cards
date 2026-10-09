@@ -25,7 +25,6 @@ func (bogusAction) Name() string { return "bogus" }
 //
 //nolint:paralleltest // reads the process-wide meter provider TestMain installed
 func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
-	registry := NewRegistry()
 	for _, entry := range Games {
 		t.Run(entry.Slug, func(t *testing.T) {
 			m := lobby.NewManager(t.Context(), nil, NewRegistry())
@@ -38,7 +37,7 @@ func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 				require.NoError(t, err)
 			}
 			for _, p := range players {
-				require.NoError(t, l.ToggleReady(p, registry))
+				require.NoError(t, m.ToggleReady(p))
 			}
 			seat := l.Seat(players[0].ID)
 			require.NotNil(t, seat, "the game did not start")

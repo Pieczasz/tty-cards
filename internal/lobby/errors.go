@@ -25,5 +25,4 @@ var (
 	errHostNotInLobby = errors.New("host is not in a lobby")
 	errKickSelf       = errors.New("cannot kick yourself")
 	errKickInGame     = errors.New("cannot kick during a game")
-	errTooManyPlayers = errors.New("too many players for this game")
 )

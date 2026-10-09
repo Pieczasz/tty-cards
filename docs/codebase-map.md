@@ -626,4 +626,4 @@ Caveats when reading graph output for Go:
   they are reached through a type assertion. `make deadcode` is authoritative.
 - **Same-named symbols merge.** Its top hub, `Equal`, is `Player.Equal` fused with
   testify's `assert.Equal`. The meaningful bridges it reports are
-  `FinalizeRankedMatch`, `updateRankings` and `Lobby.ToggleReady`.
+  `FinalizeRankedMatch`, `updateRankings` and `Manager.ToggleReady`.

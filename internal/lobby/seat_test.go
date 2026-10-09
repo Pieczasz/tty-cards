@@ -38,7 +38,7 @@ func TestLobby_SeatIsNilWithoutALiveSeat(t *testing.T) {
 
 	t.Run("a waiting table", func(t *testing.T) {
 		t.Parallel()
-		_, l, _ := newTestLobby(t, 2)
+		_, l := newTestLobby(t, 2)
 		assert.Nil(t, l.Seat(l.Leader().ID))
 	})
 
@@ -53,14 +53,14 @@ func TestLobby_SeatIsNilWithoutALiveSeat(t *testing.T) {
 	// table with no seat for them.
 	t.Run("a seat the engine removed", func(t *testing.T) {
 		t.Parallel()
-		m, l, registry := newTestLobby(t, 3)
+		m, l := newTestLobby(t, 3)
 		guests := []*game.Player{mockPlayer("p2", testutil.UID(2)), mockPlayer("p3", testutil.UID(3))}
 		for _, g := range guests {
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 		}
-		require.NoError(t, l.ToggleReady(l.Leader(), registry))
+		require.NoError(t, m.ToggleReady(l.Leader()))
 		for _, g := range guests {
-			require.NoError(t, l.ToggleReady(g, registry))
+			require.NoError(t, m.ToggleReady(g))
 		}
 		l.ActiveGame().RemovePlayer(guests[0].ID)
 
@@ -86,14 +86,14 @@ func TestLobby_SeatIsNilWithoutALiveSeat(t *testing.T) {
 // handle bound to one of them; it binds on the reader's behalf instead.
 func TestEvent_SeatBindsTheGameThatStarted(t *testing.T) {
 	t.Parallel()
-	m, l, registry := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	ch, err := l.Subscribe(guest.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, l.ToggleReady(l.Leader(), registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(l.Leader()))
+	require.NoError(t, m.ToggleReady(guest))
 
 	var started Event
 	for ev := range ch {

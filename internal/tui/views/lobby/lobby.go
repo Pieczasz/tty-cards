@@ -154,7 +154,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		// Debug, not Error: nearly every refusal here is the player's own (no seat, too
 		// few players) and is already on their screen, so a held key would flood the log.
-		m.actionErr = m.currentLobby.ToggleReady(self, m.global.GameRegistry)
+		m.actionErr = m.global.LobbyManager.ToggleReady(self)
 		if m.actionErr != nil {
 			slog.DebugContext(m.global.RequestContext(), "ready refused", "error", m.actionErr)
 		}
@@ -220,7 +220,7 @@ func (m *model) adjustSetting(self *game.Player, delta int) {
 		if next < max(rulesMin, m.currentLobby.CurrentPlayers()) || next > rulesMax {
 			return
 		}
-		if err = m.currentLobby.SetMaxPlayers(self, next, m.global.GameRegistry); err == nil {
+		if err = m.currentLobby.SetMaxPlayers(self, next); err == nil {
 			m.maxPlayers = next
 		}
 	case cursorVisibility:

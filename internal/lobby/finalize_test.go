@@ -34,10 +34,8 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	// The standings are the seats in order: leader, then guest.
-	registry := boundedRegistry("MockGame", stubRules{}, 2, 4)
-
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 
 	l.mu.RLock()
 	engine := l.activeEngine
@@ -176,13 +174,13 @@ func (b *syncBuffer) contains(want string) bool {
 func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	t.Parallel()
 
-	m, l, registry := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 	require.Equal(t, inGame, l.state)
 
 	require.ErrorIs(t, m.Kick(leader, guest), errKickInGame)
@@ -193,7 +191,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	engine := l.activeEngine
 	l.mu.RUnlock()
 	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
-	l.releaseFinishedGame()
+	m.releaseFinishedGame(l)
 
 	require.NoError(t, m.Kick(leader, guest), "and can be kicked once the hand is over")
 }
@@ -203,7 +201,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	t.Parallel()
 
-	m := newTestManager(t, nil)
+	m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, 3, 4))
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("Mock"))
@@ -213,10 +211,9 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	observer, err := l.Subscribe("observer")
 	require.NoError(t, err)
 
-	// The registry handed to the start has no rules under this name, so it fails after
-	// both flips.
-	require.NoError(t, l.ToggleReady(leader, game.NewRegistry()))
-	require.Error(t, l.ToggleReady(guest, game.NewRegistry()))
+	// The game needs a third player, so the start fails after both flips.
+	require.NoError(t, m.ToggleReady(leader))
+	require.Error(t, m.ToggleReady(guest))
 
 	assert.Equal(t, []EventType{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
 		"the second flip was committed without telling anyone")
@@ -418,7 +415,7 @@ func TestDisconnectPlayer_ASecondDropRestartsTheGrace(t *testing.T) {
 func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 	t.Parallel()
 
-	m, l, _ := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.Equal(t, waiting, l.state)
@@ -433,12 +430,12 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 // dropped session keeps its seat instead of leaving at once.
 func startedGame(t *testing.T) (*Manager, *Lobby, *game.Player, *game.Player) {
 	t.Helper()
-	m, l, registry := newTestLobby(t, 2)
+	m, l := newTestLobby(t, 2)
 	leader := l.Leader()
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	require.NoError(t, l.ToggleReady(leader, registry))
-	require.NoError(t, l.ToggleReady(guest, registry))
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
 	require.NotNil(t, l.ActiveGame(), "the game did not start")
 	return m, l, leader, guest
 }
@@ -465,9 +462,8 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-		registry := boundedRegistry("Mock", stubRules{}, 2, 2)
-		require.NoError(t, l.ToggleReady(leader, registry))
-		require.NoError(t, l.ToggleReady(guest, registry))
+		require.NoError(t, m.ToggleReady(leader))
+		require.NoError(t, m.ToggleReady(guest))
 		idler, other := leader, guest
 		if l.ActiveGame().CurrentPlayerID() != leader.ID {
 			idler, other = guest, leader
@@ -521,9 +517,8 @@ func TestDisconnectPlayer_ReleasedHoldDoesNotFireIntoTheNextTable(t *testing.T) 
 		next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("Mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
-		registry := boundedRegistry("Mock", stubRules{}, 2, 2)
-		require.NoError(t, next.ToggleReady(host, registry))
-		require.NoError(t, next.ToggleReady(guest, registry))
+		require.NoError(t, m.ToggleReady(host))
+		require.NoError(t, m.ToggleReady(guest))
 		m.DisconnectPlayer(guest)
 
 		time.Sleep(disconnectGrace/2 + time.Second)
@@ -548,7 +543,7 @@ func TestToggleReady_ReleasesHeldSeatsWhenReopening(t *testing.T) {
 	require.NotNil(t, engine)
 	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
 
-	_ = l.ToggleReady(leader, game.NewRegistry())
+	_ = m.ToggleReady(leader)
 
 	assert.False(t, pendingGrace(m, guest.ID), "reopening via ready left the grace armed")
 	assert.False(t, l.HasPlayer(guest), "the ghost seat stayed on the roster")

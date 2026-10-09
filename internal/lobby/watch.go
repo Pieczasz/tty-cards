@@ -99,7 +99,7 @@ func (l *Lobby) requestFinalize(engine *game.Engine, reason game.EndReason, req 
 	registered := l.manager.registerFinalizer()
 	observability.GameFinished(l.manager.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
-	l.releaseFinishedGame()
+	l.manager.releaseFinishedGame(l)
 	if !registered {
 		l.manager.dropFinishedMatch(req)
 		return

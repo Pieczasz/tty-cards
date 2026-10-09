@@ -150,23 +150,19 @@ func (l *Lobby) SetRanked(actor *game.Player, isRanked bool) error {
 }
 
 // SetMaxPlayers updates capacity, within the current roster and the bounds of the
-// table's game in registry. The bounds are the lobby's to look up: a caller that
-// supplied them could open a seat the game cannot deal.
-func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int, registry *game.Registry) error {
+// table's game. The bounds are the lobby's own: a caller that supplied them could
+// open a seat the game cannot deal.
+func (l *Lobby) SetMaxPlayers(actor *game.Player, limit int) error {
 	return l.withLeaderSettings(actor, func() error {
 		current := 1 + len(l.guests)
 		if limit < current {
 			return fmt.Errorf("max players cannot be below current roster (%d)", current)
 		}
-		mod, ok := registry.Module(l.options.cardGame)
-		if !ok {
-			return fmt.Errorf("look up game bounds: game %q not found in registry", l.options.cardGame)
+		if limit < l.game.MinPlayers {
+			return fmt.Errorf("max players must be at least %d for this game", l.game.MinPlayers)
 		}
-		if limit < mod.MinPlayers {
-			return fmt.Errorf("max players must be at least %d for this game", mod.MinPlayers)
-		}
-		if limit > mod.MaxPlayers {
-			return fmt.Errorf("max players cannot exceed %d for this game", mod.MaxPlayers)
+		if limit > l.game.MaxPlayers {
+			return fmt.Errorf("max players cannot exceed %d for this game", l.game.MaxPlayers)
 		}
 		l.options.maxPlayers = limit
 		return nil
@@ -291,13 +287,8 @@ func (l *Lobby) unsubscribePlayerLocked(playerID string) {
 	delete(l.playerSubs, playerID)
 }
 
-// ToggleReady flips p's ready flag, and starts the game from registry once every seat
-// is ready. A finished game still holding the table is released first.
-func (l *Lobby) ToggleReady(p *game.Player, registry *game.Registry) error {
-	// Before taking l.mu: releaseFinishedGame takes it itself, then m.mu via
-	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
-	l.releaseFinishedGame()
-
+// toggleReady flips p's ready flag, and starts the game once every seat is ready.
+func (l *Lobby) toggleReady(p *game.Player) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.state == inGame {
@@ -314,7 +305,7 @@ func (l *Lobby) ToggleReady(p *game.Player, registry *game.Registry) error {
 		return nil
 	}
 
-	if err := l.startGameLocked(registry); err != nil {
+	if err := l.startGameLocked(); err != nil {
 		// The ready flip is already committed, so the other clients have to see it even
 		// though the start failed, or their rosters disagree with the server.
 		l.broadcastLocked(Event{Type: EventPlayersUpdated})
@@ -496,28 +487,17 @@ func (l *Lobby) hasPlayerLocked(p *game.Player) bool {
 	return false
 }
 
-// startGameLocked starts a match. Caller must hold l.mu.
-func (l *Lobby) startGameLocked(registry *game.Registry) error {
+// startGameLocked starts a match. Caller must hold l.mu. Never more seats than the
+// game deals for: CreateLobby and SetMaxPlayers keep the cap inside its range, and
+// addGuest keeps the roster under the cap.
+func (l *Lobby) startGameLocked() error {
 	if l.state != waiting {
 		return errors.New("lobby is not in waiting state")
 	}
 
-	// The two failures logged here are defects, not refusals: the lobby view logs what
-	// ToggleReady returns at Debug, since from there "too few players" looks the same.
-	ctx := l.manager.appCtx
-	mod, ok := registry.Module(l.options.cardGame)
-	if !ok {
-		err := fmt.Errorf("create game rules: game %q not found in registry", l.options.cardGame)
-		slog.ErrorContext(ctx, "cannot start game", "error", err, "lobby", l.code, "game_name", l.options.cardGame)
-		return err
-	}
-
-	totalPlayers := len(l.guests) + 1
-	if totalPlayers < mod.MinPlayers {
+	mod := l.game
+	if totalPlayers := len(l.guests) + 1; totalPlayers < mod.MinPlayers {
 		return fmt.Errorf("need at least %d players to start", mod.MinPlayers)
-	}
-	if totalPlayers > mod.MaxPlayers {
-		return errTooManyPlayers
 	}
 
 	// The slug, not the display name, is what the match is persisted under.
@@ -526,15 +506,17 @@ func (l *Lobby) startGameLocked(registry *game.Registry) error {
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
 	engine := game.NewEngine(rules, players, game.WithLogger(logger))
 
+	// A defect, not a refusal: the lobby view logs what ToggleReady returns at Debug,
+	// since from there "too few players" looks the same.
 	if err := engine.Start(); err != nil {
 		err = fmt.Errorf("start game engine: %w", err)
-		logger.ErrorContext(ctx, "cannot start game", "error", err)
+		logger.ErrorContext(l.manager.appCtx, "cannot start game", "error", err)
 		return err
 	}
 
 	// Before watchGameLocked, which snapshots it for the finalize.
 	l.startedAt = time.Now()
-	l.watchGameLocked(engine, db.GameRef{Slug: mod.Slug, Name: l.options.cardGame})
+	l.watchGameLocked(engine, db.GameRef{Slug: mod.Slug, Name: mod.Name})
 
 	l.setStateLocked(inGame)
 	l.activeEngine = engine
@@ -566,7 +548,7 @@ func (l *Lobby) releaseFinishedGameLocked() *game.Engine {
 
 // releaseFinishedGame is releaseFinishedGameLocked for a caller holding no lock, and
 // announces the reopened table.
-func (l *Lobby) releaseFinishedGame() {
+func (m *Manager) releaseFinishedGame(l *Lobby) {
 	l.mu.Lock()
 	finished := l.releaseFinishedGameLocked()
 	bc := l.broadcaster
@@ -576,7 +558,7 @@ func (l *Lobby) releaseFinishedGame() {
 		return
 	}
 	finished.Close()
-	l.manager.releaseHeldSeats(l)
+	m.releaseHeldSeats(l)
 	if bc != nil {
 		bc.Broadcast(Event{Type: EventPlayersUpdated})
 	}

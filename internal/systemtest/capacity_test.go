@@ -40,15 +40,14 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	// never have, so measuring against one measures something that does not exist -
 	// and any path that starts touching it turns this into a nil dereference.
 	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
-	registry := catalog.NewRegistry()
 
-	warm := openTable(t, manager, registry, 0, seatsPerTable)
+	warm := openTable(t, manager, 0, seatsPerTable)
 	require.NotNil(t, warm)
 
 	before := heapInUse()
 	held := make([]*lobby.Lobby, 0, tables)
 	for i := 1; i <= tables; i++ {
-		held = append(held, openTable(t, manager, registry, i, seatsPerTable))
+		held = append(held, openTable(t, manager, i, seatsPerTable))
 	}
 	after := heapInUse()
 	runtime.KeepAlive(held)
@@ -61,7 +60,7 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	require.Less(t, perTable, float64(2<<20), "a table must not retain megabytes")
 }
 
-func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, idx, n int) *lobby.Lobby {
+func openTable(t *testing.T, manager *lobby.Manager, idx, n int) *lobby.Lobby {
 	t.Helper()
 	leader := benchPlayer(idx, 0)
 	l, err := manager.CreateLobby(leader,
@@ -79,9 +78,9 @@ func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, id
 		guests = append(guests, g)
 	}
 
-	require.NoError(t, l.ToggleReady(leader, registry))
+	require.NoError(t, manager.ToggleReady(leader))
 	for _, g := range guests {
-		require.NoError(t, l.ToggleReady(g, registry))
+		require.NoError(t, manager.ToggleReady(g))
 	}
 	return l
 }
