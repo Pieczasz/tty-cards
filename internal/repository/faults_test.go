@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
@@ -15,6 +16,7 @@ import (
 
 	"uuid"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -131,6 +133,95 @@ func TestFinalizeFailureAtAnyStepWritesNothing(t *testing.T) {
 			assert.Equal(t, before, snapshotFinalize(t, database, slug, ids), "a failed finalize left a write behind")
 		})
 	}
+}
+
+// abortAt makes the first aborts statements matching fragment fail the way Postgres
+// breaks a lock conflict, and counts every time the statement ran.
+func abortAt(ctx context.Context, fragment, code string, aborts int32, ran *atomic.Int32) context.Context {
+	return withHook(ctx, fragment, func(tx *gorm.DB) {
+		if ran.Add(1) <= aborts {
+			_ = tx.AddError(&pgconn.PgError{Code: code})
+		}
+	})
+}
+
+func seatPair(t *testing.T, database *gorm.DB, prefix string) []uuid.UUID {
+	t.Helper()
+	ids := make([]uuid.UUID, 0, 2)
+	for seat := range 2 {
+		u := &db.User{Username: fmt.Sprintf("%s_%d", prefix, seat)}
+		require.NoError(t, database.Create(u).Error)
+		ids = append(ids, u.ID)
+	}
+	return ids
+}
+
+// Postgres breaks a lock conflict by rolling one transaction back before it commits,
+// so nothing was written and the finalize runs again rather than losing the match:
+// one history row and one rating move, the same as a finalize nothing aborted.
+func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
+	t.Parallel()
+	database := testutil.SetupTestDB(t)
+	installStatementHooks(t, database)
+	matches := repository.NewMatchRepository(database)
+
+	for i, code := range []string{"40P01", "40001"} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			clean := seatPair(t, database, fmt.Sprintf("clean%d", i))
+			ref := db.GameRef{Slug: fmt.Sprintf("retry_clean_%d", i), Name: "Retry"}
+			require.NoError(t, matches.FinalizeRankedMatch(ctx, ref, clean, nil))
+			want := snapshotFinalize(t, database, ref.Slug, clean)
+
+			ids := seatPair(t, database, fmt.Sprintf("retry%d", i))
+			ref.Slug = fmt.Sprintf("retry_%d", i)
+			var ran atomic.Int32
+			require.NoError(t, matches.FinalizeRankedMatch(abortAt(ctx, `INSERT INTO "matches"`, code, 1, &ran), ref, ids, nil))
+			require.Equal(t, int32(2), ran.Load(), "the aborted finalize was not run again")
+
+			got := snapshotFinalize(t, database, ref.Slug, ids)
+			assert.Equal(t, want.participants, got.participants, "one history row per seat")
+			require.Len(t, got.rankings, len(want.rankings))
+			for seat := range got.rankings {
+				assert.Equal(t, want.rankings[seat].Elo, got.rankings[seat].Elo, "seat %d", seat)
+				assert.Equal(t, uint64(1), got.rankings[seat].MatchesPlayed, "seat %d", seat)
+			}
+		})
+	}
+
+	t.Run("a casual match", func(t *testing.T) {
+		t.Parallel()
+		ids := seatPair(t, database, "retrycasual")
+		var ran atomic.Int32
+		ctx := abortAt(t.Context(), `INSERT INTO "matches"`, "40P01", 1, &ran)
+		require.NoError(t, matches.RecordCasualMatch(ctx, db.GameRef{Slug: "retry_casual", Name: "Retry"}, ids))
+		assert.Equal(t, int64(2), snapshotFinalize(t, database, "retry_casual", ids).participants)
+	})
+
+	t.Run("gives up after three aborts in a row", func(t *testing.T) {
+		t.Parallel()
+		ids := seatPair(t, database, "retrylost")
+		var ran atomic.Int32
+		ctx := abortAt(t.Context(), `INSERT INTO "matches"`, "40P01", 1000, &ran)
+		err := matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_lost", Name: "Retry"}, ids, nil)
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr)
+		assert.Equal(t, int32(3), ran.Load())
+	})
+
+	t.Run("does not retry any other failure", func(t *testing.T) {
+		t.Parallel()
+		ids := seatPair(t, database, "retryother")
+		var ran atomic.Int32
+		ctx := withHook(t.Context(), `INSERT INTO "matches"`, func(tx *gorm.DB) {
+			ran.Add(1)
+			_ = tx.AddError(errInjected)
+		})
+		err := matches.FinalizeRankedMatch(ctx, db.GameRef{Slug: "retry_other", Name: "Retry"}, ids, nil)
+		require.ErrorIs(t, err, errInjected)
+		assert.Equal(t, int32(1), ran.Load())
+	})
 }
 
 func TestRecordCasualMatchReportsAFailedGameLookup(t *testing.T) {

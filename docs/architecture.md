@@ -1161,6 +1161,11 @@ place, because splitting them mints Elo between two people who both quit.
    `matches_played`), then the match, the participants, the places and the deltas
    (`recordMatch`).
 
+A transaction Postgres aborts to break a conflict (SQLSTATE `40001` or `40P01`) is
+run again by `transactRetrying`, up to three attempts, and so is
+`RecordCasualMatch`. Both codes are raised before commit, so nothing was written;
+a dropped connection is not retried, because it may have committed.
+
 **Elo itself.** `internal/elo/elo.go` is pure: `DefaultRating` 1500, `MinRating`
 100, `MaxRating` 4000, the unexported `kFactor` 32, expected score base 10 over 400. `Calculate`
 takes a slice sorted first place to last and scores each player against their
