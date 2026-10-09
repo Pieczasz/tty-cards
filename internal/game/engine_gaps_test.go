@@ -63,12 +63,13 @@ func TestEngine_TurnTimeout_CursorOffTheTableIsIgnored(t *testing.T) {
 // interruptingRules ends the match for everyone when any seat leaves, as hearts does.
 type interruptingRules struct{ *timeoutRules }
 
-func (*interruptingRules) OnPlayerLeave(s *State, _ string) { s.Interrupted = true }
-func (*interruptingRules) AfterPlayerRemoved(*State, int)   {}
-func (*interruptingRules) CheckWinCondition(s *State) bool  { return s.Interrupted }
+func (*interruptingRules) OnPlayerLeave(*State, string) {}
+func (*interruptingRules) AfterPlayerRemoved(*State, int) LeaveOutcome {
+	return LeaveInterruptsMatch
+}
 
-// Interrupted is what keeps a leave that ended the match from being recorded as the
-// remaining seats' win: finalize charges only the leavers.
+// LeaveInterruptsMatch is what keeps a leave that ended the match from being recorded
+// as the remaining seats' win: finalize charges only the leavers.
 func TestEngine_RemovePlayer_InterruptedLeaveIsNotAWin(t *testing.T) {
 	t.Parallel()
 	engine := newTimeoutEngine(t, &interruptingRules{&timeoutRules{}}, "a", "b", "c")

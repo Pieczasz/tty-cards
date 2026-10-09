@@ -240,25 +240,24 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 // table. The engine's generic fix-up leaves the cursor where the leaver sat, which is
 // now the seat one step clockwise - the right answer at Direction +1 and the wrong
 // neighbour at -1, where it skips a player.
-func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
+func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) game.LeaveOutcome {
 	extra, ok := state.Extra.(*State)
 	if !ok {
-		return
+		return game.LeaveSettled
 	}
 	onTurn := extra.leaverWasOnTurn
 	extra.leaverWasOnTurn = false
 
 	n := len(state.Players)
-	// Below two seats there is no neighbour to hand the turn to, and a non-nil
-	// OverrideNextTurn would tell the engine the last seat still has work - which
-	// costs the survivor the forfeit win.
+	// Below two seats there is no neighbour to hand the turn to.
 	if !onTurn || extra.Direction >= 0 || n < 2 {
-		return
+		return game.LeaveSettled
 	}
 	// Counterclockwise the turn owes to the seat before the leaver, which keeps its
 	// index through the delete when there is one and wraps to the last seat when
 	// the leaver sat first.
 	state.SetTurn(game.SeatAt(removedIndex-1, n))
+	return game.LeaveSettled
 }
 
 func (r *Rules) Standings(state *game.State) []game.Standing { return shed.Standings(state) }

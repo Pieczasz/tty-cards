@@ -659,9 +659,8 @@ func TestRules_ApplyAction_ForcedDrawHeadsUp(t *testing.T) {
 	}
 }
 
-// Two seats left and the one on turn walks out: the survivor has nobody to pass to, and
-// an override naming a seat would tell the engine the table still has work to do, which
-// costs them the forfeit win.
+// Two seats left and the one on turn walks out: the survivor has nobody to pass to,
+// and the leave is settled, so the engine hands them the forfeit win.
 func TestRules_AfterPlayerRemoved_TwoSeatsCollapseToOne(t *testing.T) {
 	t.Parallel()
 	for _, dir := range []int8{1, -1} {
@@ -674,7 +673,7 @@ func TestRules_AfterPlayerRemoved_TwoSeatsCollapseToOne(t *testing.T) {
 			extra.leaverWasOnTurn = true
 			state.Players = state.Players[1:] // the engine removes the seat first
 
-			(&Rules{}).AfterPlayerRemoved(state, 0)
+			assert.Equal(t, game.LeaveSettled, (&Rules{}).AfterPlayerRemoved(state, 0))
 
 			assert.Nil(t, state.OverrideNextTurn, "one seat left has no next turn to take")
 			assert.False(t, extra.leaverWasOnTurn, "the flag is consumed, not left to fire again")

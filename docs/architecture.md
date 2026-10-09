@@ -756,9 +756,12 @@ lobby's locks, which order before `Engine.mu`. `RemovePlayer` never calls it. On
 (`clock.missed`) - a move the rules reject
 does not, or spamming garbage would dodge removal forever.
 
-`OverrideNextTurn` also keeps a last-seat-standing hand open (a poker heads-up
-all-in leave still contests the pot) - `settleAfterLeaveLocked` checks for it
-before declaring a forfeit.
+`AfterPlayerRemoved` returns a `game.LeaveOutcome` that `settleAfterLeaveLocked`
+acts on: `LeaveInterruptsMatch` ends the match `EndReasonInterrupted`, and only
+`LeaveKeepsHandOpen` keeps a last-seat-standing hand open (a poker heads-up all-in
+leave still contests the pot) rather than declaring a forfeit. `OverrideNextTurn`
+used to double as that signal, which cost uno's survivor a forfeit win it was
+owed whenever it named the next seat; it now means only who acts next.
 
 Every way a table ends goes through `endGameLocked(winner, reason)`: `Finished`, the
 clock stopped, the winner recorded and `EventGameEnded` broadcast, in one place.
@@ -910,8 +913,8 @@ saying why it was unreachable.
 qualifies `EventGameEnded` and is zero on everything else). The reasons are
 `EndReasonWin`, `EndReasonRulesError`, `EndReasonForfeit` (last player standing),
 `EndReasonAbandoned` (every seat left) and `EndReasonInterrupted` (one seat's leave
-ended the match for everyone: hearts sets `State.Interrupted` in `OnPlayerLeave`,
-and `settleAfterLeaveLocked` reports it in place of a win). `EventType` and
+ended the match for everyone: hearts' `AfterPlayerRemoved` returns
+`LeaveInterruptsMatch`, and `settleAfterLeaveLocked` reports it in place of a win). `EventType` and
 `EndReason` both have a `String()` beside their constants, the stable label logs and
 metrics carry. An event is a **cue to re-read a snapshot**, never the state itself.
 

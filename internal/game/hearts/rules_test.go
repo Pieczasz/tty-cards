@@ -430,7 +430,8 @@ func TestRules_OnPlayerLeave_EndsMatch(t *testing.T) {
 	rules.OnPlayerLeave(state, "p2")
 	assert.True(t, gametest.Extra[*State](t, state).MatchComplete)
 	assert.True(t, rules.CheckWinCondition(state))
-	assert.True(t, state.Interrupted, "the match ended on a leave, not on the score")
+	assert.Equal(t, game.LeaveInterruptsMatch, rules.AfterPlayerRemoved(state, 1),
+		"the match ended on a leave, not on the score")
 }
 
 // Hearts cannot go on three-handed, so one leave ends the match for everyone. That is

@@ -115,10 +115,14 @@ Two rules that have each cost a bug:
   `ApplyAction` ends the game as `EndReasonRulesError`, with
   state possibly half-applied and the match recorded unrated.
 
-If one seat leaving means the match cannot go on (hearts is four-handed or
-nothing), set `State.Interrupted` in `OnPlayerLeave`: the removal that ends the
-game then reports `EndReasonInterrupted`, and finalize charges only the leavers
+`AfterPlayerRemoved` returns a `game.LeaveOutcome`. If one seat leaving means the
+match cannot go on (hearts is four-handed or nothing), return
+`game.LeaveInterruptsMatch`: the game then ends `EndReasonInterrupted`, and finalize
+charges only the leavers
 ([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
+If a lone remaining seat still has a hand to play out (poker's all-in leaver still
+contests the pot), return `game.LeaveKeepsHandOpen`, or the engine hands that seat a
+forfeit win; otherwise `game.LeaveSettled`.
 A shedding game should reuse package `internal/game/shed` (embed `shed.State`, and
 call `shed.Deal`, `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
 `shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.

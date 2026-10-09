@@ -236,6 +236,7 @@ type leaveAwareRules struct {
 	*MockRules
 	onLeave      func(state *State, playerID string)
 	afterRemoved func(state *State, removedIndex int)
+	outcome      LeaveOutcome
 }
 
 func (r *leaveAwareRules) OnPlayerLeave(state *State, playerID string) {
@@ -244,10 +245,11 @@ func (r *leaveAwareRules) OnPlayerLeave(state *State, playerID string) {
 	}
 }
 
-func (r *leaveAwareRules) AfterPlayerRemoved(state *State, removedIndex int) {
+func (r *leaveAwareRules) AfterPlayerRemoved(state *State, removedIndex int) LeaveOutcome {
 	if r.afterRemoved != nil {
 		r.afterRemoved(state, removedIndex)
 	}
+	return r.outcome
 }
 
 // TestEngine_RemovePlayer_MidTurnOverrideClamped is a regression test for a fixed CRITICAL
@@ -755,7 +757,7 @@ func TestEngine_GameEndedCarriesItsReason(t *testing.T) {
 			base.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
 			r := &leaveAwareRules{MockRules: base}
 			if tt.keepHandOpen {
-				r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
+				r.outcome = LeaveKeepsHandOpen
 			}
 
 			engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}})
@@ -783,14 +785,14 @@ func TestEngine_GameEndedCarriesItsReason(t *testing.T) {
 }
 
 // Poker keeps the hand alive when an all-in player leaves: the last seat still has to
-// act on the pot, and OverrideNextTurn is how the rules say so. Without this the
+// act on the pot, and LeaveKeepsHandOpen is how the rules say so. Without it the
 // engine would hand them a forfeit win over a pot they had not yet contested.
-func TestEngine_RemovePlayer_OverrideKeepsTheLastSeatPlaying(t *testing.T) {
+func TestEngine_RemovePlayer_KeepsHandOpenKeepsTheLastSeatPlaying(t *testing.T) {
 	t.Parallel()
 
 	base := setupMockRules()
 	base.On("CheckWinCondition", mock.Anything).Return(false)
-	r := &leaveAwareRules{MockRules: base}
+	r := &leaveAwareRules{MockRules: base, outcome: LeaveKeepsHandOpen}
 	r.afterRemoved = func(state *State, _ int) { state.OverrideNextTurn = new(int) }
 
 	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}})
@@ -804,6 +806,28 @@ func TestEngine_RemovePlayer_OverrideKeepsTheLastSeatPlaying(t *testing.T) {
 		assert.Nil(t, state.OverrideNextTurn, "and the override was consumed")
 	})
 	assert.Equal(t, "p1", engine.CurrentPlayerID())
+}
+
+// OverrideNextTurn only says who acts next. A leave handler that names the lone
+// survivor without keeping the hand open - uno, settling its cursor - must not cost
+// that survivor the forfeit win.
+func TestEngine_RemovePlayer_AnOverrideAloneDoesNotKeepTheHandOpen(t *testing.T) {
+	t.Parallel()
+
+	base := setupMockRules()
+	base.On("CheckWinCondition", mock.Anything).Return(false)
+	base.On("Standings", mock.Anything).Return([]*Player{}).Maybe()
+	r := &leaveAwareRules{MockRules: base}
+	r.afterRemoved = func(state *State, _ int) { state.SetTurn(0) }
+
+	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}})
+	t.Cleanup(engine.Close)
+	require.NoError(t, engine.Start())
+
+	engine.RemovePlayer("p2")
+
+	assert.True(t, engine.IsFinished())
+	assert.Equal(t, EndReasonForfeit, engine.EndReason())
 }
 
 // The winner is settled from the standings, but a rules set that ranks nobody still

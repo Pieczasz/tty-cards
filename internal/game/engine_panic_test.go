@@ -69,8 +69,8 @@ func TestEngine_TurnTimeout_PanickingStandingsDoesNotEscape(t *testing.T) {
 // leavePanicRules panics in OnPlayerLeave, the hook RemovePlayer reaches.
 type leavePanicRules struct{ *timeoutRules }
 
-func (*leavePanicRules) OnPlayerLeave(*State, string)   { panic("rules bug in leave") }
-func (*leavePanicRules) AfterPlayerRemoved(*State, int) {}
+func (*leavePanicRules) OnPlayerLeave(*State, string)                { panic("rules bug in leave") }
+func (*leavePanicRules) AfterPlayerRemoved(*State, int) LeaveOutcome { return LeaveSettled }
 
 // The lobby's disconnect-grace timer calls RemovePlayer from a time.AfterFunc
 // goroutine with nothing above it to recover: a rules panic there would take every

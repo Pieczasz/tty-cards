@@ -32,9 +32,8 @@ type model struct {
 	handNumber       int
 	passDirection    logic.PassDirection
 	matchComplete    bool
-	// interrupted is a match a leave ended early; leavers are who left, by name.
-	interrupted bool
-	leavers     []string
+	// leavers are who left, by name, for the end screen of a match a leave ended.
+	leavers []string
 }
 
 // New creates a Hearts TUI view bound to the session player; slug is its catalog
@@ -65,7 +64,6 @@ func (m *model) syncState() {
 			m.passDirection = s.PassDirection
 			m.matchComplete = s.MatchComplete
 		}
-		m.interrupted = state.Interrupted
 		m.leavers = m.leavers[:0]
 		for _, p := range state.LeftPlayers {
 			m.leavers = append(m.leavers, p.Name)

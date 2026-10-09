@@ -314,16 +314,18 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	return 0
 }
 
-// OnPlayerLeave ends the match: hearts does not play three-handed. Interrupted tells
-// the engine, and through it finalize, that the seats still playing did not finish it.
+// OnPlayerLeave ends the match: hearts does not play three-handed.
 func (r *Rules) OnPlayerLeave(state *game.State, _ string) {
 	if extra, ok := state.Extra.(*State); ok {
 		extra.MatchComplete = true
-		state.Interrupted = true
 	}
 }
 
-func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) {}
+// AfterPlayerRemoved tells the engine, and through it finalize, that the seats still
+// playing did not finish the match.
+func (r *Rules) AfterPlayerRemoved(_ *game.State, _ int) game.LeaveOutcome {
+	return game.LeaveInterruptsMatch
+}
 
 // standingScore is the total Standings ranks by, so players who finished the match
 // on the same total are reported as the draw they are. Mid-hand - a table that ended

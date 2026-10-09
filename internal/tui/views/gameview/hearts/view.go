@@ -169,7 +169,7 @@ func (m *model) renderHandOver() string {
 		Hint:   keyHintsOver,
 	}
 	switch {
-	case m.interrupted && m.Base.Phase == game.Finished:
+	case m.Base.EndReason == game.EndReasonInterrupted:
 		h.Title, h.Hint = gameview.InterruptedTitle(m.leavers), gameview.LobbyHint
 	case m.matchComplete || m.Base.Phase == game.Finished:
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint

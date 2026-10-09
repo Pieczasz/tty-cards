@@ -25,15 +25,16 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 
 // AfterPlayerRemoved reindexes the button/blinds and picks the next actor from
 // post-removal seats, so a fold-on-disconnect never leaves a stale pre-removal
-// index on turn.
-func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
+// index on turn. A hand still live keeps a lone remaining seat playing: an all-in
+// leaver still contests the pot, so the seat has not won it by forfeit.
+func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) game.LeaveOutcome {
 	extra, ok := state.Extra.(*State)
 	if !ok {
-		return
+		return game.LeaveSettled
 	}
 	n := len(state.Players)
 	if n == 0 {
-		return
+		return game.LeaveSettled
 	}
 	extra.DealerIndex = adjustSeatIndex(extra.DealerIndex, removedIndex, n)
 	extra.SBIndex = adjustSeatIndex(extra.SBIndex, removedIndex, n)
@@ -43,7 +44,7 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 		// The player who was due to deal may be the one who just left, so the turn
 		// is re-parked rather than left pointing at an empty seat.
 		finishHand(state, extra)
-		return
+		return game.LeaveSettled
 	}
 
 	// A hand is only ever handed to a seat while two players still contest it, and
@@ -54,6 +55,10 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) {
 		state.Logger().Error("poker cannot finish the hand after a leave",
 			"hand", extra.HandNumber, "phase", extra.Phase.String(), "error", err)
 	}
+	if extra.HandComplete() {
+		return game.LeaveSettled
+	}
+	return game.LeaveKeepsHandOpen
 }
 
 // adjustSeatIndex maps a seat marker to its new index after the player

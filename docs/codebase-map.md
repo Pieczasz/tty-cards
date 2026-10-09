@@ -361,7 +361,7 @@ classDiagram
     class PlayerLeaveHandler {
         <<optional>>
         OnPlayerLeave(*State, id)
-        AfterPlayerRemoved(*State, idx)
+        AfterPlayerRemoved(*State, idx) LeaveOutcome
     }
 
     class Engine {
@@ -397,7 +397,6 @@ classDiagram
         Winner *Player
         Deck *Pile
         Discard *Pile
-        Interrupted bool
         Extra any
     }
     class BoundEngine {

@@ -456,7 +456,7 @@ func TestRules_AfterPlayerRemoved_LeavesTheCursorAlone(t *testing.T) {
 	state := suite.Table(t, 3, 3, 3)
 	state.CurrentTurn = 1
 
-	(&Rules{}).AfterPlayerRemoved(state, 0)
+	assert.Equal(t, game.LeaveSettled, (&Rules{}).AfterPlayerRemoved(state, 0))
 
 	assert.Equal(t, 1, state.CurrentTurn)
 	assert.Nil(t, state.OverrideNextTurn)
