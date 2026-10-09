@@ -366,6 +366,18 @@ func TestResolveEnv_DotEnvLoadedOutsideProductionOnly(t *testing.T) {
 	}
 }
 
+// A .env that fails to parse used to be ignored, so the server booted without the
+// settings it was written to provide.
+func TestResolveEnv_MalformedDotEnvFailsTheBoot(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_NAME=\"unterminated\nnot a pair\n"), 0o600))
+	t.Chdir(dir)
+	t.Setenv("ENV", "development")
+
+	_, err := config.Load()
+	require.ErrorContains(t, err, ".env")
+}
+
 // A mistyped ENV used to mean development, which silently switched off every
 // production check - the password requirement, the TLS default - on the one
 // deployment that needed them.

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/netip"
 	"net/url"
@@ -117,7 +118,11 @@ func resolveEnvironment() (string, error) {
 	switch env {
 	case envProduction:
 	case envDevelopment, envStaging:
-		_ = godotenv.Load()
+		// A missing .env is normal; one that fails to parse would otherwise boot
+		// without whatever it was meant to set.
+		if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("load .env: %w", err)
+		}
 	default:
 		return "", fmt.Errorf("invalid ENV %q: want production, staging or development", env)
 	}
