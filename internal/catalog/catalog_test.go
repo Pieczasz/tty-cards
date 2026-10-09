@@ -39,41 +39,19 @@ func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry()
 
-	names := make([]string, 0, len(Games))
+	slugs := make([]string, 0, len(Games))
 	for _, e := range Games {
-		names = append(names, e.Name)
-		mod, ok := registry.Module(e.Name)
-		require.Truef(t, ok, "%q is in the catalog but not in the registry", e.Name)
-		assert.Equal(t, e.Slug, mod.Slug)
-		rules, err := registry.Create(e.Name)
-		require.NoError(t, err)
-		assert.NotNil(t, rules)
+		slugs = append(slugs, e.Slug)
+		mod, ok := registry.Module(e.Slug)
+		require.Truef(t, ok, "%q is in the catalog but not in the registry", e.Slug)
+		assert.Equal(t, e.Name, mod.Name)
+		assert.NotNil(t, mod.Factory())
 	}
-	assert.Equal(t, names, registry.GameNames(), "the lobby menu keeps catalog order")
-}
-
-// Module.Name is persisted as games.name and is the registry key the lobby looks a
-// game up by, so a rename is a data migration, not a cosmetic edit: existing rows,
-// existing rankings and every match already recorded point at the old string. Freeze
-// them here so changing one has to be deliberate.
-func TestGames_NamesArePersistedAndFrozen(t *testing.T) {
-	t.Parallel()
-
-	want := map[string]string{
-		"crazy_eights": "Crazy Eights",
-		"poker":        "Poker",
-		"uno":          "Uno",
-		"hearts":       "Hearts",
-		"gin_rummy":    "Gin Rummy",
+	got := make([]string, 0, len(Games))
+	for _, mod := range registry.Modules() {
+		got = append(got, mod.Slug)
 	}
-
-	got := make(map[string]string, len(Games))
-	for _, e := range Games {
-		got[e.Slug] = e.Name
-	}
-
-	assert.Equal(t, want, got,
-		"update this map when adding a game; renaming or re-slugging one orphans its rows in games, rankings and match_participants")
+	assert.Equal(t, slugs, got, "the lobby menu keeps catalog order")
 }
 
 // Migration 000005 backfills games.slug from the display names that existed when it

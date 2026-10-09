@@ -82,10 +82,10 @@ type options struct {
 	isRanked   bool
 }
 
-// WithCardGame picks the game by its display name, the game.Registry key.
-func WithCardGame(name string) Option {
+// WithCardGame picks the game by its slug, the game.Registry key.
+func WithCardGame(slug string) Option {
 	return func(o *options) {
-		o.cardGame = name
+		o.cardGame = slug
 	}
 }
 
@@ -329,10 +329,11 @@ func (l *Lobby) allReadyLocked() bool {
 // Code is the 8-character code players join by.
 func (l *Lobby) Code() string { return l.code }
 
+// Slug is the game the table plays: its registry key and persisted identity.
+func (l *Lobby) Slug() string { return l.game.Slug }
+
 // GameName is the display name of the game the table plays.
-func (l *Lobby) GameName() string {
-	return l.game.Name
-}
+func (l *Lobby) GameName() string { return l.game.Name }
 
 // MaxPlayers is the seat cap, leader included.
 func (l *Lobby) MaxPlayers() int {
@@ -424,31 +425,34 @@ func (l *Lobby) IsLeader(p *game.Player) bool {
 	return l.leader.Equal(p)
 }
 
-// Rating is p's rating in gameName as the lobby matches on it: missing and zero both
-// read as the starting rating. Views show this, so a seat reads the same everywhere.
-func Rating(p *game.Player, gameName string) uint32 {
+// Rating is p's rating in the game slug names, as the lobby matches on it: missing
+// and zero both read as the starting rating. Views show this, so a seat reads the same
+// everywhere.
+func Rating(p *game.Player, slug string) uint32 {
 	if p == nil {
 		return elo.ToUint32(elo.DefaultRating)
 	}
-	return ratingFor(p.Ratings, gameName)
+	return ratingFor(p.Ratings, slug)
 }
 
-// ratingFor is a player's rating in gameName. Missing and zero both mean unrated: no
-// stored rating can be zero (elo.MinRating is the floor), so a zero is a map that was
-// never filled in, and it is matched at the starting rating like any newcomer.
-func ratingFor(ratings map[string]uint32, gameName string) uint32 {
-	if rating := ratings[gameName]; rating != 0 {
+// ratingFor is a player's rating in the game slug names. Missing and zero both mean
+// unrated: no stored rating can be zero (elo.MinRating is the floor), so a zero is a
+// map that was never filled in, and it is matched at the starting rating like any
+// newcomer.
+func ratingFor(ratings map[string]uint32, slug string) uint32 {
+	if rating := ratings[slug]; rating != 0 {
 		return rating
 	}
 	return elo.ToUint32(elo.DefaultRating)
 }
 
-// averageEloLocked is the table's average rating in gameName. Caller holds l.mu.
-func (l *Lobby) averageEloLocked(gameName string) uint32 {
-	totalElo := ratingFor(l.leader.Ratings, gameName)
+// averageEloLocked is the table's average rating in its game. Caller holds l.mu.
+func (l *Lobby) averageEloLocked() uint32 {
+	slug := l.game.Slug
+	totalElo := ratingFor(l.leader.Ratings, slug)
 	count := uint32(1)
 	for _, g := range l.guests {
-		totalElo += ratingFor(g.Ratings, gameName)
+		totalElo += ratingFor(g.Ratings, slug)
 		count++
 	}
 	return totalElo / count

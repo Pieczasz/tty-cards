@@ -111,14 +111,14 @@ func TestRemoveLobby_KeepsANewerLobbysMapping(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 	p := mockPlayer("p1", testutil.UID(1))
-	old, err := m.CreateLobby(p, WithCardGame("Mock"))
+	old, err := m.CreateLobby(p, WithCardGame("mock"))
 	require.NoError(t, err)
 
 	// The window inside LeaveLobby: the entry is gone, RemoveLobby has not run yet.
 	m.mu.Lock()
 	delete(m.playerLobby, p.ID)
 	m.mu.Unlock()
-	fresh, err := m.CreateLobby(p, WithCardGame("Mock"))
+	fresh, err := m.CreateLobby(p, WithCardGame("mock"))
 	require.NoError(t, err)
 
 	m.RemoveLobby(old.Code())

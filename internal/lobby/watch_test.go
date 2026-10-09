@@ -42,12 +42,12 @@ func gamesFinished(t *testing.T, gameType string) int64 {
 	return n
 }
 
-// playFinishedTable seats two players at a table of gameName and plays the hand out,
+// playFinishedTable seats two players at a table of slug's game and plays the hand out,
 // returning once the table has reopened: by then the watcher has handed the match on.
-func playFinishedTable(t *testing.T, m *Manager, gameName string) {
+func playFinishedTable(t *testing.T, m *Manager, slug string) {
 	t.Helper()
 	leader, guest := mockPlayer("leader", testutil.UID(1)), mockPlayer("guest", testutil.UID(2))
-	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame(gameName), WithRanked(true))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame(slug), WithRanked(true))
 	require.NoError(t, err)
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, m.ToggleReady(leader))
@@ -98,14 +98,15 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			name := "Finished " + tt.name
+			slug := strings.ToLower(name)
 			m := tt.setup(t, gameRegistry(name, stubRules{}))
 			// The counter is process-wide and cumulative, so -count=N sees earlier runs.
-			before := gamesFinished(t, strings.ToLower(name))
+			before := gamesFinished(t, slug)
 
-			playFinishedTable(t, m, name)
+			playFinishedTable(t, m, slug)
 			require.True(t, m.WaitForFinalizers(2*time.Second))
 
-			assert.Equal(t, before+1, gamesFinished(t, strings.ToLower(name)))
+			assert.Equal(t, before+1, gamesFinished(t, slug))
 		})
 	}
 }
@@ -121,7 +122,7 @@ func TestFeedEnd_UnobservedEndIsFinalizedWithTheEnginesReason(t *testing.T) {
 	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("Mock"),
 		[]uuid.UUID{testutil.UID(2), testutil.UID(1)}, []int{1, 2}).Return(nil).Once()
 	m := newTestManager(t, repo)
-	l, err := m.CreateLobby(seats[0], WithCardGame("Mock"), WithRanked(true))
+	l, err := m.CreateLobby(seats[0], WithCardGame("mock"), WithRanked(true))
 	require.NoError(t, err)
 
 	engine := game.NewEngine(stubRules{}, seats)
@@ -194,7 +195,7 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			t.Cleanup(func() { slog.SetDefault(original) })
 
 			m := newManagerFor(t, nil, tt.registry)
-			l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("Mock"))
+			l, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithCardGame("mock"))
 			require.NoError(t, err)
 			guest := mockPlayer("p2", testutil.UID(2))
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))

@@ -64,7 +64,7 @@ func openTable(t *testing.T, manager *lobby.Manager, idx, n int) *lobby.Lobby {
 	t.Helper()
 	leader := benchPlayer(idx, 0)
 	l, err := manager.CreateLobby(leader,
-		lobby.WithCardGame("Poker"),
+		lobby.WithCardGame("poker"),
 		lobby.WithMaxPlayers(9),
 		lobby.WithPrivate(false),
 	)

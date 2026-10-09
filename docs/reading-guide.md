@@ -571,8 +571,8 @@ closing the DB handle they write through.
 `catalog_test.go`; but copying an entry and changing only the rules **does**
 compile, so the pair is kept in lockstep by hand.
 
-**Test.** `internal/catalog/catalog_test.go` `TestGames_EntriesComplete`,
-`TestGames_NamesArePersistedAndFrozen` and `TestGames_SlugsMatchTheMigrationBackfill`;
+**Test.** `internal/catalog/catalog_test.go` `TestGames_EntriesComplete` and
+`TestGames_SlugsMatchTheMigrationBackfill`;
 then `close_test.go` `TestGames_CloseReleasesTheEngineSubscription`, one table over
 `catalog.Games` that proves every view gives its subscriber slot back.
 

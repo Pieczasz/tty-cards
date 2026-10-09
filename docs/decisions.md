@@ -285,9 +285,9 @@ fails on a missing field or a duplicate slug. But **copying an entry and changin
 only the `Factory` field still compiles and still passes** - the types match. That
 hazard is accepted rather than engineered away, because the alternative (a
 registry keyed by a type parameter, or codegen) costs more than the one line of
-attention it saves. The pair is kept in lockstep by hand, and the tests
-`TestGames_NamesArePersistedAndFrozen` and `TestGames_SlugsMatchTheMigrationBackfill`
-catch the cases that actually corrupt data.
+attention it saves. The pair is kept in lockstep by hand, and
+`TestGames_SlugsMatchTheMigrationBackfill` catches the case that actually corrupts
+data (a name is cosmetic since #7's extension).
 
 **Where.** `internal/catalog/catalog.go`, `internal/catalog/catalog_test.go`,
 `internal/game/registry.go` `NewRegistry`.
@@ -310,11 +310,20 @@ existing slugs explicitly and **drops** `idx_games_name`.
 **Consequences.** The slug is permanent. Changing one later is a data migration,
 not a rename - `CONTRIBUTING.md` says so where a contributor will read it. The two
 halves travel together as `db.GameRef{Slug, Name}` so a caller cannot supply one
-without the other, and `Module.Name` stays the in-memory registry key so the lobby
-never has to know about slugs.
+without the other. `Module.Name` stayed the in-memory registry key so the lobby
+never had to know about slugs - until the extension below.
+
+*Extended 2026-10-09: names are now cosmetic.* Keeping `Module.Name` as the
+in-memory key meant the lobby joined ratings on a mutable string: `Player.Ratings`
+was keyed by the `games.name` read at login, so after a rename a player logged in
+before it was matched against the new name and read as unrated. The registry, the
+lobby option (`WithCardGame(slug)`), `Player.Ratings` (from `Ranking.Game.Slug`), the
+browse filter and the profile's game filter now all key by slug, and a name is only
+ever displayed. The frozen-name test went with it; the slug test stays.
 
 **Where.** `internal/db/games.go` (`GameRef`), `internal/repository/match.go`
-`getOrCreateGame`, `internal/db/migrations/000005_game_slug.up.sql`.
+`getOrCreateGame`, `internal/db/migrations/000005_game_slug.up.sql`,
+`internal/game/registry.go`, `internal/lobby/player.go`.
 
 ---
 
@@ -2073,7 +2082,7 @@ at most 33µs (300 refreshes a second, #60's browsers, under 1% of a core) and j
 show no significant regression.
 
 **What was measured.** `internal/lobby/browse_bench_test.go`: one op of
-`BenchmarkBrowse` is one join-screen refresh (`BrowseLobbies` + `GameNames`) from
+`BenchmarkBrowse` is one join-screen refresh (`BrowseLobbies` + `GamesOnOffer`) from
 parallel browsers, over tables that are half public and waiting, a quarter private
 and a quarter in a game; churn flips one public table's settings every millisecond.
 `BenchmarkJoinUnderBrowse` is a join and a leave (both take `m.mu` exclusively) while

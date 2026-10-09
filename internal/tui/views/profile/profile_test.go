@@ -9,6 +9,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -39,7 +40,7 @@ func loaded(t *testing.T, msg profileLoadedMsg) *model {
 func alice() *db.User {
 	return &db.User{ID: testutil.UID(1),
 		Username: "alice",
-		Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Name: "Poker"}}},
+		Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Slug: "poker", Name: "Poker"}}},
 	}
 }
 
@@ -78,16 +79,35 @@ func TestRenderContent_SaysWhenThereAreNoMatchesRatherThanAnError(t *testing.T) 
 	assert.NotContains(t, out, "Unable to load match history.")
 }
 
-func TestFilteredHistory_WinsAndGame(t *testing.T) {
+// gameFilterIndex is where the filter named name sits, or -1.
+func gameFilterIndex(m *model, name string) int {
+	return slices.IndexFunc(m.gameFilters, func(g game.Module) bool { return g.Name == name })
+}
+
+// The filter matches a match by its game's slug, so a game renamed since the match was
+// played is still found under its current name.
+func TestFilteredHistory_MatchesARenamedGameBySlug(t *testing.T) {
 	t.Parallel()
 	history := []db.MatchParticipant{
-		{Placement: 1, Match: db.Match{Game: db.Game{Name: "Uno"}, Ranked: true}},
-		{Placement: 2, Match: db.Match{Game: db.Game{Name: "Uno"}, Ranked: true}},
-		{Placement: 1, Match: db.Match{Game: db.Game{Name: "Poker"}, Ranked: true}},
+		{Placement: 1, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno (old name)"}}},
 	}
 	m := loaded(t, profileLoadedMsg{user: alice(), history: history})
 
-	m.gameFilterIdx = slices.Index(m.gameFilters, "Uno")
+	m.gameFilterIdx = gameFilterIndex(m, "Uno")
+	require.NotEqual(t, -1, m.gameFilterIdx)
+	assert.Len(t, m.filteredHistory(), 1)
+}
+
+func TestFilteredHistory_WinsAndGame(t *testing.T) {
+	t.Parallel()
+	history := []db.MatchParticipant{
+		{Placement: 1, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno"}, Ranked: true}},
+		{Placement: 2, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno"}, Ranked: true}},
+		{Placement: 1, Match: db.Match{Game: db.Game{Slug: "poker", Name: "Poker"}, Ranked: true}},
+	}
+	m := loaded(t, profileLoadedMsg{user: alice(), history: history})
+
+	m.gameFilterIdx = gameFilterIndex(m, "Uno")
 	require.NotEqual(t, -1, m.gameFilterIdx)
 	m.resultIdx = slices.Index(m.resultFilters, filterWins)
 
@@ -100,12 +120,12 @@ func TestFilteredHistory_WinsAndGame(t *testing.T) {
 func TestRenderContent_FilterDoesNotResizeLayout(t *testing.T) {
 	t.Parallel()
 	history := []db.MatchParticipant{
-		{Placement: 1, EloDelta: 12, Match: db.Match{Game: db.Game{Name: "Uno"}, Ranked: true}},
+		{Placement: 1, EloDelta: 12, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno"}, Ranked: true}},
 	}
 	m := loaded(t, profileLoadedMsg{user: alice(), history: history})
 
 	base := tuitest.StripANSI(m.renderContent(20))
-	m.gameFilterIdx = slices.Index(m.gameFilters, "Crazy Eights")
+	m.gameFilterIdx = gameFilterIndex(m, "Crazy Eights")
 	require.NotEqual(t, -1, m.gameFilterIdx)
 	m.resultIdx = slices.Index(m.resultFilters, filterLosses)
 	filtered := tuitest.StripANSI(m.renderContent(20))
@@ -129,7 +149,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 	for i := range 50 {
 		history = append(history, db.MatchParticipant{
 			Placement: (i % 4) + 1,
-			Match:     db.Match{Game: db.Game{Name: "Poker"}, Ranked: true},
+			Match:     db.Match{Game: db.Game{Slug: "poker", Name: "Poker"}, Ranked: true},
 		})
 	}
 
@@ -394,7 +414,7 @@ func TestHistoryRows_TruncatesInsideItsBudget(t *testing.T) {
 	history := make([]db.MatchParticipant, 0, 10)
 	for i := range 10 {
 		history = append(history, db.MatchParticipant{
-			Placement: i + 1, Match: db.Match{Game: db.Game{Name: "Poker"}, Ranked: true},
+			Placement: i + 1, Match: db.Match{Game: db.Game{Slug: "poker", Name: "Poker"}, Ranked: true},
 		})
 	}
 	m := loaded(t, profileLoadedMsg{user: alice(), history: history})
@@ -411,9 +431,9 @@ func TestFilteredHistory(t *testing.T) {
 	t.Parallel()
 
 	history := []db.MatchParticipant{
-		{Placement: 1, Match: db.Match{Game: db.Game{Name: "Uno"}, Ranked: true}},
-		{Placement: 2, Match: db.Match{Game: db.Game{Name: "Uno"}, Ranked: true}},
-		{Placement: 4, Match: db.Match{Game: db.Game{Name: "Poker"}}},
+		{Placement: 1, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno"}, Ranked: true}},
+		{Placement: 2, Match: db.Match{Game: db.Game{Slug: "uno", Name: "Uno"}, Ranked: true}},
+		{Placement: 4, Match: db.Match{Game: db.Game{Slug: "poker", Name: "Poker"}}},
 	}
 
 	tests := []struct {
@@ -436,7 +456,7 @@ func TestFilteredHistory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := loaded(t, profileLoadedMsg{user: alice(), history: history})
-			m.gameFilterIdx = slices.Index(m.gameFilters, tt.game)
+			m.gameFilterIdx = gameFilterIndex(m, tt.game)
 			require.NotEqual(t, -1, m.gameFilterIdx)
 			m.resultIdx = slices.Index(m.resultFilters, tt.result)
 			require.NotEqual(t, -1, m.resultIdx)
@@ -678,7 +698,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
-	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.Games[0].Name))
+	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.Games[0].Slug))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 

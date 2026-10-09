@@ -29,6 +29,7 @@ const (
 // BrowseEntry is one open public table as the browse screen lists it.
 type BrowseEntry struct {
 	Code       string
+	Slug       string
 	GameName   string
 	Players    int
 	MaxPlayers int
@@ -43,14 +44,14 @@ func (e BrowseEntry) hasRoom() bool { return e.Players < e.MaxPlayers }
 
 // BrowseFilter narrows BrowseLobbies. The zero value lists every open public table.
 type BrowseFilter struct {
-	GameName     string // empty means any
+	Slug         string // empty means any
 	Mode         BrowseMode
 	OnlyWithRoom bool
 	Limit        int
 }
 
 func (f BrowseFilter) matches(e BrowseEntry) bool {
-	if f.GameName != "" && e.GameName != f.GameName {
+	if f.Slug != "" && e.Slug != f.Slug {
 		return false
 	}
 	if f.OnlyWithRoom && !e.hasRoom() {
@@ -85,7 +86,7 @@ func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 		if !open || !f.matches(entry) {
 			continue
 		}
-		delta := int(entry.AvgElo) - int(ratingFor(ratings, entry.GameName))
+		delta := int(entry.AvgElo) - int(ratingFor(ratings, entry.Slug))
 		entry.EloDelta = max(delta, -delta)
 		entries = append(entries, entry)
 	}
@@ -115,11 +116,12 @@ func (l *Lobby) browseEntry() (BrowseEntry, bool) {
 	}
 	return BrowseEntry{
 		Code:       l.code,
-		GameName:   l.options.cardGame,
+		Slug:       l.game.Slug,
+		GameName:   l.game.Name,
 		Players:    1 + len(l.guests),
 		MaxPlayers: l.options.maxPlayers,
 		Ranked:     l.options.isRanked,
-		AvgElo:     l.averageEloLocked(l.options.cardGame),
+		AvgElo:     l.averageEloLocked(),
 	}, true
 }
 
@@ -128,18 +130,18 @@ func (l *Lobby) onOfferLocked() bool {
 	return !l.options.isPrivate && l.state == waiting
 }
 
-// GameNames is the sorted set of games the public waiting tables play.
-func (m *Manager) GameNames() []string {
+// GamesOnOffer is the set of games the public waiting tables play, sorted by name.
+func (m *Manager) GamesOnOffer() []game.Module {
 	if m == nil {
 		return nil
 	}
-	seen := map[string]struct{}{}
+	seen := map[string]game.Module{}
 	for _, l := range m.publicLobbies() {
-		if name := l.GameName(); name != "" {
-			seen[name] = struct{}{}
-		}
+		seen[l.game.Slug] = l.game
 	}
-	return slices.Sorted(maps.Keys(seen))
+	return slices.SortedFunc(maps.Values(seen), func(a, b game.Module) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 }
 
 // publicLobbyCacheTTL is what keeps a browse off every lobby's own lock. The window

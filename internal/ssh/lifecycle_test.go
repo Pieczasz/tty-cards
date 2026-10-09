@@ -73,7 +73,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	guest := &db.User{ID: testutil.UID(2), Username: "guest"}
 	guestPlayer := lobby.NewPlayer(guest)
 
-	table, err := manager.CreateLobby(lobby.NewPlayer(host), lobby.WithCardGame(catalog.Games[0].Name))
+	table, err := manager.CreateLobby(lobby.NewPlayer(host), lobby.WithCardGame(catalog.Games[0].Slug))
 	require.NoError(t, err)
 	_, err = manager.JoinLobbyByCode(table.Code(), guestPlayer)
 	require.NoError(t, err)

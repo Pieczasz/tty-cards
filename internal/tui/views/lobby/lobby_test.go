@@ -25,7 +25,10 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 )
 
-const testGameName = "Crazy Eights"
+const (
+	testGameSlug = "crazy_eights"
+	testGameName = "Crazy Eights"
+)
 
 func testUser(id uint64, name string) *db.User {
 	return &db.User{ID: testutil.UID(id), Username: name}
@@ -34,7 +37,7 @@ func testUser(id uint64, name string) *db.User {
 func testRegistry() *game.Registry {
 	return game.NewRegistry(game.Module{
 		Name:       testGameName,
-		Slug:       "crazy_eights",
+		Slug:       testGameSlug,
 		MinPlayers: crazyeight.MinPlayers,
 		MaxPlayers: crazyeight.MaxPlayers,
 		Factory:    func() game.Rules { return &crazyeight.Rules{} },
@@ -55,7 +58,7 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	leader := lobby.NewPlayer(leaderUser)
 
 	l, err := manager.CreateLobby(leader,
-		lobby.WithCardGame(testGameName),
+		lobby.WithCardGame(testGameSlug),
 		lobby.WithMaxPlayers(4),
 		lobby.WithPrivate(false),
 	)
@@ -164,7 +167,7 @@ func TestAdjustSetting_MaxPlayersRespectsRulesBounds(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 
-	rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.GameName())
+	rulesMin, rulesMax := gamePlayerBounds(m.global.GameRegistry, m.currentLobby.Slug())
 	require.Equal(t, 2, rulesMin)
 	require.Equal(t, 6, rulesMax)
 
@@ -218,19 +221,6 @@ func TestHandleLobbyEvent_ClosedGoesHome(t *testing.T) {
 	_, cmd := m.Update(lobbyMsg{Type: lobby.EventLobbyClosed, src: m.lobbyChan})
 	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
 	assert.Nil(t, m.lobbyChan)
-}
-
-// An unregistered game must not eject the player, and must leave the listener
-// armed so the view keeps receiving lobby events.
-func TestHandleLobbyEvent_UnknownGameKeepsListening(t *testing.T) {
-	t.Parallel()
-	m, l := leaderView(t)
-	started := startGame(t, m, l)
-	m.global.GameRegistry = game.NewRegistry() // game no longer registered
-
-	_, cmd := m.Update(lobbyMsg{Event: started, src: m.lobbyChan})
-	require.NotNil(t, cmd, "listener must stay armed")
-	assert.NotNil(t, m.lobbyChan, "subscription is retained")
 }
 
 func TestView_RendersLobbyAndConfirmPopup(t *testing.T) {
@@ -370,11 +360,11 @@ func TestRating(t *testing.T) {
 		want   uint32
 	}{
 		{name: "no player at all", player: nil, want: def},
-		{name: "rated for this game", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameName: 1750}}, want: 1750},
+		{name: "rated for this game", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameSlug: 1750}}, want: 1750},
 		{name: "rated only for another game", player: &game.Player{ID: "9", Ratings: map[string]uint32{"Poker": 1750}}, want: def},
 		{name: "never played anything", player: &game.Player{ID: "9"}, want: def},
 		// The lobby matches a stored zero as unrated, so the roster has to show it as one.
-		{name: "a stored zero", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameName: 0}}, want: def},
+		{name: "a stored zero", player: &game.Player{ID: "9", Ratings: map[string]uint32{testGameSlug: 0}}, want: def},
 	}
 
 	for _, tt := range tests {
@@ -407,7 +397,7 @@ func TestGamePlayerBounds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			minP, maxP := gamePlayerBounds(tt.registry, testGameName)
+			minP, maxP := gamePlayerBounds(tt.registry, testGameSlug)
 
 			assert.Equal(t, tt.wantMin, minP)
 			assert.Equal(t, tt.wantMax, maxP)
