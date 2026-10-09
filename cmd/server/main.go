@@ -33,11 +33,16 @@ import (
 )
 
 // compose's stop_grace_period (80s) has to outlast the whole sequential drain:
-// ssh, then the stats api, then two finalizer windows, then otel, whose three
-// providers get 2s each (otelsetup.Setup). See docs/decisions.md #29 for why a
-// match write gets windows rather than an outbox.
+// ssh, then the session teardowns its Close sets off, then the stats api, then two
+// finalizer windows, then otel, whose three providers get 2s each
+// (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. See docs/decisions.md #29 for why
+// a match write gets windows rather than an outbox.
 const (
-	sshDrainTimeout      = 30 * time.Second
+	sshDrainTimeout = 30 * time.Second
+	// sessionDrainTimeout bounds the wait for session handlers after Close. Their
+	// teardown is in-memory work, but a table it ends registers its finalize there,
+	// and the finalizer drain that follows refuses anything registered after it.
+	sessionDrainTimeout  = 5 * time.Second
 	apiDrainTimeout      = 5 * time.Second
 	finalizeDrainTimeout = 15 * time.Second
 	otelDrainTimeout     = 6 * time.Second
@@ -247,6 +252,7 @@ type sshServer interface {
 	Serve(net.Listener) error
 	Shutdown(context.Context) error
 	Close() error
+	WaitSessions(context.Context) error
 }
 
 type serveDeps struct {
@@ -343,5 +349,14 @@ func stopServer(server sshServer) {
 	}
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
+	}
+
+	// Close returns before the session handlers it ends have given up their seats;
+	// the finalizer drain the caller runs next must not start until they have.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), sessionDrainTimeout)
+	defer cancelWait()
+	if err := server.WaitSessions(waitCtx); err != nil {
+		slog.WarnContext(waitCtx, "session teardowns outlasted their window; a match they end may go unrecorded",
+			"error", err, "timeout", sessionDrainTimeout)
 	}
 }

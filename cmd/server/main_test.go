@@ -31,19 +31,32 @@ type fakeServer struct {
 	serveErr    chan error
 	shutdownErr error
 	closeErr    error
+	waitErr     error
 	closed      bool
 	closeOnce   sync.Once
+	// stops is the order the drain called Shutdown, Close and WaitSessions in.
+	stops []string
 }
 
-func (f *fakeServer) Serve(net.Listener) error       { return <-f.serveErr }
-func (f *fakeServer) Shutdown(context.Context) error { return f.shutdownErr }
+func (f *fakeServer) Serve(net.Listener) error { return <-f.serveErr }
+
+func (f *fakeServer) Shutdown(context.Context) error {
+	f.stops = append(f.stops, "shutdown")
+	return f.shutdownErr
+}
 
 func (f *fakeServer) Close() error {
+	f.stops = append(f.stops, "close")
 	f.closed = true
 	if f.serveErr != nil {
 		f.closeOnce.Do(func() { close(f.serveErr) })
 	}
 	return f.closeErr
+}
+
+func (f *fakeServer) WaitSessions(context.Context) error {
+	f.stops = append(f.stops, "wait sessions")
+	return f.waitErr
 }
 
 // errOnce is a Serve that returns the given error immediately, once.
@@ -84,7 +97,9 @@ func TestServe_AcceptLoopFailureIsReturned(t *testing.T) {
 }
 
 // Sessions outliving the drain window is what a card game does, so it must not stop
-// the shutdown: the listener and the connections have to be let go either way.
+// the shutdown: the listener and the connections have to be let go either way. Close
+// does not wait for the session handlers it ends, so the wait for their teardown -
+// which the finalizer drain after this depends on - comes after it, every time.
 func TestStopServer_ClosesOnEveryPath(t *testing.T) {
 	t.Parallel()
 
@@ -96,6 +111,7 @@ func TestStopServer_ClosesOnEveryPath(t *testing.T) {
 		{name: "drain deadline passed", server: &fakeServer{shutdownErr: context.DeadlineExceeded}},
 		{name: "already closed", server: &fakeServer{shutdownErr: context.DeadlineExceeded, closeErr: net.ErrClosed}},
 		{name: "close itself fails", server: &fakeServer{closeErr: errors.New("close failed")}},
+		{name: "teardowns outlast their window", server: &fakeServer{waitErr: context.DeadlineExceeded}},
 	}
 
 	for _, tt := range tests {
@@ -104,6 +120,7 @@ func TestStopServer_ClosesOnEveryPath(t *testing.T) {
 			stopServer(tt.server)
 
 			assert.True(t, tt.server.closed, "the server was never closed")
+			assert.Equal(t, []string{"shutdown", "close", "wait sessions"}, tt.server.stops)
 		})
 	}
 }
