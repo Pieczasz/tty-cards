@@ -108,10 +108,10 @@ func gameRef(name string) db.GameRef {
 // goroutine on the engine feed, and closing the engine - which only RemoveLobby does -
 // is what ends it. Production always gets there; a test that drops the manager on the
 // floor would strand the goroutine and trip goleak.
-func newTestManager(t *testing.T, repo db.MatchRepository) *Manager {
-	t.Helper()
-	m := NewManager(t.Context(), repo)
-	t.Cleanup(func() {
+func newTestManager(tb testing.TB, repo db.MatchRepository) *Manager {
+	tb.Helper()
+	m := NewManager(tb.Context(), repo)
+	tb.Cleanup(func() {
 		m.mu.RLock()
 		codes := slices.Collect(maps.Keys(m.lobbies))
 		m.mu.RUnlock()
