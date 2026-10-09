@@ -688,11 +688,6 @@ func TestRules_TurnDuration(t *testing.T) {
 			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
-
-	t.Run("a state that is not a gin rummy state has no opinion", func(t *testing.T) {
-		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnDuration(&game.State{}))
-	})
 }
 
 // The ordinary knock: neither gin nor an undercut, which is the branch the whole game
@@ -742,16 +737,4 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	assert.Equal(t, 64, result.ScoreDelta, "the difference, with no bonus either way")
 	assert.Equal(t, 64, extra.CumulativeScores["p1"])
 	assert.Zero(t, extra.CumulativeScores["p2"], "the loser of a plain knock scores nothing")
-}
-
-func TestRules_NotAGinRummyState(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-	state := &game.State{}
-
-	require.ErrorIs(t, rules.ValidateAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.ApplyAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	assert.Nil(t, rules.Standings(state))
-	assert.Nil(t, rules.TimeoutAction(state))
-	assert.False(t, rules.CheckWinCondition(state))
 }

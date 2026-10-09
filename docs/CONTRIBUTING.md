@@ -137,6 +137,12 @@ allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 decision to discuss first
 ([`decisions.md` #54](decisions.md#54-the-game-packages-import-from-an-allow-list)).
 
+Read `State.Extra` through one per-package `extraOf(state) *State` that asserts
+without `ok`, as every game does: the wrong type there is a wiring bug, and the
+engine's recover ends that one table as a rules error
+([`decisions.md` #37](decisions.md#37-a-rules-panic-on-the-turn-timer-ends-one-table-not-the-process)).
+A helper a view calls inside `Frame` is the exception and keeps the `ok` form.
+
 Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 `PipValue` answer three different questions and must not be swapped, and
 `RemoveOne` / `RemoveEach` never alias.

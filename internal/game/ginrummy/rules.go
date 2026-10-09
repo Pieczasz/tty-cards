@@ -111,10 +111,7 @@ var (
 )
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 
 	if _, isNext := action.(ActionNextHand); isNext {
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
@@ -183,10 +180,7 @@ func mayDiscard(card deck.Card, forbidden *deck.Card) bool {
 }
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	p := state.Players[state.CurrentTurn]
 
 	switch action := action.(type) {
@@ -358,25 +352,18 @@ func settleWall(state *game.State, extra *State, cause string) {
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
-	extra, ok := state.Extra.(*State)
-	return ok && extra.MatchComplete
+	return extraOf(state).MatchComplete
 }
 
 // Standings ranks by cumulative score descending: gin rummy is a high-score-wins
 // game and RankByScore ranks ascending, so the score is negated.
 func (r *Rules) Standings(state *game.State) []game.Standing {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
+	extra := extraOf(state)
 	return game.RankByScore(state, func(p *game.Player) int { return -extra.CumulativeScores[p.ID] })
 }
 
 func (r *Rules) TimeoutAction(state *game.State) game.Action {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
+	extra := extraOf(state)
 	if extra.HandComplete() {
 		if extra.MatchComplete {
 			return nil
@@ -447,8 +434,7 @@ func ginDiscard(hand []deck.Card, forbidden *deck.Card) (deck.Card, bool) {
 // TurnDuration stretches the between-hands prompt. Zero everywhere else means
 // "engine default", not "no clock".
 func (r *Rules) TurnDuration(state *game.State) time.Duration {
-	extra, ok := state.Extra.(*State)
-	if !ok || !extra.HandComplete() {
+	if !extraOf(state).HandComplete() {
 		return 0
 	}
 	return handOverTurnDuration

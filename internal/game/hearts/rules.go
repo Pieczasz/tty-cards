@@ -95,10 +95,7 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 var errNotEnoughCards = errors.New("not enough cards to deal")
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 
 	switch action.(type) {
 	case ActionNextHand:
@@ -183,10 +180,7 @@ func validatePlayCard(extra *State, p *game.Player, card deck.Card) error {
 }
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	switch a := action.(type) {
 	case ActionPassCards:
 		p := state.Players[state.CurrentTurn]
@@ -259,25 +253,18 @@ func afterPlay(state *game.State, extra *State) {
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
-	extra, ok := state.Extra.(*State)
-	return ok && extra.MatchComplete
+	return extraOf(state).MatchComplete
 }
 
 // Standings ranks by cumulative score ascending: hearts is a low-score-wins game,
 // so the seat that took the fewest points is first.
 func (r *Rules) Standings(state *game.State) []game.Standing {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
+	extra := extraOf(state)
 	return game.RankByScore(state, func(p *game.Player) int { return standingScore(extra, p) })
 }
 
 func (r *Rules) TimeoutAction(state *game.State) game.Action {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
+	extra := extraOf(state)
 	switch extra.Phase {
 	case PhaseHandOver:
 		if extra.MatchComplete {
@@ -297,10 +284,7 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 }
 
 func (r *Rules) TurnDuration(state *game.State) time.Duration {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return 0
-	}
+	extra := extraOf(state)
 	switch extra.Phase {
 	case PhasePassing:
 		return passTurnDuration
@@ -316,9 +300,7 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 
 // OnPlayerLeave ends the match: hearts does not play three-handed.
 func (r *Rules) OnPlayerLeave(state *game.State, _ string) {
-	if extra, ok := state.Extra.(*State); ok {
-		extra.MatchComplete = true
-	}
+	extraOf(state).MatchComplete = true
 }
 
 // AfterPlayerRemoved tells the engine, and through it finalize, that the seats still

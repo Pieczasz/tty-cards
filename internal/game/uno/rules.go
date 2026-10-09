@@ -102,10 +102,7 @@ type ActionDrawCard struct{}
 func (a ActionDrawCard) Name() string { return "uno.DrawCard" }
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 
 	switch a := action.(type) {
 	case ActionPlayCard:
@@ -148,10 +145,7 @@ func validatePlay(hand []deck.Card, extra *State, a ActionPlayCard, topCard deck
 }
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	switch a := action.(type) {
 	case ActionPlayCard:
 		actor := state.Players[state.CurrentTurn]
@@ -219,18 +213,11 @@ func applyVoluntaryDraw(state *game.State, extra *State) {
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return false
-	}
-	return shed.HandEmptyOrAllPassed(state, extra.Passes)
+	return shed.HandEmptyOrAllPassed(state, extraOf(state).Passes)
 }
 
 func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return
-	}
+	extra := extraOf(state)
 	extra.leaverWasOnTurn = state.CurrentTurn == slices.IndexFunc(state.Players,
 		func(p *game.Player) bool { return p != nil && p.ID == playerID })
 	shed.Leave(state, &extra.State, playerID)
@@ -241,10 +228,7 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 // now the seat one step clockwise - the right answer at Direction +1 and the wrong
 // neighbour at -1, where it skips a player.
 func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) game.LeaveOutcome {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.LeaveSettled
-	}
+	extra := extraOf(state)
 	onTurn := extra.leaverWasOnTurn
 	extra.leaverWasOnTurn = false
 

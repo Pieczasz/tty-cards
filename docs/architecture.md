@@ -638,7 +638,12 @@ engine's.
   on `Rules` itself - because a table without it freezes on a player who walks away.
 
 Per-game state lives in `State.Extra` (`*crazyeight.State`, `*poker.State`,
-`*uno.State`, `*hearts.State`, `*ginrummy.State`).
+`*uno.State`, `*hearts.State`, `*ginrummy.State`). Each rules package reads it
+through one `extraOf(state)` that asserts without `ok`: the wrong type is a wiring
+bug, and the engine's recover ends that table as a rules error
+([#37](decisions.md#37-a-rules-panic-on-the-turn-timer-ends-one-table-not-the-process)).
+The engine runs the leave hooks only while `Playing`, so a seat leaving a table that
+never started (no `Extra` yet) reaches no rules code.
 
 The rules name who acts next through `State.SetTurn(seat)` (on turn now, and kept
 there once the action settles) or `State.OverrideTurn(seat)` (the seat the engine

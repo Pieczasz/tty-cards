@@ -17,10 +17,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
-// ErrInvalidState means State.Extra is not the type the Rules put there: a wiring bug,
-// not a player mistake.
-var ErrInvalidState = errors.New("invalid state type")
-
 var (
 	errClosed = errors.New("game is closed")
 	errNoGame = errors.New("no active game")
@@ -396,7 +392,11 @@ func (e *Engine) removePlayerLocked(playerID string) {
 		return
 	}
 
-	if h, ok := e.state.Rules.(PlayerLeaveHandler); ok {
+	// The leave hooks read the Extra OnGameStart writes: on a table that never
+	// started a seat leaving is only a seat leaving.
+	h, hooked := e.state.Rules.(PlayerLeaveHandler)
+	hooked = hooked && e.state.Phase == Playing
+	if hooked {
 		h.OnPlayerLeave(e.state, playerID)
 	}
 
@@ -414,7 +414,7 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	e.clampTurnLocked()
 
 	outcome := LeaveSettled
-	if h, ok := e.state.Rules.(PlayerLeaveHandler); ok {
+	if hooked {
 		outcome = h.AfterPlayerRemoved(e.state, playerIndex)
 	}
 

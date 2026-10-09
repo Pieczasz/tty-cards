@@ -1223,6 +1223,15 @@ them from doing so. `bestSplitBy`'s over-long-hand guard in
 than panicking; its comment predates this recover and now understates the
 blast-radius reduction, but the guard itself is still the right behaviour.
 
+One panic is deliberate (2026-10-09): each rules package reads `State.Extra` through
+one `extraOf(state)` that asserts without `ok`. `Extra` of the wrong type is a wiring
+bug, and the 37 guards it replaced each fell back differently - `ErrInvalidState`,
+`false`, a `nil` `TimeoutAction` that took the seat, a `nil` `Standings` that crowned
+`Players[0]`, a silent return - where the panic gives one: this recover, one table
+ended `EndReasonRulesError`. The engine runs the leave hooks only while `Playing`, so a
+table that never started (no `Extra` yet) never reaches one. Exported helpers a view
+calls inside `Frame` (`poker.RaiseBounds`) keep the `ok` form: `Frame` has no recover.
+
 **Where.** `internal/game/turnclock.go` `onTurnTimeout` /
 `endOnRulesPanicLocked`, `internal/game/engine.go` `SubmitAction` /
 `endGameLocked` / `Standings`. Tests:

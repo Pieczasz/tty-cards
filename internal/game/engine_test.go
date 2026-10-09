@@ -251,6 +251,23 @@ func (r *leaveAwareRules) AfterPlayerRemoved(state *State, removedIndex int) Lea
 	return r.outcome
 }
 
+// The leave hooks read the Extra OnGameStart writes, so a table that never started,
+// which has none, does not run them.
+func TestEngine_RemovePlayer_BeforeStartRunsNoLeaveHooks(t *testing.T) {
+	t.Parallel()
+	r := &leaveAwareRules{
+		MockRules:    setupMockRules(),
+		onLeave:      func(*State, string) { t.Error("OnPlayerLeave ran on a table that never started") },
+		afterRemoved: func(*State, int) { t.Error("AfterPlayerRemoved ran on a table that never started") },
+	}
+	engine := NewEngine(r, []*Player{{ID: "p1"}, {ID: "p2"}})
+	t.Cleanup(engine.Close)
+
+	engine.RemovePlayer("p1")
+
+	engine.WithState(func(s *State) { assert.Len(t, s.Players, 1, "the seat still goes") })
+}
+
 // TestEngine_RemovePlayer_MidTurnOverrideClamped is a regression test for a fixed CRITICAL
 // Regression: a leave handler could set OverrideNextTurn to an index computed against
 // the pre-removal seat count, which is past the end of the shortened Players slice.
