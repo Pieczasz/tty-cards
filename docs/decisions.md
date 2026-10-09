@@ -75,6 +75,7 @@ is only the *why*.
 | [59](#59-backups-hold-the-database-and-the-host-key-go-off-host-and-are-drilled) | Backups hold the database and the host key, go off-host, and are drilled |
 | [60](#60-capacity-is-measured-not-computed-20-fps-4-gib-and-1250-sessions) | Capacity is measured, not computed: 20 FPS, 4 GiB and 1250 sessions |
 | [61](#61-terminal-size-is-a-shared-cell-budget-tiers-by-load-and-a-pool-for-what-renderers-keep) | Terminal size is a shared cell budget: tiers by load, and a pool for what renderers keep |
+| [62](#62-the-public-lobby-cache-stays-it-halves-a-browse-and-the-manager-lock-with-it) | The public-lobby cache stays: it halves a browse, and the manager lock with it |
 
 The 2026-09-23 review labelled its policy choices D-1 to D-8, and code comments
 still cite them: D-1 is [#39](#39-an-interrupted-match-charges-only-its-leavers),
@@ -2053,3 +2054,58 @@ tiers or either budget changes.
 **Where.** `internal/ssh/termsize.go` (`sizeTiers`, `cellBudget`, `extraCellBudget`,
 `nextTier`, `sizeBudget.grant`), `internal/ssh/server.go` (`sessionProgram`,
 `sessionRegistry.retier`, `leaveSizes`), `internal/ssh/memory_test.go`.
+
+## 62. The public-lobby cache stays: it halves a browse, and the manager lock with it
+
+*2026-10-09.*
+
+**Context.** The join screen re-reads the public tables every 2 s for every player
+parked on it. `publicLobbies` serves a 2-second list of lobby pointers instead of
+scanning every lobby under its own lock the way `Stats` does; a hit still re-locks
+each listed table (`browseEntry`), so it only skips the private and in-game ones. It
+is invalidated by every write that changes what is on offer, it has needed two fixes
+of its own, and a design review asked whether it pays for itself. The rule was set
+before measuring: delete it if an uncached refresh at 1000 tables under churn costs
+at most 33µs (300 refreshes a second, #60's browsers, under 1% of a core) and joins
+show no significant regression.
+
+**What was measured.** `internal/lobby/browse_bench_test.go`: one op of
+`BenchmarkBrowse` is one join-screen refresh (`BrowseLobbies` + `GameNames`) from
+parallel browsers, over tables that are half public and waiting, a quarter private
+and a quarter in a game; churn flips one public table's settings every millisecond.
+`BenchmarkJoinUnderBrowse` is a join and a leave (both take `m.mu` exclusively) while
+the other CPUs browse flat out. `-count 10 -cpu 3 -benchmem`, Apple M1, Go 1.27.2;
+"old" is with the cache, "new" a scratch build scanning on every browse.
+
+```
+                                          │    old.txt    │                new.txt                 │
+                                          │    sec/op     │    sec/op      vs base                 │
+Browse/lobbies=10/churn=none-3              582.0n ±   5%   1080.5n ± 24%   +85.64% (p=0.000 n=10)
+Browse/lobbies=10/churn=1ms-3               571.8n ±  16%   1184.5n ± 12%  +107.13% (p=0.000 n=10)
+Browse/lobbies=100/churn=none-3             5.634µ ±  84%   10.621µ ± 10%   +88.51% (p=0.003 n=10)
+Browse/lobbies=100/churn=1ms-3              5.334µ ±  13%   11.117µ ± 27%  +108.45% (p=0.000 n=10)
+Browse/lobbies=1000/churn=none-3            72.12µ ±  42%   133.54µ ± 18%   +85.16% (p=0.000 n=10)
+Browse/lobbies=1000/churn=1ms-3             68.87µ ±   5%   123.30µ ± 16%   +79.02% (p=0.000 n=10)
+JoinUnderBrowse/lobbies=1000/churn=none-3   1.905µ ± 238%    4.144µ ± 40%  +117.51% (p=0.015 n=10)
+JoinUnderBrowse/lobbies=1000/churn=1ms-3    1.713µ ±  10%    5.046µ ± 26%  +194.57% (p=0.000 n=10)
+```
+
+Allocations follow the same line: at 1000 tables a refresh allocates 96 KiB in 12
+allocations cached, 138 KiB in 28 uncached.
+
+**Decision.** Keep the cache. Uncached, a refresh at 1000 tables under churn is
+123µs, almost four times the threshold, and a join waits two to three times as long
+for `m.mu` behind the scans. Even a millisecond of churn leaves the cache most of its
+win, because a browse finishes in well under a millisecond and every browse in
+between is a hit.
+
+**Consequences.** The cache is not what makes a big server's browse cheap: a cached
+refresh at 1000 tables is still ~70µs of wall time per op across three browsers, most
+of it re-locking, averaging and sorting the ~500 tables on offer. If that ever shows
+up in a profile, the next step is a smaller hit path (a per-lobby entry kept current
+by its own writes), not removing this. Re-run the benchmark before touching
+`publicLobbies` or `browseEntry`, and whenever the join screen's refresh changes.
+
+**Where.** `internal/lobby/browse.go` (`publicLobbies`, `invalidatePublicCache`,
+`browseEntry`), `internal/lobby/browse_bench_test.go`, `internal/tui/views/lobby/join.go`
+(`browseRefresh`).
