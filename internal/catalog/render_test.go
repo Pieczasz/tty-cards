@@ -61,16 +61,14 @@ func TestGameViews_RenderInsideTheTerminal(t *testing.T) {
 	}
 }
 
-// A view for player A must never print another seat's card faces. Poker has its own
-// targeted showdown test; the other four never reveal anybody's hand at all, so the
-// check is that no other seat's cards are anywhere in the frame.
+// A view for player A must never print another seat's card faces at a freshly dealt
+// table. Poker's showdown reveals by design, which poker.SeatsFor's own tests pin;
+// before it, poker shows nobody else's hole cards either, so every game is checked
+// for no other seat's cards anywhere in the frame.
 func TestGameViews_NeverShowAnotherSeatsCards(t *testing.T) {
 	t.Parallel()
 
 	for _, entry := range Games {
-		if entry.Slug == "poker" {
-			continue // showdown reveals by design; poker tests that reveal itself
-		}
 		t.Run(entry.Slug, func(t *testing.T) {
 			t.Parallel()
 
