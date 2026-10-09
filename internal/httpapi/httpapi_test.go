@@ -59,6 +59,9 @@ func handler(t *testing.T, deps Deps) http.Handler {
 	if deps.Users == nil {
 		deps.Users = &stubUsers{}
 	}
+	if deps.Health == nil {
+		deps.Health = func(context.Context) error { return nil }
+	}
 	if deps.RequestsPerMinute == 0 {
 		deps.RequestsPerMinute = 120
 	}
@@ -93,7 +96,10 @@ func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder
 func TestNewServer_RequiresEveryDependency(t *testing.T) {
 	t.Parallel()
 
-	full := Deps{Sessions: fakeSessions(0), Lobbies: fakeLobbies{}, Users: &stubUsers{}, RequestsPerMinute: 1, AllowOrigin: "*"}
+	full := Deps{
+		Sessions: fakeSessions(0), Lobbies: fakeLobbies{}, Users: &stubUsers{},
+		Health: func(context.Context) error { return nil }, RequestsPerMinute: 1, AllowOrigin: "*",
+	}
 	tests := []struct {
 		name  string
 		unset func(*Deps)
@@ -101,6 +107,7 @@ func TestNewServer_RequiresEveryDependency(t *testing.T) {
 		{name: "no sessions", unset: func(d *Deps) { d.Sessions = nil }},
 		{name: "no lobbies", unset: func(d *Deps) { d.Lobbies = nil }},
 		{name: "no users", unset: func(d *Deps) { d.Users = nil }},
+		{name: "no health probe", unset: func(d *Deps) { d.Health = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -449,7 +456,6 @@ func TestHealthz(t *testing.T) {
 		wantCode int
 		wantBody string
 	}{
-		{name: "no probe means the process alone", wantCode: http.StatusOK, wantBody: `{"status":"ok"}`},
 		{
 			name:     "probe passes",
 			health:   func(context.Context) error { return nil },

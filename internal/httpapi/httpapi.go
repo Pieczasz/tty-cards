@@ -52,12 +52,12 @@ type LobbyCounter interface {
 	Stats() (inGame, waiting int)
 }
 
-// ErrMissingDeps refuses a server built without its counters or its repository. A
-// nil one used to be skipped, so a miswiring served zeros or an empty leaderboard
-// forever instead of failing the boot.
-var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies and Users")
+// ErrMissingDeps refuses a server built without its counters, its repository or its
+// health probe. A nil one used to be skipped, so a miswiring served zeros, an empty
+// leaderboard or an unconditional healthy forever instead of failing the boot.
+var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies, Users and Health")
 
-// Deps are what the stats API reads from. Sessions, Lobbies and Users are required.
+// Deps are what the stats API reads from. Sessions, Lobbies, Users and Health are required.
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
@@ -110,7 +110,7 @@ func NewServer(addr string, deps Deps) (*http.Server, error) {
 }
 
 func newHandler(deps Deps) (http.Handler, error) {
-	if deps.Sessions == nil || deps.Lobbies == nil || deps.Users == nil {
+	if deps.Sessions == nil || deps.Lobbies == nil || deps.Users == nil || deps.Health == nil {
 		return nil, ErrMissingDeps
 	}
 	limiter := ratelimit.New(deps.RequestsPerMinute, time.Minute)
@@ -273,14 +273,12 @@ func withRateLimit(
 
 func healthHandler(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if deps.Health != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
-			defer cancel()
-			if err := deps.Health(ctx); err != nil {
-				slog.ErrorContext(ctx, "health check failed", "error", err)
-				writeError(w, r, http.StatusServiceUnavailable, "unhealthy")
-				return
-			}
+		ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+		defer cancel()
+		if err := deps.Health(ctx); err != nil {
+			slog.ErrorContext(ctx, "health check failed", "error", err)
+			writeError(w, r, http.StatusServiceUnavailable, "unhealthy")
+			return
 		}
 		// Not writeJSON: a cached health answer is a lie about a later moment.
 		w.Header().Set("Cache-Control", "no-store")

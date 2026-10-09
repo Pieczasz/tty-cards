@@ -1328,9 +1328,9 @@ leaderboard does not already show any visitor. That is what makes it safe
 unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
 `lobby.Manager.Stats`, and `ssh.NewServer` requires the tracker the two share
 (`ErrNoTracker`). `httpapi.NewServer(addr, Deps)` builds the `*http.Server` and
-refuses to start with `Sessions`, `Lobbies` or `Users` missing (`ErrMissingDeps`):
-a nil counter or repository would otherwise serve zeros or an empty leaderboard
-forever. `Deps.AllowOrigin` and `Deps.RequestsPerMinute` are required too:
+refuses to start with `Sessions`, `Lobbies`, `Users` or `Health` missing
+(`ErrMissingDeps`): a nil counter or repository would otherwise serve zeros or an
+empty leaderboard forever, and a nil probe a `/healthz` that cannot fail. `Deps.AllowOrigin` and `Deps.RequestsPerMinute` are required too:
 `config.Load` owns the defaults and validates them, so a second copy in the package
 could only drift from it.
 
