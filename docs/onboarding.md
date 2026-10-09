@@ -50,7 +50,7 @@ Named here so you recognise them on sight, not as an inventory.
 | Fan-out broadcaster (observer) | `internal/broadcaster.Broadcaster[T]` - latest-wins, per-subscriber buffered channel |
 | Strategy | `game.Rules`, implemented by all five rules packages; the engine calls rules, never the reverse |
 | Factory + single registration point | `internal/catalog.Games` -> `game.Registry` |
-| Functional options | `lobby.Option` (`WithCardGame`, `WithMaxPlayers`, `WithPrivate`, `WithRanked`), `game.EngineOption` (`WithLogger`; `WithTurnTimeout` in tests) |
+| Functional options | `lobby.Option` (`WithCardGame`, `WithMaxPlayers`, `WithPrivate`, `WithRanked`), `game.EngineOption` (`WithLogger`, `WithOnIdleRemoved`, `WithTurnTimeout` - zero is the clock's off switch) |
 | Facade | `game.BoundEngine` via `game.Bind(engine, playerID)` - nil-safe throughout |
 | Embedded base type | `gameview.Session` in every game view's model; `shed.State` in the crazy eights and uno `Extra` |
 | Repository | `db.Authenticator` / `db.Profiles` / `db.Leaderboard` (their union is `db.UserRepository`) and `db.MatchRepository`, declared in `internal/db`, implemented in `internal/repository` - each consumer takes the smallest one it calls |
@@ -59,7 +59,7 @@ Named here so you recognise them on sight, not as an inventory.
 | Snapshot / DTO | `game.StateSnapshot`, `game.PlayerSnapshot`, `lobby.BrowseEntry` - built under one lock, rendered lock-free |
 | Double-checked locking with TTL | `repository.BestPlayers` (5 min) |
 | Dirty-flag cache invalidation | `Manager.cacheDirty atomic.Bool` + a 2 s TTL - atomic specifically to avoid inverting lock order |
-| Optional interface (capability probe) | `game.PlayerLeaveHandler`, `TurnTimeoutHandler`, `TurnDurationHandler`, `StandingScorer`, `router.Closer` |
+| Optional interface (capability probe) | `game.PlayerLeaveHandler`, `TurnDurationHandler`, `StandingScorer`, `router.Closer` |
 | Sentinel errors | `broadcaster.ErrClosed`/`ErrAtCapacity`, `db.ErrUsernameTaken`… |
 
 Idiomatic Go habits worth matching: `context.Context` first on every repository

@@ -16,6 +16,7 @@ type bindRules struct{}
 func (bindRules) OnGameStart(s *State) error          { return dealEach(s, 2) }
 func (bindRules) ValidateAction(*State, Action) error { return nil }
 func (bindRules) ApplyAction(*State, Action) error    { return nil }
+func (bindRules) TimeoutAction(*State) Action         { return noopAction{} }
 func (bindRules) CheckWinCondition(*State) bool       { return false }
 func (bindRules) Standings(s *State) []*Player        { return s.Players }
 

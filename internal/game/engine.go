@@ -60,6 +60,15 @@ func WithLogger(l *slog.Logger) EngineOption {
 	}
 }
 
+// WithTurnTimeout sets the default turn length. Zero or less is the clock's one off
+// switch: every rules set has a TimeoutAction, so the engine never decides on its
+// own that a table goes without one.
+func WithTurnTimeout(d time.Duration) EngineOption {
+	return func(e *Engine) {
+		e.clock.defaultLength = d
+	}
+}
+
 // WithOnIdleRemoved is told each seat the turn clock takes for idling - unlike
 // EventPlayerIdle on the latest-wins feed, it cannot be dropped. It runs on the timer
 // goroutine after the engine lock is released, so it may take locks that order before

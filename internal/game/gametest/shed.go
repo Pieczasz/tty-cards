@@ -23,7 +23,6 @@ import (
 type ShedRules interface {
 	game.Rules
 	game.PlayerLeaveHandler
-	game.TurnTimeoutHandler
 }
 
 // Shed describes one shedding game to the shared suite.

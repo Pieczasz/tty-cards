@@ -458,7 +458,7 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-		registry := boundedRegistry("Mock", idleRules{}, 2, 2)
+		registry := boundedRegistry("Mock", stubRules{}, 2, 2)
 		require.NoError(t, l.ToggleReady(leader, registry))
 		require.NoError(t, l.ToggleReady(guest, registry))
 		idler, other := leader, guest
@@ -475,11 +475,6 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 		assert.True(t, l.HasPlayer(other), "only the idle seat leaves")
 	})
 }
-
-// idleRules puts stubRules on the turn clock: an expired turn passes.
-type idleRules struct{ stubRules }
-
-func (idleRules) TimeoutAction(*game.State) game.Action { return stubAction("pass") }
 
 // A seat is held for a reconnect because the hand is still running. Once the game is
 // over the lobby is Waiting, where DisconnectPlayer gives a seat up immediately - so a

@@ -29,9 +29,6 @@ func (e *Engine) armTurnTimerLocked() {
 	if e.closed || e.clock.defaultLength <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
 		return
 	}
-	if _, ok := e.state.Rules.(TurnTimeoutHandler); !ok {
-		return
-	}
 
 	timeout := e.clock.defaultLength
 	if h, ok := e.state.Rules.(TurnDurationHandler); ok {
@@ -117,13 +114,7 @@ func (e *Engine) expireTurn(seq uint64) (idle string) {
 // autoPlayLocked plays the rules' safe move for current, whose turn just expired, and
 // returns current's ID if it took the seat instead. Caller holds e.mu.
 func (e *Engine) autoPlayLocked(current *Player) (idle string) {
-	// armTurnTimerLocked never arms without a TurnTimeoutHandler and Rules is set once
-	// at construction, so a missing handler here is a wiring bug. It falls into the
-	// "no safe move" path below - the seat goes, the table does not panic.
-	var safe Action
-	if handler, ok := e.state.Rules.(TurnTimeoutHandler); ok {
-		safe = handler.TimeoutAction(e.state)
-	}
+	safe := e.state.Rules.TimeoutAction(e.state)
 	if safe == nil {
 		// No safe move: the seat goes rather than the table waiting. Reaching this in
 		// real play is a rules bug, hence the log.

@@ -35,7 +35,6 @@ type Rules struct{}
 var (
 	_ game.Rules               = (*Rules)(nil)
 	_ game.PlayerLeaveHandler  = (*Rules)(nil)
-	_ game.TurnTimeoutHandler  = (*Rules)(nil)
 	_ game.TurnDurationHandler = (*Rules)(nil)
 	// Without it, deleting StandingScore still compiles and the engine silently
 	// splits every draw by seat order.

@@ -90,13 +90,16 @@ Implement `game.Rules` and pin it:
 var _ game.Rules = (*Rules)(nil)
 ```
 
+`TimeoutAction` is one of its methods, not an option: it is the move the turn clock
+plays for a player who stopped playing, and without it a player who walks away
+would freeze the table.
+
 Add the optional interfaces you actually need, each with its own compile-time
 assertion:
 
 | Interface | When |
 |---|---|
 | `game.PlayerLeaveHandler` | mid-hand disconnects change your state (`OnPlayerLeave` before removal, `AfterPlayerRemoved` after seat indices shift) |
-| `game.TurnTimeoutHandler` | **almost always.** No handler means no turn clock, and a player who walks away freezes the table forever |
 | `game.TurnDurationHandler` | one phase needs longer than 30s (hearts' pass, the between-hands deal) |
 | `game.StandingScorer` | equal results should share a place rather than break the tie by seat order |
 

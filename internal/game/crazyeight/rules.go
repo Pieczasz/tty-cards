@@ -27,7 +27,6 @@ type Rules struct{}
 var (
 	_ game.Rules              = (*Rules)(nil)
 	_ game.PlayerLeaveHandler = (*Rules)(nil)
-	_ game.TurnTimeoutHandler = (*Rules)(nil)
 	_ game.StandingScorer     = (*Rules)(nil)
 )
 
