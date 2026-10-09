@@ -20,7 +20,7 @@ func TestLobby_EveryPlayerGetsAFeedAfterTheTableGrows(t *testing.T) {
 	for _, guest := range seats[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	}
-	require.Equal(t, 10, l.CurrentPlayers())
+	require.Equal(t, 10, l.Snapshot().Players())
 
 	for _, p := range seats {
 		_, err := l.Subscribe(p.ID)

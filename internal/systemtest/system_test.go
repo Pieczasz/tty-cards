@@ -37,21 +37,21 @@ func TestSystemRankedGameWithMidGameLeave(t *testing.T) {
 		lobby.WithPrivate(true),
 	)
 	require.NoError(t, err)
-	require.Equal(t, leader, l.Leader())
+	require.Equal(t, leader, l.Snapshot().Leader.Player)
 
 	require.NoError(t, l.SetMaxPlayers(leader, 4))
 	require.NoError(t, l.SetPrivate(leader, false))
 	require.NoError(t, l.SetRanked(leader, true))
-	assert.Equal(t, 4, l.MaxPlayers())
-	assert.False(t, l.IsPrivate())
-	assert.True(t, l.IsRanked())
+	assert.Equal(t, 4, l.Snapshot().Limit)
+	assert.False(t, l.Snapshot().Private)
+	assert.True(t, l.Snapshot().Ranked)
 
 	require.Error(t, l.SetMaxPlayers(guests[0], 9), "only the leader may change settings")
 
 	for _, g := range guests {
 		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)), "guest %s should join", g.ID)
 	}
-	require.Equal(t, 4, l.CurrentPlayers())
+	require.Equal(t, 4, l.Snapshot().Players())
 	assert.Contains(t, browseCodes(manager, leader), l.Code(), "a public waiting lobby is listed")
 
 	events, subErr := l.Subscribe(leader.ID)
@@ -111,7 +111,7 @@ func TestSystemLobbyRespectsGameBounds(t *testing.T) {
 
 	err = manager.ToggleReady(leader)
 	require.ErrorContains(t, err, "at least 2 players")
-	assert.True(t, l.IsReady(leader), "the ready flag still toggles")
+	assert.True(t, l.Snapshot().Leader.Ready, "the ready flag still toggles")
 	assert.Nil(t, l.ActiveGame(), "one ready player cannot start a two-player game")
 
 	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), newPlayer(testutil.UID(2), "bob"))))
@@ -131,8 +131,8 @@ func TestSystemLeaderLeavingPromotesGuest(t *testing.T) {
 	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
 
 	manager.LeaveLobby(leader)
-	assert.Equal(t, guest, l.Leader(), "the remaining guest takes over")
-	assert.True(t, l.IsLeader(guest))
+	assert.Equal(t, guest, l.Snapshot().Leader.Player, "the remaining guest takes over")
+	assert.True(t, l.Snapshot().IsLeader(guest))
 
 	manager.LeaveLobby(guest)
 	_, err = manager.FindLobbyByCode(l.Code())

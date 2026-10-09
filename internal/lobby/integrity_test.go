@@ -15,6 +15,11 @@ import (
 // the join was refused.
 func joinErr(_ *Lobby, err error) error { return err }
 
+func isReady(l *Lobby, p *game.Player) bool {
+	seat, _ := l.Snapshot().SeatOf(p)
+	return seat.Ready
+}
+
 func isWaiting(l *Lobby) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -36,7 +41,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			m, l := newTestLobby(t, 4)
-			leader := l.Leader()
+			leader := l.Snapshot().Leader.Player
 			guest := mockPlayer("p2", testutil.UID(2))
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 			require.NoError(t, m.ToggleReady(guest))
@@ -45,7 +50,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, change(l, leader))
 
-			assert.False(t, l.IsReady(guest), "the guest's ready survived a setting change")
+			assert.False(t, isReady(l, guest), "the guest's ready survived a setting change")
 			assert.Contains(t, drainEventTypes(ch), EventPlayersUpdated, "the rosters were not told")
 
 			require.NoError(t, m.ToggleReady(leader))
@@ -68,7 +73,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			m, l := newTestLobby(t, 4)
-			leader := l.Leader()
+			leader := l.Snapshot().Leader.Player
 			b := mockPlayer("p2", testutil.UID(2))
 			c := mockPlayer("p3", testutil.UID(3))
 			holdout := mockPlayer("p4", testutil.UID(4))
@@ -82,7 +87,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 			require.NoError(t, remove(m, leader, holdout))
 
 			for _, p := range []*game.Player{leader, b, c} {
-				assert.False(t, l.IsReady(p), "%s is still ready after the roster changed", p.ID)
+				assert.False(t, isReady(l, p), "%s is still ready after the roster changed", p.ID)
 			}
 			assert.Equal(t, waiting, l.state)
 		})
@@ -91,7 +96,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 	t.Run("the leader leaves", func(t *testing.T) {
 		t.Parallel()
 		m, l := newTestLobby(t, 4)
-		leader := l.Leader()
+		leader := l.Snapshot().Leader.Player
 		b := mockPlayer("p2", testutil.UID(2))
 		c := mockPlayer("p3", testutil.UID(3))
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), b)))
@@ -100,7 +105,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 
 		m.LeaveLobby(leader)
 
-		assert.False(t, l.IsReady(b), "the promoted table kept a ready from before the change")
+		assert.False(t, isReady(l, b), "the promoted table kept a ready from before the change")
 	})
 }
 
@@ -140,7 +145,7 @@ func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
 	m.grace.arm(guest.ID, time.Hour, func() {})
 	m.mu.Unlock()
 
-	require.NoError(t, m.Kick(l.Leader(), guest))
+	require.NoError(t, m.Kick(l.Snapshot().Leader.Player, guest))
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()

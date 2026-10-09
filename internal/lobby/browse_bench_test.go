@@ -113,7 +113,7 @@ func startChurn(tables []*Lobby, every time.Duration) (stop func()) {
 			case <-tick.C:
 			}
 			l := tables[(i/2)%len(tables)]
-			_ = l.SetPrivate(l.Leader(), i%2 == 0)
+			_ = l.SetPrivate(l.Snapshot().Leader.Player, i%2 == 0)
 		}
 	})
 	return func() {

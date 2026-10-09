@@ -39,8 +39,11 @@ func TestLobby_Snapshot(t *testing.T) {
 	assert.Equal(t, 2, snap.Players())
 	assert.True(t, snap.IsLeader(leader))
 	assert.False(t, snap.IsLeader(guest))
-	assert.True(t, snap.Seated(guest))
-	assert.False(t, snap.Seated(mockPlayer("stranger", testutil.UID(3))))
+	seat, ok := snap.SeatOf(guest)
+	assert.True(t, ok)
+	assert.Equal(t, snap.Guests[0], seat)
+	_, ok = snap.SeatOf(mockPlayer("stranger", testutil.UID(3)))
+	assert.False(t, ok)
 }
 
 // A snapshot is a copy: what the lobby does next, and what a view does to the copy,
@@ -58,7 +61,8 @@ func TestLobby_SnapshotDoesNotAlias(t *testing.T) {
 
 	before := l.Snapshot()
 	before.Guests[0] = SeatView{Player: mockPlayer("forged", testutil.UID(9))}
-	assert.True(t, l.Snapshot().Seated(first), "a write to the copy reached the roster")
+	_, seated := l.Snapshot().SeatOf(first)
+	assert.True(t, seated, "a write to the copy reached the roster")
 
 	before = l.Snapshot()
 	_, err = m.JoinLobbyByCode(l.Code(), mockPlayer("second", testutil.UID(3)))
@@ -133,7 +137,7 @@ func assertConsistentSnapshot(t *testing.T, s Snapshot, anchor *game.Player) {
 	if s.Players() > s.Limit {
 		t.Errorf("%d seats over a cap of %d", s.Players(), s.Limit)
 	}
-	if !s.Seated(anchor) {
+	if _, ok := s.SeatOf(anchor); !ok {
 		t.Error("the anchor, who never left, is missing")
 	}
 }

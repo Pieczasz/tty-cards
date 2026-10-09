@@ -238,7 +238,7 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 		return m, router.NavigateToGame(m.snap.Slug, table)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
 		m.refresh()
-		if !m.snap.Seated(views.SessionPlayer(m.global)) {
+		if _, seated := m.snap.SeatOf(views.SessionPlayer(m.global)); !seated {
 			m.unsubscribe()
 			cmd := m.goHome()
 			return m, cmd

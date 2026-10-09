@@ -26,9 +26,9 @@ func TestManager_New(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, l)
 
-	assert.Equal(t, leader, l.Leader())
-	assert.Equal(t, 3, l.MaxPlayers())
-	assert.False(t, l.IsPrivate())
+	assert.Equal(t, leader, l.Snapshot().Leader.Player)
+	assert.Equal(t, 3, l.Snapshot().Limit)
+	assert.False(t, l.Snapshot().Private)
 
 	assert.Len(t, l.Code(), 8)
 	assert.Equal(t, l, m.FindLobbyByPlayer(leader))
@@ -53,7 +53,7 @@ func TestManager_JoinLobbyByCode(t *testing.T) {
 	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
 	require.NoError(t, err)
 	assert.True(t, l.HasPlayer(guest1))
-	assert.Equal(t, 2, l.CurrentPlayers())
+	assert.Equal(t, 2, l.Snapshot().Players())
 
 	err = joinErr(m.JoinLobbyByCode(l.Code(), guest2))
 	require.ErrorIs(t, err, ErrLobbyFull)
@@ -78,12 +78,12 @@ func TestManager_LeaveLobby(t *testing.T) {
 
 	m.LeaveLobby(guest1)
 	assert.False(t, l.HasPlayer(guest1))
-	assert.Equal(t, 2, l.CurrentPlayers())
+	assert.Equal(t, 2, l.Snapshot().Players())
 	assert.Nil(t, m.FindLobbyByPlayer(guest1))
 
 	m.LeaveLobby(leader)
 	assert.False(t, l.HasPlayer(leader))
-	assert.Equal(t, guest2, l.Leader())
+	assert.Equal(t, guest2, l.Snapshot().Leader.Player)
 	assert.Nil(t, m.FindLobbyByPlayer(leader))
 
 	m.LeaveLobby(guest2)
@@ -573,16 +573,16 @@ func TestManager_Stats(t *testing.T) {
 func TestLobby_IsLeader(t *testing.T) {
 	t.Parallel()
 	m, l := newTestLobby(t, 3)
-	leader := l.Leader()
+	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
-	assert.True(t, l.IsLeader(leader))
-	assert.False(t, l.IsLeader(guest))
+	assert.True(t, l.Snapshot().IsLeader(leader))
+	assert.False(t, l.Snapshot().IsLeader(guest))
 
 	// The inherited leader is the one the controls follow.
 	m.LeaveLobby(leader)
-	assert.True(t, l.IsLeader(guest))
+	assert.True(t, l.Snapshot().IsLeader(guest))
 }
 
 // A session that never resolved to a user hands the manager a nil player. Every
@@ -641,7 +641,7 @@ func TestManager_CreateLobby_HoldsTheTableToItsGame(t *testing.T) {
 
 			if tt.wantSeats > 0 {
 				require.NoError(t, err)
-				assert.Equal(t, tt.wantSeats, l.MaxPlayers())
+				assert.Equal(t, tt.wantSeats, l.Snapshot().Limit)
 				return
 			}
 			if tt.wantIs != nil {
@@ -673,7 +673,7 @@ func TestManager_RemoveLobby_UnknownCodeIsANoOp(t *testing.T) {
 	found, err := m.FindLobbyByCode(l.Code())
 	require.NoError(t, err)
 	assert.Equal(t, l, found)
-	assert.Equal(t, l, m.FindLobbyByPlayer(l.Leader()))
+	assert.Equal(t, l, m.FindLobbyByPlayer(l.Snapshot().Leader.Player))
 }
 
 // A player whose index entry outlived their seat is leaving all the same: the entry
@@ -682,7 +682,7 @@ func TestManager_LeaveLobby_DropsAStaleIndexEntry(t *testing.T) {
 	t.Parallel()
 	m, l := newTestLobby(t, 2)
 	stranger := mockPlayer("p9", testutil.UID(9))
-	events, err := l.Subscribe(l.Leader().ID)
+	events, err := l.Subscribe(l.Snapshot().Leader.Player.ID)
 	require.NoError(t, err)
 	m.mu.Lock()
 	m.playerLobby[stranger.ID] = l
@@ -694,6 +694,6 @@ func TestManager_LeaveLobby_DropsAStaleIndexEntry(t *testing.T) {
 	_, indexed := m.playerLobby[stranger.ID]
 	m.mu.RUnlock()
 	assert.False(t, indexed, "the stale entry survived the leave")
-	assert.Equal(t, 1, l.CurrentPlayers())
+	assert.Equal(t, 1, l.Snapshot().Players())
 	assert.Empty(t, drainEventTypes(events), "a leave that moved nobody was broadcast")
 }

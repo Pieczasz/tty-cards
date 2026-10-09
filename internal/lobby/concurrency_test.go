@@ -104,7 +104,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	assert.Equal(t, int64(joiners-freeSlots), fullErrs.Load(), "all remaining joiners must be rejected as full")
 
 	// Roster is exactly full and contains no duplicates.
-	assert.Equal(t, maxPlayers, l.CurrentPlayers(), "lobby must end exactly at capacity")
+	assert.Equal(t, maxPlayers, l.Snapshot().Players(), "lobby must end exactly at capacity")
 
 	seen := map[string]bool{leader.ID: true}
 	joinedCount := 0
@@ -139,7 +139,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	for _, g := range all[1:] {
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
-	require.Equal(t, players, l.CurrentPlayers())
+	require.Equal(t, players, l.Snapshot().Players())
 
 	var (
 		start = make(chan struct{})
@@ -284,9 +284,9 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	// The lobby never had enough players to start, so it must still be Waiting,
 	// with an intact roster and every ready flag a well-defined bool.
 	assert.True(t, isWaiting(l), "lobby must remain in Waiting; a start should never have succeeded")
-	assert.Equal(t, members, l.CurrentPlayers(), "roster must be unchanged")
+	assert.Equal(t, members, l.Snapshot().Players(), "roster must be unchanged")
 	for _, p := range roster {
-		_ = l.IsReady(p) // must not race or panic
+		_ = isReady(l, p) // must not race or panic
 		assert.True(t, l.HasPlayer(p), "member %q vanished from roster", p.ID)
 	}
 }

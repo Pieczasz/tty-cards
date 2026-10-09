@@ -329,33 +329,6 @@ func (l *Lobby) allReadyLocked() bool {
 // Code is the 8-character code players join by.
 func (l *Lobby) Code() string { return l.code }
 
-// Slug is the game the table plays: its registry key and persisted identity.
-func (l *Lobby) Slug() string { return l.game.Slug }
-
-// GameName is the display name of the game the table plays.
-func (l *Lobby) GameName() string { return l.game.Name }
-
-// MaxPlayers is the seat cap, leader included.
-func (l *Lobby) MaxPlayers() int {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.options.maxPlayers
-}
-
-// IsRanked is whether a finished match here moves Elo.
-func (l *Lobby) IsRanked() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.options.isRanked
-}
-
-// IsPrivate is whether the table is kept out of BrowseLobbies.
-func (l *Lobby) IsPrivate() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.options.isPrivate
-}
-
 // ActiveGame is the running engine, or nil. It is the server side's: a view reaches
 // the table through Seat.
 func (l *Lobby) ActiveGame() *game.Engine {
@@ -383,46 +356,11 @@ func (l *Lobby) Seat(playerID string) *game.BoundEngine {
 	return game.Bind(engine, playerID)
 }
 
-// Leader is the player in seat 0, who owns the settings.
-func (l *Lobby) Leader() *game.Player {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.leader
-}
-
-// Guests is every seated player but the leader, in join order. The slice is a copy.
-func (l *Lobby) Guests() []*game.Player {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return slices.Clone(l.guests)
-}
-
-// CurrentPlayers is how many seats are taken, leader included.
-func (l *Lobby) CurrentPlayers() int {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return 1 + len(l.guests)
-}
-
 // HasPlayer is whether p is seated here.
 func (l *Lobby) HasPlayer(p *game.Player) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.hasPlayerLocked(p)
-}
-
-// IsReady is p's ready flag for the next game.
-func (l *Lobby) IsReady(p *game.Player) bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.ready[p.ID]
-}
-
-// IsLeader is whether p holds seat 0.
-func (l *Lobby) IsLeader(p *game.Player) bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.leader.Equal(p)
 }
 
 // ratingFor is a player's rating in the game slug names. Missing and zero both mean
