@@ -152,6 +152,7 @@ Telemetry identity: the resource is `service.name=tty-cards-server` in every env
 - In `internal/tui`, join and pad with `styles.JoinVertical`, `styles.JoinHorizontal` and `styles.MarginTop`, never lipgloss's: they are its output byte for byte (a `rapid` test proves it) at half the CPU, and under 1000 sessions lipgloss's joins were two thirds of frame-building CPU. semgrep (`tui-uses-lipgloss-join`) enforces it. `RenderMainLayout` frames the screen through `renderBox` and `centreWrapped` for the same reason: lipgloss word-wraps a whole frame before bordering it, 38% of all bytes allocated, for a frame already sized to fit. Both take the fast path only for text lipgloss would leave as it is (it fits, and no line leaves a style open or holds a control byte) and hand anything else to lipgloss. Anything a frame draws unchanged every time (card faces, backs, empty slots, footers, banners) is cached per theme, not re-rendered.
 - To profile, build `go build -tags pprof ./cmd/server`: it serves `net/http/pprof` on `127.0.0.1:6060`; drive it with `cmd/loadtest`. The production image never builds the tag.
 - Comments explain *why*, not *what*; the codebase is intentionally light on them.
+- Deliberately deferred design work, each with the trigger that should bring it back, is in `docs/deferred.md` - not in `TODO` markers, which `godox` fails. Delete an entry when you act on it.
 
 ## Code graph
 
