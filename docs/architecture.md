@@ -519,8 +519,9 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   promoted - clear every ready flag. A join does not.
 - `Lobby.Snapshot()` copies the table under one `RLock`: code, game and its seat
   bounds, the settings, whether it is in a game, and the leader and guests each with
-  their Elo and ready flag. A frame drawn from it cannot show a promoted leader
-  twice, as one drawn from separate getters could.
+  their Elo and ready flag. The waiting room draws from it, retaken on each lobby
+  event and after its own actions, so a frame cannot show a promoted leader twice
+  and the settings form cannot show a value the lobby refused.
 - `RemoveLobby` unmaps only the `playerLobby` entries still pointing at the removed
   lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
   seated at a newer table.

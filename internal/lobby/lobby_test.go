@@ -919,13 +919,15 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
 }
 
-func TestRating_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
+// A seat reads the same on the roster as the browse matches it: missing and zero are
+// both the starting rating, and only the table's own game counts.
+func TestRatingFor_ZeroAndMissingReadAsTheStartingRating(t *testing.T) {
 	t.Parallel()
 	start := elo.ToUint32(elo.DefaultRating)
-	assert.Equal(t, start, Rating(nil, "Poker"))
-	assert.Equal(t, start, Rating(&game.Player{}, "Poker"))
-	assert.Equal(t, start, Rating(&game.Player{Ratings: map[string]uint32{"poker": 0}}, "poker"))
-	assert.Equal(t, uint32(1720), Rating(&game.Player{Ratings: map[string]uint32{"poker": 1720}}, "poker"))
+	assert.Equal(t, start, ratingFor(nil, "poker"))
+	assert.Equal(t, start, ratingFor(map[string]uint32{"uno": 1720}, "poker"))
+	assert.Equal(t, start, ratingFor(map[string]uint32{"poker": 0}, "poker"))
+	assert.Equal(t, uint32(1720), ratingFor(map[string]uint32{"poker": 1720}, "poker"))
 }
 
 // refusedStartRules is stubRules whose deal fails, so the engine never starts: a
