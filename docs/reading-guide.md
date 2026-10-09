@@ -118,7 +118,7 @@ into the engine. That holds structurally today: `Rules` methods receive only
 `CheckWinCondition` -> `advanceTurnLocked` -> broadcast `EventTurnAdvanced`. The
 timer's auto-play runs the same two halves, `submitTimedOutAction` minus the
 clear. An error from `ApplyAction` or `AfterAction`
-finishes the game as `EndReasonRulesError` with state possibly half-applied, so
+ends the game as `EndReasonRulesError`, with no winner since the state may be half-applied, so
 **anything checkable up front belongs in `ValidateAction`**.
 
 *The turn cursor.* `advanceTurnLocked` steps `CurrentTurn` on unless
