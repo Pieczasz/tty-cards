@@ -206,7 +206,7 @@ one state change and there is no half-applied "wild played, suit not yet named".
 `ActionDrawCard` is always legal, so an exhausted board cannot soft-lock the turn
 loop. The win check (`shed.HandEmptyOrAllPassed`) and the standings
 (`shed.Standings`, `shed.Score`) come from package `internal/game/shed`, shared
-with Uno, and so do the opening card (`shed.OpenDiscard`), the play check
+with Uno, and so do the opening deal (`shed.Deal`), the opening card (`shed.OpenDiscard`), the play check
 (`shed.ValidatePlay`), the draw (`shed.DrawInto`, which reshuffles the discard
 under the card in play when the stock runs out) and the leave (`shed.Leave`). The
 per-game `State` embeds `shed.State`.

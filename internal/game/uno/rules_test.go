@@ -171,7 +171,7 @@ func TestRules_OnGameStart_OpeningCardActsOnTheFirstPlayer(t *testing.T) {
 		state := game.NewState(&Rules{}, players, nil)
 		state.Deck = deck.New(stock)
 		state.CurrentTurn = 0
-		require.NoError(t, (&Rules{}).OnGameStart(state))
+		require.NoError(t, openTable(state))
 		return state, gametest.Extra[*State](t, state)
 	}
 
@@ -378,7 +378,7 @@ func TestRules_OnGameStart_NeverOpensOnAWild(t *testing.T) {
 	state := game.NewState(rules, players, nil)
 	state.Deck = deck.New(stacked)
 
-	require.NoError(t, rules.OnGameStart(state))
+	require.NoError(t, openTable(state))
 
 	top, ok := state.Discard.Peek()
 	require.True(t, ok)
@@ -409,8 +409,18 @@ func TestRules_DrawCard_SuccessfulDrawClearsThePassCount(t *testing.T) {
 func TestRules_Init(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	assert.Equal(t, 7, rules.InitialDealCount())
 	assert.Len(t, rules.InitialDeck(), 108)
+
+	t.Run("seven each from a full deck", func(t *testing.T) {
+		t.Parallel()
+		state := game.NewState(rules, []*game.Player{{ID: "a"}, {ID: "b"}}, nil)
+		require.NoError(t, rules.OnGameStart(state))
+
+		// The first seat also takes two when a Draw Two opens the pile.
+		assert.Contains(t, []int{7, 9}, len(state.Players[0].Cards))
+		assert.Len(t, state.Players[1].Cards, 7)
+		assert.Equal(t, 108, gametest.CardsInPlay(state))
+	})
 
 	t.Run("opening wild redrawn", func(t *testing.T) {
 		t.Parallel()
@@ -422,7 +432,7 @@ func TestRules_Init(t *testing.T) {
 			{Rank: deck.Two, Suit: ColorRed},
 		}
 		state := game.NewState(rules, players, stock)
-		require.NoError(t, rules.OnGameStart(state))
+		require.NoError(t, openTable(state))
 
 		extra := gametest.Extra[*State](t, state)
 		top, ok := state.Discard.Peek()
@@ -682,7 +692,7 @@ func TestRules_OnGameStart_AllWildsCannotOpen(t *testing.T) {
 		{Rank: WildDrawFour, Suit: ColorWild},
 	})
 
-	err := (&Rules{}).OnGameStart(state)
+	err := openTable(state)
 
 	require.ErrorContains(t, err, "not enough cards to start")
 	assert.Equal(t, 2, state.Deck.Size(), "the stock comes back whole")

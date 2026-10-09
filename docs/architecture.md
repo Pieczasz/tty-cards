@@ -650,7 +650,9 @@ rules beside the games rather than in the engine: `shed.State` (embedded in both
 games' `Extra`, carrying the deadlock `Passes` count), `shed.ValidatePlay` (a card in
 play to match, and the played card in the hand of the seat on turn, with the game's
 own match rule passed in), `shed.DrawInto` (off the stock, refilled from under the
-card in play; `false` is a forced pass), `shed.OpenDiscard`, `shed.Leave`,
+card in play; `false` is a forced pass), `shed.Deal` (the opening deal: a fresh
+shuffled stock and seven each, run from `OnGameStart` - the rules deal, not the
+engine), `shed.OpenDiscard`, `shed.Leave`,
 `shed.HandEmptyOrAllPassed` and `shed.Standings`/`shed.Score`. The reshuffle itself
 is unexported and returns nothing: the error it used to return was unreachable.
 Both games prove the shared contract once, through `gametest.RunShed` and

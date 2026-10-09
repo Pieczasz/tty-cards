@@ -18,6 +18,9 @@ const (
 	MaxPlayers = 10
 )
 
+// dealCount is the hand every seat is dealt.
+const dealCount = 7
+
 // Rules implements Uno; see the Deviation notes for where it departs from the box.
 type Rules struct{}
 
@@ -29,7 +32,7 @@ var (
 )
 
 func (r *Rules) InitialDeck() []deck.Card { return initialDeck() }
-func (r *Rules) InitialDealCount() int    { return 7 }
+func (r *Rules) InitialDealCount() int    { return 0 }
 
 // TimeoutAction draws: ValidateAction always accepts a draw, so it cannot be refused.
 func (r *Rules) TimeoutAction(_ *game.State) game.Action {
@@ -37,6 +40,16 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
+	if err := shed.Deal(state, initialDeck(), dealCount); err != nil {
+		return fmt.Errorf("deal uno: %w", err)
+	}
+	return openTable(state)
+}
+
+// openTable is OnGameStart once the hands are dealt - and it has to be after, since
+// an opening Draw Two deals into the first seat's hand: the opening discard, the
+// colour it names and its action.
+func openTable(state *game.State) error {
 	extra := &State{Direction: 1}
 	state.Extra = extra
 
