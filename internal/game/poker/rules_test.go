@@ -105,10 +105,16 @@ func TestRules_ValidateAction(t *testing.T) {
 		assert.ErrorContains(t, (&Rules{}).ValidateAction(state, ActionFold{}), "player cannot act")
 	})
 
-	t.Run("a move from another game", func(t *testing.T) {
+	// Between hands too: the hand being over is no answer to a move poker has no
+	// case for.
+	t.Run("a move from another game, mid-hand or between hands", func(t *testing.T) {
 		t.Parallel()
-		require.ErrorIs(t, (&Rules{}).ValidateAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
-		assert.ErrorIs(t, (&Rules{}).ApplyAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
+		for _, phase := range []Phase{PhasePreFlop, PhaseShowdown} {
+			state := createTestState()
+			gametest.Extra[*State](t, state).Phase = phase
+			require.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction, phase)
+			require.ErrorIs(t, (&Rules{}).ApplyAction(state, gametest.ForeignAction{}), game.ErrUnknownAction, phase)
+		}
 	})
 }
 

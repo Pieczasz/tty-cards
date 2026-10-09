@@ -162,14 +162,22 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	if !ok {
 		return game.ErrInvalidState
 	}
-	if _, isNextHand := action.(ActionNextHand); isNextHand {
+	switch action.(type) {
+	case ActionNextHand:
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
 		return game.ValidateNextHand(extra.HandComplete(), extra.MatchComplete)
+	case ActionFold, ActionCheck, ActionCall, ActionRaiseTo, ActionAllIn:
+		if extra.HandComplete() {
+			return game.ErrHandOver
+		}
+		return validateBet(state, extra, action)
+	default:
+		return game.ErrUnknownAction
 	}
-	if extra.HandComplete() {
-		return game.ErrHandOver
-	}
+}
 
+// validateBet checks a betting action from the seat on turn in a live hand.
+func validateBet(state *game.State, extra *State, action game.Action) error {
 	p := state.Players[state.CurrentTurn]
 	seat := extra.Seats[p.ID]
 	if seat.Folded || seat.AllIn {
@@ -179,18 +187,14 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	toCall := extra.ToCall(p.ID)
 
 	switch action := action.(type) {
-	case ActionFold:
-		return nil
 	case ActionCheck:
 		if toCall > 0 {
 			return errors.New("cannot check, must call or raise")
 		}
-		return nil
 	case ActionCall:
 		if toCall == 0 {
 			return errors.New("nothing to call")
 		}
-		return nil
 	case ActionRaiseTo:
 		return validateRaiseTo(state, extra, p, action.Amount)
 	case ActionAllIn:
@@ -202,10 +206,9 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 		if seat.Bet+seat.Chips > extra.CurrentBet {
 			return checkBettingReopened(extra, seat)
 		}
-		return nil
-	default:
-		return game.ErrUnknownAction
 	}
+	// A fold is always open to a seat that can act.
+	return nil
 }
 
 // ApplyAction plays the move and then settles the street around it - the next actor,
