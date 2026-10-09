@@ -1216,8 +1216,8 @@ table ends, the match is recorded **unrated**
 (§[11](#11-three-end-states-are-recorded-without-elo)), and every other table
 keeps playing. This is a
 backstop, not a licence: rules are still expected not to panic, and the
-`TestSoak_TimeoutActionIsAlwaysLegal` soaks (for crazy eights and uno, through the
-shared `gametest.SoakTimeoutIsAlwaysLegal`) and `FuzzBestMeldSplit` exist to keep
+`gametest.SoakAmongRandomMoves` soak, run over every catalog game, and
+`FuzzBestMeldSplit` exist to keep
 them from doing so. `bestSplitBy`'s over-long-hand guard in
 `internal/game/ginrummy/melds.go` still returns the whole hand as deadwood rather
 than panicking; its comment predates this recover and now understates the

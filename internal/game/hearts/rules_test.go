@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func fourPlayers(hands ...[]deck.Card) []*game.Player {
@@ -909,85 +908,6 @@ func TestPassDirection_String(t *testing.T) {
 	assert.Equal(t, "across", PassAcross.String())
 	assert.Equal(t, "hold", PassNone.String())
 	assert.Equal(t, "unknown", PassDirection(9).String())
-}
-
-// The engine plays TimeoutAction for a seat that has gone quiet. A move ValidateAction
-// refuses is not a skipped turn: the clock re-arms and the seat is taken on the next
-// expiry, so a player is removed for a mistake the rules made. Hearts is the hardest
-// case - the pass phase, the 2♣ lead, following suit and the first-trick point ban are
-// four different reasons a plausible move is illegal.
-func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		players := []*game.Player{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}, {ID: "p4"}}
-		engine := game.NewEngine(rules, players)
-		require.NoError(rt, engine.Start())
-		defer engine.Close()
-
-		for step := range 2000 {
-			if engine.IsFinished() {
-				return
-			}
-			id := engine.CurrentPlayerID()
-			var act game.Action
-			engine.WithState(func(s *game.State) {
-				act = rules.TimeoutAction(s)
-				require.NotNil(rt, act, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, act),
-					"step %d: %s is not a legal move", step, act.Name())
-			})
-			require.NoError(rt, engine.SubmitAction(id, act))
-		}
-		rt.Fatalf("a match played entirely by the clock never reached %d points", targetScore)
-	})
-}
-
-// A table played only by the clock passes the same kind of cards and plays the first
-// legal one, so it reaches few of the hands a real pass leaves behind. Random legal
-// moves between the checks put TimeoutAction in front of the rest.
-func TestSoak_TimeoutActionIsLegalAmongRandomMoves(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		engine := game.NewEngine(rules, fourPlayers())
-		require.NoError(rt, engine.Start())
-		defer engine.Close()
-
-		for step := range 120 {
-			if engine.IsFinished() {
-				return
-			}
-			id := engine.CurrentPlayerID()
-			var legal []game.Action
-			engine.WithState(func(s *game.State) {
-				timeout := rules.TimeoutAction(s)
-				require.NotNil(rt, timeout, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, timeout),
-					"step %d: %s is not a legal move", step, timeout.Name())
-				legal = append(legal, timeout)
-
-				hand := s.Players[s.CurrentTurn].Cards
-				moves := []game.Action{ActionNextHand{}}
-				if len(hand) >= cardsToPass {
-					pass := rapid.Permutation(hand).Draw(rt, fmt.Sprintf("pass%d", step))[:cardsToPass]
-					moves = append(moves, ActionPassCards{Cards: pass})
-				}
-				for _, c := range hand {
-					moves = append(moves, ActionPlayCard{Card: c})
-				}
-				for _, m := range moves {
-					if rules.ValidateAction(s, m) == nil {
-						legal = append(legal, m)
-					}
-				}
-			})
-			act := rapid.SampledFrom(legal).Draw(rt, fmt.Sprintf("move%d", step))
-			require.NoError(rt, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
-		}
-	})
 }
 
 // The lobby enforces MinPlayers, but OnGameStart is what the deal depends on: thirteen

@@ -208,16 +208,11 @@ data migration, not a rename. The display `Name` is free to change.
   sharing a seated player's place - and `gametest.SoakAmongRandomMoves` checks
   `TimeoutAction` against `ValidateAction` on every turn of random play with seats
   walking out.
-- **A timeout-action soak.** Four games have
-  `TestSoak_TimeoutActionIsAlwaysLegal` (rapid-driven; hearts and gin rummy write
-  their own, crazy eights and uno call `gametest.SoakTimeoutIsAlwaysLegal`); poker
-  has the deterministic equivalent,
-  `TestRules_TimeoutAction_IsAcceptedByValidateAction`. Either shape is fine.
-  Without one, the auto-play path is untested until it strands a real table.
+  That is the timeout-action soak; do not write your own. Without it the auto-play
+  path is untested until it strands a real table.
 - **A shedding game runs the shared suite.** Describe it as a `gametest.Shed` and
   call `gametest.RunShed(t, suite)`, as `internal/game/uno/helpers_test.go` does,
-  rather than copying the draw, reshuffle and deadlock tests. Other games have no
-  shared suite; `gametest` is optional for them.
+  rather than copying the draw, reshuffle and deadlock tests.
 - **A fit test.** `TestView_FitsTheTerminal`-style, over `tuitest.FitSizes`
   (`{styles.MinWidth, styles.MinHeight}`, `{80, 24}`, `{120, 50}`), driving keys
   with `tuitest.Key`. Copy `internal/tui/views/gameview/uno/view_test.go`.

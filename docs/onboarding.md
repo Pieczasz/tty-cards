@@ -121,7 +121,7 @@ tty-cards/
 │   │   ├── bound.go            BoundEngine - the per-player façade
 │   │   ├── registry.go         immutable name -> Module lookup, NewRegistry(mods...)
 │   │   ├── shed/               what crazy eights and uno share (play check, draw, standings)
-│   │   ├── gametest/           the shared shedding-game suite, RunShed
+│   │   ├── gametest/           the shared suites: RunRules, SoakAmongRandomMoves, RunShed
 │   │   ├── crazyeight/         rules.go, state.go
 │   │   ├── uno/                rules.go, state.go, deck.go
 │   │   ├── hearts/             rules.go, state.go, trick.go

@@ -26,8 +26,3 @@ func TestShedContract(t *testing.T) {
 	t.Parallel()
 	gametest.RunShed(t, suite)
 }
-
-func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
-	t.Parallel()
-	gametest.SoakTimeoutIsAlwaysLegal(t, suite)
-}

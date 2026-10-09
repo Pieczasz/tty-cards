@@ -663,10 +663,13 @@ shuffled stock and seven each, run from `OnGameStart` - the rules deal, not the
 engine), `shed.OpenDiscard`, `shed.Leave`,
 `shed.HandEmptyOrAllPassed` and `shed.Standings`/`shed.Score`. The reshuffle itself
 is unexported and returns nothing: the error it used to return was unreachable.
-Both games prove the shared contract once, through `gametest.RunShed` and
-`gametest.SoakTimeoutIsAlwaysLegal` (`internal/game/gametest`, imported only by
-tests); the soak mixes random legal plays, Eights' and Wilds' suit choices among
-them, into the clock's own moves before a clock-only tail proves the table still ends.
+Both games prove the shedding contract once, through `gametest.RunShed`
+(`internal/game/gametest`, imported only by tests). Every game, these two included,
+also runs the Rules contract from `internal/catalog/rules_test.go`:
+`gametest.RunRules` (a match the clock plays alone ends, another game's move is
+`ErrUnknownAction`, `Standings` ranks every seat and leaver) and
+`gametest.SoakAmongRandomMoves`, which mixes random legal moves - Eights' and Wilds'
+suit choices among them - and the odd leave into the clock's own moves.
 
 `NewEngine` seats **copies** of the players it is given, with `Cards` cleared, so
 a finished engine's viewers and the next engine never share a hand. The engine
@@ -1303,7 +1306,7 @@ rules still compiles, so keep the pair in lockstep by hand.
 | `internal/lobby` | tables, grace, finalize orchestration | card rules |
 | `internal/game` | engine + rules | db, tui, routes, lobby |
 | `internal/game/shed` | what the shedding games (crazy eights, uno) share | engine internals |
-| `internal/game/gametest` | the shared rules suites (`RunShed`, `SoakTimeoutIsAlwaysLegal`) and test helpers every rules package uses (`Extra`, `ForeignAction`, `LogSink`) | production imports |
+| `internal/game/gametest` | the shared rules suites (`RunRules`, `SoakAmongRandomMoves`, `RunShed`) and test helpers every rules package uses (`Extra`, `ForeignAction`, `LogSink`) | production imports |
 | `internal/db` | models + repository **interfaces** + auth sentinels | GORM queries |
 | `internal/repository` | GORM implementations | SSH / TUI |
 | `internal/catalog` | the game list | runtime state |
