@@ -118,7 +118,7 @@ func (m *Manager) persistFinishedMatch(
 		res.places = append(res.places, s.Place)
 	}
 	if res.interrupted {
-		res.leavers = leaverIDs(engine)
+		res.leavers = leaverIDs(standings)
 	}
 
 	// An interrupted match stays rated, but only against its leavers: see
@@ -156,15 +156,14 @@ func (m *Manager) recordFinishedMatch(ctx context.Context, res matchResult, rate
 	}
 }
 
-// leaverIDs is who left the finished engine's table. LeftPlayers is engine state, so it
-// is read under the engine's lock; the lobby holds no lock of its own here.
-func leaverIDs(engine *game.Engine) []uuid.UUID {
+// leaverIDs is who left the finished table, as its standings mark them.
+func leaverIDs(standings []game.Standing) []uuid.UUID {
 	var ids []uuid.UUID
-	engine.WithState(func(state *game.State) {
-		for _, p := range state.LeftPlayers {
-			ids = append(ids, p.UserID)
+	for _, s := range standings {
+		if s.Left {
+			ids = append(ids, s.Player.UserID)
 		}
-	})
+	}
 	return ids
 }
 

@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"uuid"
 )
 
 type MockRules struct {
@@ -678,6 +680,8 @@ func TestEngine_Places_LeaverNeverTiesASeatedPlayer(t *testing.T) {
 			require.Len(t, standings, 3)
 			assert.Equal(t, []string{"p1", "p2", "p3"}, standingIDs(engine))
 			assert.Equal(t, tt.want, places(standings), "the quitter always places last on their own")
+			assert.Equal(t, []bool{false, false, true}, []bool{standings[0].Left, standings[1].Left, standings[2].Left},
+				"finalize charges the leavers it reads off Left")
 		})
 	}
 }
@@ -705,6 +709,31 @@ func TestEngine_Places_LeaversWithEqualScoreShareAPlace(t *testing.T) {
 	require.Len(t, standings, 4)
 	assert.Equal(t, []string{"p1", "p2", "p4", "p3"}, standingIDs(engine))
 	assert.Equal(t, []int{1, 1, 3, 3}, places(standings))
+}
+
+// Standings outlive the engine lock - finalize reads them on its own goroutine - so
+// they are copies of the seats' identity, not the live seats a leave or a deal still
+// writes.
+func TestEngine_Standings_AreCopiesOfTheSeatsIdentity(t *testing.T) {
+	t.Parallel()
+	var userID uuid.UUID
+	userID[15] = 1
+	seat := &Player{ID: "p1", UserID: userID, Name: "alice", Ratings: map[string]uint32{"g": 1500}}
+
+	// bindRules ranks the live seats in order.
+	engine := NewEngine(bindRules{}, []*Player{seat, {ID: "p2"}})
+	t.Cleanup(engine.Close)
+	require.NoError(t, engine.Start())
+	var live *Player
+	engine.WithState(func(state *State) { live = state.Players[0] })
+	assert.Nil(t, live.Ratings, "the ratings are the lobby's, not the table's")
+
+	standings := engine.Standings()
+
+	require.Len(t, standings, 2)
+	got := standings[0].Player
+	assert.NotSame(t, live, got)
+	assert.Equal(t, Player{ID: "p1", UserID: userID, Name: "alice"}, *got, "identity only: no cards, no ratings")
 }
 
 // drainEvents takes everything already published. Broadcast is synchronous under the
