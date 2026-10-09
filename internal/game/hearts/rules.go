@@ -197,6 +197,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		// applyAllPasses delivers them, and a caller that retains its slice must
 		// not be able to rewrite another seat's incoming cards.
 		extra.PendingPasses[p.ID] = slices.Clone(a.Cards)
+		afterPass(state, extra)
 	case ActionPlayCard:
 		p := state.Players[state.CurrentTurn]
 		extra.startTrick()
@@ -209,21 +210,6 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		if a.Card.Suit == deck.Hearts {
 			extra.HeartsBroken = true
 		}
-	case ActionNextHand:
-		// dealt in AfterAction
-	}
-	return nil
-}
-
-func (r *Rules) AfterAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
-	switch action.(type) {
-	case ActionPassCards:
-		afterPass(state, extra)
-	case ActionPlayCard:
 		afterPlay(state, extra)
 	case ActionNextHand:
 		return beginHand(state, extra, state.CurrentTurn)

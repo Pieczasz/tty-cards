@@ -39,7 +39,7 @@ func TestMatch_ScoresCarryIntoNextHand(t *testing.T) {
 	require.True(t, extra.HandComplete())
 
 	require.NoError(t, rules.ValidateAction(state, ActionNextHand{}))
-	require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
+	require.NoError(t, rules.ApplyAction(state, ActionNextHand{}))
 	assert.Equal(t, score, extra.CumulativeScores["p1"], "scores carry across hands")
 	assert.Equal(t, 2, extra.HandNumber)
 	assert.False(t, extra.HandComplete())
@@ -75,8 +75,7 @@ func TestMatch_UpcardTradingCannotStallTheHand(t *testing.T) {
 		shed, ok := autoDiscard(state.Players[state.CurrentTurn].Cards, extra.TakenUpcard)
 		require.True(t, ok)
 		require.NoError(t, rules.ValidateAction(state, ActionDiscard{Card: shed}))
-		rules.ApplyAction(state, ActionDiscard{Card: shed})
-		require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: shed}))
+		require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: shed}))
 		state.CurrentTurn = 1 - state.CurrentTurn
 	}
 	t.Fatalf("hand never terminated after %d turns", maxHandTurns*2)
@@ -162,7 +161,7 @@ func TestMatch_FirstActorAlternates(t *testing.T) {
 	next := 1
 	extra.FirstActor = next
 	state.CurrentTurn = next
-	require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
+	require.NoError(t, rules.ApplyAction(state, ActionNextHand{}))
 	assert.Equal(t, 1, extra.FirstActor)
 	assert.Equal(t, 1, state.CurrentTurn)
 }

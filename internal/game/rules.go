@@ -32,8 +32,8 @@ type Rules interface {
 	OnGameStart(state *State) error
 
 	ValidateAction(state *State, action Action) error
-	AfterAction(state *State, action Action) error
-
+	// ApplyAction plays an action ValidateAction accepted, the whole move: an error
+	// ends the table as a rules error.
 	ApplyAction(state *State, action Action) error
 	CheckWinCondition(state *State) bool
 	Standings(state *State) []*Player

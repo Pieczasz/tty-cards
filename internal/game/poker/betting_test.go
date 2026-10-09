@@ -613,7 +613,7 @@ func TestApplyAction_AllInCommitsTheWholeStack(t *testing.T) {
 			extra.MinRaise = DefaultBigBlind
 			state.CurrentTurn = 0
 
-			(&Rules{}).ApplyAction(state, ActionAllIn{})
+			applyBet(state, extra, ActionAllIn{})
 
 			assert.Zero(t, extra.Seats["a"].Chips, "all-in leaves no chips behind")
 			assert.Equal(t, tt.wantBet, extra.Seats["a"].Bet)
@@ -756,13 +756,13 @@ func TestValidateAction_NoRaiseWhenBettingIsNotReopened(t *testing.T) {
 }
 
 // A hand that cannot be dealt has to be reported.
-func TestAfterAction_NextHandReportsABadDeal(t *testing.T) {
+func TestApplyAction_NextHandReportsABadDeal(t *testing.T) {
 	t.Parallel()
 	// Only one player still has chips, so there is no hand to deal.
 	state, extra := tableWithChips(1000, 0)
 	extra.HandNumber = 1
 
-	err := (&Rules{}).AfterAction(state, ActionNextHand{})
+	err := (&Rules{}).ApplyAction(state, ActionNextHand{})
 
 	require.ErrorContains(t, err, "not enough funded players")
 }

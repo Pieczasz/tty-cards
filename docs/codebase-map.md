@@ -257,7 +257,6 @@ sequenceDiagram
         E->>Bc: endOnRulesPanicLocked -> endGameLocked - EventGameEnded (RulesError), no Standings call
     else accepted
         E->>Ru: ApplyAction
-        E->>Ru: AfterAction
         Note over E,Ru: error here = EndReasonRulesError,<br/>state may be half-applied, match unrated
         E->>Ru: CheckWinCondition
         E->>E: advanceTurnLocked -> settleTurnLocked<br/>OverrideNextTurn > advance > stay<br/>re-arm timer, clock.seq++ (same seat keeps its deadline)
@@ -351,7 +350,6 @@ classDiagram
         OnGameStart(*State) error
         ValidateAction(*State, Action) error
         ApplyAction(*State, Action) error
-        AfterAction(*State, Action) error
         CheckWinCondition(*State) bool
         Standings(*State) []*Player
     }

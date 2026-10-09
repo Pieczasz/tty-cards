@@ -3,7 +3,7 @@ package game
 import "errors"
 
 // SetTurn puts seat on turn now and keeps it there once the action settles. It is the
-// one way a rules set names who acts next from inside ApplyAction or AfterAction.
+// one way a rules set names who acts next from inside ApplyAction.
 func (s *State) SetTurn(seat int) {
 	s.CurrentTurn = seat
 	s.OverrideTurn(seat)

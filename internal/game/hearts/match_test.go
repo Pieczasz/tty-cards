@@ -152,13 +152,13 @@ func TestMatch_DealerRotatesOneSeatPerHand(t *testing.T) {
 			extra.TrickCards[p.ID] = card
 		}
 		extra.LedSuit = deck.Clubs
-		require.NoError(t, rules.AfterAction(state, ActionPlayCard{}))
+		afterPlay(state, extra)
 
 		// Hand 1 dealt from seat 1, so hand N deals from seat N mod 4.
 		wantDealer := hand % len(players)
 		require.Equal(t, wantDealer, state.CurrentTurn, "hand %d deals to the next seat", hand)
 
-		require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
+		require.NoError(t, rules.ApplyAction(state, ActionNextHand{}))
 		assert.Equal(t, wantDealer, extra.DealerIndex, "hand %d", hand)
 		assert.Equal(t, hand, extra.HandNumber)
 	}

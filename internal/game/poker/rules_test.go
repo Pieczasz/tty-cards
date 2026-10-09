@@ -225,7 +225,7 @@ func TestRules_CheckWinCondition(t *testing.T) {
 		extra.Pool = 150
 		extra.Seats["p2"].Folded = true
 		extra.Seats["p3"].Folded = true
-		require.NoError(t, (&Rules{}).AfterAction(state, ActionFold{}))
+		require.NoError(t, afterBettingAction(state, extra))
 		assert.True(t, extra.HandComplete())
 		assert.True(t, (&Rules{}).CheckWinCondition(state))
 		assert.Equal(t, uint(1150), extra.Seats["p1"].Chips)
@@ -539,7 +539,6 @@ func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
 	assert.Zero(t, rules.TurnDuration(state))
 	require.ErrorIs(t, rules.ValidateAction(state, ActionFold{}), game.ErrInvalidState)
 	require.ErrorIs(t, rules.ApplyAction(state, ActionFold{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.AfterAction(state, ActionFold{}), game.ErrInvalidState)
 	assert.NotPanics(t, func() { rules.OnPlayerLeave(state, "a") })
 	assert.NotPanics(t, func() { rules.AfterPlayerRemoved(state, 0) })
 }
@@ -559,7 +558,6 @@ func TestRules_TimeoutAction_CallsWhenTheCallIsRefundedInFull(t *testing.T) {
 	require.Equal(t, ActionCall{}, action)
 	require.NoError(t, rules.ValidateAction(state, action))
 	require.NoError(t, rules.ApplyAction(state, action))
-	require.NoError(t, rules.AfterAction(state, action))
 	assert.True(t, extra.ReachedShowdown, "the hand is shown down, not folded")
 	assert.Equal(t, uint(1010), extra.Seats["p0"].Chips+extra.Seats["p1"].Chips)
 	assert.GreaterOrEqual(t, extra.Seats["p0"].Chips, uint(990), "the button risked only the 10 the blind covered")

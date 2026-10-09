@@ -375,8 +375,7 @@ func TestRules_Wall_AfterDiscard(t *testing.T) {
 	})
 	card := state.Players[0].Cards[0]
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds)) // 11 cards
-	rules.ApplyAction(state, ActionDiscard{Card: card})
-	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
+	require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
 	assert.True(t, extra.HandComplete())
 	require.NotNil(t, extra.LastHandResult)
 	assert.Equal(t, OutcomeWall, extra.LastHandResult.Outcome)
@@ -394,8 +393,7 @@ func TestRules_Wall_StockThreeDoesNotTrigger(t *testing.T) {
 	})
 	card := state.Players[0].Cards[0]
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds))
-	rules.ApplyAction(state, ActionDiscard{Card: card})
-	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
+	require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
 	assert.False(t, extra.HandComplete())
 	assert.Equal(t, PhaseAwaitingDraw, extra.Phase)
 }
@@ -575,8 +573,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 		extra.Phase = PhaseAwaitingDiscard
 		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 		card := state.Players[state.CurrentTurn].Cards[0]
-		rules.ApplyAction(state, ActionDiscard{Card: card})
-		require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
+		require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
 		require.True(t, extra.HandComplete())
 		require.Equal(t, OutcomeWall, extra.LastHandResult.Outcome)
 
@@ -590,7 +587,7 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 		}
 
 		require.NoError(t, rules.ValidateAction(state, ActionNextHand{}))
-		require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
+		require.NoError(t, rules.ApplyAction(state, ActionNextHand{}))
 	}
 	t.Fatalf("the match never ended after %d walled hands", maxHands+5)
 }
@@ -762,7 +759,6 @@ func TestRules_NotAGinRummyState(t *testing.T) {
 
 	require.ErrorIs(t, rules.ValidateAction(state, ActionDrawStock{}), game.ErrInvalidState)
 	require.ErrorIs(t, rules.ApplyAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.AfterAction(state, ActionDrawStock{}), game.ErrInvalidState)
 	assert.Nil(t, rules.Standings(state))
 	assert.Nil(t, rules.TimeoutAction(state))
 	assert.Zero(t, rules.StandingScore(state, &game.Player{ID: "p1"}))

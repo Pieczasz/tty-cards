@@ -578,7 +578,7 @@ key -> view.Update -> BoundEngine.Submit(action)
                          v
                  Engine.SubmitAction (e.mu held)
                    checkTurnLocked:    on turn? ValidateAction
-                   applyActionLocked:  ApplyAction -> AfterAction
+                   applyActionLocked:  ApplyAction (the whole move)
                                        CheckWinCondition / advanceTurnLocked
                    broadcast Event*
 ```
@@ -626,8 +626,9 @@ engine's.
   structurally: `Rules` methods receive only `*State`, which carries no engine
   handle. Do not add one.
 - Rules may mutate `*State` freely under the engine lock.
-- `ValidateAction` rejects cleanly; an error from `ApplyAction` or `AfterAction`
-  ends the game as `endGameLocked(nil, EndReasonRulesError)`, with no winner and
+- `ValidateAction` rejects cleanly; an error from `ApplyAction` (the whole move:
+  a rules set's own after-step, such as poker settling the street, runs at its
+  end - the engine never had a use for a second hook) ends the game as `endGameLocked(nil, EndReasonRulesError)`, with no winner and
   without asking `Standings` (state may be half-applied) -> **unrated** persistence. Anything checkable up front belongs in
   `ValidateAction`.
 - Optional, probed by type assertion: `PlayerLeaveHandler`,

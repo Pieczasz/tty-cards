@@ -177,18 +177,15 @@ func TestBetting_AllInShortStackSidePotAward(t *testing.T) {
 
 	// short all-in 100; mid and big put 300 each -> main 300 + side 400.
 	state.CurrentTurn = 0
-	rules.ApplyAction(state, ActionAllIn{})
-	require.NoError(t, rules.AfterAction(state, ActionAllIn{}))
+	require.NoError(t, rules.ApplyAction(state, ActionAllIn{}))
 
 	state.CurrentTurn = *state.OverrideNextTurn
 	require.NoError(t, rules.ValidateAction(state, ActionRaiseTo{Amount: 300}))
-	rules.ApplyAction(state, ActionRaiseTo{Amount: 300})
-	require.NoError(t, rules.AfterAction(state, ActionRaiseTo{Amount: 300}))
+	require.NoError(t, rules.ApplyAction(state, ActionRaiseTo{Amount: 300}))
 
 	state.CurrentTurn = *state.OverrideNextTurn
 	require.NoError(t, rules.ValidateAction(state, ActionCall{}))
-	rules.ApplyAction(state, ActionCall{})
-	require.NoError(t, rules.AfterAction(state, ActionCall{}))
+	require.NoError(t, rules.ApplyAction(state, ActionCall{}))
 
 	assert.True(t, extra.HandComplete())
 	assert.Equal(t, uint(0), extra.Pool)

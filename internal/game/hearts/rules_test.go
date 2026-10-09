@@ -109,7 +109,7 @@ func TestRules_ValidateAction_Pass(t *testing.T) {
 	})
 }
 
-func TestRules_AfterAction_Pass_AppliesOnFourth(t *testing.T) {
+func TestRules_ApplyAction_Pass_AppliesOnFourth(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	hands := make([][]deck.Card, 4)
@@ -134,8 +134,7 @@ func TestRules_AfterAction_Pass_AppliesOnFourth(t *testing.T) {
 		state.CurrentTurn = seat
 		pass := hands[seat][:3]
 		require.NoError(t, rules.ValidateAction(state, ActionPassCards{Cards: pass}))
-		rules.ApplyAction(state, ActionPassCards{Cards: pass})
-		require.NoError(t, rules.AfterAction(state, ActionPassCards{Cards: pass}))
+		require.NoError(t, rules.ApplyAction(state, ActionPassCards{Cards: pass}))
 	}
 
 	assert.Equal(t, PhaseTrickPlay, extra.Phase)
@@ -223,8 +222,7 @@ func TestRules_ApplyAction_Play_BreaksHeartsAndTrickWinner(t *testing.T) {
 	}
 	for _, play := range plays {
 		state.CurrentTurn = play.seat
-		rules.ApplyAction(state, ActionPlayCard{Card: play.card})
-		require.NoError(t, rules.AfterAction(state, ActionPlayCard{Card: play.card}))
+		require.NoError(t, rules.ApplyAction(state, ActionPlayCard{Card: play.card}))
 	}
 
 	assert.True(t, extra.HeartsBroken)
@@ -255,8 +253,7 @@ func TestRules_ApplyAction_Play_TrickWithoutHeartsLeavesThemUnbroken(t *testing.
 		{Rank: deck.Two, Suit: deck.Diamonds},
 	} {
 		state.CurrentTurn = seat
-		rules.ApplyAction(state, ActionPlayCard{Card: card})
-		require.NoError(t, rules.AfterAction(state, ActionPlayCard{Card: card}))
+		require.NoError(t, rules.ApplyAction(state, ActionPlayCard{Card: card}))
 	}
 
 	assert.False(t, extra.HeartsBroken, "no heart was played")
@@ -265,7 +262,7 @@ func TestRules_ApplyAction_Play_TrickWithoutHeartsLeavesThemUnbroken(t *testing.
 
 // The led suit is fixed by the first card of the trick, not the last. A higher card
 // of another suit does not win, however high it is.
-func TestRules_AfterAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
+func TestRules_ApplyAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state := createTestState(
@@ -284,8 +281,7 @@ func TestRules_AfterAction_Play_LedSuitIsTheFirstCardNotTheLast(t *testing.T) {
 		{Rank: deck.Two, Suit: deck.Diamonds}, // last card, and its suit must not lead
 	} {
 		state.CurrentTurn = seat
-		rules.ApplyAction(state, ActionPlayCard{Card: card})
-		require.NoError(t, rules.AfterAction(state, ActionPlayCard{Card: card}))
+		require.NoError(t, rules.ApplyAction(state, ActionPlayCard{Card: card}))
 	}
 
 	assert.Equal(t, "p3", extra.LastTrickWinner, "the king of clubs beats the ace of diamonds")
@@ -387,7 +383,7 @@ func TestRules_TimeoutAction(t *testing.T) {
 	})
 }
 
-// The engine broadcasts a play after AfterAction returns, so a trick swept the
+// The engine broadcasts a play after ApplyAction returns, so a trick swept the
 // moment its fourth card lands is gone before anyone is told about it: the three
 // players who did not take it never see what beat them. It has to stay on the table
 // until somebody leads the next one.
@@ -408,8 +404,7 @@ func TestRules_FinishedTrickStaysOnTheTableUntilTheNextLead(t *testing.T) {
 		state.CurrentTurn = seat
 		card := p.Cards[0]
 		require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: card}))
-		rules.ApplyAction(state, ActionPlayCard{Card: card})
-		require.NoError(t, rules.AfterAction(state, ActionPlayCard{Card: card}))
+		require.NoError(t, rules.ApplyAction(state, ActionPlayCard{Card: card}))
 	}
 
 	require.Equal(t, "p3", extra.LastTrickWinner)
@@ -591,8 +586,7 @@ func TestMatch_MoonFromRealTrickPlay(t *testing.T) {
 			card, ok := firstLegalCard(extra, p)
 			require.True(t, ok, "trick %d seat %d has no legal card", trick, seat)
 			require.NoError(t, rules.ValidateAction(state, ActionPlayCard{Card: card}))
-			rules.ApplyAction(state, ActionPlayCard{Card: card})
-			require.NoError(t, rules.AfterAction(state, ActionPlayCard{Card: card}))
+			require.NoError(t, rules.ApplyAction(state, ActionPlayCard{Card: card}))
 		}
 		require.Equal(t, "p1", extra.LastTrickWinner, "trick %d", trick)
 	}
@@ -899,7 +893,6 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 		state := &game.State{}
 		require.ErrorIs(t, rules.ValidateAction(state, ActionNextHand{}), game.ErrInvalidState)
 		require.ErrorIs(t, rules.ApplyAction(state, ActionNextHand{}), game.ErrInvalidState)
-		require.ErrorIs(t, rules.AfterAction(state, ActionNextHand{}), game.ErrInvalidState)
 		assert.False(t, rules.CheckWinCondition(state))
 		assert.Nil(t, rules.Standings(state))
 		assert.Zero(t, rules.StandingScore(state, &game.Player{ID: "p1"}))
