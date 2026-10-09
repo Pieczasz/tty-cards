@@ -86,7 +86,21 @@ func (m *model) Init() tea.Cmd {
 			return router.NavigateToGame(m.snap.Slug, table)
 		}
 	}
-	return listenToLobbyBroadcaster(m.lobbyChan)
+	return tea.Batch(listenToLobbyBroadcaster(m.lobbyChan), m.syncPlayer())
+}
+
+// syncPlayer keeps the session's player the one its seat holds. A ranked match
+// written while the player sits here reseats them with the new ratings, and every
+// screen built after this one - the join list's matchmaking among them - reads the
+// session's copy, not the seat. A player seated nowhere when the write commits keeps
+// the login's ratings until they reconnect.
+func (m *model) syncPlayer() tea.Cmd {
+	seat, ok := m.snap.SeatOf(m.global.Player)
+	if !ok || seat.Player == m.global.Player {
+		return nil
+	}
+	m.global.Player = seat.Player
+	return router.UpdatePlayer(seat.Player)
 }
 
 func (m *model) unsubscribe() {
@@ -239,6 +253,7 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.cursor = components.StepCursor(m.cursor, 0, m.maxCursor())
+		return m, tea.Batch(listenToLobbyBroadcaster(m.lobbyChan), m.syncPlayer())
 	}
 	return m, listenToLobbyBroadcaster(m.lobbyChan)
 }

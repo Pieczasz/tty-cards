@@ -37,6 +37,7 @@ type Deps struct {
 func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
 		User:         &deps.User,
+		Player:       internallobby.NewPlayer(&deps.User),
 		Profiles:     deps.Profiles,
 		Leaderboard:  deps.Leaderboard,
 		LobbyManager: deps.LobbyManager,
