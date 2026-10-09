@@ -1,6 +1,7 @@
-// Package gametest holds the rules tests more than one game has to pass, so a
-// shedding game proves the shared contract once rather than carrying its own copy of
-// every case. It is imported only by _test files.
+// Package gametest holds the rules tests more than one game has to pass, so a game
+// proves the shared contract once rather than carrying its own copy of every case:
+// RunRules and SoakAmongRandomMoves for every game, RunShed for the shedding ones. It
+// is imported only by _test files.
 //
 //nolint:thelper // the case functions are subtest bodies, not helpers: a failure belongs on their own line
 package gametest

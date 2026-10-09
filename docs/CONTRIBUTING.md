@@ -190,13 +190,24 @@ and `internal/tui/app.go` both read it.
 `Factory`) beside `View`; export the seat range as `MinPlayers` / `MaxPlayers`
 constants from the rules package. `catalog_test.go` fails on a missing field or a
 duplicate slug, and `game.NewRegistry` panics on either, or on seat bounds no table
-can meet, at boot. **The slug is
+can meet, at boot. `internal/catalog/rules_test.go` runs the shared Rules contract
+over every entry, and fails until its `moves` map has your game's candidate moves (see
+below). **The slug is
 persisted** (`games.slug`), so treat it as permanent: changing it later means a
 data migration, not a rename. The display `Name` is free to change.
 
 ### 4. Tests the game does not ship without
 
 - **Rules unit tests**, table-driven, covering every action the rules can reject.
+- **Candidate moves for the Rules contract.** Add your slug to `moves` in
+  `internal/catalog/rules_test.go`: every move worth trying for the seat on turn,
+  legal or not (the suite keeps the ones `ValidateAction` accepts). With it,
+  `gametest.RunRules` proves a match played by `TimeoutAction` alone ends, another
+  game's move is refused with `game.ErrUnknownAction` by `ValidateAction` and
+  `ApplyAction`, and `Standings` ranks everyone who sat down - leavers last, never
+  sharing a seated player's place - and `gametest.SoakAmongRandomMoves` checks
+  `TimeoutAction` against `ValidateAction` on every turn of random play with seats
+  walking out.
 - **A timeout-action soak.** Four games have
   `TestSoak_TimeoutActionIsAlwaysLegal` (rapid-driven; hearts and gin rummy write
   their own, crazy eights and uno call `gametest.SoakTimeoutIsAlwaysLegal`); poker
