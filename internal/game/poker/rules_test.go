@@ -456,24 +456,6 @@ func TestRoundPhase_String(t *testing.T) {
 	}
 }
 
-// Every rules hook reads State.Extra, and the engine hands it whatever the game put
-// there. Another game's state must be ignored rather than type-asserted into a panic.
-func TestRules_ForeignStateIsNotReadAsPoker(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-	state := game.NewState(rules, []*game.Player{{ID: "a"}, {ID: "b"}}, deck.Standard())
-	state.Extra = struct{ NotPoker bool }{}
-
-	assert.False(t, rules.CheckWinCondition(state))
-	assert.Nil(t, rules.Standings(state))
-	assert.Nil(t, rules.TimeoutAction(state))
-	assert.Zero(t, rules.TurnDuration(state))
-	require.ErrorIs(t, rules.ValidateAction(state, ActionFold{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.ApplyAction(state, ActionFold{}), game.ErrInvalidState)
-	assert.NotPanics(t, func() { rules.OnPlayerLeave(state, "a") })
-	assert.NotPanics(t, func() { rules.AfterPlayerRemoved(state, 0) })
-}
-
 // A call that no opponent can make the player pay for is free: the short big blind
 // is all-in for 10, so everything the button adds past that comes straight back at
 // showdown. Folding there hands the blind a pot the button had already covered.

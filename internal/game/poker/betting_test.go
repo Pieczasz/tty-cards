@@ -882,14 +882,6 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 	}
 }
 
-// A state that is not poker's must not be read as one.
-func TestRules_TurnTimeout_ForeignStateFallsBackToTheDefault(t *testing.T) {
-	t.Parallel()
-	state := game.NewState(&Rules{}, nil, deck.Standard())
-
-	assert.Zero(t, (&Rules{}).TurnDuration(state))
-}
-
 // Short all-ins that are each below a full raise but together reach one reopen the
 // betting for a player who already acted (the TDA rule): what they face is measured
 // against the bet they last acted on, not against the last shove alone.

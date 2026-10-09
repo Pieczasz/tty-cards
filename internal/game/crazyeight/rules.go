@@ -79,10 +79,7 @@ type ActionDrawCard struct{}
 func (a ActionDrawCard) Name() string { return "crazyeight.DrawCard" }
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 
 	switch action := action.(type) {
 	case ActionPlayCard:
@@ -111,10 +108,7 @@ func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 }
 
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	p := state.Players[state.CurrentTurn]
 
 	switch action := action.(type) {
@@ -143,20 +137,13 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return false
-	}
-	return shed.HandEmptyOrAllPassed(state, extra.Passes)
+	return shed.HandEmptyOrAllPassed(state, extraOf(state).Passes)
 }
 
 // OnPlayerLeave returns the departing player's cards to the stock so the deck
 // stays whole; the engine removes the player afterward.
 func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return
-	}
+	extra := extraOf(state)
 	shed.Leave(state, &extra.State, playerID)
 }
 

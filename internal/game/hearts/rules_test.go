@@ -790,11 +790,6 @@ func TestRules_TurnDuration(t *testing.T) {
 			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
-
-	t.Run("a state that is not a hearts state has no opinion", func(t *testing.T) {
-		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnDuration(&game.State{}))
-	})
 }
 
 // A hearts match that ends on a disconnect is scored where it stood, and where it stood
@@ -888,15 +883,6 @@ func TestRules_ValidateAction_StageGates(t *testing.T) {
 		assert.ErrorContains(t, rules.ValidateAction(state, ActionNextHand{}), "the match is over")
 	})
 
-	t.Run("a state that is not a hearts state", func(t *testing.T) {
-		t.Parallel()
-		state := &game.State{}
-		require.ErrorIs(t, rules.ValidateAction(state, ActionNextHand{}), game.ErrInvalidState)
-		require.ErrorIs(t, rules.ApplyAction(state, ActionNextHand{}), game.ErrInvalidState)
-		assert.False(t, rules.CheckWinCondition(state))
-		assert.Nil(t, rules.Standings(state))
-		assert.Nil(t, rules.TimeoutAction(state))
-	})
 }
 
 // PassDirection.String is the one label table the logs and the TUI banner share, so a

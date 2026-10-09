@@ -11,8 +11,8 @@ import (
 // them would forfeit chips they had no way to protect. They stay in the pot they are
 // committed to (see contenders) and are shown down like anybody else.
 func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
-	extra, ok := state.Extra.(*State)
-	if !ok || extra.HandComplete() {
+	extra := extraOf(state)
+	if extra.HandComplete() {
 		return
 	}
 	seat := extra.Seats[playerID]
@@ -28,10 +28,7 @@ func (r *Rules) OnPlayerLeave(state *game.State, playerID string) {
 // index on turn. A hand still live keeps a lone remaining seat playing: an all-in
 // leaver still contests the pot, so the seat has not won it by forfeit.
 func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) game.LeaveOutcome {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.LeaveSettled
-	}
+	extra := extraOf(state)
 	n := len(state.Players)
 	if n == 0 {
 		return game.LeaveSettled

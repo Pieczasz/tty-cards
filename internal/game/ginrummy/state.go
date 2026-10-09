@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // Phase is where the turn, or the hand, is. The zero value is PhaseAwaitingDraw, the
@@ -142,4 +143,11 @@ func cloneMelds(melds [][]deck.Card) [][]deck.Card {
 		out[i] = slices.Clone(meld)
 	}
 	return out
+}
+
+// extraOf is the table's Extra, which OnGameStart put there. Anything else is a
+// wiring bug, and the panic ends the one table as a rules error through the engine's
+// recover (decision #37).
+func extraOf(state *game.State) *State {
+	return state.Extra.(*State) //nolint:forcetypeassert // a wiring bug; the engine's recover ends the table (decision #37)
 }

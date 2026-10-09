@@ -129,3 +129,10 @@ func (p Phase) String() string {
 	}
 	return "UNKNOWN"
 }
+
+// extraOf is the table's Extra, which OnGameStart put there. Anything else is a
+// wiring bug, and the panic ends the one table as a rules error through the engine's
+// recover (decision #37).
+func extraOf(state *game.State) *State {
+	return state.Extra.(*State) //nolint:forcetypeassert // a wiring bug; the engine's recover ends the table (decision #37)
+}

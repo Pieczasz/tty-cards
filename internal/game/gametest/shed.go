@@ -8,7 +8,6 @@ package gametest
 
 import (
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -114,7 +113,6 @@ func RunShed(t *testing.T, s Shed) {
 		{"an empty table is not a deadlock", emptyTableIsNotADeadlock},
 		{"a draw needs no discard", drawNeedsNoDiscard},
 		{"the timeout move draws", timeoutDraws},
-		{"another game's state is refused or ignored", foreignExtraIsRefused},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -253,21 +251,4 @@ func timeoutDraws(t *testing.T, s Shed) {
 
 	state := s.Table(t, 3, 3)
 	assert.NoError(t, s.Rules.ValidateAction(state, s.Rules.TimeoutAction(state)))
-}
-
-// Extra holding something else is a wiring bug: every hook refuses or ignores it
-// rather than acting on a table it cannot read.
-func foreignExtraIsRefused(t *testing.T, s Shed) {
-	state := s.Table(t, 3, 3)
-	state.Extra = "not this game"
-	hand := slices.Clone(state.Players[0].Cards)
-
-	require.ErrorIs(t, s.Rules.ValidateAction(state, s.Draw), game.ErrInvalidState)
-	require.ErrorIs(t, s.Rules.ApplyAction(state, s.Draw), game.ErrInvalidState)
-	assert.False(t, s.Rules.CheckWinCondition(state))
-
-	s.Rules.OnPlayerLeave(state, "p1")
-	s.Rules.AfterPlayerRemoved(state, 0)
-	assert.Equal(t, hand, state.Players[0].Cards, "a leave on a foreign state moves no cards")
-	assert.Nil(t, state.OverrideNextTurn, "nor the turn")
 }

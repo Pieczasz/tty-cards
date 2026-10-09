@@ -48,10 +48,7 @@ var (
 // only one who can, so an absent dealer would otherwise freeze the match for
 // everyone still playing.
 func (r *Rules) TimeoutAction(state *game.State) game.Action {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
+	extra := extraOf(state)
 	if extra.HandComplete() {
 		if extra.MatchComplete {
 			return nil
@@ -77,8 +74,8 @@ const dealTurnDuration = time.Minute
 // TurnDuration gives the between-hands deal its own clock and leaves every betting
 // turn on the engine's.
 func (r *Rules) TurnDuration(state *game.State) time.Duration {
-	extra, ok := state.Extra.(*State)
-	if !ok || !extra.HandComplete() || extra.MatchComplete {
+	extra := extraOf(state)
+	if !extra.HandComplete() || extra.MatchComplete {
 		return 0
 	}
 	return dealTurnDuration
@@ -108,19 +105,11 @@ func (r *Rules) OnGameStart(state *game.State) error {
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return false
-	}
-	return extra.MatchComplete
+	return extraOf(state).MatchComplete
 }
 
 func (r *Rules) Standings(state *game.State) []game.Standing {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return nil
-	}
-	return rankPlayers(state, extra)
+	return rankPlayers(state, extraOf(state))
 }
 
 // ActionFold gives up the hand and everything already committed to it.
@@ -158,10 +147,7 @@ type ActionNextHand struct{}
 func (a ActionNextHand) Name() string { return "poker.NextHand" }
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	switch action.(type) {
 	case ActionNextHand:
 		//nolint:wrapcheck // player-facing prose; the engine already prefixes it
@@ -214,10 +200,7 @@ func validateBet(state *game.State, extra *State, action game.Action) error {
 // ApplyAction plays the move and then settles the street around it - the next actor,
 // the next street or the hand's end - or deals the next hand.
 func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
-	extra, ok := state.Extra.(*State)
-	if !ok {
-		return game.ErrInvalidState
-	}
+	extra := extraOf(state)
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
 		return beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
 	}

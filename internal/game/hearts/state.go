@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 // Phase is where a hand is. The zero value is PhasePassing, the phase every hand but
@@ -140,4 +141,11 @@ func resetHandState(extra *State) {
 	// reads zero and beginHand does not have to seed one key per player.
 	extra.HandPoints = make(map[string]int, playerCount)
 	extra.LastTrickWinner = ""
+}
+
+// extraOf is the table's Extra, which OnGameStart put there. Anything else is a
+// wiring bug, and the panic ends the one table as a rules error through the engine's
+// recover (decision #37).
+func extraOf(state *game.State) *State {
+	return state.Extra.(*State) //nolint:forcetypeassert // a wiring bug; the engine's recover ends the table (decision #37)
 }
