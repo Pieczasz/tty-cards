@@ -26,8 +26,6 @@ type timeoutRules struct {
 	applied []string
 }
 
-func (r *timeoutRules) MinPlayers() int                  { return 2 }
-func (r *timeoutRules) MaxPlayers() int                  { return 4 }
 func (r *timeoutRules) InitialDeck() []deck.Card         { return deck.Standard() }
 func (r *timeoutRules) InitialDealCount() int            { return 1 }
 func (r *timeoutRules) OnGameStart(*State) error         { return nil }

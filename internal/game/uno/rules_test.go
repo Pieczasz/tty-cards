@@ -591,9 +591,8 @@ func TestRules_CardConservation(t *testing.T) {
 
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
-	assert.Equal(t, 2, rules.MinPlayers(), "uno needs somebody to play against")
-	assert.Equal(t, 10, rules.MaxPlayers())
+	assert.Equal(t, 2, MinPlayers, "uno needs somebody to play against")
+	assert.Equal(t, 10, MaxPlayers)
 	assert.Equal(t, "uno.PlayCard", ActionPlayCard{}.Name())
 	assert.Equal(t, "uno.DrawCard", ActionDrawCard{}.Name())
 }

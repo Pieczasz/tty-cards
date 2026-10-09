@@ -12,6 +12,12 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game/shed"
 )
 
+// The seat range a Crazy Eights table deals for.
+const (
+	MinPlayers = 2
+	MaxPlayers = 6
+)
+
 // Rules implements Crazy Eights; one hand is the whole game.
 type Rules struct{}
 
@@ -29,9 +35,6 @@ var (
 func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 	return ActionDrawCard{}
 }
-
-func (r *Rules) MinPlayers() int { return 2 }
-func (r *Rules) MaxPlayers() int { return 6 }
 
 func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 func (r *Rules) InitialDealCount() int    { return 7 }

@@ -768,8 +768,8 @@ func TestRules_StandingScore_CountsTheLiveHandExactlyOnce(t *testing.T) {
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	assert.Equal(t, playerCount, rules.MinPlayers(), "hearts is a four-handed game either way")
-	assert.Equal(t, playerCount, rules.MaxPlayers())
+	assert.Equal(t, 4, MinPlayers, "hearts is a four-handed game either way")
+	assert.Equal(t, 4, MaxPlayers)
 	assert.Len(t, rules.InitialDeck(), 52)
 	assert.Equal(t, "hearts.PassCards", ActionPassCards{}.Name())
 	assert.Equal(t, "hearts.PlayCard", ActionPlayCard{}.Name())

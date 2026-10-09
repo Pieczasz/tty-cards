@@ -166,16 +166,20 @@ and `internal/tui/app.go` both read it.
 
 ```go
 {
-    Name:    "My Game",
-    Slug:    "my_game",
-    Factory: func() game.Rules { return &mygamerules.Rules{} },
-    View:    mygameview.New,
+    Name:       "My Game",
+    Slug:       "my_game",
+    MinPlayers: mygamerules.MinPlayers,
+    MaxPlayers: mygamerules.MaxPlayers,
+    Factory:    func() game.Rules { return &mygamerules.Rules{} },
+    View:       mygameview.New,
 },
 ```
 
-`catalog.Entry` embeds `game.Module` (`Name`, `Slug`, `Factory`) beside `View`.
-`catalog_test.go` fails on a missing field or a duplicate slug, and
-`game.NewRegistry` panics on either at boot. **The slug is
+`catalog.Entry` embeds `game.Module` (`Name`, `Slug`, `MinPlayers`, `MaxPlayers`,
+`Factory`) beside `View`; export the seat range as `MinPlayers` / `MaxPlayers`
+constants from the rules package. `catalog_test.go` fails on a missing field or a
+duplicate slug, and `game.NewRegistry` panics on either, or on seat bounds no table
+can meet, at boot. **The slug is
 persisted** (`games.slug`), so treat it as permanent: changing it later means a
 data migration, not a rename. The display `Name` is free to change.
 

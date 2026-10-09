@@ -23,6 +23,12 @@ const (
 	HandsPerMatch = 10
 )
 
+// The seat range a poker table deals for.
+const (
+	MinPlayers = 2
+	MaxPlayers = 9
+)
+
 // Rules implements No-Limit Texas Hold'em over a HandsPerMatch-hand match.
 type Rules struct{}
 
@@ -81,9 +87,6 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	}
 	return dealTurnDuration
 }
-
-func (r *Rules) MinPlayers() int { return 2 }
-func (r *Rules) MaxPlayers() int { return 9 }
 
 func (r *Rules) InitialDeck() []deck.Card { return deck.Standard() }
 

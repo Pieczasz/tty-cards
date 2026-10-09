@@ -348,8 +348,6 @@ classDiagram
     direction LR
     class Rules {
         <<interface>>
-        MinPlayers() int
-        MaxPlayers() int
         InitialDeck() []Card
         InitialDealCount() int
         OnGameStart(*State) error
@@ -441,6 +439,8 @@ classDiagram
         game.Module
         Name string
         Slug string
+        MinPlayers int
+        MaxPlayers int
         Factory func() Rules
         View func(GlobalContext, *Engine, slug) Model
     }

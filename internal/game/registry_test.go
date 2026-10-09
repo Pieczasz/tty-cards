@@ -8,7 +8,7 @@ import (
 )
 
 func fakeModule(name, slug string) Module {
-	return Module{Name: name, Slug: slug, Factory: func() Rules { return &MockRules{} }}
+	return Module{Name: name, Slug: slug, MinPlayers: 2, MaxPlayers: 4, Factory: func() Rules { return &MockRules{} }}
 }
 
 func TestRegistry_CreateBuildsADeclaredGame(t *testing.T) {
@@ -54,6 +54,8 @@ func TestRegistry_GameNamesKeepDeclarationOrder(t *testing.T) {
 // later as a missing route or a nil factory panic at the moment somebody starts a
 // table. catalog_test.go leans on this being loud. A name declared twice is the
 // same mistake: GameNames drives the menu, and one of the two would be unreachable.
+// A slug declared twice files two games' ratings under one identity, and seat bounds
+// no table could satisfy make a game nobody can start.
 func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {
 	t.Parallel()
 
@@ -62,10 +64,13 @@ func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {
 		name string
 		mods []Module
 	}{
-		{name: "no display name", mods: []Module{{Slug: "s", Factory: factory}}},
-		{name: "no slug", mods: []Module{{Name: "N", Factory: factory}}},
-		{name: "no factory", mods: []Module{{Name: "N", Slug: "s"}}},
+		{name: "no display name", mods: []Module{{Slug: "s", MinPlayers: 2, MaxPlayers: 2, Factory: factory}}},
+		{name: "no slug", mods: []Module{{Name: "N", MinPlayers: 2, MaxPlayers: 2, Factory: factory}}},
+		{name: "no factory", mods: []Module{{Name: "N", Slug: "s", MinPlayers: 2, MaxPlayers: 2}}},
+		{name: "no seat bounds", mods: []Module{{Name: "N", Slug: "s", Factory: factory}}},
+		{name: "a max below the min", mods: []Module{{Name: "N", Slug: "s", MinPlayers: 4, MaxPlayers: 2, Factory: factory}}},
 		{name: "a name declared twice", mods: []Module{fakeModule("Poker", "old"), fakeModule("Poker", "new")}},
+		{name: "a slug declared twice", mods: []Module{fakeModule("Poker", "poker"), fakeModule("Texas", "poker")}},
 	}
 
 	for _, tt := range tests {

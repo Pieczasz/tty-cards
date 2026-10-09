@@ -32,9 +32,11 @@ func testUser(id uint64, name string) *db.User {
 
 func testRegistry() *game.Registry {
 	return game.NewRegistry(game.Module{
-		Name:    testGameName,
-		Slug:    "crazy_eights",
-		Factory: func() game.Rules { return &crazyeight.Rules{} },
+		Name:       testGameName,
+		Slug:       "crazy_eights",
+		MinPlayers: crazyeight.MinPlayers,
+		MaxPlayers: crazyeight.MaxPlayers,
+		Factory:    func() game.Rules { return &crazyeight.Rules{} },
 	})
 }
 
@@ -379,7 +381,7 @@ func TestRating(t *testing.T) {
 }
 
 // The bounds decide how far the max-players setting may travel. A missing registry or a
-// game it cannot build must fall back rather than leave the row unbounded.
+// game it does not hold must fall back rather than leave the row unbounded.
 func TestGamePlayerBounds(t *testing.T) {
 	t.Parallel()
 
@@ -391,7 +393,7 @@ func TestGamePlayerBounds(t *testing.T) {
 		{name: "a registered game", registry: testRegistry(), wantMin: 2, wantMax: 6},
 		{name: "no registry at all", registry: nil, wantMin: fallbackMinPlayers, wantMax: fallbackMaxPlayers},
 		{
-			name:     "a game the registry cannot build",
+			name:     "a game the registry does not hold",
 			registry: game.NewRegistry(),
 			wantMin:  fallbackMinPlayers, wantMax: fallbackMaxPlayers,
 		},

@@ -177,12 +177,10 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	mockRules := new(MockRules)
-	mockRules.On("MinPlayers").Return(2)
-	mockRules.On("MaxPlayers").Return(4)
 	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
-	registry := gameRegistry("MockGame", mockRules)
+	registry := boundedRegistry("MockGame", mockRules, 2, 4)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -461,12 +459,10 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
 
 	rules := new(MockRules)
-	rules.On("MinPlayers").Return(2)
-	rules.On("MaxPlayers").Return(4)
 	rules.On("InitialDeck").Return(deck.Standard())
 	rules.On("InitialDealCount").Return(2)
 	rules.On("OnGameStart", mock.Anything).Return(nil)
-	registry := gameRegistry("Mock", rules)
+	registry := boundedRegistry("Mock", rules, 2, 4)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))

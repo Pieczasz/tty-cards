@@ -13,8 +13,6 @@ import (
 
 type bindRules struct{}
 
-func (bindRules) MinPlayers() int                     { return 2 }
-func (bindRules) MaxPlayers() int                     { return 4 }
 func (bindRules) InitialDeck() []deck.Card            { return deck.Standard() }
 func (bindRules) InitialDealCount() int               { return 2 }
 func (bindRules) OnGameStart(*State) error            { return nil }

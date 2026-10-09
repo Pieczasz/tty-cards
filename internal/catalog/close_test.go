@@ -24,7 +24,7 @@ func TestGames_CloseReleasesTheEngineSubscription(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				engine, view := seatedEngineAndView(t, entry, entry.Factory().MinPlayers(), 120, 50)
+				engine, view := seatedEngineAndView(t, entry, entry.MinPlayers, 120, 50)
 				require.Equal(t, 1, engine.SubscriberCount(), "the view subscribed on construction")
 				closer, ok := view.(router.Closer)
 				require.True(t, ok, "every game view is a router.Closer")

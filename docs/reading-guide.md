@@ -178,7 +178,7 @@ engines never share a seat, and `Start` has no rollback: the lobby builds a new
 engine per attempt.
 
 *The registry is fixed at construction.* `game.NewRegistry(mods...)` panics on a
-half-declared module or a display name declared twice, so a wiring bug fails the
+half-declared module, impossible seat bounds, or a display name or slug declared twice, so a wiring bug fails the
 boot rather than the first table.
 
 **Invariant to check.** Nothing inside a `Rules` method can reach the `Engine`.
@@ -552,7 +552,7 @@ Then `internal/ratelimit/netkey_test.go`
 **Files.** `internal/catalog/catalog.go` (74), then `cmd/server/main.go` (421).
 
 **Understand.** `catalog.Games` is the only place a game is declared, and each
-entry embeds a `game.Module` (name, slug, rules `Factory`) **and** carries the
+entry embeds a `game.Module` (name, slug, seat bounds, rules `Factory`) **and** carries the
 TUI view constructor, which is handed the slug. `catalog.NewRegistry` builds the
 `game.Registry` from it; `internal/tui/app.go` registers routes from it. `main.go`
 now reads as a summary of everything above: `config.Load` -> OTel

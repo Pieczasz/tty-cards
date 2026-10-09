@@ -147,7 +147,7 @@ func (m *createModel) createLobby() (tea.Model, tea.Cmd) {
 // lobby.setupDefaultOptions.
 const defaultMaxPlayers = 4
 
-// The seat range for a game the registry cannot build. One pair for both screens, so
+// The seat range for a game the registry does not hold. One pair for both screens, so
 // the create form and the lobby cannot disagree about how far the setting may travel.
 const (
 	fallbackMinPlayers = 2
@@ -155,16 +155,16 @@ const (
 )
 
 // gamePlayerBounds is gameName's seat range, or the fallback range for a game the
-// registry cannot build.
+// registry does not hold.
 func gamePlayerBounds(registry *game.Registry, gameName string) (minP, maxP int) {
 	if registry == nil {
 		return fallbackMinPlayers, fallbackMaxPlayers
 	}
-	rules, err := registry.Create(gameName)
-	if err != nil {
+	mod, ok := registry.Module(gameName)
+	if !ok {
 		return fallbackMinPlayers, fallbackMaxPlayers
 	}
-	return rules.MinPlayers(), rules.MaxPlayers()
+	return mod.MinPlayers, mod.MaxPlayers
 }
 
 func (m *createModel) clampMaxPlayers() {

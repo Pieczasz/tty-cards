@@ -23,6 +23,8 @@ func TestGames_EntriesComplete(t *testing.T) {
 		require.NotEmpty(t, e.Slug, "entry %q has no slug", e.Name)
 		require.NotNil(t, e.Factory, "entry %q has no rules factory", e.Name)
 		require.NotNil(t, e.View, "entry %q has no TUI view", e.Name)
+		require.Positive(t, e.MinPlayers, "entry %q has no seat bounds", e.Name)
+		require.GreaterOrEqual(t, e.MaxPlayers, e.MinPlayers, "entry %q seats fewer than it needs", e.Name)
 
 		assert.False(t, names[e.Name], "duplicate name %q", e.Name)
 		assert.False(t, slugs[e.Slug], "duplicate slug %q", e.Slug)

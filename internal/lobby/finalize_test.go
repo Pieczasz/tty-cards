@@ -35,7 +35,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	// The standings are the seats in order: leader, then guest.
-	registry := gameRegistry("MockGame", stubRules{minPlayers: 2, maxPlayers: 4})
+	registry := boundedRegistry("MockGame", stubRules{}, 2, 4)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -459,7 +459,7 @@ func TestLobby_IdleRemovalLeavesTheRosterWithoutAMatchRepository(t *testing.T) {
 		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("Mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-		registry := gameRegistry("Mock", idleRules{stubRules{minPlayers: 2, maxPlayers: 2}})
+		registry := boundedRegistry("Mock", idleRules{}, 2, 2)
 		require.NoError(t, l.ToggleReady(leader, registry))
 		require.NoError(t, l.ToggleReady(guest, registry))
 		idler, other := leader, guest
@@ -520,7 +520,7 @@ func TestDisconnectPlayer_ReleasedHoldDoesNotFireIntoTheNextTable(t *testing.T) 
 		next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("Mock"))
 		require.NoError(t, err)
 		require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
-		registry := gameRegistry("Mock", stubRules{minPlayers: 2, maxPlayers: 2})
+		registry := boundedRegistry("Mock", stubRules{}, 2, 2)
 		require.NoError(t, next.ToggleReady(host, registry))
 		require.NoError(t, next.ToggleReady(guest, registry))
 		m.DisconnectPlayer(guest)

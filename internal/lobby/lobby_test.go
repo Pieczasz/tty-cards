@@ -26,13 +26,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// gameRegistry is a registry of rules under one display name. These tests only ever
-// look games up by name, so the slug just has to be present and distinct.
+// gameRegistry is a registry of rules under one display name, seating 1 to 9. These
+// tests only ever look games up by name, so the slug just has to be present and
+// distinct.
 func gameRegistry(name string, rules game.Rules) *game.Registry {
+	return boundedRegistry(name, rules, 1, 9)
+}
+
+// boundedRegistry is gameRegistry for a game seating minP to maxP.
+func boundedRegistry(name string, rules game.Rules, minP, maxP int) *game.Registry {
 	return game.NewRegistry(game.Module{
-		Name:    name,
-		Slug:    strings.ToLower(name),
-		Factory: func() game.Rules { return rules },
+		Name:       name,
+		Slug:       strings.ToLower(name),
+		MinPlayers: minP,
+		MaxPlayers: maxP,
+		Factory:    func() game.Rules { return rules },
 	})
 }
 
@@ -40,8 +48,6 @@ type MockRules struct {
 	mock.Mock
 }
 
-func (m *MockRules) MinPlayers() int                     { return m.Called().Int(0) }
-func (m *MockRules) MaxPlayers() int                     { return m.Called().Int(0) }
 func (m *MockRules) InitialDeck() []deck.Card            { return m.Called().Get(0).([]deck.Card) }
 func (m *MockRules) InitialDealCount() int               { return m.Called().Int(0) }
 func (m *MockRules) OnGameStart(state *game.State) error { return m.Called(state).Error(0) }
@@ -124,13 +130,11 @@ func TestLobby_ToggleReady(t *testing.T) {
 
 	mockRules := new(MockRules)
 
-	mockRules.On("MinPlayers").Return(2)
-	mockRules.On("MaxPlayers").Return(4)
 	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 
-	registry := gameRegistry("MockGame", mockRules)
+	registry := boundedRegistry("MockGame", mockRules, 2, 4)
 
 	err = l.ToggleReady(leader, registry)
 	require.NoError(t, err)
@@ -165,7 +169,7 @@ func TestLobby_SettersAndGetters(t *testing.T) {
 	require.NoError(t, l.SetRanked(leader, false))
 	assert.False(t, l.IsRanked())
 
-	require.NoError(t, l.SetMaxPlayers(leader, 5, gameRegistry(cardGame, stubRules{minPlayers: 2, maxPlayers: 6})))
+	require.NoError(t, l.SetMaxPlayers(leader, 5, boundedRegistry(cardGame, stubRules{}, 2, 6)))
 	assert.Equal(t, 5, l.MaxPlayers())
 }
 
@@ -213,8 +217,6 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 
 	mockRules := new(MockRules)
 
-	mockRules.On("MinPlayers").Return(2)
-	mockRules.On("MaxPlayers").Return(4)
 	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
@@ -222,7 +224,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	acceptAnyAction(mockRules)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
 
-	registry := gameRegistry("MockGame", mockRules)
+	registry := boundedRegistry("MockGame", mockRules, 2, 4)
 
 	done := make(chan struct{})
 	mockRepo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}, mock.Anything).
@@ -274,15 +276,13 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	mockRules := new(MockRules)
-	mockRules.On("MinPlayers").Return(2)
-	mockRules.On("MaxPlayers").Return(4)
 	mockRules.On("InitialDeck").Return(deck.Standard())
 	mockRules.On("InitialDealCount").Return(5)
 	mockRules.On("OnGameStart", mock.Anything).Return(nil)
 	mockRules.On("CheckWinCondition", mock.Anything).Return(true)
 	mockRules.On("Standings", mock.Anything).Return([]*game.Player{leader, guest})
 	acceptAnyAction(mockRules)
-	registry := gameRegistry("MockGame", mockRules)
+	registry := boundedRegistry("MockGame", mockRules, 2, 4)
 
 	done := make(chan struct{})
 	mockRepo.On("RecordCasualMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}).
@@ -321,9 +321,7 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	mockRules := new(MockRules)
 
 	// mockRules limits max players to 2, but lobby has 3!
-	mockRules.On("MinPlayers").Return(2)
-	mockRules.On("MaxPlayers").Return(2)
-	registry := gameRegistry("Mock", mockRules)
+	registry := boundedRegistry("Mock", mockRules, 2, 2)
 
 	require.NoError(t, l.ToggleReady(leader, registry))
 	require.NoError(t, l.ToggleReady(guest, registry))
@@ -339,12 +337,10 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 
 	// Game already in progress
 	mockRules2 := new(MockRules)
-	mockRules2.On("MinPlayers").Return(2)
-	mockRules2.On("MaxPlayers").Return(4)
 	mockRules2.On("InitialDeck").Return(deck.Standard())
 	mockRules2.On("InitialDealCount").Return(5)
 	mockRules2.On("OnGameStart", mock.Anything).Return(nil)
-	registry = gameRegistry("Mock2", mockRules2)
+	registry = boundedRegistry("Mock2", mockRules2, 2, 4)
 
 	leader3 := mockPlayer("p5", testutil.UID(5))
 	l3, err := m.CreateLobby(leader3, WithCardGame("Mock2"))
@@ -378,7 +374,7 @@ func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby, *game.Registr
 	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("Mock"))
 	require.NoError(t, err)
 
-	registry := gameRegistry("Mock", stubRules{minPlayers: 2, maxPlayers: maxPlayers})
+	registry := boundedRegistry("Mock", stubRules{}, 2, maxPlayers)
 
 	return m, l, registry
 }
@@ -512,7 +508,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 			if tt.unknown {
 				name = "Some Other Game"
 			}
-			registry := gameRegistry(name, stubRules{minPlayers: tt.rulesMin, maxPlayers: tt.rulesMax})
+			registry := boundedRegistry(name, stubRules{}, cmp.Or(tt.rulesMin, 1), cmp.Or(tt.rulesMax, 9))
 
 			err := l.SetMaxPlayers(l.Leader(), tt.limit, registry)
 
@@ -772,11 +768,9 @@ func TestLobby_FailedMatchWriteIsLoggedLoudly(t *testing.T) {
 }
 
 // stubRules is the smallest Rules that lets an engine start and hand back standings,
-// the seats in order. A zero bound means 1 to 9 seats.
-type stubRules struct{ minPlayers, maxPlayers int }
+// the seats in order.
+type stubRules struct{}
 
-func (r stubRules) MinPlayers() int                             { return cmp.Or(r.minPlayers, 1) }
-func (r stubRules) MaxPlayers() int                             { return cmp.Or(r.maxPlayers, 9) }
 func (stubRules) InitialDeck() []deck.Card                      { return deck.Standard() }
 func (stubRules) InitialDealCount() int                         { return 1 }
 func (stubRules) OnGameStart(*game.State) error                 { return nil }
@@ -872,7 +866,7 @@ func TestLobby_InheritedLeaderCanChangeSettingsAfterTheGameEnds(t *testing.T) {
 	l.releaseFinishedGame()
 
 	require.NoError(t, l.SetPrivate(inheritor, false), "the new leader owns the settings")
-	require.NoError(t, l.SetMaxPlayers(inheritor, 4, gameRegistry("Mock", stubRules{maxPlayers: 9})))
+	require.NoError(t, l.SetMaxPlayers(inheritor, 4, gameRegistry("Mock", stubRules{})))
 	assert.Equal(t, 4, l.MaxPlayers())
 }
 
@@ -966,10 +960,11 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 	tests := []struct {
 		name      string
 		rules     game.Rules
+		min       int
 		withGuest bool
 		wantErr   string
 	}{
-		{name: "too few players", rules: stubRules{minPlayers: 2}, wantErr: "need at least 2 players"},
+		{name: "too few players", rules: stubRules{}, min: 2, wantErr: "need at least 2 players"},
 		{name: "the rules refuse the deal", rules: refusedStartRules{}, withGuest: true, wantErr: "start game engine"},
 	}
 	for _, tt := range tests {
@@ -983,7 +978,7 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 				seats = append(seats, mockPlayer("p2", testutil.UID(2)))
 				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), seats[1])))
 			}
-			registry := gameRegistry("Mock", tt.rules)
+			registry := boundedRegistry("Mock", tt.rules, cmp.Or(tt.min, 1), 9)
 
 			for _, p := range seats[:len(seats)-1] {
 				require.NoError(t, l.ToggleReady(p, registry))

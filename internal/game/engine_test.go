@@ -18,16 +18,6 @@ type MockRules struct {
 	mock.Mock
 }
 
-func (m *MockRules) MinPlayers() int {
-	args := m.Called()
-	return args.Int(0)
-}
-
-func (m *MockRules) MaxPlayers() int {
-	args := m.Called()
-	return args.Int(0)
-}
-
 func (m *MockRules) InitialDeck() []deck.Card {
 	args := m.Called()
 	return args.Get(0).([]deck.Card)

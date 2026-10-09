@@ -39,8 +39,8 @@ func createTestState() *game.State {
 func TestRules_Metadata(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
-	assert.Equal(t, 2, rules.MinPlayers())
-	assert.Equal(t, 9, rules.MaxPlayers())
+	assert.Equal(t, 2, MinPlayers)
+	assert.Equal(t, 9, MaxPlayers)
 	assert.Equal(t, 0, rules.InitialDealCount(), "poker deals its own hole cards, once per hand")
 }
 

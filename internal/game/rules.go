@@ -28,9 +28,6 @@ type Action interface {
 // held and receives only *State, so it may mutate the state freely and can never call
 // back into the Engine.
 type Rules interface {
-	MinPlayers() int
-	MaxPlayers() int
-
 	InitialDeck() []deck.Card
 	InitialDealCount() int
 

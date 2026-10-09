@@ -123,7 +123,7 @@ func TestModel_AWrongPayloadFallsBackToHome(t *testing.T) {
 
 	e := catalog.Games[0]
 	rules := e.Factory()
-	engine := game.NewEngine(rules, testutil.Players(rules.MinPlayers()), rules.InitialDeck())
+	engine := game.NewEngine(rules, testutil.Players(e.MinPlayers), rules.InitialDeck())
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
@@ -272,7 +272,7 @@ func TestModel_EveryCatalogGameBuildsItsViewFromAnEngine(t *testing.T) {
 			t.Parallel()
 
 			rules := e.Factory()
-			players := testutil.Players(rules.MinPlayers())
+			players := testutil.Players(e.MinPlayers)
 			engine := game.NewEngine(rules, players, rules.InitialDeck())
 			require.NoError(t, engine.Start())
 			t.Cleanup(engine.Close)
