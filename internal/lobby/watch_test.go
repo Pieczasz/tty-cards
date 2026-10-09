@@ -155,7 +155,7 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	require.NoError(t, m.ToggleReady(l.Leader()))
+	require.NoError(t, m.ToggleReady(l.Snapshot().Leader.Player))
 	require.NoError(t, m.ToggleReady(guest))
 
 	l.ActiveGame().WithState(func(s *game.State) { s.Logger().Info("probe") })
@@ -199,7 +199,7 @@ func TestToggleReady_GenuineStartFailuresAreLoggedAtTheSource(t *testing.T) {
 			require.NoError(t, err)
 			guest := mockPlayer("p2", testutil.UID(2))
 			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-			require.NoError(t, m.ToggleReady(l.Leader()))
+			require.NoError(t, m.ToggleReady(l.Snapshot().Leader.Player))
 			require.Error(t, m.ToggleReady(guest))
 
 			if !tt.wantLog {

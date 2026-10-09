@@ -211,10 +211,10 @@ func TestBrowseLobbies_VisibilityChangeShowsUpImmediately(t *testing.T) {
 	l := openTable(t, m, "leader", testutil.UID(1), "poker", 1500)
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1, "the list is now cached")
 
-	require.NoError(t, l.SetPrivate(l.Leader(), true))
+	require.NoError(t, l.SetPrivate(l.Snapshot().Leader.Player, true))
 	assert.Empty(t, m.BrowseLobbies(nil, BrowseFilter{}), "a private table is not on offer")
 
-	require.NoError(t, l.SetPrivate(l.Leader(), false))
+	require.NoError(t, l.SetPrivate(l.Snapshot().Leader.Player, false))
 	assert.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1, "and is back the moment it reopens")
 }
 

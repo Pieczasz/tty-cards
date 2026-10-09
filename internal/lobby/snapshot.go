@@ -66,15 +66,15 @@ func (s Snapshot) Players() int { return 1 + len(s.Guests) }
 // IsLeader is whether p holds seat 0.
 func (s Snapshot) IsLeader(p *game.Player) bool { return s.Leader.Player.Equal(p) }
 
-// Seated is whether p holds any seat.
-func (s Snapshot) Seated(p *game.Player) bool {
+// SeatOf is p's seat, and whether p holds one.
+func (s Snapshot) SeatOf(p *game.Player) (SeatView, bool) {
 	if s.IsLeader(p) {
-		return true
+		return s.Leader, true
 	}
 	for _, g := range s.Guests {
 		if g.Player.Equal(p) {
-			return true
+			return g, true
 		}
 	}
-	return false
+	return SeatView{}, false
 }

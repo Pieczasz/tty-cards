@@ -81,7 +81,7 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 func startGame(t *testing.T, m *model, l *lobby.Lobby) lobby.Event {
 	t.Helper()
 	guest := addGuest(t, m, l, 2, "bob")
-	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Leader()))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Snapshot().Leader.Player))
 	require.NoError(t, m.global.LobbyManager.ToggleReady(guest))
 	// Closing the engine is what ends the lobby's result watcher.
 	t.Cleanup(l.ActiveGame().Close)
@@ -176,7 +176,7 @@ func TestAdjustSetting_MaxPlayersRespectsRulesBounds(t *testing.T) {
 		press(m, "l")
 	}
 	assert.Equal(t, rulesMax, m.snap.Limit)
-	assert.Equal(t, rulesMax, l.MaxPlayers(), "the lobby is updated, not just the view")
+	assert.Equal(t, rulesMax, l.Snapshot().Limit, "the lobby is updated, not just the view")
 
 	for range 10 {
 		press(m, "h")
@@ -191,12 +191,12 @@ func TestAdjustSetting_TogglesVisibilityAndMode(t *testing.T) {
 	m.cursor = cursorVisibility
 	press(m, "l")
 	assert.True(t, m.snap.Private)
-	assert.True(t, l.IsPrivate())
+	assert.True(t, l.Snapshot().Private)
 
 	m.cursor = cursorMode
 	press(m, "l")
 	assert.True(t, m.snap.Ranked)
-	assert.True(t, l.IsRanked())
+	assert.True(t, l.Snapshot().Ranked)
 }
 
 // The game row is deliberately fixed once a lobby exists, and it reads straight off
@@ -211,7 +211,7 @@ func TestAdjustSetting_GameRowIsNoOp(t *testing.T) {
 	press(m, "h")
 
 	assert.Equal(t, before, m.renderSettings(true))
-	assert.Contains(t, before, l.GameName(), "the game row names the lobby's game")
+	assert.Contains(t, before, l.Snapshot().GameName, "the game row names the lobby's game")
 }
 
 func TestHandleLobbyEvent_ClosedGoesHome(t *testing.T) {
@@ -307,7 +307,7 @@ func TestInit_ArmsTheLobbyListener(t *testing.T) {
 	cmd := m.Init()
 	require.NotNil(t, cmd)
 
-	require.NoError(t, l.SetPrivate(l.Leader(), true))
+	require.NoError(t, l.SetPrivate(l.Snapshot().Leader.Player, true))
 
 	msg, ok := cmd().(lobbyMsg)
 	require.True(t, ok, "the listener must deliver lobby events as lobbyMsg")
@@ -337,7 +337,7 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	m, l := leaderView(t)
 	guest := addGuest(t, m, l, 2, "bob")
 
-	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Leader()))
+	require.NoError(t, m.global.LobbyManager.ToggleReady(l.Snapshot().Leader.Player))
 	require.NoError(t, m.global.LobbyManager.ToggleReady(guest))
 	engine := l.ActiveGame()
 	require.NotNil(t, engine)
@@ -350,7 +350,7 @@ func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {
 	assert.Equal(t, router.GameRoute("crazy_eights"), routeOf(t, cmd))
 	change, ok := cmd().(router.ChangeViewMsg)
 	require.True(t, ok)
-	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat resumed is this session's own")
+	assert.Equal(t, l.Snapshot().Leader.Player.ID, change.Payload.Table.PlayerID(), "the seat resumed is this session's own")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
 }
 
@@ -369,7 +369,7 @@ func TestHandleLobbyEvent_GameStartedRoutesToTheGameView(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, router.GameRoute("crazy_eights"), change.ViewName)
 	require.NotNil(t, change.Payload.Table)
-	assert.Equal(t, l.Leader().ID, change.Payload.Table.PlayerID(), "the seat is bound to this session's player")
+	assert.Equal(t, l.Snapshot().Leader.Player.ID, change.Payload.Table.PlayerID(), "the seat is bound to this session's player")
 	assert.Nil(t, m.lobbyChan, "the lobby feed is released on the way to the table")
 }
 
@@ -400,9 +400,9 @@ func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
 
-			require.NoError(t, l.SetPrivate(l.Leader(), true))
-			require.NoError(t, l.SetRanked(l.Leader(), true))
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 5))
+			require.NoError(t, l.SetPrivate(l.Snapshot().Leader.Player, true))
+			require.NoError(t, l.SetRanked(l.Snapshot().Leader.Player, true))
+			require.NoError(t, l.SetMaxPlayers(l.Snapshot().Leader.Player, 5))
 			m.cursor = cursorFirstGuest + 4 // a row for a guest who has since left
 
 			_, cmd := m.Update(lobbyMsg{Type: evType, src: m.lobbyChan})
@@ -429,7 +429,7 @@ func TestHandleLobbyEvent_PlayerNoLongerInTheRosterGoesHomeOnce(t *testing.T) {
 	guestModel, ok := New(global, l).(*model)
 	require.True(t, ok)
 
-	require.NoError(t, m.global.LobbyManager.Kick(l.Leader(), guest))
+	require.NoError(t, m.global.LobbyManager.Kick(l.Snapshot().Leader.Player, guest))
 
 	_, cmd := guestModel.Update(lobbyMsg{Type: lobby.EventPlayersUpdated, src: guestModel.lobbyChan})
 	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
@@ -460,8 +460,8 @@ func TestHandleKey_GuestCannotDriveTheForm(t *testing.T) {
 	}
 
 	assert.Zero(t, guestModel.cursor, "a guest has no cursor to move")
-	assert.False(t, l.IsPrivate(), "and no settings to change")
-	assert.Equal(t, 4, l.MaxPlayers())
+	assert.False(t, l.Snapshot().Private, "and no settings to change")
+	assert.Equal(t, 4, l.Snapshot().Limit)
 }
 
 func TestHandleKey_EnterKicksTheSelectedGuest(t *testing.T) {
@@ -472,12 +472,12 @@ func TestHandleKey_EnterKicksTheSelectedGuest(t *testing.T) {
 		m, l := leaderView(t)
 		t.Cleanup(m.Close)
 		addGuest(t, m, l, 2, "bob")
-		require.Len(t, l.Guests(), 1)
+		require.Len(t, l.Snapshot().Guests, 1)
 
 		m.cursor = cursorFirstGuest
 		press(m, "enter")
 
-		assert.Empty(t, l.Guests())
+		assert.Empty(t, l.Snapshot().Guests)
 	})
 
 	// The cursor is clamped on roster events, but an enter racing a guest's departure
@@ -489,7 +489,7 @@ func TestHandleKey_EnterKicksTheSelectedGuest(t *testing.T) {
 
 		m.cursor = cursorFirstGuest
 		assert.NotPanics(t, func() { press(m, "enter") })
-		assert.Empty(t, l.Guests())
+		assert.Empty(t, l.Snapshot().Guests)
 	})
 
 	// A lobby torn down underneath the view still answers IsLeader, so the kick reaches
@@ -521,7 +521,7 @@ func TestHandleKey_ReadyTogglesAndReportsFailure(t *testing.T) {
 		press(m, "r")
 
 		require.NoError(t, m.actionErr, "a successful toggle clears the last error")
-		assert.True(t, l.IsReady(l.Leader()))
+		assert.True(t, l.Snapshot().Leader.Ready)
 	})
 
 	t.Run("a player with no seat is told why", func(t *testing.T) {
@@ -599,7 +599,7 @@ func TestAdjustSetting_MaxPlayersStopsAtTheSeatedRoster(t *testing.T) {
 	t.Cleanup(m.Close)
 	addGuest(t, m, l, 2, "bob")
 	addGuest(t, m, l, 3, "carol")
-	require.Equal(t, 3, l.CurrentPlayers())
+	require.Equal(t, 3, l.Snapshot().Players())
 
 	m.cursor = cursorMaxPlayers
 	for range 5 {
@@ -607,7 +607,7 @@ func TestAdjustSetting_MaxPlayersStopsAtTheSeatedRoster(t *testing.T) {
 	}
 
 	assert.Equal(t, 3, m.snap.Limit, "the floor is the roster, not the rules minimum")
-	assert.Equal(t, 3, l.MaxPlayers())
+	assert.Equal(t, 3, l.Snapshot().Limit)
 }
 
 // A resize must reach the layout, and anything else must be ignored rather than
@@ -701,7 +701,7 @@ func TestLobbyView_FitsTheTerminal(t *testing.T) {
 			t.Parallel()
 			m, l := leaderView(t)
 			t.Cleanup(m.Close)
-			require.NoError(t, l.SetMaxPlayers(l.Leader(), 6))
+			require.NoError(t, l.SetMaxPlayers(l.Snapshot().Leader.Player, 6))
 			for i := 2; i <= 6; i++ {
 				addGuest(t, m, l, uint64(i), fmt.Sprintf("player-number-%d", i))
 			}
@@ -757,7 +757,7 @@ func TestView_AReadyMarkStaysOnItsPlayersRowAt80x24(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)
 	t.Cleanup(m.Close)
-	require.NoError(t, l.SetMaxPlayers(l.Leader(), 6))
+	require.NoError(t, l.SetMaxPlayers(l.Snapshot().Leader.Player, 6))
 	for i := 2; i <= 4; i++ {
 		g := addGuest(t, m, l, uint64(i), fmt.Sprintf("load_%04d", i))
 		require.NoError(t, m.global.LobbyManager.ToggleReady(g))

@@ -81,7 +81,7 @@ func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 	view.refresh()
 	require.Len(t, view.entries, 1)
 
-	require.NoError(t, m.ToggleReady(l.Leader()))
+	require.NoError(t, m.ToggleReady(l.Snapshot().Leader.Player))
 	require.NoError(t, m.ToggleReady(guest))
 	// Starting a game arms the lobby's own result watcher, which lives until the
 	// engine's feed closes. Nothing else in this test ends the match, so without this

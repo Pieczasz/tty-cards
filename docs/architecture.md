@@ -524,7 +524,9 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   bounds, the settings, whether it is in a game, and the leader and guests each with
   their Elo and ready flag. The waiting room draws from it, retaken on each lobby
   event and after its own actions, so a frame cannot show a promoted leader twice
-  and the settings form cannot show a value the lobby refused.
+  and the settings form cannot show a value the lobby refused. It is the lobby's only
+  read of its roster and settings; `Code()` (fixed at creation) and `HasPlayer` (the
+  manager's index check) are the getters left beside it.
 - `RemoveLobby` unmaps only the `playerLobby` entries still pointing at the removed
   lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
   seated at a newer table.

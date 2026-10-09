@@ -309,10 +309,10 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	assert.Equal(t, router.RouteLobby, change.ViewName)
 	created := change.Payload.Lobby
 	require.NotNil(t, created, "the lobby view is handed the lobby that was just made")
-	assert.Equal(t, m.selectedGame().Name, created.GameName())
-	assert.Equal(t, 5, created.MaxPlayers())
-	assert.False(t, created.IsPrivate())
-	assert.True(t, created.IsRanked())
+	assert.Equal(t, m.selectedGame().Name, created.Snapshot().GameName)
+	assert.Equal(t, 5, created.Snapshot().Limit)
+	assert.False(t, created.Snapshot().Private)
+	assert.True(t, created.Snapshot().Ranked)
 	assert.NoError(t, m.err)
 }
 

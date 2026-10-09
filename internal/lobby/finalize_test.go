@@ -175,7 +175,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	t.Parallel()
 
 	m, l := newTestLobby(t, 2)
-	leader := l.Leader()
+	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
@@ -217,7 +217,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 
 	assert.Equal(t, []EventType{EventPlayersUpdated, EventPlayersUpdated}, drainEventTypes(observer),
 		"the second flip was committed without telling anyone")
-	assert.True(t, l.IsReady(guest), "and it really was committed")
+	assert.True(t, isReady(l, guest), "and it really was committed")
 }
 
 // A drain that times out used to strand its waiter goroutine, one per attempt, on a
@@ -431,7 +431,7 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 func startedGame(t *testing.T) (*Manager, *Lobby, *game.Player, *game.Player) {
 	t.Helper()
 	m, l := newTestLobby(t, 2)
-	leader := l.Leader()
+	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 	require.NoError(t, m.ToggleReady(leader))
