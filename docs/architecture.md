@@ -525,11 +525,15 @@ caller has to tell apart are sentinels in `errors.go` (`ErrLobbyClosed`,
   their Elo and ready flag. The waiting room draws from it, retaken on each lobby
   event and after its own actions, so a frame cannot show a promoted leader twice
   and the settings form cannot show a value the lobby refused. It is the lobby's only
-  read of its roster and settings; `Code()` (fixed at creation) and `HasPlayer` (the
-  manager's index check) are the getters left beside it.
-- `RemoveLobby` unmaps only the `playerLobby` entries still pointing at the removed
-  lobby: `LeaveLobby` drops `m.mu` before calling it, so the player may already be
-  seated at a newer table.
+  read of its roster and settings; `Code()` (fixed at creation) and `HasPlayer` (a
+  seat check) are the getters left beside it.
+- **The `playerLobby` index never needs repairing.** Every roster write - create,
+  join, leave, kick, an idle seat dropped - updates the index in the same hold of
+  `m.mu`, and a leave that empties a table removes it in that hold too
+  (`removeLobbyLocked`). So every seat at an open table is indexed to it and the
+  index holds nobody else: `FindLobbyByPlayer` returns the entry as it is, and
+  `RemoveLobby` unmaps the whole roster. `assertIndexMatchesRosters` checks this
+  after every race in `concurrency_test.go`.
 
 **Starting a game.** `Manager.ToggleReady(p)` finds p's table through the index,
 releases a finished game still holding it, and flips the flag; with every seat ready
@@ -1656,8 +1660,8 @@ releaseSession
   -> SessionTracker.ReleaseWith (owning generation only, under the account's mu)
   -> Manager.DisconnectPlayer
       -> m.grace.arm (mid-game, disconnectGrace)
-      -> OR LeaveLobby / expireLeave -> departure.notify
-          -> Engine.RemovePlayer -> Manager.RemoveLobby (empty table)
+      -> OR LeaveLobby / expireLeave -> removeLobbyLocked (empty table, same m.mu hold)
+          -> departure.notify -> Engine.RemovePlayer, then the removed table closes
 ```
 
 Re-index after a large merge:

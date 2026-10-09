@@ -109,28 +109,6 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 	})
 }
 
-// LeaveLobby drops the index entry and releases m.mu before it calls RemoveLobby, so a
-// leader who closes a table can already sit at a new one by the time the old one is
-// removed. RemoveLobby must not take the new table's mapping with it.
-func TestRemoveLobby_KeepsANewerLobbysMapping(t *testing.T) {
-	t.Parallel()
-	m := newTestManager(t, nil)
-	p := mockPlayer("p1", testutil.UID(1))
-	old, err := m.CreateLobby(p, WithCardGame("mock"))
-	require.NoError(t, err)
-
-	// The window inside LeaveLobby: the entry is gone, RemoveLobby has not run yet.
-	m.mu.Lock()
-	delete(m.playerLobby, p.ID)
-	m.mu.Unlock()
-	fresh, err := m.CreateLobby(p, WithCardGame("mock"))
-	require.NoError(t, err)
-
-	m.RemoveLobby(old.Code())
-
-	assert.Same(t, fresh, m.FindLobbyByPlayer(p), "removing the old table unmapped the new one")
-}
-
 // A hold can outlive its hand: releaseFinishedGame reopens the table before
 // releaseHeldSeats reaches m.mu, and a kick in that gap unmaps the guest, so the
 // release no longer finds them. The timer then fires a DisconnectGrace later and

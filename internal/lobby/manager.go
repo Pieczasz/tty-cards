@@ -127,18 +127,6 @@ func validCode(code string) bool {
 	return lobbyCodePattern.MatchString(code)
 }
 
-func (m *Manager) playerInLobbyLocked(p *game.Player) bool {
-	lobby, exists := m.playerLobby[p.ID]
-	if !exists {
-		return false
-	}
-	if lobby.HasPlayer(p) {
-		return true
-	}
-	delete(m.playerLobby, p.ID)
-	return false
-}
-
 // CreateLobby opens a table with leader in seat 0. WithCardGame is required and must
 // name a game the manager offers; the defaults are 4 seats (clamped to what the game
 // deals for), private and casual.
@@ -166,7 +154,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.playerInLobbyLocked(leader) {
+	if _, seated := m.playerLobby[leader.ID]; seated {
 		return nil, ErrAlreadyInLobby
 	}
 
@@ -228,7 +216,7 @@ func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.playerInLobbyLocked(p) {
+	if _, seated := m.playerLobby[p.ID]; seated {
 		observability.LobbyJoin(ctx, "already_in_lobby")
 		return nil, ErrAlreadyInLobby
 	}
@@ -248,24 +236,13 @@ func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
 	return lobby, nil
 }
 
-// FindLobbyByPlayer is the lobby p sits at, or nil.
+// FindLobbyByPlayer is the lobby p sits at, or nil. The index is the whole answer:
+// every roster write updates it in the same hold of m.mu, so it cannot point at a
+// table that no longer seats p.
 func (m *Manager) FindLobbyByPlayer(p *game.Player) *Lobby {
 	m.mu.RLock()
-	lobby, exists := m.playerLobby[p.ID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return nil
-	}
-	if lobby.HasPlayer(p) {
-		return lobby
-	}
-	m.mu.Lock()
-	if m.playerLobby[p.ID] == lobby {
-		delete(m.playerLobby, p.ID)
-	}
-	m.mu.Unlock()
-	return nil
+	defer m.mu.RUnlock()
+	return m.playerLobby[p.ID]
 }
 
 // FindLobbyByCode is the open lobby holding code.
@@ -327,18 +304,21 @@ func (m *Manager) leave(p *game.Player, from *Lobby) {
 	l.mu.Lock()
 	l.unsubscribePlayerLocked(p.ID)
 	leave, found := l.detachPlayerLocked(p)
-	code := l.code
 	l.mu.Unlock()
 	delete(m.playerLobby, p.ID)
+	// Closed in the same hold that emptied it: a table that is out of the index but
+	// still open is one a later RemoveLobby has to second-guess.
+	var gone closing
+	if leave.closeLobby {
+		gone = m.removeLobbyLocked(l)
+	}
 	m.mu.Unlock()
 
 	if !found {
 		return
 	}
 	leave.notify(p.ID)
-	if leave.closeLobby {
-		m.RemoveLobby(code)
-	}
+	gone.close(m.appCtx)
 }
 
 // Stats counts lobbies by state for the public stats endpoint: how many hands are
@@ -408,47 +388,50 @@ func (m *Manager) Kick(host, target *game.Player) error {
 }
 
 // RemoveLobby closes the table under code: its engine, its event feed and every seat
-// still indexed to it.
+// at it.
 func (m *Manager) RemoveLobby(code string) {
 	m.mu.Lock()
-	l, exists := m.lobbies[code]
-	if !exists {
-		m.mu.Unlock()
-		return
+	var gone closing
+	if l, exists := m.lobbies[code]; exists {
+		gone = m.removeLobbyLocked(l)
 	}
-	delete(m.lobbies, code)
+	m.mu.Unlock()
+	gone.close(m.appCtx)
+}
+
+// closing is what a removed table leaves to close once the locks are released.
+type closing struct {
+	engine *game.Engine
+	bc     *broadcaster.Broadcaster[Event]
+}
+
+func (c closing) close(ctx context.Context) {
+	if c.engine != nil {
+		c.engine.Close()
+	}
+	if c.bc != nil {
+		if n := c.bc.Dropped(); n > 0 {
+			observability.BroadcastDropped(ctx, "lobby", n)
+		}
+		c.bc.Close()
+	}
+}
+
+// removeLobbyLocked takes l out of the manager and unmaps every seat at it. Every
+// seat is indexed to l and nowhere else - roster and index change in one hold of
+// m.mu - so the whole roster is unmapped. Caller holds m.mu.
+func (m *Manager) removeLobbyLocked(l *Lobby) closing {
+	delete(m.lobbies, l.code)
 	m.invalidatePublicCache()
 
 	l.mu.Lock()
-	seats := make([]string, 0, 1+len(l.guests))
-	if l.leader != nil {
-		seats = append(seats, l.leader.ID)
-	}
+	defer l.mu.Unlock()
+	delete(m.playerLobby, l.leader.ID)
 	for _, g := range l.guests {
-		seats = append(seats, g.ID)
+		delete(m.playerLobby, g.ID)
 	}
-	engine := l.activeEngine
+	gone := closing{engine: l.activeEngine, bc: l.broadcaster}
 	l.activeEngine = nil
-	bc := l.broadcaster
 	l.broadcaster = nil
-	l.mu.Unlock()
-
-	// Only entries still pointing here: LeaveLobby unmaps and drops m.mu before it
-	// calls this, so the player may already be seated at a newer table.
-	for _, id := range seats {
-		if m.playerLobby[id] == l {
-			delete(m.playerLobby, id)
-		}
-	}
-	m.mu.Unlock()
-
-	if engine != nil {
-		engine.Close()
-	}
-	if bc != nil {
-		if n := bc.Dropped(); n > 0 {
-			observability.BroadcastDropped(m.appCtx, "lobby", n)
-		}
-		bc.Close()
-	}
+	return gone
 }

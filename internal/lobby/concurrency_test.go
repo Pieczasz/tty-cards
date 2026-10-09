@@ -39,6 +39,29 @@ func runWithTimeout(t *testing.T, d time.Duration, fn func()) {
 	}
 }
 
+// assertIndexMatchesRosters is the invariant every roster write keeps by updating the
+// manager's index in the same hold of m.mu: every seat at an open table is indexed to
+// that table, and the index holds nobody else. It is what lets FindLobbyByPlayer and
+// RemoveLobby trust the index without repairing it.
+func assertIndexMatchesRosters(t *testing.T, m *Manager) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seated := 0
+	for code, l := range m.lobbies {
+		l.mu.RLock()
+		roster := append([]*game.Player{l.leader}, l.guests...)
+		open := l.state != closed
+		l.mu.RUnlock()
+		assert.True(t, open, "lobby %s is closed but still listed", code)
+		for _, p := range roster {
+			assert.Same(t, l, m.playerLobby[p.ID], "%s sits at %s, but the index says otherwise", p.ID, code)
+		}
+		seated += len(roster)
+	}
+	assert.Len(t, m.playerLobby, seated, "the index holds a player no open table seats")
+}
+
 // guestRef pairs a joiner with the per-goroutine outcome of its join attempt.
 type guestRef struct {
 	p      *game.Player
@@ -121,6 +144,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		}
 	}
 	assert.Equal(t, freeSlots, joinedCount)
+	assertIndexMatchesRosters(t, m)
 }
 
 // TestConcurrent_LeaderAndGuestsLeaveSimultaneously drains a full lobby by having
@@ -170,6 +194,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	for _, p := range all {
 		assert.Nil(t, m.FindLobbyByPlayer(p), "player %q left a ghost playerLobby entry", p.ID)
 	}
+	assertIndexMatchesRosters(t, m)
 }
 
 // TestConcurrent_JoinRacingLastLeave repeatedly interleaves a fresh joiner with
@@ -229,6 +254,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 				assert.Nil(t, m.FindLobbyByPlayer(joiner), "iter %d: rejected joiner left a ghost entry", i)
 				assert.False(t, l.HasPlayer(joiner), "iter %d: rejected joiner still a member", i)
 			}
+			assertIndexMatchesRosters(t, m)
 		}
 	})
 }
@@ -289,6 +315,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 		_ = isReady(l, p) // must not race or panic
 		assert.True(t, l.HasPlayer(p), "member %q vanished from roster", p.ID)
 	}
+	assertIndexMatchesRosters(t, m)
 }
 
 // seatInvariant is the one thing that must hold after any interleaving of disconnect,
@@ -297,6 +324,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 // player; a seat gone with no index entry is an expired one. Never both, never neither.
 func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int) {
 	t.Helper()
+	assertIndexMatchesRosters(t, m)
 	m.mu.RLock()
 	_, pending := m.grace.pending[p.ID]
 	indexed := m.playerLobby[p.ID]
@@ -508,6 +536,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			default:
 				assert.Nil(t, indexed, "iter %d: no seat anywhere, but the index still claims one", i)
 			}
+			assertIndexMatchesRosters(t, m)
 		}
 	})
 }
