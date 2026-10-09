@@ -871,3 +871,97 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 		})
 	}
 }
+
+// seated is a player as NewPlayer builds one: the seat key is the account id, which
+// is what refreshRatings finds a player's current table by.
+func seated(n uint64) *game.Player {
+	return &game.Player{ID: testutil.UID(n).String(), UserID: testutil.UID(n), Ratings: map[string]uint32{"other": 1700}}
+}
+
+// A ranked write lands on the seats still at the table, so the waiting room,
+// matchmaking and the table's average show the new rating rather than the one the
+// session logged in with - without writing through a pointer a reader still holds.
+func TestFinalize_RefreshesTheSeatedPlayersRatings(t *testing.T) {
+	t.Parallel()
+	leader, guest := seated(1), seated(2)
+	written := map[uuid.UUID]uint32{leader.UserID: 1516, guest.UserID: 1484}
+	repo := new(MockMatchRepo)
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), mock.Anything, mock.Anything).
+		Return(written, nil)
+	m := newTestManager(t, repo)
+	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mockgame"), WithRanked(true))
+	require.NoError(t, err)
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	events, err := l.Subscribe(leader.ID)
+	require.NoError(t, err)
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
+	drainEventTypes(events)
+
+	endHand(l.ActiveGame(), stubWin)
+	// Not WaitForFinalizers: a drain records a ranked match unrated.
+	for _, why := range []string{"the reopened table", "its new ratings"} {
+		select {
+		case ev := <-events:
+			require.Equal(t, EventPlayersUpdated, ev.Type, why)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s was never announced", why)
+		}
+	}
+
+	snap := l.Snapshot()
+	assert.Equal(t, uint32(1516), snap.Leader.Elo)
+	assert.Equal(t, uint32(1484), snap.Guests[0].Elo)
+	assert.Equal(t, uint32(1700), snap.Leader.Player.Ratings["other"], "another game's rating was lost")
+	assert.True(t, snap.Leader.Player.Equal(leader))
+	assert.NotSame(t, leader, snap.Leader.Player, "the seat was written in place, not replaced")
+	assert.Equal(t, map[string]uint32{"other": 1700}, leader.Ratings, "a reader's map changed under it")
+}
+
+// The write commits after the table reopened, so a player may be somewhere else by
+// then: the rating follows them there, and a player seated nowhere is skipped.
+func TestRefreshRatings_FollowsEachPlayerToTheirCurrentTable(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	stayed, moved, gone := seated(1), seated(2), seated(3)
+	here, err := m.CreateLobby(stayed, WithCardGame("mockgame"))
+	require.NoError(t, err)
+	there, err := m.CreateLobby(moved, WithCardGame("mockgame"))
+	require.NoError(t, err)
+	quiet, err := there.Subscribe(moved.ID)
+	require.NoError(t, err)
+
+	m.refreshRatings("mockgame", map[uuid.UUID]uint32{stayed.UserID: 1520, moved.UserID: 1480, gone.UserID: 1400})
+	m.refreshRatings("mockgame", map[uuid.UUID]uint32{moved.UserID: 1480})
+
+	assert.Equal(t, uint32(1520), here.Snapshot().Leader.Elo)
+	assert.Equal(t, uint32(1480), there.Snapshot().Leader.Elo)
+	assert.Equal(t, []EventType{EventPlayersUpdated}, drainEventTypes(quiet), "an unchanged rating was announced again")
+	assert.Nil(t, m.FindLobbyByPlayer(gone))
+}
+
+// Snapshots hand out the seated *game.Player, and its readers hold no lock: a
+// refresh must replace it, never write its Ratings map, or this races.
+func TestRefreshRatings_DoesNotRaceReadersOfTheOldSeat(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	p := seated(1)
+	l, err := m.CreateLobby(p, WithCardGame("mockgame"))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 200 {
+				seat := l.Snapshot().Leader.Player
+				_ = seat.Ratings["mockgame"]
+				_ = len(seat.Ratings)
+			}
+		})
+	}
+	for i := range 200 {
+		m.refreshRatings("mockgame", map[uuid.UUID]uint32{p.UserID: uint32(1500 + i)})
+	}
+	wg.Wait()
+	assert.Equal(t, uint32(1699), l.Snapshot().Leader.Elo)
+}

@@ -1250,8 +1250,10 @@ a dropped connection is not retried, because it may have committed.
 
 Both ranked finalizes return the rating they stored per written seat
 (`map[uuid.UUID]uint32`, from the committed attempt's `rating.Result.Writes`; a
-skipped seat is absent), so a caller can show the new ratings without reading the
-rows back.
+skipped seat is absent). The lobby's `refreshRatings` puts them on those players'
+seats at whatever table each sits at by then, as fresh `*game.Player` copies, and
+announces `EventPlayersUpdated`, so the waiting room, matchmaking and a table's
+average stop showing the rating the session logged in with.
 
 **Elo itself.** `internal/elo/elo.go` is pure: `DefaultRating` 1500, `MinRating`
 100, `MaxRating` 4000, the unexported `kFactor` 32, expected score base 10 over 400. `Calculate`

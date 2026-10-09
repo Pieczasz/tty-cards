@@ -669,7 +669,7 @@ func TestLobby_RecordFinishedMatch(t *testing.T) {
 			tt.setup(repo)
 			m := newTestManager(t, repo)
 
-			err := m.recordFinishedMatch(t.Context(), matchResult{
+			_, err := m.recordFinishedMatch(t.Context(), matchResult{
 				ref:         gameRef("Mock"),
 				userIDs:     []uuid.UUID{testutil.UID(1)},
 				interrupted: tt.reason == game.EndReasonInterrupted,
