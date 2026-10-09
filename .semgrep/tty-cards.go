@@ -113,21 +113,36 @@ func telemetry(span Span, s Session) {
 }
 
 func sessionLogs(s Session) {
-	// ruleid: routine-log-carries-remote-addr
+	// ruleid: routine-log-carries-remote-addr, game-logs-without-its-table
 	slog.Info("ssh connect", "remote_addr", addrString(s.RemoteAddr()))
-	// ruleid: routine-log-carries-remote-addr
+	// ruleid: routine-log-carries-remote-addr, game-logs-without-its-table
 	slog.InfoContext(s.Context(), "ssh connect", "peer", s.RemoteAddr().String())
-	// ruleid: routine-log-carries-remote-addr
+	// ruleid: routine-log-carries-remote-addr, game-logs-without-its-table
 	slog.DebugContext(s.Context(), "ssh disconnect", slog.String("remote_addr", "x"))
 	// ok: routine-log-carries-remote-addr
+	// ruleid: game-logs-without-its-table
 	slog.InfoContext(s.Context(), "ssh connect", "client_net", clientNet(s.RemoteAddr()))
 	// ok: routine-log-carries-remote-addr
+	// ruleid: game-logs-without-its-table
 	slog.WarnContext(s.Context(), "rate limited", "remote_addr", addrString(s.RemoteAddr()))
+}
+
+// The calls above are bare too, which in a rules package would drop the lobby code
+// and the game slug the table logger carries.
+func rulesLog(state *State, extra *Extra) {
+	// ruleid: game-logs-without-its-table
+	slog.Warn("chips do not add up", "hand", extra.Hand)
+	// ruleid: game-logs-without-its-table
+	slog.Default().Error("bad deal", "hand", extra.Hand)
+	// ok: game-logs-without-its-table
+	state.Logger().Warn("chips do not add up", "hand", extra.Hand)
+	// ok: game-logs-without-its-table
+	state.Logger().Info("hand dealt", slog.Int("hand", extra.Hand))
 }
 
 func credentials(cfg *Config) error {
 	dsn := cfg.DSN()
-	// ruleid: database-credential-leaves-config
+	// ruleid: database-credential-leaves-config, game-logs-without-its-table
 	slog.Info("connecting", "dsn", dsn)
 	// ruleid: database-credential-leaves-config
 	log.Printf("db %s", cfg.DSN())
@@ -136,6 +151,7 @@ func credentials(cfg *Config) error {
 	// ok: database-credential-leaves-config
 	fmt.Println(cfg.DBPassword)
 	// ok: database-credential-leaves-config
+	// ruleid: game-logs-without-its-table
 	slog.Info("config loaded", "config", cfg)
 	// ok: database-credential-leaves-config
 	Connect(dsn)
