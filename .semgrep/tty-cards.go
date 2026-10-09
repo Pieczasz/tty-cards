@@ -36,9 +36,9 @@ func turnCursor(state *State, extra *Extra) {
 }
 
 func view(engine *Engine, bound *BoundEngine, id string, act Action) {
-	// ruleid: tui-uses-server-engine-api
+	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	engine.WithState(func(*State) {})
-	// ruleid: tui-uses-server-engine-api
+	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	_ = engine.SubmitAction(id, act)
 	// ruleid: tui-uses-server-engine-api
 	engine.Frame(id, func(*State) {})
@@ -48,22 +48,22 @@ func view(engine *Engine, bound *BoundEngine, id string, act Action) {
 	bound.Frame(func(*State) {})
 }
 
-// ok: tui-uses-server-engine-api
-// A comment may name game.Engine; code in internal/tui may not.
+// ok: tui-uses-server-engine-api, rules-package-reaches-the-engine
+// A comment may name game.Engine; code in internal/tui and the rules packages may not.
 type tableView struct {
-	// ruleid: tui-uses-server-engine-api
+	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	engine *game.Engine
 	// ok: tui-uses-server-engine-api
 	seat *game.BoundEngine
 }
 
-// ruleid: tui-uses-server-engine-api
+// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 func newTableView(engine *game.Engine) {}
 
 func lobbyView(l *Lobby, ev Event, id string) {
-	// ruleid: tui-uses-server-engine-api
+	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	_ = game.Bind(l.engine, id)
-	// ruleid: tui-uses-server-engine-api
+	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	_ = game.NewEngine(nil, nil)
 	// ruleid: tui-uses-server-engine-api
 	_ = l.ActiveGame()
@@ -71,6 +71,17 @@ func lobbyView(l *Lobby, ev Event, id string) {
 	_ = l.Seat(id)
 	// ok: tui-uses-server-engine-api
 	_ = ev.Seat(id)
+}
+
+// The calls a view may not make, a rules package may not make either; these are the
+// ones it may.
+func rulesHook(state *State) error {
+	// ok: rules-package-reaches-the-engine
+	state.SetTurn(0)
+	// ok: rules-package-reaches-the-engine
+	_ = []game.EngineOption{}
+	// ok: rules-package-reaches-the-engine
+	return game.ErrUnknownAction
 }
 
 func recovers(reg *registry, s Session) {

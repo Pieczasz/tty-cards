@@ -124,14 +124,19 @@ deadlock on the mutex it is already under.
 
 **Decision.** Rules must never call the engine. Enforced **structurally** rather
 than by review: `Rules` methods receive only `*State`, and `State` carries no
-engine handle. There is nothing to call.
+engine handle. There is nothing to call. That stops a hook reaching its own table's
+engine, not a rules package reaching an engine some other way, so since 2026-10-09
+the semgrep rule `rules-package-reaches-the-engine` also fails non-test code under
+`internal/game/<game>/` (gametest aside) that names `game.Engine`, calls
+`game.NewEngine` or `game.Bind`, or calls `WithState` / `SubmitAction`.
 
 **Consequences.** Rules may mutate `*State` freely, which is what makes them
 readable. The cost is that a rules set cannot ask the engine a question - anything
 it needs has to be on `State` or in `State.Extra`. Adding an engine pointer to
 `State` for convenience would silently remove the guarantee, so do not.
 
-**Where.** `internal/game/rules.go`, `internal/game/state.go`. The doc comment on
+**Where.** `internal/game/rules.go`, `internal/game/state.go`,
+`.semgrep/tty-cards.yml` `rules-package-reaches-the-engine`. The doc comment on
 `Engine.WithState` repeats the warning for the other caller class.
 
 ---
