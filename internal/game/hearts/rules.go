@@ -213,6 +213,8 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		afterPlay(state, extra)
 	case ActionNextHand:
 		return beginHand(state, extra, state.CurrentTurn)
+	default:
+		return game.ErrUnknownAction
 	}
 	return nil
 }

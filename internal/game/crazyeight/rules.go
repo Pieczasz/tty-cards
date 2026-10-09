@@ -138,6 +138,8 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	case ActionDrawCard:
 		// Nothing drawn means stock and discard are both spent: a forced pass.
 		extra.RecordDraw(shed.DrawInto(state, p, 1))
+	default:
+		return game.ErrUnknownAction
 	}
 	return nil
 }

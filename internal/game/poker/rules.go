@@ -245,17 +245,20 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 	if _, isNextHand := action.(ActionNextHand); isNextHand {
 		return beginHandOrFinish(state, extra, nextFundedSeat(state, extra, extra.DealerIndex))
 	}
-	applyBet(state, extra, action)
+	if err := applyBet(state, extra, action); err != nil {
+		return err
+	}
 	return afterBettingAction(state, extra)
 }
 
 // applyBet moves what a betting action commits, before the street is settled around
 // it.
-func applyBet(state *game.State, extra *State, action game.Action) {
+func applyBet(state *game.State, extra *State, action game.Action) error {
 	p := state.Players[state.CurrentTurn]
 	seat := extra.Seats[p.ID]
 
 	switch action := action.(type) {
+	case ActionCheck:
 	case ActionFold:
 		seat.Folded = true
 	case ActionCall:
@@ -270,7 +273,10 @@ func applyBet(state *game.State, extra *State, action game.Action) {
 		if wasRaise {
 			applyBetIncrease(state, extra, p, seat.Bet)
 		}
+	default:
+		return game.ErrUnknownAction
 	}
 	seat.Acted = true
 	seat.LastBetLevel = extra.CurrentBet
+	return nil
 }

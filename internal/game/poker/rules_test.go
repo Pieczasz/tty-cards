@@ -107,7 +107,8 @@ func TestRules_ValidateAction(t *testing.T) {
 
 	t.Run("a move from another game", func(t *testing.T) {
 		t.Parallel()
-		assert.ErrorIs(t, (&Rules{}).ValidateAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
+		require.ErrorIs(t, (&Rules{}).ValidateAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
+		assert.ErrorIs(t, (&Rules{}).ApplyAction(createTestState(), gametest.ForeignAction{}), game.ErrUnknownAction)
 	})
 }
 

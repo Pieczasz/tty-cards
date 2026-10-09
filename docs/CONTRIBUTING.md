@@ -119,7 +119,9 @@ call `shed.Deal`, `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
 `shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.
 Name who acts next with `State.SetTurn` / `State.OverrideTurn`, never by writing
 `CurrentTurn` and `OverrideNextTurn` by hand; refuse a foreign action with
-`game.ErrUnknownAction` and a move between hands with `game.ErrHandOver`, and gate
+`game.ErrUnknownAction` - from `ValidateAction` and, through a `default:` arm, from
+`ApplyAction` too, so a move added to one switch and forgotten in the other is not a
+silent no-op - and a move between hands with `game.ErrHandOver`, and gate
 the between-hands deal with `game.ValidateNextHand`. `internal/game` imports from an
 allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 `internal/game/...`, `uuid`), so a rules package that needs anything else is a

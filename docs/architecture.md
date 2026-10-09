@@ -643,7 +643,11 @@ hands the turn to), never by writing `CurrentTurn` and `OverrideNextTurn` by han
 `game.SeatAt` and `game.NextSeat` are the one seat wrap-around, and
 `game.ValidateNextHand` the one "deal the next hand" check, so the three multi-hand
 games refuse it in the same words; `game.ErrUnknownAction` and `game.ErrHandOver`
-are the refusals every rules set shares (`rules.go`, `turn.go`).
+are the refusals every rules set shares (`rules.go`, `turn.go`). Every `ApplyAction`
+ends in a `default:` arm returning `ErrUnknownAction` as well - poker names
+`ActionCheck` rather than letting it fall through - so a move `ValidateAction`
+learned and `ApplyAction` did not ends the table as a rules error instead of being
+accepted as a no-op.
 
 `game.AnyScoreAtLeast` is the shared match-target check for Hearts and Gin Rummy.
 Package `internal/game/shed` holds what Crazy Eights and Uno share, as game-family
