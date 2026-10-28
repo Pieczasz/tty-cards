@@ -262,14 +262,14 @@ func (s *Session) HandleLeaveKey(key string) (tea.Cmd, bool) {
 	armed := s.confirmingLeave()
 	s.confirmLeave = false
 	switch {
-	case armed && key == "y":
+	case armed && components.IsYes(key):
 		return s.Leave(), true
 	case armed:
 		return nil, true
-	case key == "esc" && s.Base.Phase == game.Playing:
+	case key == components.KeyEsc && s.Base.Phase == game.Playing:
 		s.confirmLeave = true
 		return nil, true
-	case key == "esc", key == "enter" && s.Base.Phase == game.Finished:
+	case key == components.KeyEsc || (key == components.KeyEnter && s.Base.Phase == game.Finished):
 		return s.Leave(), true
 	}
 	return nil, false
@@ -293,7 +293,7 @@ func (s *Session) LeaveConfirmScreen() (string, bool) {
 	return renderGameNotice(s.Global, styles.JoinVertical(lg.Center,
 		t.ErrorText.Render("Leave and forfeit this game?"),
 		"",
-		t.Muted.Render("y - leave and forfeit | any other key - keep playing"),
+		t.Muted.Render("y - leave and forfeit | any other key - stay"),
 	)), true
 }
 

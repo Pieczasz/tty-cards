@@ -1,6 +1,7 @@
 package gameview
 
 import (
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
@@ -86,7 +87,7 @@ func RenderTableRow(width, height int, left, center, right string) string {
 }
 
 // HandKeyHints is the key line for the games driven entirely from the hand cursor.
-const HandKeyHints = "<-/h: left | ->/l: right | enter: play/confirm | d: draw | esc: leave/cancel"
+const HandKeyHints = components.HintMove + " | enter: play/confirm | d: draw | esc: leave/cancel"
 
 // HandWidth leaves a column at each edge so a full-width fan is not flush against it.
 func HandWidth(width int) int {

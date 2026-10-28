@@ -8,6 +8,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/hearts"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,22 +29,20 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if dx, ok := components.HorizontalNudge(msg.String()); ok {
+		m.MoveCursor(dx)
+		return m, nil
+	}
+
 	switch msg.String() {
-	case "left", "h":
-		m.MoveCursor(-1)
-		return m, nil
-	case "right", "l":
-		m.MoveCursor(1)
-		return m, nil
 	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.SelectDigit(msg.String())
 		return m, nil
-	// "space", not " ": that is what KeyPressMsg.String() normalises the spacebar to,
-	// and matching the literal meant the pass phase could not be played by hand at all
-	// - the engine's 45-second auto-pass was the only way out of it.
-	case "space":
+	// KeySpace, not " ": matching the literal meant the pass phase could not be played
+	// by hand at all - the engine's 45-second auto-pass was the only way out of it.
+	case components.KeySpace:
 		return m.handleSpace()
-	case "enter":
+	case components.KeyEnter:
 		return m.handleEnter()
 	}
 	return m, nil

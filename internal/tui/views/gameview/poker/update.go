@@ -3,6 +3,7 @@ package poker
 import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
@@ -20,7 +21,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// esc takes the raise prompt down before it can mean leaving the table.
-	if msg.String() == "esc" && m.raising {
+	if msg.String() == components.KeyEsc && m.raising {
 		m.raising = false
 		return m, nil
 	}
@@ -30,24 +31,14 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "f":
-		if m.canFold() {
-			return m.submit(logic.ActionFold{})
-		}
-		return m, nil
+		return m.ifLegal(m.canFold(), logic.ActionFold{})
 	case "c":
 		if m.canCheck() {
 			return m.submit(logic.ActionCheck{})
 		}
-		if m.canCall() {
-			return m.submit(logic.ActionCall{})
-		}
-		return m, nil
+		return m.ifLegal(m.canCall(), logic.ActionCall{})
 	case "a":
-		if m.canAllIn() {
-			m.raising = false
-			return m.submit(logic.ActionAllIn{})
-		}
-		return m, nil
+		return m.ifLegal(m.canAllIn(), logic.ActionAllIn{})
 	case "r":
 		return m.beginRaise()
 	case "1", "2", "3", "4":
@@ -56,10 +47,19 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "0", "[", "h", "left", "]", "l", "right":
 		m.adjustRaise(msg.String())
 		return m, nil
-	case "enter":
+	case components.KeyEnter:
 		return m.confirm()
 	}
 	return m, nil
+}
+
+// ifLegal submits action when the view's own check says it is legal now, and swallows
+// the key otherwise: a fold on someone else's turn is not an error to show.
+func (m *model) ifLegal(legal bool, action game.Action) (tea.Model, tea.Cmd) {
+	if !legal {
+		return m, nil
+	}
+	return m.submit(action)
 }
 
 // adjustRaise handles the keys that only shape a pending raise: the arrows and brackets

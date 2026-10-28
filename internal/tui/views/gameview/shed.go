@@ -3,6 +3,7 @@ package gameview
 import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,7 +47,7 @@ func (t *ShedTable) Handle(msg tea.Msg, sync func(), moves ShedMoves) tea.Cmd {
 
 func (t *ShedTable) handleKey(key string, moves ShedMoves) tea.Cmd {
 	// esc closes the picker before it can mean leaving the table.
-	if key == "esc" && t.Picker.Open {
+	if key == components.KeyEsc && t.Picker.Open {
 		t.Picker.Open = false
 		return nil
 	}
@@ -54,20 +55,21 @@ func (t *ShedTable) handleKey(key string, moves ShedMoves) tea.Cmd {
 		return cmd
 	}
 
+	if dx, ok := components.HorizontalNudge(key); ok {
+		t.step(dx, 0)
+		return nil
+	}
+	if dy, ok := components.VerticalNudge(key); ok {
+		t.step(0, dy)
+		return nil
+	}
+
 	switch key {
-	case "left", "h":
-		t.step(-1, 0)
-	case "right", "l":
-		t.step(1, 0)
-	case "up", "k":
-		t.step(0, -1)
-	case "down", "j":
-		t.step(0, 1)
 	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		if !t.Picker.Open {
 			t.SelectDigit(key)
 		}
-	case "enter":
+	case components.KeyEnter:
 		t.play(moves)
 	case "d":
 		if t.Base.MyTurn && !t.Picker.Open {

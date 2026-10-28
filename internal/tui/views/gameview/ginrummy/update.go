@@ -3,6 +3,7 @@ package ginrummy
 import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/ginrummy"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,13 +24,12 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if dx, ok := components.HorizontalNudge(msg.String()); ok {
+		m.MoveCursor(dx)
+		return m, nil
+	}
+
 	switch msg.String() {
-	case "left", "h":
-		m.MoveCursor(-1)
-		return m, nil
-	case "right", "l":
-		m.MoveCursor(1)
-		return m, nil
 	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.SelectDigit(msg.String())
 		return m, nil
@@ -39,7 +39,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.submitIfTurn(logic.ActionDrawDiscard{})
 	case "k":
 		return m.handleKnock()
-	case "enter":
+	case components.KeyEnter:
 		return m.handleEnter()
 	}
 	return m, nil

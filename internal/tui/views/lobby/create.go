@@ -73,16 +73,17 @@ func (m *createModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if dy, ok := components.VerticalNudge(key.String()); ok {
+		m.cursor = components.StepCursor(m.cursor, dy, createCursorSubmit)
+		return m, nil
+	}
+	if dx, ok := components.HorizontalNudge(key.String()); ok {
+		m.adjustSetting(dx)
+		return m, nil
+	}
+
 	switch key.String() {
-	case "up", "k":
-		m.cursor = components.StepCursor(m.cursor, -1, createCursorSubmit)
-	case "down", "j":
-		m.cursor = components.StepCursor(m.cursor, +1, createCursorSubmit)
-	case "left", "h":
-		m.adjustSetting(-1)
-	case "right", "l":
-		m.adjustSetting(+1)
-	case "enter":
+	case components.KeyEnter:
 		if m.cursor == createCursorSubmit {
 			return m.createLobby()
 		}

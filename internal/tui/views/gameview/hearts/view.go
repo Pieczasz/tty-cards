@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	keyHintsPlay = "<-/h: left | ->/l: right | enter: play | esc: leave"
+	keyHintsPlay = components.HintMove + " | enter: play | " + components.HintLeave
 	//nolint:gosec // G101: "Pass" is the card pass, not a credential
-	keyHintsPass = "<-/h: left | ->/l: right | space: toggle | enter: pass 3 | esc: leave"
+	keyHintsPass = components.HintMove + " | space: toggle | enter: pass 3 | " + components.HintLeave
 )
 
 func (m *model) View() tea.View {

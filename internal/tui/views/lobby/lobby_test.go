@@ -135,11 +135,15 @@ func TestHandleKey_LeaveConfirmFlow(t *testing.T) {
 	assert.True(t, m.showLeaveConfirm)
 	assert.Nil(t, cmd, "asking for confirmation does not navigate")
 
-	// Declining returns to the lobby and keeps the subscription.
-	_, cmd = press(m, "n")
-	assert.False(t, m.showLeaveConfirm)
-	assert.Nil(t, cmd)
-	assert.NotNil(t, m.lobbyChan)
+	// Declining returns to the lobby and keeps the subscription. Any key but y
+	// declines, as it does at a table.
+	for _, key := range []string{"n", "esc", "enter"} {
+		press(m, "x")
+		_, cmd = press(m, key)
+		assert.False(t, m.showLeaveConfirm, "%q declines", key)
+		assert.Nil(t, cmd)
+		assert.NotNil(t, m.lobbyChan)
+	}
 
 	// Confirming leaves and goes home.
 	press(m, "x")

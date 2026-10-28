@@ -144,11 +144,11 @@ func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *joinModel) handleCodeEntry(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
-	case "esc":
+	case components.KeyEsc:
 		m.writingCode = false
 		m.textInput.Blur()
 		return m, nil
-	case "enter":
+	case components.KeyEnter:
 		return m.joinByCode(strings.ToUpper(m.textInput.Value()))
 	default:
 		var cmd tea.Cmd
@@ -163,11 +163,12 @@ func (m *joinModel) handleBrowsing(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if dy, ok := components.VerticalNudge(key.String()); ok {
+		m.cursor = components.StepCursor(m.cursor, dy, len(m.entries)-1)
+		return m, nil
+	}
+
 	switch key.String() {
-	case "up", "k":
-		m.cursor = components.StepCursor(m.cursor, -1, len(m.entries)-1)
-	case "down", "j":
-		m.cursor = components.StepCursor(m.cursor, +1, len(m.entries)-1)
 	case "g":
 		m.cycleGame()
 	case "m":
@@ -179,9 +180,9 @@ func (m *joinModel) handleBrowsing(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.writingCode = true
 		m.textInput.Focus()
 		return m, textinput.Blink
-	// "space", not " ": KeyPressMsg.String() normalises the spacebar to the name, so
-	// the literal never matched and space on the browse list did nothing at all.
-	case "enter", "space":
+	// KeySpace, not " ": the literal never matched and space on the browse list did
+	// nothing at all.
+	case components.KeyEnter, components.KeySpace:
 		return m.joinSelected()
 	}
 	return m, nil

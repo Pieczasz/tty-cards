@@ -360,6 +360,18 @@ func TestSession_HandleLeaveKey(t *testing.T) {
 		assert.Nil(t, manager.FindLobbyByPlayer(alice), "y is the forfeit")
 	})
 
+	t.Run("a capital Y forfeits as the lobby prompt's does", func(t *testing.T) {
+		t.Parallel()
+		manager, alice, s := seatedSession(t)
+
+		s.HandleLeaveKey("esc")
+		cmd, handled := s.HandleLeaveKey("Y")
+
+		require.True(t, handled)
+		require.NotNil(t, cmd)
+		assert.Nil(t, manager.FindLobbyByPlayer(alice))
+	})
+
 	t.Run("anything else disarms and is swallowed", func(t *testing.T) {
 		t.Parallel()
 		manager, alice, s := seatedSession(t)

@@ -41,11 +41,11 @@ func (m *model) View() tea.View {
 func (m *model) keyHints() string {
 	switch m.phase {
 	case logic.PhaseAwaitingDraw:
-		return "s: draw stock | t: take discard | esc: leave"
+		return "s: draw stock | t: take discard | " + components.HintLeave
 	case logic.PhaseAwaitingDiscard:
-		return "<-/h: left | ->/l: right | enter: discard | k: knock | esc: leave"
+		return components.HintMove + " | enter: discard | k: knock | " + components.HintLeave
 	default:
-		return "esc: leave"
+		return components.HintLeave
 	}
 }
 
@@ -78,7 +78,7 @@ func (m *model) renderHandOver() string {
 		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Body:   m.renderHandResult(),
 		Header: fmt.Sprintf("%-12s  %9s", "player", "total"),
-		Hint:   gameview.NextHandHint(m.Base.MyTurn, m.Base.CurrentPlayerName, "deal the next hand", "esc: leave"),
+		Hint:   gameview.NextHandHint(m.Base.MyTurn, m.Base.CurrentPlayerName, "deal the next hand", components.HintLeave),
 	}
 	if m.matchComplete || m.Base.Phase == game.Finished {
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint

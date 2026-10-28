@@ -166,16 +166,16 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // handleLeaderKey is the form and the kick key, which only the leader may drive.
 func (m *model) handleLeaderKey(self *game.Player, key string) {
-	switch key {
-	case "up", "k":
-		m.cursor = components.StepCursor(m.cursor, -1, m.maxCursor())
-	case "down", "j":
-		m.cursor = components.StepCursor(m.cursor, +1, m.maxCursor())
-	case "left", "h":
-		m.adjustSetting(self, -1)
-	case "right", "l":
-		m.adjustSetting(self, +1)
-	case "enter":
+	if dy, ok := components.VerticalNudge(key); ok {
+		m.cursor = components.StepCursor(m.cursor, dy, m.maxCursor())
+		return
+	}
+	if dx, ok := components.HorizontalNudge(key); ok {
+		m.adjustSetting(self, dx)
+		return
+	}
+
+	if key == components.KeyEnter {
 		if i := m.cursor - cursorFirstGuest; i >= 0 && i < len(m.snap.Guests) {
 			m.actionErr = views.PlayerError(m.global.RequestContext(), m.global.LobbyManager.Kick(self, m.snap.Guests[i].Player))
 			m.refresh()
@@ -194,17 +194,17 @@ func (m *model) goHome() tea.Cmd {
 	return router.Navigate(router.RouteHome)
 }
 
+// handleLeaveConfirm answers the prompt as the table's forfeit prompt does: y leaves
+// and any other key keeps the seat, so the two prompts cannot teach different habits.
 func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		m.global.LobbyManager.LeaveLobby(views.SessionPlayer(m.global))
-		m.unsubscribe()
-		cmd := m.goHome()
-		return m, cmd
-	case "n", "N", "esc":
+	if !components.IsYes(key) {
 		m.showLeaveConfirm = false
+		return m, nil
 	}
-	return m, nil
+	m.global.LobbyManager.LeaveLobby(views.SessionPlayer(m.global))
+	m.unsubscribe()
+	cmd := m.goHome()
+	return m, cmd
 }
 
 // adjustSetting asks the lobby to change the highlighted setting. The form is the
@@ -271,7 +271,7 @@ func (m *model) View() tea.View {
 	return tea.NewView(views.RenderSeatedScreen(m.global, "Lobby", actions, func(height int) string {
 		if m.showLeaveConfirm {
 			redYes := m.global.Theme.ErrorText.Bold(true).Render("Yes")
-			return fmt.Sprintf("Are you sure you want to leave the lobby?\n\n[y] %s   [n] No", redYes)
+			return fmt.Sprintf("Are you sure you want to leave the lobby?\n\n[y] %s   [any other key] No", redYes)
 		}
 
 		innerWidth := styles.InnerWidth(m.global.Width)
