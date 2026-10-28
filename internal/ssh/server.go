@@ -351,6 +351,11 @@ func (reg *sessionRegistry) failSessionf(s ssh.Session, outcome string, err erro
 	wish.Fatalf(s, format, args...)
 }
 
+func (reg *sessionRegistry) refuseFull(s ssh.Session, err error) {
+	reg.failSessionf(s, "rejected_full", err,
+		"The server is full right now - please try again in a few minutes.\n")
+}
+
 func sessionModel(
 	deps Deps, reg *sessionRegistry, registerBudget registrationBudget,
 ) func(ssh.Session) tea.Model {
@@ -372,7 +377,23 @@ func sessionModel(
 			return nil
 		}
 		user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
-			func() bool { return allowRegistration(traceCtx, registerBudget, s) })
+			func() (func(), error) {
+				// Before the budget is spent and the account made: a newcomer has no
+				// live session to displace, so a full server would only refuse them
+				// after the fact, leaving an account they never got to use.
+				if deps.Tracker.Full() {
+					return nil, errServerFull
+				}
+				refund, ok := allowRegistration(traceCtx, registerBudget, s)
+				if !ok {
+					return nil, errTooManyRegistrations
+				}
+				return refund, nil
+			})
+		if errors.Is(err, errServerFull) {
+			reg.refuseFull(s, err)
+			return nil
+		}
 		if err != nil {
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
@@ -724,10 +745,10 @@ func newRegistrationBudget(cfg *config.Config) registrationBudget {
 // allowRegistration answers whether this network may mint another account. An
 // address that cannot be keyed is refused: registration is the one path where
 // admitting an unmeterable client is worse than turning a real player away.
-func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Session) bool {
+func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Session) (refund func(), ok bool) {
 	host, ok := clientHost(s.RemoteAddr())
 	if !ok {
-		return false
+		return nil, false
 	}
 	spends := []struct {
 		limiter *ratelimit.SlidingWindow
@@ -749,9 +770,15 @@ func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Ses
 			admitted.limiter.Refund(admitted.key)
 		}
 		observability.RateLimitReject(ctx, spend.name)
-		return false
+		return nil, false
 	}
-	return true
+	// Given back if the registration then fails (a taken name, a racing key): no
+	// account was made, so it must not cost the network one of its few.
+	return func() {
+		for _, spent := range spends {
+			spent.limiter.Refund(spent.key)
+		}
+	}, true
 }
 
 // clientNet is what the routine connect/disconnect logs record instead of the address:

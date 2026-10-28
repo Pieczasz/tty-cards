@@ -22,6 +22,7 @@ import (
 
 	"charm.land/ssh"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -248,7 +249,7 @@ func TestAllowRegistration(t *testing.T) {
 			t.Parallel()
 			var got bool
 			for _, addr := range tt.addrs {
-				got = allowRegistration(t.Context(), tt.budget, &stubSession{addr: stubAddr{addr}})
+				_, got = allowRegistration(t.Context(), tt.budget, &stubSession{addr: stubAddr{addr}})
 			}
 			assert.Equal(t, tt.want, got)
 		})
@@ -264,8 +265,10 @@ func TestAllowRegistration_ARefusalSpendsNothing(t *testing.T) {
 	first := &stubSession{addr: stubAddr{"[2001:db8:1:1::1]:1"}}
 	sibling := &stubSession{addr: stubAddr{"[2001:db8:1:2::1]:1"}}
 
-	require.True(t, allowRegistration(t.Context(), budget, first))
-	require.False(t, allowRegistration(t.Context(), budget, sibling), "the /48 budget did not hold")
+	_, ok := allowRegistration(t.Context(), budget, first)
+	require.True(t, ok)
+	_, ok = allowRegistration(t.Context(), budget, sibling)
+	require.False(t, ok, "the /48 budget did not hold")
 
 	assert.True(t, budget.net.Allow(ratelimit.NetKey("2001:db8:1:2::1")), "the refused /64 spent its own budget")
 	for range 4 {
@@ -536,4 +539,46 @@ func TestReportingModel_TellsTheClientAboutThePanic(t *testing.T) {
 				"the panic reached the logs and the span but never the player")
 		})
 	}
+}
+
+// A registration that then fails created no account, so the refund the gate hands back
+// must return every budget it spent: five typos of a taken name would otherwise lock a
+// network out for the hour.
+func TestAllowRegistration_RefundGivesEveryBudgetBack(t *testing.T) {
+	t.Parallel()
+	budget := testBudget(1, 1, 1)
+	s := &stubSession{addr: stubAddr{"[2001:db8:1:1::1]:1"}}
+
+	refund, ok := allowRegistration(t.Context(), budget, s)
+	require.True(t, ok)
+	_, again := allowRegistration(t.Context(), budget, s)
+	require.False(t, again, "the budget of one held")
+
+	refund()
+
+	_, ok = allowRegistration(t.Context(), budget, s)
+	assert.True(t, ok, "the refund did not give the budget back")
+}
+
+// A newcomer to a full server is told so before an account exists: registering one
+// first leaves a permanent row for a player who never got in, and spends their
+// network's registration budget on it.
+func TestSessionModel_FullServerRefusesANewcomerBeforeRegistering(t *testing.T) {
+	t.Parallel()
+	session := &stubSession{addr: stubAddr{"10.0.0.9:1"}, pubKey: testPublicKey(t), user: "newcomer"}
+	repo := new(MockUserRepository)
+	repo.On("LoadUserByFingerprint", mock.Anything, mock.Anything).Return(nil, nil, nil)
+	reg := &sessionRegistry{}
+	reg.store(session, &sessionState{traceCtx: t.Context()})
+	deps := newSessionDeps(t, repo)
+	deps.Tracker = fullTracker(t)
+	budget := testBudget(1, 1, 1)
+
+	model := sessionModel(deps, reg, budget)(session)
+
+	assert.Nil(t, model)
+	assert.Contains(t, session.errOut.String(), "The server is full")
+	repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
+	_, ok := allowRegistration(t.Context(), budget, session)
+	assert.True(t, ok, "the refusal spent the network's registration budget")
 }

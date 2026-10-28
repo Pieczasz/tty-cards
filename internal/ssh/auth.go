@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 
@@ -41,14 +42,26 @@ func SessionFingerprint(s ssh.Session) (string, error) {
 	return gossh.FingerprintSHA256(key), nil
 }
 
+// authTimeout bounds each database round trip a login makes, the same budget the
+// TUI gives a view's request: a stalled database must not hold an unauthenticated
+// connection, and its session slot, open until the idle timeout.
+const authTimeout = 5 * time.Second
+
+// registrationGate decides whether a first-time fingerprint may register. It returns
+// the error the player is shown when not, and otherwise a refund (may be nil) that
+// gives back what the gate spent, for when the registration then fails.
+type registrationGate func() (refund func(), err error)
+
 // LoadOrRegisterUser resolves a fingerprint to an account, registering one on first
 // sight. allowRegister gates only that first sight - a returning player never spends
 // its budget - and may be nil where registration needs no limit. Auth deliberately
 // knows nothing about how the budget is counted; it only asks.
 func LoadOrRegisterUser(
 	ctx context.Context, userRepo db.Authenticator, sshUsername, fingerprint string,
-	allowRegister func() bool,
+	allowRegister registrationGate,
 ) (*db.User, error) {
+	ctx, cancel := context.WithTimeout(ctx, authTimeout)
+	defer cancel()
 	user, key, err := userRepo.LoadUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		slog.ErrorContext(ctx, "database error while authenticating user", "error", err)
@@ -67,12 +80,20 @@ func LoadOrRegisterUser(
 	if err := db.ValidateUsername(sshUsername); err != nil {
 		return nil, fmt.Errorf("%w: %w; try another with ssh -l <name>", db.ErrInvalidUsername, err)
 	}
-	if allowRegister != nil && !allowRegister() {
-		slog.WarnContext(ctx, "refused new account registration: network over its budget")
-		return nil, errTooManyRegistrations
+	var refund func()
+	if allowRegister != nil {
+		if refund, err = allowRegister(); err != nil {
+			slog.WarnContext(ctx, "refused new account registration", "error", err)
+			return nil, err
+		}
 	}
 	user, _, err = userRepo.RegisterUserWithSSHKey(ctx, sshUsername, fingerprint)
 	if err != nil {
+		// No account was made, so the attempt costs the network nothing: a taken name
+		// would otherwise burn five registrations on five typos.
+		if refund != nil {
+			refund()
+		}
 		// A taken name or a key registered by a racing connection is the player's
 		// situation, not a server failure.
 		level := slog.LevelError

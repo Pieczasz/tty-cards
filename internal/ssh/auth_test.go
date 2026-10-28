@@ -139,7 +139,7 @@ func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing
 
 			asked := 0
 			_, err := LoadOrRegisterUser(t.Context(), repo, tt.username, "fp",
-				func() bool { asked++; return true })
+				func() (func(), error) { asked++; return nil, nil })
 
 			require.ErrorIs(t, err, db.ErrInvalidUsername)
 			require.ErrorContains(t, err, tt.wantText)
@@ -161,7 +161,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 
 		_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
-			func() bool { return false })
+			func() (func(), error) { return nil, errTooManyRegistrations })
 
 		require.ErrorIs(t, err, errTooManyRegistrations)
 		repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
@@ -176,7 +176,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 
 		asked := 0
 		user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp",
-			func() bool { asked++; return false })
+			func() (func(), error) { asked++; return nil, errTooManyRegistrations })
 
 		require.NoError(t, err, "an existing account is not a registration")
 		assert.Equal(t, existing, user)
@@ -191,7 +191,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("RegisterUserWithSSHKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicSSHKey{}, nil)
 
 		user, err := LoadOrRegisterUser(t.Context(), repo, "new", "fp",
-			func() bool { return true })
+			func() (func(), error) { return nil, nil })
 
 		require.NoError(t, err)
 		assert.Equal(t, fresh, user)
@@ -211,4 +211,50 @@ func TestLoadOrRegisterUser_ActivityUpdateFailureDoesNotBlockLogin(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, existing, user)
 	repo.AssertExpectations(t)
+}
+
+// A name that is taken (or a key that raced) made no account, so it must not cost the
+// network one of its few registrations.
+func TestLoadOrRegisterUser_AFailedRegistrationRefundsTheGate(t *testing.T) {
+	t.Parallel()
+	repo := new(MockUserRepository)
+	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
+	repo.On("RegisterUserWithSSHKey", mock.Anything, "user", "fp").Return(nil, nil, db.ErrUsernameTaken)
+
+	refunded := 0
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
+		func() (func(), error) { return func() { refunded++ }, nil })
+
+	require.ErrorIs(t, err, errNameUnavailable)
+	assert.Equal(t, 1, refunded)
+}
+
+// A stalled database must not hold an unauthenticated connection open until the idle
+// timeout: every round trip login makes carries a deadline.
+func TestLoadOrRegisterUser_EveryRoundTripHasADeadline(t *testing.T) {
+	t.Parallel()
+	hasDeadline := mock.MatchedBy(func(ctx context.Context) bool {
+		_, ok := ctx.Deadline()
+		return ok
+	})
+	repo := new(MockUserRepository)
+	repo.On("LoadUserByFingerprint", hasDeadline, "fp").Return(nil, nil, nil).Once()
+	repo.On("RegisterUserWithSSHKey", hasDeadline, "user", "fp").
+		Return(&db.User{ID: testutil.UID(4)}, &db.PublicSSHKey{}, nil).Once()
+
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", nil)
+
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+}
+
+// A server with no room refuses a newcomer before the account exists, not after.
+func TestSessionTracker_FullMeansANewcomerIsRefusedUpFront(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(1)
+	assert.False(t, tracker.Full())
+	_, err := tracker.Connect(testutil.UID(1), nil)
+	require.NoError(t, err)
+	assert.True(t, tracker.Full())
+	assert.False(t, NewSessionTracker(0).Full(), "zero means unlimited")
 }

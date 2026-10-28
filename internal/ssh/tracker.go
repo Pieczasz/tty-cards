@@ -128,6 +128,13 @@ func (t *SessionTracker) claim(a *account) (uint64, error) {
 	return t.next, nil
 }
 
+// Full reports whether a session for an account with none live would be refused. It
+// lets a login learn that before it registers an account it could not seat; Connect
+// stays the authority, as another login may take the last slot in between.
+func (t *SessionTracker) Full() bool {
+	return t.maxSessions > 0 && t.live.Load() >= int64(t.maxSessions)
+}
+
 // Count is the number of accounts with a live session.
 func (t *SessionTracker) Count() int {
 	return int(t.live.Load())
