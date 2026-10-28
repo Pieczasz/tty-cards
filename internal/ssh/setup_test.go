@@ -13,41 +13,59 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/config"
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
-	"github.com/Pieczasz/terminal-card/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/config"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
+
+	"uuid"
 
 	"charm.land/ssh"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	gossh "golang.org/x/crypto/ssh"
 )
 
-func TestSetupServer_Errors(t *testing.T) {
+func TestNewServer_Errors(t *testing.T) {
 	t.Parallel()
 
-	deps := ServerDependencies{
-		Config: &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+	deps := Deps{
+		Config:  &config.Config{SSHKeyPath: "/invalid/path/that/doesnt/exist"},
+		Tracker: NewSessionTracker(0),
 	}
-	_, err := SetupServer(deps)
-	assert.ErrorContains(t, err, "error while saving keypair")
+	_, err := NewServer(deps)
+	assert.ErrorContains(t, err, "write host key")
 }
 
-func TestSetupServer_SetsConnectionTimeouts(t *testing.T) {
+// The tracker is shared with the stats API, which counts who is online from it. A
+// server that quietly built its own would leave that count at zero forever.
+func TestNewServer_RequiresATracker(t *testing.T) {
 	t.Parallel()
 
-	deps := ServerDependencies{
+	_, err := NewServer(Deps{
+		Config: &config.Config{SSHKeyPath: t.TempDir() + "/id_ed25519", RateLimitCount: 5, RateLimitWindow: time.Second},
+	})
+	require.ErrorIs(t, err, errNoTracker)
+}
+
+func TestNewServer_SetsConnectionTimeouts(t *testing.T) {
+	t.Parallel()
+
+	deps := Deps{
 		Config: &config.Config{
 			SSHKeyPath:      t.TempDir() + "/id_ed25519",
 			RateLimitCount:  5,
 			RateLimitWindow: time.Second,
 		},
+		Tracker: NewSessionTracker(0),
 	}
 
-	server, err := SetupServer(deps)
+	server, err := NewServer(deps)
 	require.NoError(t, err)
 
 	assert.Equal(t, 20*time.Second, server.HandshakeTimeout, "an unauthenticated connection must be dropped")
@@ -98,13 +116,17 @@ type stubAddr struct{ s string }
 func (a stubAddr) Network() string { return "tcp" }
 func (a stubAddr) String() string  { return a.s }
 
-// stubSSHContext is enough ssh.Context for the auth handlers: they only read the
-// remote address and the session id, and log against the context.
+// stubSSHContext is enough ssh.Context for the auth handlers and the teardown: they
+// read the remote address, session id and client version, keep per-connection values
+// and log against the context.
 type stubSSHContext struct {
 	ssh.Context
 	ctx  context.Context
 	addr net.Addr
 }
+
+func (c *stubSSHContext) SetValue(key, value any) { c.ctx = context.WithValue(c.ctx, key, value) }
+func (c *stubSSHContext) ClientVersion() string   { return "SSH-2.0-stub" }
 
 func (c *stubSSHContext) Deadline() (time.Time, bool) { return c.ctx.Deadline() }
 func (c *stubSSHContext) Done() <-chan struct{}       { return c.ctx.Done() }
@@ -148,7 +170,7 @@ func TestRateLimitAuth(t *testing.T) {
 			t.Parallel()
 			nextCalls := 0
 			handler := rateLimitAuth(
-				ratelimit.NewSlidingWindowLimiter(3, time.Minute),
+				ratelimit.New(3, time.Minute), ratelimit.New(1, time.Minute),
 				func(ssh.Context, ssh.PublicKey) bool { nextCalls++; return true },
 			)
 
@@ -168,7 +190,7 @@ func TestRateLimitAuth_CollapsesIPv6ToItsPrefix(t *testing.T) {
 	t.Parallel()
 
 	handler := rateLimitAuth(
-		ratelimit.NewSlidingWindowLimiter(1, time.Minute),
+		ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true },
 	)
 
@@ -177,50 +199,89 @@ func TestRateLimitAuth_CollapsesIPv6ToItsPrefix(t *testing.T) {
 		"a second address in the same /64 spent someone else's budget")
 }
 
+func testBudget(perNet, perWide, global int) registrationBudget {
+	return registrationBudget{
+		net:    ratelimit.New(perNet, time.Hour),
+		wide:   ratelimit.New(perWide, time.Hour),
+		global: ratelimit.New(global, time.Hour),
+	}
+}
+
 func TestAllowRegistration(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		limiter  *ratelimit.SlidingWindowLimiter
-		addr     net.Addr
-		attempts int
-		want     bool
+		name   string
+		budget registrationBudget
+		addrs  []string
+		want   bool
 	}{
-		{name: "no limiter configured", limiter: nil, addr: stubAddr{"10.0.0.1:1"}, attempts: 1, want: true},
 		{
-			name:    "inside the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
-			addr:    stubAddr{"10.0.0.2:1"}, attempts: 2, want: true,
+			name: "inside the budget", budget: testBudget(2, 10, 10),
+			addrs: []string{"10.0.0.2:1", "10.0.0.2:1"}, want: true,
 		},
 		{
-			name:    "over the budget",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
-			addr:    stubAddr{"10.0.0.3:1"}, attempts: 3, want: false,
+			name: "over the network's budget", budget: testBudget(2, 10, 10),
+			addrs: []string{"10.0.0.3:1", "10.0.0.3:1", "10.0.0.3:1"}, want: false,
 		},
 		{
-			name:    "an unkeyable address fails closed",
-			limiter: ratelimit.NewSlidingWindowLimiter(2, time.Hour),
-			addr:    stubAddr{"not-an-address"}, attempts: 1, want: false,
+			// A free tunnel is a /48: without the wide budget each of its 65,536 /64s
+			// would get a fresh one.
+			name: "a /48 shares one budget across its /64s", budget: testBudget(2, 3, 10),
+			addrs: []string{"[2001:db8:1:1::1]:1", "[2001:db8:1:2::1]:1", "[2001:db8:1:3::1]:1", "[2001:db8:1:4::1]:1"},
+			want:  false,
+		},
+		{
+			name: "the next /48 is somebody else", budget: testBudget(2, 1, 10),
+			addrs: []string{"[2001:db8:1::1]:1", "[2001:db8:2::1]:1"}, want: true,
+		},
+		{
+			name: "the server-wide ceiling holds across networks", budget: testBudget(2, 10, 3),
+			addrs: []string{"10.0.1.1:1", "10.0.1.2:1", "10.0.1.3:1", "10.0.1.4:1"}, want: false,
+		},
+		{
+			name: "an unkeyable address fails closed", budget: testBudget(2, 10, 10),
+			addrs: []string{"not-an-address"}, want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			s := &stubSession{addr: tt.addr}
-
 			var got bool
-			for range tt.attempts {
-				got = allowRegistration(context.Background(), tt.limiter, s)
+			for _, addr := range tt.addrs {
+				got, _ = allowRegistration(t.Context(), tt.budget, &stubSession{addr: stubAddr{addr}})
 			}
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// stubSession is enough ssh.Session for sessionModel's refusal paths: wish.Fatalf
-// writes to Stderr, then exits and closes.
+// A registration refused by a wider budget did not happen, so it must not spend the
+// narrower ones: under a flood that fills the server-wide ceiling, a real player who
+// retries would otherwise find their own network locked out for the hour after.
+func TestAllowRegistration_ARefusalSpendsNothing(t *testing.T) {
+	t.Parallel()
+	budget := testBudget(1, 1, 5)
+	first := &stubSession{addr: stubAddr{"[2001:db8:1:1::1]:1"}}
+	sibling := &stubSession{addr: stubAddr{"[2001:db8:1:2::1]:1"}}
+
+	ok, _ := allowRegistration(t.Context(), budget, first)
+	require.True(t, ok)
+	ok, _ = allowRegistration(t.Context(), budget, sibling)
+	require.False(t, ok, "the /48 budget did not hold")
+
+	assert.True(t, budget.net.Allow(ratelimit.NetKey("2001:db8:1:2::1")), "the refused /64 spent its own budget")
+	for range 4 {
+		assert.True(t, budget.global.Allow(""), "the refusal spent the server-wide budget")
+	}
+	assert.False(t, budget.global.Allow(""))
+}
+
+// stubSession is the one ssh.Session double: enough for sessionModel's refusal paths
+// (wish.Fatalf writes to Stderr, then exits and closes) and for the teardown helpers,
+// which only look the session up in the registry. Embedding the interface leaves every
+// other method nil on purpose: calling one is a bug in the test, not a silent pass.
 type stubSession struct {
 	ssh.Session
 	pubKey ssh.PublicKey
@@ -241,26 +302,26 @@ func (s *stubSession) Context() ssh.Context     { return newStubSSHContext(s.add
 
 // stubUserRepo answers only what sessionModel asks of it.
 type stubUserRepo struct {
-	db.UserRepository
+	db.Authenticator
 	user *db.User
 	err  error
 }
 
-func (r stubUserRepo) LoadUserByFingerprint(context.Context, string) (*db.User, *db.PublicKey, error) {
+func (r stubUserRepo) LoadUserByFingerprint(context.Context, string) (*db.User, *db.PublicSSHKey, error) {
 	if r.err != nil {
 		return nil, nil, r.err
 	}
-	return r.user, &db.PublicKey{}, nil
+	return r.user, &db.PublicSSHKey{}, nil
 }
 
-func (stubUserRepo) UpdateUserActivity(context.Context, *db.User, *db.PublicKey) error { return nil }
+func (stubUserRepo) UpdateUserActivity(context.Context, uuid.UUID, uint) error { return nil }
 
-func newSessionDeps(repo db.UserRepository) ServerDependencies {
-	return ServerDependencies{
-		Config:         &config.Config{},
-		UserRepository: repo,
-		LobbyManager:   lobby.NewManager(context.Background(), nil),
-		GameRegistry:   game.NewRegistry(),
+func newSessionDeps(tb testing.TB, repo db.Authenticator) Deps {
+	tb.Helper()
+	return Deps{
+		Config:       &config.Config{},
+		Auth:         repo,
+		LobbyManager: lobby.NewManager(tb.Context(), nil, game.NewRegistry()),
 	}
 }
 
@@ -273,7 +334,7 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 	tests := []struct {
 		name       string
 		session    *stubSession
-		repo       db.UserRepository
+		repo       db.Authenticator
 		tracker    *SessionTracker
 		storeState bool
 		wantOutput string
@@ -303,9 +364,11 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 			wantOutput: "The server is full",
 		},
 		{
-			name:       "the session state was already torn down",
-			session:    &stubSession{addr: stubAddr{"10.0.0.4:1"}, pubKey: testPublicKey(t)},
-			repo:       stubUserRepo{user: &db.User{ID: testutil.UID(3), Username: "ghost"}},
+			name:    "the session state was already torn down",
+			session: &stubSession{addr: stubAddr{"10.0.0.4:1"}, pubKey: testPublicKey(t), user: "ghost"},
+			// No expectations: any lookup fails the test. A session that is going to be
+			// refused must not first register an account and spend the network's budget.
+			repo:       new(MockUserRepository),
 			tracker:    NewSessionTracker(0),
 			storeState: false,
 			wantOutput: "could not be started",
@@ -315,21 +378,72 @@ func TestSessionModel_RefusalPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			reg := &sessionRegistry{}
 			if tt.storeState {
-				sessionStates.Store(tt.session, &sessionState{traceCtx: context.Background()})
-				t.Cleanup(func() { sessionStates.Delete(tt.session) })
+				reg.store(tt.session, &sessionState{traceCtx: t.Context()})
 			}
 			before := tt.tracker.Count()
 
-			deps := newSessionDeps(tt.repo)
-			limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
-			model, opts := sessionModel(deps, tt.tracker, limiter)(tt.session)
+			deps := newSessionDeps(t, tt.repo)
+			deps.Tracker = tt.tracker
+			limiter := testBudget(5, 5, 5)
+			model := sessionModel(deps, reg, limiter)(tt.session)
 
 			assert.Nil(t, model, "a refused session must not be handed to bubbletea")
-			assert.Nil(t, opts)
 			assert.Contains(t, tt.session.errOut.String(), tt.wantOutput)
 			assert.Equal(t, 1, tt.session.exited, "the client is left waiting on a session that never starts")
 			assert.Equal(t, before, tt.tracker.Count(), "a refused session kept a tracker slot")
+		})
+	}
+}
+
+// A refusal has to land on the session span as well as the client's screen, or a
+// trace shows a session that simply ended without saying why.
+func TestFailSessionf_MarksTheSessionSpan(t *testing.T) {
+	t.Parallel()
+
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	ctx, span := provider.Tracer("test").Start(t.Context(), "ssh.session")
+	s := &stubSession{addr: stubAddr{"10.0.0.12:1"}}
+	reg := &sessionRegistry{}
+	reg.store(s, &sessionState{traceCtx: ctx, span: span})
+
+	reg.failSessionf(s, "rejected_full", errServerFull, "full\n")
+	span.End()
+
+	ended := recorder.Ended()
+	require.Len(t, ended, 1)
+	assert.Equal(t, codes.Error, ended[0].Status().Code)
+	assert.Equal(t, "rejected_full", ended[0].Status().Description, "the span does not say which refusal it was")
+	require.Len(t, ended[0].Events(), 1, "the refusal's error was not recorded on the span")
+	assert.Equal(t, "full\n", s.errOut.String())
+	assert.Equal(t, 1, s.exited)
+}
+
+// Routine connect/disconnect logs carry the network the limiter counts, never the
+// address; the warn-level refusals carry the address. Neither may fail on a session
+// that has no usable address.
+func TestLoggedAddresses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		addr     net.Addr
+		wantNet  string
+		wantAddr string
+	}{
+		{name: "ipv4", addr: stubAddr{"198.51.100.7:22"}, wantNet: "198.51.100.7", wantAddr: "198.51.100.7:22"},
+		{name: "ipv6 is logged as its /64", addr: stubAddr{"[2001:db8::1]:22"}, wantNet: "2001:db8::/64", wantAddr: "[2001:db8::1]:22"},
+		{name: "no port", addr: stubAddr{"198.51.100.7"}, wantNet: "unknown", wantAddr: "198.51.100.7"},
+		{name: "no address", addr: nil, wantNet: "unknown", wantAddr: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.wantNet, clientNet(tt.addr))
+			assert.Equal(t, tt.wantAddr, addrString(tt.addr))
 		})
 	}
 }
@@ -360,24 +474,49 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 
 	user := &db.User{ID: testutil.UID(42), Username: "player"}
 	s := &stubSession{addr: stubAddr{"10.0.0.9:1"}, pubKey: testPublicKey(t), user: "player"}
-	st := &sessionState{traceCtx: context.Background()}
-	sessionStates.Store(s, st)
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	st := &sessionState{traceCtx: t.Context()}
+	reg := &sessionRegistry{}
+	reg.store(s, st)
 
 	tracker := NewSessionTracker(0)
-	deps := newSessionDeps(stubUserRepo{user: user})
-	limiter := ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow)
+	deps := newSessionDeps(t, stubUserRepo{user: user})
+	limiter := testBudget(5, 5, 5)
 
-	model, _ := sessionModel(deps, tracker, limiter)(s)
+	deps.Tracker = tracker
+	model := sessionModel(deps, reg, limiter)(s)
 	require.NotNil(t, model)
 	t.Cleanup(func() { st.model.Close() })
 
-	assert.True(t, st.owns, "teardown skips a session that does not own its slot")
-	assert.Equal(t, user, st.user)
+	assert.Equal(t, user, st.user, "teardown skips a session with no user, so it would free nothing")
 	assert.NotZero(t, st.gen)
 	assert.NotNil(t, st.model, "closeSessionModel would leave the view's subscriptions running")
-	assert.True(t, tracker.Owns(user.ID, st.gen))
+	assert.True(t, release(tracker, user.ID, st.gen), "the session does not own the slot it claimed")
 	assert.Zero(t, s.exited, "an accepted session must not be hung up on")
+}
+
+func TestSessionModel_ResumePanicStillPublishesTheSlot(t *testing.T) {
+	t.Parallel()
+
+	user := &db.User{ID: testutil.UID(7), Username: "player"}
+	s := &stubSession{addr: stubAddr{"10.0.0.11:1"}, pubKey: testPublicKey(t), user: "player"}
+	st := &sessionState{traceCtx: t.Context()}
+	reg := &sessionRegistry{}
+	reg.store(s, st)
+
+	tracker := NewSessionTracker(1)
+	deps := newSessionDeps(t, stubUserRepo{user: user})
+	deps.Tracker = tracker
+	deps.LobbyManager = nil
+
+	require.Panics(t, func() { sessionModel(deps, reg, testBudget(5, 5, 5))(s) })
+	require.NotNil(t, st.user, "teardown skips a session whose user was never stored")
+	assert.NotZero(t, st.gen)
+	require.NotNil(t, st.model)
+	t.Cleanup(func() { st.model.Close() })
+
+	released := false
+	tracker.ReleaseWith(user.ID, st.gen, func() { released = true })
+	assert.True(t, released, "the slot claimed before ResumeSeat must still be releasable")
 }
 
 // sessionProgram is what wish calls; handing it a refused session must produce no
@@ -386,12 +525,13 @@ func TestSessionProgram_RefusedSessionGetsNoProgram(t *testing.T) {
 	t.Parallel()
 
 	s := &stubSession{addr: stubAddr{"10.0.0.10:1"}}
-	sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-	t.Cleanup(func() { sessionStates.Delete(s) })
+	reg := &sessionRegistry{}
+	reg.store(s, &sessionState{traceCtx: t.Context()})
 
-	deps := newSessionDeps(stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
-	program := sessionProgram(deps, NewSessionTracker(0),
-		ratelimit.NewSlidingWindowLimiter(registrationLimit, registrationWindow))
+	deps := newSessionDeps(t, stubUserRepo{user: &db.User{ID: testutil.UID(5)}})
+	deps.Tracker = NewSessionTracker(0)
+	program := sessionProgram(deps, reg,
+		testBudget(5, 5, 5))
 
 	assert.Nil(t, program(s), "a refused session must not get a bubbletea program")
 }
@@ -406,10 +546,10 @@ func TestReportingModel_TellsTheClientAboutThePanic(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			t.Parallel()
 			s := &stubSession{addr: stubAddr{"10.0.0.11:1"}}
-			sessionStates.Store(s, &sessionState{traceCtx: context.Background()})
-			t.Cleanup(func() { sessionStates.Delete(s) })
+			reg := &sessionRegistry{}
+			reg.store(s, &sessionState{traceCtx: t.Context()})
 
-			m := reportingModel{Model: panicModel{on: method}, session: s}
+			m := reportingModel{Model: panicModel{on: method}, session: s, reg: reg}
 			require.Panics(t, func() {
 				switch method {
 				case "init":

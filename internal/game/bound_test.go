@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/broadcaster"
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/broadcaster"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,16 +13,12 @@ import (
 
 type bindRules struct{}
 
-func (bindRules) MinPlayers() int                     { return 2 }
-func (bindRules) MaxPlayers() int                     { return 4 }
-func (bindRules) InitialDeck() []deck.Card            { return deck.StandardDeck() }
-func (bindRules) InitialDealCount() int               { return 2 }
-func (bindRules) OnGameStart(*State) error            { return nil }
+func (bindRules) OnGameStart(s *State) error          { return dealEach(s, 2) }
 func (bindRules) ValidateAction(*State, Action) error { return nil }
-func (bindRules) AfterAction(*State, Action) error    { return nil }
 func (bindRules) ApplyAction(*State, Action) error    { return nil }
+func (bindRules) TimeoutAction(*State) Action         { return noopAction{} }
 func (bindRules) CheckWinCondition(*State) bool       { return false }
-func (bindRules) Standings(s *State) []*Player        { return s.Players }
+func (bindRules) Standings(s *State) []Standing       { return inOrder(s.Players) }
 
 // boundHand is the hand slice of a Frame read, which is the one read path views use.
 func boundHand(b *BoundEngine) []deck.Card {
@@ -35,7 +31,7 @@ func TestBoundEngine_HandIsClonedAndScoped(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -59,7 +55,7 @@ func TestBoundEngine_HandBelongsToTheBoundPlayerOnly(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -84,7 +80,7 @@ func TestBoundEngine_SubmitRequiresBoundPlayer(t *testing.T) {
 
 	p1 := &Player{ID: "1"}
 	p2 := &Player{ID: "2"}
-	engine := NewEngine(bindRules{}, []*Player{p1, p2}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{p1, p2})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -103,19 +99,19 @@ func TestBoundEngine_SubmitRequiresBoundPlayer(t *testing.T) {
 func TestBoundEngine_SubscribeAndUnsubscribe(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	bound := Bind(engine, "1")
 
 	events, err := bound.Subscribe()
 	require.NoError(t, err)
-	require.Equal(t, 1, engine.Broadcaster().Len())
+	require.Equal(t, 1, engine.SubscriberCount())
 
 	require.NoError(t, engine.Start())
 	assert.Equal(t, EventGameStarted, (<-events).Type)
 
 	bound.Unsubscribe(events)
-	assert.Zero(t, engine.Broadcaster().Len(), "unsubscribing returns the slot")
+	assert.Zero(t, engine.SubscriberCount(), "unsubscribing returns the slot")
 
 	var unbound *BoundEngine
 	_, err = unbound.Subscribe()
@@ -132,7 +128,6 @@ func TestBoundEngine_NilIsInert(t *testing.T) {
 	assert.Nil(t, Bind(nil, "1"), "there is no seat without an engine")
 
 	var unbound *BoundEngine
-	assert.Nil(t, unbound.Engine())
 	assert.Empty(t, unbound.PlayerID())
 	require.ErrorContains(t, unbound.Submit(noopAction{}), "no active game")
 
@@ -142,17 +137,14 @@ func TestBoundEngine_NilIsInert(t *testing.T) {
 	assert.Zero(t, remaining)
 }
 
-// The escape hatch has to reach the same engine the view was bound to - poker renders
-// every seat through it - and the bound ID is what scopes everything else.
-func TestBoundEngine_ExposesItsEngineAndSeat(t *testing.T) {
+// The bound ID is what scopes everything else a view does.
+func TestBoundEngine_ExposesItsSeat(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 
-	bound := Bind(engine, "1")
-	assert.Same(t, engine, bound.Engine())
-	assert.Equal(t, "1", bound.PlayerID())
+	assert.Equal(t, "1", Bind(engine, "1").PlayerID())
 }
 
 // Frame is one lock hold: the callback sees the same state the snapshot and hand were
@@ -160,7 +152,7 @@ func TestBoundEngine_ExposesItsEngineAndSeat(t *testing.T) {
 func TestBoundEngine_FrameCallbackSeesTheSnapshottedState(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	require.NoError(t, engine.Start())
 
@@ -181,7 +173,7 @@ func TestBoundEngine_FrameCallbackSeesTheSnapshottedState(t *testing.T) {
 func TestBoundEngine_SubscribeReportsCapacity(t *testing.T) {
 	t.Parallel()
 
-	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}}, deck.StandardDeck())
+	engine := NewEngine(bindRules{}, []*Player{{ID: "1"}, {ID: "2"}})
 	t.Cleanup(engine.Close)
 	bound := Bind(engine, "1")
 

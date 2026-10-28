@@ -1,15 +1,15 @@
 package systemtest
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/catalog"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,16 +39,15 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	// A real repository, not nil: a nil db.MatchRepository is a shape the server can
 	// never have, so measuring against one measures something that does not exist -
 	// and any path that starts touching it turns this into a nil dereference.
-	manager := lobby.NewManager(context.Background(), newRankedFinalizeRecorder())
-	registry := realRegistry(t)
+	manager := lobby.NewManager(t.Context(), newRankedFinalizeRecorder(), catalog.NewRegistry())
 
-	warm := openTable(t, manager, registry, 0, seatsPerTable)
+	warm := openTable(t, manager, 0, seatsPerTable)
 	require.NotNil(t, warm)
 
 	before := heapInUse()
 	held := make([]*lobby.Lobby, 0, tables)
 	for i := 1; i <= tables; i++ {
-		held = append(held, openTable(t, manager, registry, i, seatsPerTable))
+		held = append(held, openTable(t, manager, i, seatsPerTable))
 	}
 	after := heapInUse()
 	runtime.KeepAlive(held)
@@ -61,11 +60,11 @@ func TestCapacity_MemoryPerTable(t *testing.T) {
 	require.Less(t, perTable, float64(2<<20), "a table must not retain megabytes")
 }
 
-func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, idx, n int) *lobby.Lobby {
+func openTable(t *testing.T, manager *lobby.Manager, idx, n int) *lobby.Lobby {
 	t.Helper()
 	leader := benchPlayer(idx, 0)
-	l, err := manager.New(leader,
-		lobby.WithCardGame("Poker"),
+	l, err := manager.CreateLobby(leader,
+		lobby.WithCardGame("poker"),
 		lobby.WithMaxPlayers(9),
 		lobby.WithPrivate(false),
 	)
@@ -75,13 +74,13 @@ func openTable(t *testing.T, manager *lobby.Manager, registry *game.Registry, id
 	guests := make([]*game.Player, 0, n-1)
 	for i := 1; i < n; i++ {
 		g := benchPlayer(idx, i)
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
 		guests = append(guests, g)
 	}
 
-	require.NoError(t, l.ToggleReady(leader, registry))
+	require.NoError(t, manager.ToggleReady(leader))
 	for _, g := range guests {
-		require.NoError(t, l.ToggleReady(g, registry))
+		require.NoError(t, manager.ToggleReady(g))
 	}
 	return l
 }

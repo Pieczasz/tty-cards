@@ -1,10 +1,11 @@
 package ginrummy
 
 import (
+	"cmp"
 	"math"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
 func deadwoodPoints(c deck.Card) int { return deck.PipValue(c.Rank) }
@@ -20,6 +21,31 @@ func sumDeadwood(cards []deck.Card) int {
 // maskBits is how many cards the meld search can address: candidate melds are
 // uint16 index masks.
 const maskBits = 16
+
+// pick appends to dst the cards whose bit in mask is in, or whose bit is clear when in
+// is false: a meld is the cards in its mask, the deadwood the cards outside them all.
+func pick(dst, cards []deck.Card, mask uint16, in bool) []deck.Card {
+	for i, c := range cards {
+		if (mask&(1<<i) != 0) == in {
+			dst = append(dst, c)
+		}
+	}
+	return dst
+}
+
+// maskOf is the mask with a bit set for every index in idxs.
+func maskOf(idxs []int) uint16 {
+	var mask uint16
+	for _, i := range idxs {
+		mask |= 1 << i
+	}
+	return mask
+}
+
+// byRunOrder sorts cards the way a run reads, ace low.
+func byRunOrder(a, b deck.Card) int {
+	return cmp.Compare(deck.RunOrder(a.Rank), deck.RunOrder(b.Rank))
+}
 
 // bestMeldSplit partitions hand into melds minimizing deadwood points.
 func bestMeldSplit(hand []deck.Card) (melds [][]deck.Card, deadwood []deck.Card, deadwoodPts int) {
@@ -49,10 +75,9 @@ func bestSplitBy(
 ) (melds [][]deck.Card, deadwood []deck.Card, deadwoodPts int) {
 	n := len(hand)
 	if n > maskBits {
-		// Candidate melds are uint16 index masks. A bigger hand is a caller mistake
-		// (deal is 10, hold is 11). The engine now recovers a panic on the timer
-		// goroutine, but that ends the table; treating the hand as deadwood keeps it
-		// playing instead of scoring a silently truncated search.
+		// A bigger hand is a caller mistake (deal is 10, hold is 11). Scoring it all
+		// as deadwood keeps the table playing, where a panic would end it and a
+		// truncated search would score it wrong.
 		deadwood = slices.Clone(hand)
 		return nil, deadwood, score(deadwood)
 	}
@@ -67,12 +92,7 @@ func bestSplitBy(
 	search = func(start int, used uint16, chosen []uint16) {
 		// Reused across the whole search: score reads it before we recurse, and
 		// applyLayoffs clones what it keeps.
-		buf = buf[:0]
-		for i := range n {
-			if used&(1<<i) == 0 {
-				buf = append(buf, cards[i])
-			}
-		}
+		buf = pick(buf[:0], cards, used, false)
 		pts := score(buf)
 		if pts < bestPts {
 			bestPts = pts
@@ -94,27 +114,15 @@ func bestSplitBy(
 	melds = make([][]deck.Card, 0, len(bestMasks))
 	var used uint16
 	for _, mask := range bestMasks {
-		meld := make([]deck.Card, 0, 4)
-		for i := range n {
-			if mask&(1<<i) != 0 {
-				meld = append(meld, cards[i])
-				used |= 1 << i
-			}
-		}
-		melds = append(melds, meld)
+		melds = append(melds, pick(make([]deck.Card, 0, maxSetSize), cards, mask, true))
+		used |= mask
 	}
-	deadwood = make([]deck.Card, 0, n)
-	for i := range n {
-		if used&(1<<i) == 0 {
-			deadwood = append(deadwood, cards[i])
-		}
-	}
-	return melds, deadwood, bestPts
+	return melds, pick(make([]deck.Card, 0, n), cards, used, false), bestPts
 }
 
 func generateMeldMasks(cards []deck.Card) []uint16 {
 	masks := append(setMasks(cards), runMasks(cards)...)
-	// setMasks and runMasks walk maps, and BestMeldSplit keeps the first split it
+	// setMasks and runMasks walk maps, and bestSplitBy keeps the first split it
 	// finds at the best score. Without an order the melds a knock is scored on
 	// change between runs on the same hand.
 	slices.Sort(masks)
@@ -128,16 +136,9 @@ func setMasks(cards []deck.Card) []uint16 {
 	}
 	var out []uint16
 	for _, idxs := range byRank {
-		if len(idxs) < 3 {
-			continue
-		}
-		for size := 3; size <= len(idxs) && size <= 4; size++ {
+		for size := minMeldSize; size <= min(len(idxs), maxSetSize); size++ {
 			for _, combo := range combinations(idxs, size) {
-				var mask uint16
-				for _, i := range combo {
-					mask |= 1 << i
-				}
-				out = append(out, mask)
+				out = append(out, maskOf(combo))
 			}
 		}
 	}
@@ -151,9 +152,7 @@ func runMasks(cards []deck.Card) []uint16 {
 	}
 	out := make([]uint16, 0, len(cards))
 	for _, idxs := range bySuit {
-		slices.SortFunc(idxs, func(a, b int) int {
-			return deck.RunOrder(cards[a].Rank) - deck.RunOrder(cards[b].Rank)
-		})
+		slices.SortFunc(idxs, func(a, b int) int { return byRunOrder(cards[a], cards[b]) })
 		out = append(out, runMasksInSuit(cards, idxs)...)
 	}
 	return out
@@ -175,17 +174,13 @@ func runMasksInSuit(cards []deck.Card, idxs []int) []uint16 {
 }
 
 func subRunMasks(block []int) []uint16 {
-	if len(block) < 3 {
+	if len(block) < minMeldSize {
 		return nil
 	}
 	var out []uint16
 	for i := range block {
-		for j := i + 3; j <= len(block); j++ {
-			var mask uint16
-			for _, idx := range block[i:j] {
-				mask |= 1 << idx
-			}
-			out = append(out, mask)
+		for j := i + minMeldSize; j <= len(block); j++ {
+			out = append(out, maskOf(block[i:j]))
 		}
 	}
 	return out
@@ -217,12 +212,12 @@ func highestPointCard(cards []deck.Card) deck.Card {
 		return deck.Card{}
 	}
 	return slices.MaxFunc(cards, func(a, b deck.Card) int {
-		return deadwoodPoints(a) - deadwoodPoints(b)
+		return cmp.Compare(deadwoodPoints(a), deadwoodPoints(b))
 	})
 }
 
 func isSet(meld []deck.Card) bool {
-	if len(meld) < 3 || len(meld) > 4 {
+	if len(meld) < minMeldSize || len(meld) > maxSetSize {
 		return false
 	}
 	rank := meld[0].Rank
@@ -235,13 +230,11 @@ func isSet(meld []deck.Card) bool {
 }
 
 func isRun(meld []deck.Card) bool {
-	if len(meld) < 3 {
+	if len(meld) < minMeldSize {
 		return false
 	}
-	sorted := slices.Clone(meld)
-	slices.SortFunc(sorted, func(a, b deck.Card) int {
-		return deck.RunOrder(a.Rank) - deck.RunOrder(b.Rank)
-	})
+	sorted := slices.SortedFunc(slices.Values(meld), byRunOrder)
+
 	suit := sorted[0].Suit
 	for i := 1; i < len(sorted); i++ {
 		if sorted[i].Suit != suit {

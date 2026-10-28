@@ -3,19 +3,14 @@ package game
 import (
 	"uuid"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
-// Player is a seat at a table. It holds the scalars the engine, the rules and the
-// views actually read rather than the database row they came from: that is what
-// keeps internal/game free of internal/db, and it means a rules set cannot reach a
-// persisted user through the state it is handed.
+// Player is a seat at a table.
 type Player struct {
-	ID     string
-	UserID uuid.UUID
-	Name   string
-	// Ratings is Elo by game name as of the moment this player sat down. Lobbies
-	// read it for matchmaking; nothing writes it back.
+	ID      string
+	UserID  uuid.UUID
+	Name    string
 	Ratings map[string]uint32
 	Cards   []deck.Card
 }

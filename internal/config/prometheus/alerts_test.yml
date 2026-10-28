@@ -1,0 +1,153 @@
+# promtool unit tests for alerts.yml; the command is at the top of that file.
+# The series are what the backend pushes: one sample a minute, and the zero
+# otelsetup.Setup seeds for every series an increase() alert watches.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: the first lost match after a boot pages
+    interval: 1m
+    input_series:
+      - series: 'ttycards_match_finalize_total{job="tty-cards-server",outcome="dropped",ranked="true"}'
+        values: '0 0 1 1 1 1 1 1 1 1 1'
+      - series: 'ttycards_match_finalize_total{job="tty-cards-server",outcome="error",ranked="false"}'
+        values: '0x10'
+      - series: 'ttycards_match_finalize_total{job="tty-cards-server",outcome="ok",ranked="true"}'
+        values: '0+3x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MatchResultLost
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: MatchResultLost
+        exp_alerts:
+          - exp_labels: {severity: page, job: tty-cards-server, outcome: dropped, ranked: "true"}
+            exp_annotations:
+              summary: "match results are being lost (1 in 5m)"
+      - eval_time: 9m
+        alertname: MatchResultLost
+        exp_alerts: []
+
+  - name: persisted matches stay quiet
+    interval: 1m
+    input_series:
+      - series: 'ttycards_match_finalize_total{job="tty-cards-server",outcome="dropped",ranked="false"}'
+        values: '0x10'
+      - series: 'ttycards_match_finalize_total{job="tty-cards-server",outcome="ok",ranked="false"}'
+        values: '0+5x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MatchResultLost
+        exp_alerts: []
+
+  - name: the first panic after a boot warns, and nothing else does
+    interval: 1m
+    input_series:
+      - series: 'ttycards_ssh_session_panics_total{job="tty-cards-server"}'
+        values: '0 0 0 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SSHSessionPanics
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: SSHSessionPanics
+        exp_alerts:
+          - exp_labels: {severity: warn, job: tty-cards-server}
+            exp_annotations:
+              summary: "panics recovered in SSH sessions"
+      - eval_time: 10m
+        alertname: SSHSessionPanics
+        exp_alerts: []
+
+  - name: the first dropped event warns
+    interval: 1m
+    input_series:
+      - series: 'ttycards_broadcaster_events_dropped_total{job="tty-cards-server",stream="game"}'
+        values: '0 0 4 4 4'
+      - series: 'ttycards_broadcaster_events_dropped_total{job="tty-cards-server",stream="lobby"}'
+        values: '0x4'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: BroadcasterDroppingEvents
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: BroadcasterDroppingEvents
+        exp_alerts:
+          - exp_labels: {severity: warn, job: tty-cards-server, stream: game}
+            exp_annotations:
+              summary: "slow subscribers are losing game events"
+
+  - name: a pool held at its cap for 5m warns, a spike does not
+    interval: 1m
+    input_series:
+      - series: 'ttycards_db_pool_connections_used{job="tty-cards-server"}'
+        values: '5 25 25 5 5 23 23 23 23 23 23 23'
+      - series: 'ttycards_db_pool_connections_max{job="tty-cards-server"}'
+        values: '25x11'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DBPoolSaturation
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: DBPoolSaturation
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: DBPoolSaturation
+        exp_alerts:
+          - exp_labels: {severity: warn, job: tty-cards-server}
+            exp_annotations:
+              summary: "the database pool has been at 90% of its connections for 5m"
+
+  - name: a busy pool below 90% stays quiet
+    interval: 1m
+    input_series:
+      - series: 'ttycards_db_pool_connections_used{job="tty-cards-server"}'
+        values: '22x20'
+      - series: 'ttycards_db_pool_connections_max{job="tty-cards-server"}'
+        values: '25x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DBPoolSaturation
+        exp_alerts: []
+
+  - name: a backend that stops pushing pages 7-8 minutes after its last export
+    interval: 1m
+    input_series:
+      - series: 'ttycards_ssh_sessions_active{job="tty-cards-server"}'
+        values: '3x5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BackendMetricsAbsent
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: BackendMetricsAbsent
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: BackendMetricsAbsent
+        exp_alerts:
+          - exp_labels: {severity: page}
+            exp_annotations:
+              summary: "backend stopped reporting metrics"
+
+  - name: goroutines that track sessions stay quiet, a leak warns after 15m
+    interval: 1m
+    input_series:
+      - series: 'ttycards_ssh_sessions_active{job="tty-cards-server"}'
+        values: '100x40'
+      - series: 'go_goroutine_count{job="tty-cards-server"}'
+        values: '900x10 5000x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: GoroutineGrowth
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: GoroutineGrowth
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: GoroutineGrowth
+        exp_alerts:
+          - exp_labels: {severity: warn, job: tty-cards-server}
+            exp_annotations:
+              summary: "goroutine count is abnormally high"

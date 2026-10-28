@@ -1,177 +1,189 @@
 package game
 
 import (
-	"errors"
-	"log/slog"
 	"runtime/debug"
 	"time"
 )
 
 const (
+	// DefaultTurnTimeout is a turn's length unless WithTurnTimeout or a
+	// TurnDurationHandler says otherwise.
 	DefaultTurnTimeout = 30 * time.Second
-	MaxMissedTurns     = 3
+	// MaxMissedTurns is how many turns in a row a seat may miss before it is taken.
+	MaxMissedTurns = 3
+	// minTurnRemaining is the least a seat keeping the turn is left with, so a turn
+	// that carries on (gin's draw then discard, an auto-play, a leave elsewhere) never
+	// lands on a clock already at zero.
+	minTurnRemaining = 10 * time.Second
 )
 
+// armTurnTimerLocked (re)starts the clock for the seat on turn. The same seat with the
+// same turn length is the same turn carrying on - gin's draw then discard, a re-armed
+// auto-play, somebody else leaving - and keeps its running deadline, floored at
+// minTurnRemaining. Anything else is a fresh turn with the full length, and only a
+// fresh turn can be charged a new miss.
 func (e *Engine) armTurnTimerLocked() {
+	prevDeadline, prevPlayer, prevLength := e.clock.deadline, e.clock.playerID, e.clock.length
 	e.stopTurnTimerLocked()
 
-	if e.closed || e.turnTimeout <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
-		return
-	}
-	if _, ok := e.state.Rules.(TurnTimeoutHandler); !ok {
+	if e.closed || e.clock.defaultLength <= 0 || e.state.Phase != Playing || len(e.state.Players) == 0 {
 		return
 	}
 
-	timeout := e.turnTimeout
+	timeout := e.clock.defaultLength
 	if h, ok := e.state.Rules.(TurnDurationHandler); ok {
-		if override := h.TurnTimeout(e.state); override > 0 {
+		if override := h.TurnDuration(e.state); override > 0 {
 			timeout = override
 		}
 	}
 
-	seq := e.turnSeq
-	e.turnDeadline = time.Now().Add(timeout)
-	e.turnTimer = time.AfterFunc(timeout, func() { e.onTurnTimeout(seq) })
+	playerID := ""
+	if current := e.currentPlayerLocked(); current != nil {
+		playerID = current.ID
+	}
+	sameTurn := !prevDeadline.IsZero() && playerID == prevPlayer && timeout == prevLength
+	wait := timeout
+	if sameTurn {
+		wait = max(time.Until(prevDeadline), min(minTurnRemaining, timeout))
+	} else {
+		e.clock.missCharged = false
+	}
+	e.clock.playerID, e.clock.length = playerID, timeout
+
+	generation := e.clock.generation
+	e.clock.deadline = time.Now().Add(wait)
+	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(generation) })
 }
 
 func (e *Engine) stopTurnTimerLocked() {
-	e.turnSeq++
-	if e.turnTimer != nil {
-		e.turnTimer.Stop()
-		e.turnTimer = nil
+	e.clock.generation++
+	if e.clock.timer != nil {
+		e.clock.timer.Stop()
+		e.clock.timer = nil
 	}
-	e.turnDeadline = time.Time{}
+	e.clock.deadline = time.Time{}
 }
 
-func (e *Engine) rearmTurnTimer() {
+// onTurnTimeout is the timer's callback. A seat taken for idling is reported to
+// WithOnIdleRemoved only here, once the engine lock is released.
+func (e *Engine) onTurnTimeout(generation uint64) {
+	idle := e.expireTurn(generation)
+	if idle == "" || e.onIdleRemoved == nil {
+		return
+	}
+	// The hook runs after the lock is released, on the timer goroutine. A panic
+	// here is the roster's, and nothing above this callback would catch it.
+	defer func() {
+		if r := recover(); r != nil {
+			e.mu.Lock()
+			e.state.Logger().Error("idle-removal hook panicked",
+				"panic", r, "player_id", idle, "stack", string(debug.Stack()))
+			e.mu.Unlock()
+		}
+	}()
+	e.onIdleRemoved(idle)
+}
+
+// expireTurn settles an expired turn in one lock hold: it charges the miss, then
+// plays the rules' safe move for the seat or, once the seat has missed MaxMissedTurns
+// in a row, takes it. Nothing is decided under one hold and acted on under another,
+// so a player's own move either lands before this takes the lock - and moved the
+// generation on - or after it has settled the turn. It returns the seat it took for
+// idling, or "".
+func (e *Engine) expireTurn(generation uint64) (idle string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.armTurnTimerLocked()
-}
-
-func (e *Engine) TurnDeadline() time.Time {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.turnDeadline
-}
-
-func (e *Engine) MissedTurns(playerID string) int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.missedTurns[playerID]
-}
-
-func (e *Engine) onTurnTimeout(seq uint64) {
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
 	// rules hook here would take the whole process down: every table, for one game's
-	// defect. It gets the same treatment as a rules error from SubmitAction, so this
-	// table ends unrated and the rest keep playing.
-	defer e.recoverRulesPanic()
+	// defect. Deferred after the Lock, it runs before the unlock, as in SubmitAction.
+	defer func() {
+		if r := recover(); r != nil {
+			e.endOnRulesPanicLocked(r)
+		}
+	}()
 
-	playerID, action, takeSeat := e.resolveTurnTimeout(seq)
-	if playerID == "" {
-		return
+	// A fired AfterFunc cannot be stopped: one that waited on the lock while the turn
+	// moved on, the table ended or the engine closed finds a newer generation.
+	if generation != e.clock.generation || e.state.Phase != Playing {
+		return ""
 	}
-
-	if takeSeat {
-		e.removeIfStillIdle(seq, playerID)
-		return
-	}
-
-	err := e.submitTimedOutAction(playerID, action, seq)
-	switch {
-	case err == nil, errors.Is(err, errStaleTurn):
-		// The player acted for themselves while the lock was dropped: their action
-		// armed a fresh clock, so re-arming would hand the next player a double turn.
-		return
-	default:
-		// TimeoutAction returned a move ValidateAction refuses: a rules bug. The seat
-		// is taken on the next expiry instead.
-		slog.Warn("auto-play for an expired turn was refused",
-			"error", err, "player_id", playerID, "action", action.Name())
-		e.rearmTurnTimer()
-	}
-}
-
-// recoverRulesPanic is deferred by the timer goroutine. The locked helpers release
-// e.mu in their own defers while the panic unwinds, so it is safe to take here.
-func (e *Engine) recoverRulesPanic() {
-	r := recover()
-	if r == nil {
-		return
-	}
-	slog.Error("rules panicked during auto-play; ending the table as a rules error",
-		"panic", r, "stack", string(debug.Stack()))
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.state.Phase == Playing && !e.closed {
-		e.finishGameLocked(nil, EndReasonRulesError)
-	}
-}
-
-func (e *Engine) resolveTurnTimeout(seq uint64) (playerID string, action Action, takeSeat bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if seq != e.turnSeq || e.state.Phase != Playing || len(e.state.Players) == 0 {
-		return "", nil, false
-	}
-
 	current := e.currentPlayerLocked()
 	if current == nil {
-		return "", nil, false
+		return ""
 	}
 
-	e.missedTurns[current.ID]++
-	if e.missedTurns[current.ID] >= MaxMissedTurns {
-		return current.ID, nil, true
+	// One miss per seat-turn, not per expiry: a turn that carries on after an
+	// auto-play (gin's draw, then its discard) is still the one turn missed.
+	if !e.clock.missCharged {
+		e.clock.missed[current.ID]++
+		e.clock.missCharged = true
 	}
-
-	// armTurnTimerLocked never arms without a TurnTimeoutHandler and Rules is set once
-	// at construction, so a missing handler here is a wiring bug. It falls into the
-	// "no safe move" path below - the seat goes, the table does not panic.
-	var safe Action
-	if handler, ok := e.state.Rules.(TurnTimeoutHandler); ok {
-		safe = handler.TimeoutAction(e.state)
+	if e.clock.missed[current.ID] >= MaxMissedTurns {
+		return e.takeIdleSeatLocked(current.ID)
 	}
-	if safe == nil {
-		// No safe move: the seat goes rather than the table waiting. A full set of
-		// misses is what makes that re-checkable in removeIfStillIdle. Reaching this in
-		// real play is a rules bug, hence the log.
-		slog.Warn("rules returned no safe timeout move; taking the seat",
-			"player_id", current.ID, "phase", e.state.Phase)
-		e.missedTurns[current.ID] = MaxMissedTurns
-		return current.ID, nil, true
+	if e.autoPlayLocked(current) {
+		return current.ID
 	}
-	// Broadcast under the same lock hold that charged the miss. Outside it, a player
-	// whose action lands in the gap has the miss refunded while the "timed out" they
-	// disproved still ships.
-	e.broadcaster.Broadcast(Event{Type: EventTurnTimedOut, PlayerID: current.ID})
-	return current.ID, safe, false
+	return ""
 }
 
-// removeIfStillIdle re-checks the idle decision and removes under one lock hold.
-// resolveTurnTimeout had to drop the lock before calling here; without this, a player
-// who SubmitAction'd in that window would still be kicked.
-//
-// turnSeq is the whole re-check: every path that clears a miss count settles the
-// cursor too, and settling the cursor bumps turnSeq. So a sequence that still matches
-// is proof the count was not cleared behind our back, and no separate count check is
-// needed - a rejected action clears nothing and leaves the sequence alone, which is
-// how spamming garbage fails to dodge removal.
-func (e *Engine) removeIfStillIdle(seq uint64, playerID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if seq != e.turnSeq {
-		// They acted (or the table moved on) inside the window we had to drop the
-		// lock for: a newer timer already owns the turn.
-		return
+// autoPlayLocked plays the rules' safe move for current, whose turn just expired.
+// removed is set when that move did not exist and the seat was taken instead.
+// Caller holds e.mu.
+func (e *Engine) autoPlayLocked(current *Player) (removed bool) {
+	safe := e.state.Rules.TimeoutAction(e.state)
+	if safe == nil {
+		// No safe move: the seat goes rather than the table waiting. Reaching this in
+		// real play is a rules bug, hence the log.
+		e.state.Logger().Warn("rules returned no safe timeout move; taking the seat",
+			"player_id", current.ID, "phase", e.state.Phase)
+		e.clock.missed[current.ID] = MaxMissedTurns
+		e.takeIdleSeatLocked(current.ID)
+		return true
 	}
+	e.broadcaster.Broadcast(Event{Type: EventTurnTimedOut, PlayerID: current.ID})
+
+	// The miss count is left alone: this timeout is already counted, and clearing it
+	// would mean somebody who never comes back is never removed. The generation fence
+	// already proved the table live and current on turn, so only the rules can refuse.
+	if err := e.state.Rules.ValidateAction(e.state, safe); err != nil {
+		// TimeoutAction returned a move ValidateAction refuses: a rules bug. The
+		// re-armed turn is chargeable again, or a rules set that always refuses would
+		// never lose the seat.
+		e.state.Logger().Warn("auto-play for an expired turn was refused",
+			"error", err, "player_id", current.ID, "action", safe.Name())
+		e.clock.missCharged = false
+		e.armTurnTimerLocked()
+		return false
+	}
+	if err := e.applyActionLocked(current, safe); err != nil {
+		e.state.Logger().Error("auto-play ended the table on a rules error",
+			"error", err, "player_id", current.ID, "action", safe.Name())
+	}
+	return false
+}
+
+// takeIdleSeatLocked removes a seat that stopped playing and returns its ID. Caller
+// holds e.mu.
+func (e *Engine) takeIdleSeatLocked(playerID string) string {
 	// EventPlayerIdle ends the player's ssh session through the view, so this is the
 	// only server-side record that a seat was taken for idling.
-	slog.Info("removing idle player",
-		"player_id", playerID, "missed_turns", e.missedTurns[playerID])
+	e.state.Logger().Info("removing idle player",
+		"player_id", playerID, "missed_turns", e.clock.missed[playerID])
 	e.broadcaster.Broadcast(Event{Type: EventPlayerIdle, PlayerID: playerID})
 	e.removePlayerLocked(playerID)
+	return playerID
+}
+
+// endOnRulesPanicLocked is the shared body of every recover. It ends the table without
+// asking the rules anything: the state a hook panicked on cannot be trusted to rank a
+// winner, and a second panic from Standings inside a recover would take the process
+// down. It does not check for Playing: a panic inside finishGameLocked's Standings call
+// has already set Finished without announcing it, and every rules hook runs only on a
+// table that was Playing. Nor for closed: a leave can still reach the rules on a
+// closed engine, and the reason has to be recorded even though the broadcast is lost.
+func (e *Engine) endOnRulesPanicLocked(r any) {
+	e.state.Logger().Error("rules panicked; ending the table as a rules error",
+		"panic", r, "stack", string(debug.Stack()))
+	e.endGameLocked(nil, EndReasonRulesError)
 }

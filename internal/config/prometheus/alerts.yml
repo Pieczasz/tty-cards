@@ -1,22 +1,31 @@
-# First-line alert rules. There is no Alertmanager yet, so these surface in the
-# Prometheus UI and Grafana's alert list; wiring a receiver is a config change here,
-# not a code change.
+# Delivered by Alertmanager (internal/config/alertmanager) to Telegram ("Alert delivery" in
+# docs/SECURITY.md); Prometheus shows them either way.
+#
+# The backend pushes over OTLP every 60s (the SDK's periodic reader), so one sample a
+# minute per series. The increase() alerts can fire on the first event after a boot
+# because otelsetup.Setup exports a zero for each series they watch
+# (observability.SeedAlertedSeries): a counter otherwise has no series until its first event, and
+# increase() needs two samples. The zero reaches Prometheus with the first export, so
+# an event in the process's first minute is still that first sample and is missed.
+#
+# Unit tests: alerts_test.yml, with the image compose pins:
+#   docker run --rm --entrypoint promtool -v "$PWD/internal/config/prometheus:/rules:ro" \
+#     -w /rules prom/prometheus:v3.1.0 test rules alerts_test.yml
 groups:
-  - name: terminal-card
+  - name: tty-cards
     rules:
-      # A finished match that never reached the database. Any occurrence is a bug
-      # or a shutdown-drain problem; this must stay at zero.
       - alert: MatchResultLost
-        expr: increase(terminalcard_match_finalize_total{outcome=~"dropped|error"}[5m]) > 0
+        expr: increase(ttycards_match_finalize_total{outcome=~"dropped|error"}[5m]) > 0
         labels:
           severity: page
         annotations:
           summary: "match results are being lost ({{ $value }} in 5m)"
 
-      # App metrics arrive by remote-write, so there is no up{} for the backend;
-      # the sessions gauge disappearing is the only liveness signal.
+      # Latency: a pushed series has no staleness marker, so it stays present for the
+      # 5m lookback after its last sample, and then `for` adds 2m. The alert fires 7-8
+      # minutes after the backend's last export.
       - alert: BackendMetricsAbsent
-        expr: absent(terminalcard_ssh_sessions_active)
+        expr: absent(ttycards_ssh_sessions_active)
         for: 2m
         labels:
           severity: page
@@ -24,42 +33,34 @@ groups:
           summary: "backend stopped reporting metrics"
 
       - alert: SSHSessionPanics
-        expr: increase(terminalcard_ssh_session_panics_total[5m]) > 0
+        expr: increase(ttycards_ssh_session_panics_total[5m]) > 0
         labels:
           severity: warn
         annotations:
           summary: "panics recovered in SSH sessions"
 
-      # The pool is a hard cap that queues silently; waits are the only early
-      # warning before gameplay stalls on the database.
+      # Saturation is the pool held near its cap, not a burst of waits: at 90% for 5m
+      # the next spike queues every query behind it.
       - alert: DBPoolSaturation
-        expr: increase(db_client_connections_wait_count_total[5m]) > 10
+        expr: ttycards_db_pool_connections_used >= 0.9 * ttycards_db_pool_connections_max
+        for: 5m
         labels:
           severity: warn
         annotations:
-          summary: "queries are waiting for free database connections"
+          summary: "the database pool has been at 90% of its connections for 5m"
 
       - alert: BroadcasterDroppingEvents
-        expr: increase(terminalcard_broadcaster_events_dropped_total[10m]) > 0
+        expr: increase(ttycards_broadcaster_events_dropped_total[10m]) > 0
         labels:
           severity: warn
         annotations:
           summary: "slow subscribers are losing game events"
 
-      # A leak from a view that skipped Close() shows up here first. Measured per
-      # session rather than as a flat count: a session costs several goroutines (the
-      # wish handler, bubbletea's loop, renderer, input reader and window watcher,
-      # the view's broadcaster listener), so at MAX_CONNECTIONS=1000 a healthy server
-      # sits in the thousands and any flat threshold near that pages on a good day
-      # until somebody silences it. A leak instead shows up as goroutines that do not
-      # fall when sessions do, which is what the ratio catches. The floor keeps a
-      # near-idle server, where a handful of goroutines per session is normal noise,
-      # from tripping it.
       - alert: GoroutineGrowth
         expr: >-
           go_goroutine_count > 500
           and
-          go_goroutine_count > 12 * scalar(max(terminalcard_ssh_sessions_active))
+          go_goroutine_count > 12 * scalar(max(ttycards_ssh_sessions_active))
         for: 15m
         labels:
           severity: warn

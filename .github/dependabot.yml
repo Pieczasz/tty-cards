@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # cmd/server/Dockerfile: the golang builder and alpine certs stages.
+  - package-ecosystem: docker
+    directory: /cmd/server
+    schedule:
+      interval: weekly
+
+  # compose.yaml: every service image.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly

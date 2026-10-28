@@ -17,8 +17,7 @@ var testReader = sdkmetric.NewManualReader()
 
 func TestMain(m *testing.M) {
 	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(testReader)))
-	// SetupOTel starts the runtime metrics collector on a goroutine of its own, so a
-	// shutdown that forgets one is a leak that only shows up as a slow drift in
-	// production.
+	// Recording must never start a goroutine: every session and game calls into
+	// this package, so one leaked per call is a slow drift in production.
 	goleak.VerifyTestMain(m)
 }

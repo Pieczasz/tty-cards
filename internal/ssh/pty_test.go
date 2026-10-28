@@ -1,49 +1,22 @@
 package ssh
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/catalog"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestBoundedPty_RefusesGeometryNoTerminalHas(t *testing.T) {
-	t.Parallel()
-
-	srv := &ssh.Server{}
-	require.NoError(t, srv.SetOption(boundedPty()))
-
-	tests := []struct {
-		name   string
-		window ssh.Window
-		want   bool
-	}{
-		{name: "an ordinary terminal", window: ssh.Window{Width: 80, Height: 24}, want: true},
-		{name: "a very wide one", window: ssh.Window{Width: maxTerminalWidth, Height: maxTerminalHeight}, want: true},
-		{name: "zero is left to the pty layer", window: ssh.Window{}, want: true},
-		{name: "one column too many", window: ssh.Window{Width: maxTerminalWidth + 1, Height: 24}, want: false},
-		{name: "one row too many", window: ssh.Window{Width: 80, Height: maxTerminalHeight + 1}, want: false},
-		{name: "a whole uint32 of columns", window: ssh.Window{Width: 4_294_967_295, Height: 24}, want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, srv.PtyCallback(nil, ssh.Pty{Window: tt.window}))
-		})
-	}
-}
-
-func TestClampWindowSize(t *testing.T) {
+func TestFilterSessionMsg(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -52,19 +25,9 @@ func TestClampWindowSize(t *testing.T) {
 		want tea.Msg
 	}{
 		{
-			name: "a real resize is untouched",
-			msg:  tea.WindowSizeMsg{Width: 120, Height: 40},
-			want: tea.WindowSizeMsg{Width: 120, Height: 40},
-		},
-		{
-			name: "an absurd resize is bounded",
+			name: "a resize is left to the size budget",
 			msg:  tea.WindowSizeMsg{Width: 4_000_000, Height: 3_000_000},
-			want: tea.WindowSizeMsg{Width: maxTerminalWidth, Height: maxTerminalHeight},
-		},
-		{
-			name: "only the dimension out of range moves",
-			msg:  tea.WindowSizeMsg{Width: 4_000_000, Height: 40},
-			want: tea.WindowSizeMsg{Width: maxTerminalWidth, Height: 40},
+			want: tea.WindowSizeMsg{Width: 4_000_000, Height: 3_000_000},
 		},
 		{
 			name: "suspend is still answered with resume",
@@ -81,7 +44,7 @@ func TestClampWindowSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, clampWindowSize(nil, tt.msg))
+			assert.Equal(t, tt.want, filterSessionMsg(nil, tt.msg))
 		})
 	}
 }
@@ -100,12 +63,12 @@ func TestSessionLifecycle_PanicClosingTheViewStillReleasesTheSession(t *testing.
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
 
-	deps := ServerDependencies{LobbyManager: lobby.NewManager(context.Background(), nil)}
+	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), Tracker: tracker}
+	reg := &sessionRegistry{}
 	srv := &ssh.Server{
-		Handler: sessionLifecycle(deps, tracker)(func(s ssh.Session) {
-			st, ok := lookupSessionState(s)
+		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
+			st, ok := reg.load(s)
 			require.True(t, ok)
-			st.owns = true
 			st.user = user
 			st.gen = gen
 			st.model = panickyModel{}

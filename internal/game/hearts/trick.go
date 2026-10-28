@@ -1,11 +1,11 @@
 package hearts
 
 import (
-	"log/slog"
+	"cmp"
 	"slices"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 func findTwoOfClubs(state *game.State) int {
@@ -20,14 +20,14 @@ func findTwoOfClubs(state *game.State) int {
 func passRecipient(from int, dir PassDirection, n int) int {
 	switch dir {
 	case PassLeft:
-		return (from + 1) % n
+		return game.SeatAt(from+1, n)
 	case PassRight:
-		return (from - 1 + n) % n
+		return game.SeatAt(from-1, n)
 	case PassAcross:
-		return (from + 2) % n
-	default:
-		return from
+		return game.SeatAt(from+2, n)
+	case PassNone:
 	}
+	return from
 }
 
 func applyAllPasses(state *game.State, extra *State) {
@@ -39,14 +39,13 @@ func applyAllPasses(state *game.State, extra *State) {
 }
 
 func nextUnpassedSeat(state *game.State, extra *State, from int) int {
-	n := len(state.Players)
-	for step := 1; step <= n; step++ {
-		seat := (from + step) % n
-		if !extra.Passed[state.Players[seat].ID] {
-			return seat
-		}
+	seat := game.NextSeat(from, len(state.Players), func(seat int) bool {
+		return !extra.passed(state.Players[seat].ID)
+	})
+	if seat < 0 {
+		return from
 	}
-	return from
+	return seat
 }
 
 func handHasSuit(hand []deck.Card, suit deck.Suit) bool {
@@ -66,7 +65,9 @@ func hasNonPenaltyCard(hand []deck.Card) bool {
 	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !isPenaltyCard(c) })
 }
 
-func trickWinner(state *game.State, extra *State) (string, int) {
+// trickWinner is the seat that takes the trick on the table: the highest card of the
+// suit led.
+func trickWinner(state *game.State, extra *State) int {
 	bestValue := -1
 	winnerSeat := extra.TrickLeader
 	for seat, p := range state.Players {
@@ -79,7 +80,7 @@ func trickWinner(state *game.State, extra *State) (string, int) {
 			winnerSeat = seat
 		}
 	}
-	return state.Players[winnerSeat].ID, winnerSeat
+	return winnerSeat
 }
 
 func trickPoints(cards map[string]deck.Card) int {
@@ -89,13 +90,14 @@ func trickPoints(cards map[string]deck.Card) int {
 			pts++
 		}
 		if c == queenOfSpades {
-			pts += 13
+			pts += queenOfSpadesPoints
 		}
 	}
 	return pts
 }
 
-func scoreHand(extra *State, players []*game.Player) {
+func scoreHand(state *game.State, extra *State) {
+	players := state.Players
 	shooterID := ""
 	for _, p := range players {
 		if extra.HandPoints[p.ID] == penaltyPointsTotal {
@@ -107,7 +109,7 @@ func scoreHand(extra *State, players []*game.Player) {
 		// The moon moves a full hand of points onto three players who took nothing,
 		// so it is the one result of a hand that gets disputed. Nothing reads this
 		// back; it is the only server-side record that it happened at all.
-		slog.Info("hearts moon shot",
+		state.Logger().Info("hearts moon shot",
 			"hand", extra.HandNumber, "shooter", shooterID, "points_each", penaltyPointsTotal)
 		for _, p := range players {
 			if p.ID != shooterID {
@@ -119,25 +121,40 @@ func scoreHand(extra *State, players []*game.Player) {
 			extra.CumulativeScores[p.ID] += extra.HandPoints[p.ID]
 		}
 	}
-	slog.Info("hearts hand scored",
+	state.Logger().Info("hearts hand scored",
 		"hand", extra.HandNumber,
 		"pass_direction", extra.PassDirection.String(),
 		"hand_points", extra.HandPoints,
 		"totals", extra.CumulativeScores)
 }
 
-func threeLowestCards(hand []deck.Card) []deck.Card {
+// threeMostDangerous is the absent player's pass: the Q♠, then the A♠ and K♠ that
+// catch her, then the highest hearts, then the highest of the rest. Passing the lowest
+// cards instead kept every card that takes points.
+func threeMostDangerous(hand []deck.Card) []deck.Card {
 	if len(hand) <= cardsToPass {
 		return slices.Clone(hand)
 	}
 	sorted := slices.Clone(hand)
 	slices.SortFunc(sorted, func(a, b deck.Card) int {
-		if d := deck.RankValue(a.Rank) - deck.RankValue(b.Rank); d != 0 {
-			return d
-		}
-		return int(a.Suit) - int(b.Suit)
+		return cmp.Or(cmp.Compare(passDanger(b), passDanger(a)), cmp.Compare(a.Suit, b.Suit))
 	})
+
 	return sorted[:cardsToPass]
+}
+
+func passDanger(c deck.Card) int {
+	const spadeTier, heartTier = 100, 50
+	switch {
+	case c == queenOfSpades:
+		return spadeTier + 2
+	case c.Suit == deck.Spades && (c.Rank == deck.Ace || c.Rank == deck.King):
+		return spadeTier + deck.RankValue(c.Rank) - deck.RankValue(deck.King)
+	case c.Suit == deck.Hearts:
+		return heartTier + deck.RankValue(c.Rank)
+	default:
+		return deck.RankValue(c.Rank)
+	}
 }
 
 func firstLegalCard(extra *State, p *game.Player) (deck.Card, bool) {

@@ -6,24 +6,28 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/observability"
-	"github.com/Pieczasz/terminal-card/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
-	// 200 is also the repository's cache page size, so every limit this endpoint
+	// 200 is also the repository's bestPlayersCacheSize, so every limit this endpoint
 	// accepts is one the cache can serve. Raising it past that turns each request
 	// into its own database query.
 	maxLeaderboardLimit = 200
@@ -34,31 +38,36 @@ const (
 	readTimeout  = 5 * time.Second
 	writeTimeout = 10 * time.Second
 	idleTimeout  = 60 * time.Second
+
+	healthTimeout = 2 * time.Second
 )
 
+// SessionCounter is how many players are connected: ssh.SessionTracker in production.
 type SessionCounter interface {
 	Count() int
 }
 
+// LobbyCounter is how many tables are playing and waiting: lobby.Manager in production.
 type LobbyCounter interface {
 	Stats() (inGame, waiting int)
 }
 
+// ErrMissingDeps refuses a server built without its counters, its repository or its
+// health probe. A nil one used to be skipped, so a miswiring served zeros, an empty
+// leaderboard or an unconditional healthy forever instead of failing the boot.
+var ErrMissingDeps = errors.New("stats api needs Sessions, Lobbies, Users and Health")
+
+// Deps are what the stats API reads from. Sessions, Lobbies, Users and Health are required.
 type Deps struct {
 	Sessions SessionCounter
 	Lobbies  LobbyCounter
-	// Users is the concrete db interface while Sessions and Lobbies are local
-	// one-method interfaces. That asymmetry is deliberate and shipped: the two
-	// counters exist only to keep this package from importing ssh and lobby, whereas
-	// db.UserRepository is already the contract every consumer depends on.
-	Users db.UserRepository
+	Users    db.Leaderboard
 
-	AllowOrigin       string
-	RequestsPerMinute int
-	TrustedProxy      bool
+	AllowOrigin          string
+	RequestsPerMinute    int
+	TrustedProxy         bool
+	TrustedProxyNetworks []netip.Prefix
 
-	// Health reports whether the process's dependencies are usable (the database
-	// ping, in practice). nil means /healthz only asserts the process serves HTTP.
 	Health func(ctx context.Context) error
 }
 
@@ -83,21 +92,35 @@ type leaderboardEntry struct {
 	Elo      uint32 `json:"elo"`
 }
 
-func Handler(deps Deps) http.Handler {
-	perMinute := deps.RequestsPerMinute
-	if perMinute <= 0 {
-		perMinute = 120
+// NewServer returns the stats API's http.Server for addr, with its timeouts set. The
+// caller runs and shuts it down.
+func NewServer(addr string, deps Deps) (*http.Server, error) {
+	h, err := newHandler(deps)
+	if err != nil {
+		return nil, err
 	}
-	limiter := ratelimit.NewSlidingWindowLimiter(perMinute, time.Minute)
-	clientAddr := clientIPFunc(deps.TrustedProxy)
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
+}
+
+func newHandler(deps Deps) (http.Handler, error) {
+	if deps.Sessions == nil || deps.Lobbies == nil || deps.Users == nil || deps.Health == nil {
+		return nil, ErrMissingDeps
+	}
+	limiter := ratelimit.New(deps.RequestsPerMinute, time.Minute)
+	clientAddr := clientIPFunc(deps.TrustedProxy, deps.TrustedProxyNetworks)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/stats", statsHandler(deps))
 	mux.Handle("GET /healthz", healthHandler(deps))
 	mux.Handle("GET /v1/leaderboard", leaderboardHandler(deps))
 
-	// The preflight answer is a route rather than a short-circuit in withCORS, so
-	// that OPTIONS is spent against the same budget as every other request.
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -106,40 +129,23 @@ func Handler(deps Deps) http.Handler {
 		writeError(w, r, http.StatusNotFound, "not found")
 	})
 
+	// No spans and no propagation: a noop tracer still carries an extracted
+	// traceparent into the request context, where the repository's spans would take
+	// the visitor's chosen trace id as their parent.
 	return otelhttp.NewHandler(
 		withCORS(deps.AllowOrigin, withRateLimit(limiter, clientAddr, mux)),
 		"stats-api",
-		otelhttp.WithSpanNameFormatter(routeSpanName),
-		// Without this, otelhttp labels every request metric with the client's own
-		// Host header - the same unbounded-cardinality hole routeSpanName closes
-		// for span names.
-		otelhttp.WithServerName("stats-api"),
-	)
-}
-
-// routeSpanName names a span after the route, never after the raw path: anything
-// else lets a caller mint unbounded span names by inventing URLs.
-func routeSpanName(operation string, r *http.Request) string {
-	switch r.URL.Path {
-	case "/v1/stats", "/v1/leaderboard":
-		return r.Method + " " + r.URL.Path
-	default:
-		return operation
-	}
+		otelhttp.WithTracerProvider(tracenoop.NewTracerProvider()),
+		otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator()),
+		otelhttp.WithServerName("stats-api:80"),
+	), nil
 }
 
 func statsHandler(deps Deps) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inGame, waiting := 0, 0
-		if deps.Lobbies != nil {
-			inGame, waiting = deps.Lobbies.Stats()
-		}
-		online := 0
-		if deps.Sessions != nil {
-			online = deps.Sessions.Count()
-		}
+		inGame, waiting := deps.Lobbies.Stats()
 		writeJSON(w, r, statsResponse{
-			PlayersOnline: online,
+			PlayersOnline: deps.Sessions.Count(),
 			HandsInPlay:   inGame,
 			TablesOpen:    waiting,
 		})
@@ -158,15 +164,7 @@ func leaderboardHandler(deps Deps) http.Handler {
 			limit = min(n, maxLeaderboardLimit)
 		}
 
-		if deps.Users == nil {
-			writeJSON(w, r, []leaderboardEntry{})
-			return
-		}
-
-		// No per-game filter: the only client never asked for one, and a caller-supplied
-		// game name is a cache miss by construction - one indexed join per request for
-		// any string that is not a real game.
-		rankings, err := deps.Users.BestPlayers(r.Context(), limit, "")
+		rankings, err := deps.Users.BestPlayers(r.Context(), "", limit)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "leaderboard query failed", "error", err)
 			writeError(w, r, http.StatusServiceUnavailable, "leaderboard unavailable")
@@ -186,7 +184,7 @@ func leaderboardHandler(deps Deps) http.Handler {
 	})
 }
 
-func clientIPFunc(trustProxy bool) func(*http.Request) string {
+func clientIPFunc(trustProxy bool, proxies []netip.Prefix) func(*http.Request) string {
 	socketHost := func(r *http.Request) string {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -198,28 +196,29 @@ func clientIPFunc(trustProxy bool) func(*http.Request) string {
 		return socketHost
 	}
 	return func(r *http.Request) string {
+		peer := socketHost(r)
+		if !fromProxy(peer, proxies) {
+			return peer
+		}
 		first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
 		first = strings.TrimSpace(first)
-		// Only an address the header actually parses as counts. A blank or malformed
-		// leftmost entry (", 10.0.0.1" and " " both reach here) would otherwise become
-		// NetKey("") and drop every such caller into one shared bucket, which is a
-		// rate limit anybody can either dodge or weaponise against everyone else.
 		if _, err := netip.ParseAddr(first); err != nil {
-			return socketHost(r)
+			return peer
 		}
 		return first
 	}
 }
 
-func Serve(addr string, h http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: readTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
+func fromProxy(host string, proxies []netip.Prefix) bool {
+	if len(proxies) == 0 {
+		return true
 	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	return slices.ContainsFunc(proxies, func(p netip.Prefix) bool { return p.Contains(addr) })
 }
 
 func writeJSON(w http.ResponseWriter, r *http.Request, v any) {
@@ -228,8 +227,6 @@ func writeJSON(w http.ResponseWriter, r *http.Request, v any) {
 	encodeJSON(w, r, http.StatusOK, v)
 }
 
-// writeError replaces http.Error: a client that asked for JSON gets JSON back,
-// including on the 429 and 503 paths it is most likely to have to parse.
 func writeError(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Add("Vary", "Origin")
@@ -250,9 +247,6 @@ func encodeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 }
 
 func withCORS(origin string, next http.Handler) http.Handler {
-	if origin == "" {
-		origin = "*"
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
@@ -262,7 +256,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 }
 
 func withRateLimit(
-	limiter *ratelimit.SlidingWindowLimiter,
+	limiter *ratelimit.SlidingWindow,
 	clientAddr func(*http.Request) string,
 	next http.Handler,
 ) http.Handler {
@@ -277,19 +271,14 @@ func withRateLimit(
 	})
 }
 
-// healthHandler backs the container healthcheck: 200 when the process serves and
-// its dependencies answer, 503 otherwise, so orchestration restarts a wedged
-// process instead of routing players into it.
 func healthHandler(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if deps.Health != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			if err := deps.Health(ctx); err != nil {
-				slog.ErrorContext(ctx, "health check failed", "error", err)
-				writeError(w, r, http.StatusServiceUnavailable, "unhealthy")
-				return
-			}
+		ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+		defer cancel()
+		if err := deps.Health(ctx); err != nil {
+			slog.ErrorContext(ctx, "health check failed", "error", err)
+			writeError(w, r, http.StatusServiceUnavailable, "unhealthy")
+			return
 		}
 		// Not writeJSON: a cached health answer is a lie about a later moment.
 		w.Header().Set("Cache-Control", "no-store")

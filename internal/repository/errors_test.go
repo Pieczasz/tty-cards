@@ -3,12 +3,11 @@
 package repository_test
 
 import (
-	"context"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/repository"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/repository"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"uuid"
 
@@ -24,14 +23,14 @@ import (
 func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 	t.Parallel()
 	database := testutil.SetupTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	users := repository.NewUserRepository(database)
 	matches := repository.NewMatchRepository(database)
 
 	// One real user first, so the update paths have a row to aim at before the pool
 	// goes away and are failing on the query, not on a missing record.
-	user, key, err := users.RegisterUserWithKey(ctx, "closed_pool", "closed_fp")
+	user, key, err := users.RegisterUserWithSSHKey(ctx, "closed_pool", "closed_fp")
 	require.NoError(t, err)
 
 	sqlDB, err := database.DB()
@@ -51,12 +50,12 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "registering a user",
-			call: func() error { _, _, err := users.RegisterUserWithKey(ctx, "another", "another_fp"); return err },
+			call: func() error { _, _, err := users.RegisterUserWithSSHKey(ctx, "another", "another_fp"); return err },
 			want: "register user transaction",
 		},
 		{
 			name: "the leaderboard",
-			call: func() error { _, err := users.BestPlayers(ctx, 10, ""); return err },
+			call: func() error { _, err := users.BestPlayers(ctx, "", 10); return err },
 			want: "get best players",
 		},
 		{
@@ -71,7 +70,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "stamping activity",
-			call: func() error { return users.UpdateUserActivity(ctx, user, key) },
+			call: func() error { return users.UpdateUserActivity(ctx, user.ID, key.ID) },
 			want: "update last seen",
 		},
 		{
@@ -86,7 +85,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "finalizing a ranked match",
-			call: func() error { return matches.FinalizeRankedMatch(ctx, ref, []uuid.UUID{user.ID}, nil) },
+			call: func() error { return finalizeErr(matches.FinalizeRankedMatch(ctx, ref, []uuid.UUID{user.ID}, nil)) },
 			want: "finalize ranked match",
 		},
 	}

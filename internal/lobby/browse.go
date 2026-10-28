@@ -1,50 +1,60 @@
 package lobby
 
 import (
+	"cmp"
+	"maps"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/elo"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
 const (
-	DefaultBrowseLimit = 20
-	MaxBrowseLimit     = 200
+	defaultBrowseLimit = 20
+	// MaxBrowseLimit is the most entries one BrowseLobbies call returns.
+	MaxBrowseLimit = 200
 )
 
+// BrowseMode filters the browse by whether a table is ranked.
 type BrowseMode uint8
 
+// The browse filters.
 const (
 	BrowseAny BrowseMode = iota
 	BrowseRanked
 	BrowseCasual
 )
 
+// BrowseEntry is one open public table as the browse screen lists it.
 type BrowseEntry struct {
 	Code       string
+	Slug       string
 	GameName   string
 	Players    int
 	MaxPlayers int
 	Ranked     bool
-	AvgElo     uint32
-	EloDelta   int
+	// AvgElo is the table's average rating in its game, unrated seats at the start.
+	AvgElo uint32
+	// EloDelta is how far AvgElo is from the browsing player's own rating.
+	EloDelta int
 }
 
-func (e BrowseEntry) HasRoom() bool { return e.Players < e.MaxPlayers }
+func (e BrowseEntry) hasRoom() bool { return e.Players < e.MaxPlayers }
 
+// BrowseFilter narrows BrowseLobbies. The zero value lists every open public table.
 type BrowseFilter struct {
-	GameName     string // empty means any
+	Slug         string // empty means any
 	Mode         BrowseMode
 	OnlyWithRoom bool
 	Limit        int
 }
 
 func (f BrowseFilter) matches(e BrowseEntry) bool {
-	if f.GameName != "" && e.GameName != f.GameName {
+	if f.Slug != "" && e.Slug != f.Slug {
 		return false
 	}
-	if f.OnlyWithRoom && !e.HasRoom() {
+	if f.OnlyWithRoom && !e.hasRoom() {
 		return false
 	}
 	switch f.Mode {
@@ -57,86 +67,139 @@ func (f BrowseFilter) matches(e BrowseEntry) bool {
 	return true
 }
 
+// BrowseLobbies lists the public waiting tables matching f, closest in rating to p
+// first. A nil p is matched at the starting rating.
 func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 	if m == nil {
 		return nil
 	}
-	lobbies := m.getCachedPublicLobbies()
+	lobbies := m.publicLobbies()
 	var ratings map[string]uint32
 	if p != nil {
 		ratings = p.Ratings
 	}
 
-	entries := make([]BrowseEntry, 0, min(len(lobbies), f.limit()))
+	limit := f.limit()
+	entries := make([]BrowseEntry, 0, min(len(lobbies), limit))
 	for _, l := range lobbies {
-		entry := l.browseEntry()
-		if !f.matches(entry) {
+		entry, open := l.browseEntry()
+		if !open || !f.matches(entry) {
 			continue
 		}
-		delta := int(entry.AvgElo) - int(ratingFor(ratings, entry.GameName))
+		delta := int(entry.AvgElo) - int(ratingFor(ratings, entry.Slug))
 		entry.EloDelta = max(delta, -delta)
 		entries = append(entries, entry)
 	}
 
 	slices.SortFunc(entries, func(a, b BrowseEntry) int {
-		if a.EloDelta != b.EloDelta {
-			return a.EloDelta - b.EloDelta
-		}
-		return strings.Compare(a.Code, b.Code)
+		return cmp.Or(cmp.Compare(a.EloDelta, b.EloDelta), strings.Compare(a.Code, b.Code))
 	})
-
-	if len(entries) > f.limit() {
-		entries = entries[:f.limit()]
-	}
-	return entries
+	return entries[:min(len(entries), limit)]
 }
 
 func (f BrowseFilter) limit() int {
 	if f.Limit <= 0 {
-		return DefaultBrowseLimit
+		return defaultBrowseLimit
 	}
 	return min(f.Limit, MaxBrowseLimit)
 }
 
-func ratingFor(ratings map[string]uint32, gameName string) uint32 {
-	if rating := ratings[gameName]; rating != 0 {
-		return rating
-	}
-	return elo.ToUint32(elo.DefaultRating)
-}
-
-func (l *Lobby) browseEntry() BrowseEntry {
+// browseEntry is false for a table no longer on offer. The cache holds pointers, and
+// a miss that scanned just before a table went private or started stores it anyway,
+// so the list is only as right as this re-check under the lobby's own lock.
+func (l *Lobby) browseEntry() (BrowseEntry, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	gameName := ""
-	if l.options.cardGame != "" {
-		gameName = l.options.cardGame
+	if !l.onOfferLocked() {
+		return BrowseEntry{}, false
 	}
 	return BrowseEntry{
 		Code:       l.code,
-		GameName:   gameName,
+		Slug:       l.game.Slug,
+		GameName:   l.game.Name,
 		Players:    1 + len(l.guests),
 		MaxPlayers: l.options.maxPlayers,
 		Ranked:     l.options.isRanked,
-		AvgElo:     l.averageEloLocked(gameName),
-	}
+		AvgElo:     l.averageEloLocked(),
+	}, true
 }
 
-func (m *Manager) GameNames() []string {
+// onOfferLocked is whether the table belongs in a browse. Caller holds l.mu.
+func (l *Lobby) onOfferLocked() bool {
+	return !l.options.isPrivate && l.state == waiting
+}
+
+// GamesOnOffer is the set of games the public waiting tables play, sorted by name.
+func (m *Manager) GamesOnOffer() []game.Module {
 	if m == nil {
 		return nil
 	}
-	seen := map[string]struct{}{}
-	for _, l := range m.getCachedPublicLobbies() {
-		if name := l.GameName(); name != "" {
-			seen[name] = struct{}{}
+	seen := map[string]game.Module{}
+	for _, l := range m.publicLobbies() {
+		seen[l.game.Slug] = l.game
+	}
+	return slices.SortedFunc(maps.Values(seen), func(a, b game.Module) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+}
+
+// publicLobbyCacheTTL is what keeps a browse off every lobby's own lock. The window
+// is short enough that a new table shows up on the next refresh.
+const publicLobbyCacheTTL = 2 * time.Second
+
+// invalidatePublicCache makes the next browse re-scan. Callers are the writes that
+// change which tables are on offer, so a new or closed table shows up immediately
+// rather than a cache window later.
+func (m *Manager) invalidatePublicCache() {
+	m.cacheDirty.Store(true)
+}
+
+// publicLobbies serves the cache under a read lock and, on a miss, copies
+// the lobby set and releases m.mu before touching any l.mu - the same shape as
+// Stats. Two simultaneous misses both rescan; only the scan that is still the
+// latest publishes, so an older snapshot cannot overwrite a newer one. A table
+// that went private or started after the snapshot is dropped by browseEntry.
+func (m *Manager) publicLobbies() []*Lobby {
+	m.mu.RLock()
+	if !m.cacheDirty.Load() && time.Since(m.cacheLastUpdated) < publicLobbyCacheTTL {
+		lobbies := slices.Clone(m.cachedPublicLobbies)
+		m.mu.RUnlock()
+		return lobbies
+	}
+	// Cleared inside the same lock hold that snapshots the lobby set, and before it.
+	// CreateLobby and RemoveLobby set the flag while holding m.mu exclusively, so an
+	// invalidation either happened before this point - and its lobby is in the
+	// snapshot - or lands after, and survives into the next browse. Clearing it after
+	// the snapshot instead left a window where a table set the flag, this cleared it,
+	// and the snapshot had never seen the table: hidden for the whole TTL.
+	m.cacheDirty.Store(false)
+	epoch := m.browseEpoch.Add(1)
+	all := slices.Collect(maps.Values(m.lobbies))
+	m.mu.RUnlock()
+
+	publicLobbies := make([]*Lobby, 0, len(all))
+	for _, l := range all {
+		l.mu.RLock()
+		if l.onOfferLocked() {
+			publicLobbies = append(publicLobbies, l)
 		}
+		l.mu.RUnlock()
 	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
+
+	m.publishPublicLobbies(epoch, publicLobbies)
+	return slices.Clone(publicLobbies)
+}
+
+// publishPublicLobbies stores a scan only while epoch is still the latest one
+// started. Two misses can both pass the cache check; the one that snapshotted
+// earlier must not publish after the later one has.
+func (m *Manager) publishPublicLobbies(epoch uint64, lobbies []*Lobby) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.browseEpoch.Load() != epoch {
+		return
 	}
-	slices.Sort(names)
-	return names
+	m.cachedPublicLobbies = lobbies
+	m.cacheLastUpdated = time.Now()
 }

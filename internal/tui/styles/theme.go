@@ -1,3 +1,6 @@
+// Package styles holds the per-session Theme, the only place colours are defined, and
+// the layout arithmetic every screen shares: the capped box, padding, clamping and the
+// cached figlet banners.
 package styles
 
 import (
@@ -56,6 +59,7 @@ type Theme struct {
 	PlayerItemSelected lg.Style
 	ErrorText          lg.Style
 	SuccessText        lg.Style
+	WarningText        lg.Style
 	Muted              lg.Style
 	Dim                lg.Style
 	Accented           lg.Style
@@ -74,8 +78,20 @@ type Theme struct {
 	MeldBox lg.Style
 }
 
+// fallbackTheme is the dark palette a render uses when a session has not resolved
+// one yet. Sharing it is the point: the unset zero is a nil pointer, not a copy.
+var fallbackTheme = NewTheme(true)
+
+// Or is t, or the shared dark palette when a session has not resolved one.
+func Or(t *Theme) *Theme {
+	if t == nil {
+		return fallbackTheme
+	}
+	return t
+}
+
 // NewTheme resolves the palette for a terminal background.
-func NewTheme(isDark bool) Theme {
+func NewTheme(isDark bool) *Theme {
 	pick := lg.LightDark(isDark)
 
 	t := Theme{
@@ -135,6 +151,7 @@ func NewTheme(isDark bool) Theme {
 	t.PlayerItemSelected = lg.NewStyle().Foreground(t.Selection)
 	t.ErrorText = lg.NewStyle().Foreground(t.Error)
 	t.SuccessText = lg.NewStyle().Foreground(t.Success)
+	t.WarningText = lg.NewStyle().Foreground(t.Warning)
 	t.Muted = lg.NewStyle().Foreground(t.TextMuted)
 	t.Dim = lg.NewStyle().Foreground(t.TextDim)
 	t.Accented = lg.NewStyle().Bold(true).Foreground(t.Accent)
@@ -145,5 +162,5 @@ func NewTheme(isDark bool) Theme {
 	t.PickerCell = lg.NewStyle().Border(lg.RoundedBorder()).Padding(0, 1)
 	t.MeldBox = lg.NewStyle().Border(lg.RoundedBorder()).BorderForeground(t.BorderMuted).Padding(0, 1)
 
-	return t
+	return &t
 }

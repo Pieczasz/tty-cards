@@ -3,7 +3,7 @@ package components
 import (
 	"image/color"
 
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	lg "charm.land/lipgloss/v2"
 )
@@ -43,7 +43,7 @@ func GridStep(cursor, n, dx, dy int) int {
 }
 
 // Render draws the picker: a title, then the cells in rows of gridCols, framed.
-func (p GridPicker) Render(t styles.Theme) string {
+func (p GridPicker) Render(t *styles.Theme) string {
 	if len(p.Labels) == 0 {
 		return ""
 	}
@@ -51,7 +51,7 @@ func (p GridPicker) Render(t styles.Theme) string {
 	// One width for every cell keeps the grid a rectangle whatever the label
 	// lengths. lipgloss counts border and padding inside Width, so the widest label
 	// needs four extra columns - without them "♦ Diamonds" wraps under its own glyph.
-	width := WidestLabel(p.Labels) + 4
+	width := widestLabel(p.Labels) + 4
 
 	cells := make([]string, 0, len(p.Labels))
 	for i, label := range p.Labels {
@@ -74,18 +74,18 @@ func (p GridPicker) Render(t styles.Theme) string {
 
 	rows := make([]string, 0, (len(cells)+gridCols-1)/gridCols)
 	for start := 0; start < len(cells); start += gridCols {
-		rows = append(rows, lg.JoinHorizontal(lg.Center, cells[start:min(start+gridCols, len(cells))]...))
+		rows = append(rows, styles.JoinHorizontal(lg.Center, cells[start:min(start+gridCols, len(cells))]...))
 	}
 
-	return t.PickerBox.Render(lg.JoinVertical(lg.Center,
+	return t.PickerBox.Render(styles.JoinVertical(lg.Center,
 		lg.NewStyle().Bold(true).Foreground(t.Selection).Render(p.Title),
 		"",
-		lg.JoinVertical(lg.Center, rows...),
+		styles.JoinVertical(lg.Center, rows...),
 	))
 }
 
-// WidestLabel is the display width of the longest label, for sizing a column of them.
-func WidestLabel(labels []string) int {
+// widestLabel is the display width of the longest label, for sizing a column of them.
+func widestLabel(labels []string) int {
 	widest := 0
 	for _, l := range labels {
 		widest = max(widest, lg.Width(l))

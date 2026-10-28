@@ -23,7 +23,7 @@ func TestRouter_InitArmsTheFirstViewExactlyOnce(t *testing.T) {
 
 	var inits int
 	r := New(GlobalContext{})
-	r.Register(RouteHome, func(GlobalContext, any) tea.Model { return countingModel{inits: &inits} })
+	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return countingModel{inits: &inits} })
 
 	r.Init()
 
@@ -38,8 +38,8 @@ func TestRouter_GotoArmsTheViewExactlyOnce(t *testing.T) {
 
 	var home, next int
 	r := New(GlobalContext{})
-	r.Register(RouteHome, func(GlobalContext, any) tea.Model { return countingModel{inits: &home} })
-	r.Register("next", func(GlobalContext, any) tea.Model { return countingModel{inits: &next} })
+	r.Register(RouteHome, func(GlobalContext, Payload) tea.Model { return countingModel{inits: &home} })
+	r.Register("next", func(GlobalContext, Payload) tea.Model { return countingModel{inits: &next} })
 
 	r.Init()
 	r.Update(ChangeViewMsg{ViewName: "next"})

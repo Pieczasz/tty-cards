@@ -1,14 +1,18 @@
 package uno
 
 import (
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"slices"
+
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
+
+	"github.com/Pieczasz/tty-cards/internal/game/shed"
 )
 
 // State holds Uno-specific game state stored in game.State.Extra.
 type State struct {
-	// ShedState carries Passes: the deadlock counter every shedding game keeps.
-	game.ShedState
+	// shed.State carries Passes: the deadlock counter every shedding game keeps.
+	shed.State
 
 	CurrentColor deck.Suit // one of ColorRed/Yellow/Green/Blue once started
 	Direction    int8      // +1 clockwise, -1 counterclockwise
@@ -19,17 +23,19 @@ type State struct {
 	leaverWasOnTurn bool
 }
 
-func isWild(r deck.Rank) bool {
-	return r == Wild || r == WildDrawFour
+// IsWild reports whether c is a Wild or Wild Draw Four: the cards that name a colour
+// rather than carry one.
+func IsWild(c deck.Card) bool {
+	return c.Rank == Wild || c.Rank == WildDrawFour
 }
 
 // hasColor reports whether the hand holds a playable card of the colour. Wilds sit
 // on NoSuit, so they never count: holding one is not holding the colour.
 func hasColor(hand []deck.Card, color deck.Suit) bool {
-	for _, c := range hand {
-		if !isWild(c.Rank) && c.Suit == color {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !IsWild(c) && c.Suit == color })
+}
+
+// extraOf is the table's Extra, which OnGameStart put there. Anything else is a wiring bug.
+func extraOf(state *game.State) *State {
+	return state.Extra.(*State) //nolint:forcetypeassert // wiring bug
 }

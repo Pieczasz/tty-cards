@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Opens three SSH clients to a local terminal-card server in one tmux session.
+# Opens three SSH clients to a local tty-cards server in one tmux session.
 #
 #   ./scripts/dev-session.sh              # one window per player
 #   TC_LAYOUT=panes ./scripts/dev-session.sh   # all three tiled in one window
 #   TC_PORT=6969 ./scripts/dev-session.sh      # direct to the backend, bypassing nginx
-#       (needs PROXY_PROTOCOL=off on the server: the listener otherwise REQUIREs a
+#       (needs PROXY_PROTOCOL=false on the server: the listener otherwise REQUIREs a
 #        PROXY header, which a bare ssh client never sends)
 #   TC_DRY_RUN=1 ./scripts/dev-session.sh      # print the commands, open nothing
 #
@@ -15,7 +15,7 @@ set -euo pipefail
 
 HOST="${TC_HOST:-localhost}"
 PORT="${TC_PORT:-22}"
-SESSION="${TC_SESSION:-terminal-card}"
+SESSION="${TC_SESSION:-tty-cards}"
 LAYOUT="${TC_LAYOUT:-windows}"
 
 PLAYERS=(

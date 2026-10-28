@@ -4,12 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/game/crazyeight"
-	"github.com/Pieczasz/terminal-card/internal/game/poker"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/crazyeight"
+	"github.com/Pieczasz/tty-cards/internal/game/hearts"
+	"github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -17,29 +19,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bothGamesRegistry offers Poker (max 9) and Crazy Eights (max 6), so switching
-// between them exercises the clamp.
-func bothGamesRegistry(t *testing.T) *game.Registry {
-	t.Helper()
-	r := game.NewRegistry()
-	r.RegisterModule(game.Module{
-		Name: "Poker", Slug: "poker",
-		Factory: func() game.Rules { return &poker.Rules{} },
-	})
-	r.RegisterModule(game.Module{
-		Name: "Crazy Eights", Slug: "crazy_eights",
-		Factory: func() game.Rules { return &crazyeight.Rules{} },
-	})
-	return r
+// bothGames offers Poker (max 9) and Crazy Eights (max 6), so switching between them
+// exercises the clamp.
+func bothGames() []game.Module {
+	return []game.Module{
+		{Name: "Poker", Slug: "poker", MinPlayers: poker.MinPlayers, MaxPlayers: poker.MaxPlayers},
+		{Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers},
+	}
 }
 
 func newCreateModel(t *testing.T) *createModel {
 	t.Helper()
 	global := router.GlobalContext{
-		User:         testUser(1, "alice"),
-		GameRegistry: bothGamesRegistry(t),
-		Width:        120,
-		Height:       40,
+		User:   testUser(1, "alice"),
+		Games:  bothGames(),
+		Width:  120,
+		Height: 40,
 	}
 	m, ok := NewCreate(global).(*createModel)
 	require.True(t, ok)
@@ -53,11 +48,11 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 	m := newCreateModel(t)
 
 	pokerIdx, crazyIdx := -1, -1
-	for i, name := range m.gameOptions {
-		switch name {
-		case "Poker":
+	for i, mod := range m.gameOptions {
+		switch mod.Slug {
+		case "poker":
 			pokerIdx = i
-		case "Crazy Eights":
+		case "crazy_eights":
 			crazyIdx = i
 		}
 	}
@@ -72,6 +67,22 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 	m.gameIndex = crazyIdx
 	m.clampMaxPlayers()
 	assert.Equal(t, 6, m.maxPlayers, "crazy eights caps at six, so the setting must come down")
+}
+
+// Stepping the setting down stops at the game's own minimum, not at two: a Hearts
+// table set to three seats is a lobby its rules can never start.
+func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
+	t.Parallel()
+	heartsOnly := []game.Module{{Name: "Hearts", Slug: "hearts", MinPlayers: hearts.MinPlayers, MaxPlayers: hearts.MaxPlayers}}
+	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), Games: heartsOnly}).(*createModel)
+	require.True(t, ok)
+	m.cursor = createCursorPlayers
+
+	for range 3 {
+		m.adjustSetting(-1)
+	}
+
+	assert.Equal(t, 4, m.maxPlayers, "hearts cannot go below four")
 }
 
 // The clamp must also raise a too-small setting to the game's minimum.
@@ -96,36 +107,42 @@ func TestCreate_ClampLeavesValidValueAlone(t *testing.T) {
 
 // The form used to fall back to a hardcoded "Crazy Eights" when the registry came
 // back empty, which made this a second place a game was declared and offered a
-// game the registry could not build. An empty registry now offers nothing.
-func TestCreate_OffersOnlyWhatTheRegistryHas(t *testing.T) {
+// game the registry could not build. No games on offer now means nothing offered.
+func TestCreate_OffersOnlyWhatTheSessionHas(t *testing.T) {
 	t.Parallel()
 
 	global := router.GlobalContext{
-		User:         testUser(1, "alice"),
-		GameRegistry: game.NewRegistry(),
-		Width:        120,
-		Height:       40,
+		User:   testUser(1, "alice"),
+		Width:  120,
+		Height: 40,
 	}
 	m, ok := NewCreate(global).(*createModel)
 	require.True(t, ok)
 
 	assert.Empty(t, m.gameOptions, "no registered game means no game on the form")
-	assert.Empty(t, m.selectedGame())
+	assert.Empty(t, m.selectedGame().Slug)
 
 	require.NotPanics(t, func() { m.View() }, "an empty form still has to render")
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.handleKey(keyMsg("enter"))
+	_, cmd := m.handleKey(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "there is nothing to create, so nowhere to navigate")
 	assert.ErrorIs(t, m.err, errNoGames)
 }
 
-// Every registered game must be on the form, in the registry's order.
+// Every game on offer must be on the form, in menu order.
 func TestCreate_OffersEveryRegisteredGame(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
 
-	assert.ElementsMatch(t, m.global.GameRegistry.GameNames(), m.gameOptions)
+	var want, got []string
+	for _, mod := range m.global.Games {
+		want = append(want, mod.Slug)
+	}
+	for _, mod := range m.gameOptions {
+		got = append(got, mod.Slug)
+	}
+	assert.Equal(t, want, got)
 }
 
 func TestCreate_NavigationKeys(t *testing.T) {
@@ -134,7 +151,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
-		want string
+		want router.Route
 	}{
 		{name: "new game", key: "n", want: router.RouteLobbyCreate},
 		{name: "join game", key: "f", want: router.RouteLobbyJoin},
@@ -148,7 +165,7 @@ func TestCreate_NavigationKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
-			_, cmd := m.Update(keyMsg(tt.key))
+			_, cmd := m.Update(tuitest.Key(tt.key))
 			assert.Equal(t, tt.want, routeOf(t, cmd))
 		})
 	}
@@ -199,7 +216,8 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			keys: []string{"l", "l", "l", "l", "l", "l", "l", "l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				assert.Equal(t, m.gameMaxPlayers(), m.maxPlayers)
+				_, maxP := m.playerBounds()
+				assert.Equal(t, maxP, m.maxPlayers)
 			},
 		},
 		{
@@ -249,7 +267,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			m := newCreateModel(t)
 			m.cursor = tt.cursor
 			for _, key := range tt.keys {
-				m.Update(keyMsg(key))
+				m.Update(tuitest.Key(key))
 			}
 			tt.check(t, m)
 		})
@@ -262,12 +280,12 @@ func TestCreate_CursorStaysInBounds(t *testing.T) {
 	m := newCreateModel(t)
 
 	for range 10 {
-		m.Update(keyMsg("j"))
+		m.Update(tuitest.Key("j"))
 	}
 	assert.Equal(t, createCursorSubmit, m.cursor)
 
 	for range 10 {
-		m.Update(keyMsg("k"))
+		m.Update(tuitest.Key("k"))
 	}
 	assert.Equal(t, createCursorGame, m.cursor)
 }
@@ -277,24 +295,24 @@ func TestCreate_CursorStaysInBounds(t *testing.T) {
 func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
+	m.global.LobbyManager = newManager(t)
 	m.maxPlayers = 5
 	m.isPrivate = false
 	m.isRanked = true
 	m.cursor = createCursorSubmit
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	require.NotNil(t, cmd)
 	change, ok := cmd().(router.ChangeViewMsg)
 	require.True(t, ok)
 	assert.Equal(t, router.RouteLobby, change.ViewName)
-	created, ok := change.Context.(*lobby.Lobby)
-	require.True(t, ok, "the lobby view is handed the lobby that was just made")
-	assert.Equal(t, m.selectedGame(), created.GameName())
-	assert.Equal(t, 5, created.MaxPlayers())
-	assert.False(t, created.IsPrivate())
-	assert.True(t, created.IsRanked())
+	created := change.Payload.Lobby
+	require.NotNil(t, created, "the lobby view is handed the lobby that was just made")
+	assert.Equal(t, m.selectedGame().Name, created.Snapshot().GameName)
+	assert.Equal(t, 5, created.Snapshot().Limit)
+	assert.False(t, created.Snapshot().Private)
+	assert.True(t, created.Snapshot().Ranked)
 	assert.NoError(t, m.err)
 }
 
@@ -302,14 +320,14 @@ func TestCreate_SubmitBuildsTheLobbyFromTheForm(t *testing.T) {
 // screen the button would simply look broken.
 func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	t.Parallel()
-	manager := lobby.NewManager(t.Context(), nil)
+	manager := newManager(t)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
-	_, err := manager.New(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame()))
+	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame().Slug))
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd, "nothing was created, so there is nowhere to navigate")
 	require.Error(t, m.err)
@@ -321,23 +339,25 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 func TestCreate_EnterOffTheSubmitRowDoesNothing(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.LobbyManager = lobby.NewManager(t.Context(), nil)
+	m.global.LobbyManager = newManager(t)
 	m.cursor = createCursorVisibility
 
-	_, cmd := m.Update(keyMsg("enter"))
+	_, cmd := m.Update(tuitest.Key("enter"))
 
 	assert.Nil(t, cmd)
 	assert.NoError(t, m.err)
 }
 
-// The registry is the only source of truth for seat counts, so a game it cannot build
-// has to fall back to a bound rather than leave the row free to run away.
-func TestCreate_MaxPlayersFallsBackForAnUnbuildableGame(t *testing.T) {
+// The selected game is the only source of truth for seat counts, so a form with none to
+// select has to fall back to a bound rather than leave the row free to run away.
+func TestCreate_MaxPlayersFallsBackWithNoGameToSelect(t *testing.T) {
 	t.Parallel()
 	m := newCreateModel(t)
-	m.global.GameRegistry = game.NewRegistry()
+	m.gameOptions = nil
 
-	assert.Equal(t, 8, m.gameMaxPlayers())
+	minP, maxP := m.playerBounds()
+	assert.Equal(t, fallbackMinPlayers, minP)
+	assert.Equal(t, fallbackMaxPlayers, maxP)
 }
 
 // Anything that is not a keystroke reaches this form too - a resize has to land on the
@@ -360,25 +380,30 @@ func TestCreate_UpdateIgnoresWhatIsNotAKey(t *testing.T) {
 // support - with the error line showing, which is the tallest it ever gets.
 func TestCreateView_FitsTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, size := range []struct {
-		name string
-		w, h int
-	}{
-		{name: "the declared minimum", w: styles.MinWidth, h: styles.MinHeight},
-		{name: "a stock terminal", w: 80, h: 24},
-		{name: "a tall terminal", w: 120, h: 50},
-	} {
-		t.Run(size.name, func(t *testing.T) {
+	for _, size := range tuitest.FitSizes {
+		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := newCreateModel(t)
 			m.global.Theme = styles.NewTheme(true)
-			m.global.Width, m.global.Height = size.w, size.h
+			m.global.Width, m.global.Height = size.Width, size.Height
 			m.err = errors.New("no games are available right now")
 
 			out := m.View().Content
 
-			assert.LessOrEqual(t, lg.Height(out), size.h, "taller than the terminal")
-			assert.LessOrEqual(t, lg.Width(out), size.w, "wider than the terminal")
+			assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+			assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
 		})
 	}
+}
+
+// Toggling a setting must not shift the "<" and ">" around it, so each label reads the
+// same width in both states - on the create form and in the lobby alike.
+func TestSettingLabels_KeepOneWidth(t *testing.T) {
+	t.Parallel()
+
+	// Toggling a row must not move its own "<" and ">": each option's labels share a
+	// width. The rows start at different columns, so they need not share one another's.
+	assert.Equal(t, "Ranked", modeLabel(true))
+	assert.Len(t, visibilityLabel(false), len(visibilityLabel(true)))
+	assert.Len(t, modeLabel(false), len(modeLabel(true)))
 }

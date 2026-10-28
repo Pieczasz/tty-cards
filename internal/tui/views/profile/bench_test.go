@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 )
 
 func BenchmarkProfileView_Render(b *testing.B) {
@@ -27,11 +28,11 @@ func BenchmarkProfileView_Render(b *testing.B) {
 	// The filter lists are not optional: renderContent reads the current entry of
 	// each for its filter line, so a literal without them panics where the real
 	// view, built by New, never can.
-	m := model{
+	m := &model{
 		global:        router.GlobalContext{User: user, Width: 120, Height: 40, Theme: styles.NewTheme(true)},
 		userProfile:   user,
 		history:       history,
-		gameFilters:   []string{filterAllGames, "Poker"},
+		gameFilters:   []game.Module{{Name: filterAllGames}, {Name: "Poker", Slug: "poker"}},
 		resultFilters: []string{filterAllResults, filterWins, filterLosses},
 	}
 

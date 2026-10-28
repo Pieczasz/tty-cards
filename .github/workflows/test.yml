@@ -1,21 +1,25 @@
 name: Test
-
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore: [ "web/**", "**.md" ]
   pull_request:
     branches: [ "main", "master" ]
+    paths-ignore: [ "web/**", "**.md" ]
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: true
 
     - name: Download dependencies
@@ -27,37 +31,47 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: true
 
     - name: Download dependencies
       run: go mod download
 
-    - name: Run integration tests
-      run: go test ./... -race -shuffle=on -tags=integration -count=1 -timeout 15m
+    - name: Run unit and integration tests, enforce the coverage floor
+      run: make cover
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    # uv is pinned here and semgrep in the Makefile, so CI runs what `make semgrep` runs.
+    - name: Install uv
+      run: pipx install uv==0.12.19
+
+    - name: semgrep rule tests and scan
+      run: make semgrep
 
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: false
 
     - name: golangci-lint
-      # Prebuilt binaries lag the module's Go version (v2.12.x is go1.26 and
-      # refuses go 1.27.x). goinstall builds with the setup-go toolchain.
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
       with:
-        version: v2.13.2
+        version: v2.15.0
         install-mode: goinstall
 
     - name: gofmt and go fix leave nothing to change
@@ -65,8 +79,6 @@ jobs:
         test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
         test -z "$(go fix -diff ./...)" || { go fix -diff ./...; exit 1; }
 
-    # The action above lints the default build; the integration tests are a second
-    # build that the size gates and test linters must also pass.
     - name: golangci-lint (integration tag)
       run: golangci-lint run --build-tags=integration ./...
 
@@ -78,39 +90,28 @@ jobs:
   vulncheck:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
 
-    # Reachability-based, so it fails only on advisories our call graph can actually
-    # reach. Clean today; this is what keeps it clean.
-    #
-    # Pinned, not @latest: @latest makes every run depend on whatever was published
-    # that morning, so a release that changes the exit codes or drops a Go version
-    # turns a green pipeline red on a commit that touched nothing. Bump deliberately.
     - name: govulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  # The Dockerfile is not exercised by any test, and it was wrong for months without
-  # anything noticing: it built one file instead of the package, and cross-built for
-  # the wrong architecture. Building it here is the only thing that catches that.
   image:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-    - uses: docker/setup-buildx-action@v3
+    - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
     - name: Build the server image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
       with:
         context: .
         file: cmd/server/Dockerfile
-        # linux/arm64 as well as the runner's own arch, because the deployment target
-        # may be either and TARGETOS/TARGETARCH handling is exactly what broke before.
         platforms: linux/amd64,linux/arm64
         push: false
         cache-from: type=gha
@@ -119,22 +120,42 @@ jobs:
   compose:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-    # Interpolation happens at parse time, so `docker compose config` is a real check
-    # on every ${VAR} in the file - including the ones that must have no default.
     - name: Validate compose and the proxy config
       env:
         DB_PASSWORD: ci
       run: |
         docker compose config --quiet
-        docker run --rm --add-host backend:127.0.0.1 \
-          -v "$PWD/internal/config/nginx.conf:/etc/nginx/nginx.conf:ro" \
-          nginx:1.27-alpine nginx -t
+        # The image compose runs, digest and all, so this tests what is deployed.
+        nginx_image=$(docker compose config --format json | jq -r '.services.proxy.image')
+        # nginx.conf's 443 server needs a certificate to parse; any will do.
+        tls=$(mktemp -d); openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -subj /CN=ci \
+          -keyout "$tls/privkey.pem" -out "$tls/fullchain.pem" 2>/dev/null
+        docker run --rm -v "$PWD/internal/config/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$tls:/etc/nginx/tls:ro" \
+          "$nginx_image" nginx -t
+        alloy_image=$(docker compose config --format json | jq -r '.services.alloy.image')
+        docker run --rm -v "$PWD/internal/config/alloy/config.alloy:/c/config.alloy:ro" \
+          "$alloy_image" fmt /c/config.alloy > /dev/null
+        # A rules file Prometheus cannot parse keeps it restarting, so no metric is
+        # stored and no alert is ever evaluated.
+        prometheus_image=$(docker compose config --format json | jq -r '.services.prometheus.image')
+        docker run --rm --entrypoint promtool -v "$PWD/internal/config/prometheus:/etc/prometheus:ro" \
+          "$prometheus_image" check config /etc/prometheus/prometheus.yml
+        # The alert rules' own unit tests, every *_test.yml beside them.
+        docker run --rm --entrypoint promtool -v "$PWD/internal/config/prometheus:/etc/prometheus:ro" \
+          -w /etc/prometheus "$prometheus_image" test rules $(cd internal/config/prometheus && ls *_test.yml)
+        # Loki and Tempo refuse an unknown key at start, i.e. only once deployed.
+        loki_image=$(docker compose config --format json | jq -r '.services.loki.image')
+        docker run --rm -v "$PWD/internal/config/loki/loki.yaml:/etc/loki/loki.yaml:ro" \
+          "$loki_image" -config.file=/etc/loki/loki.yaml -verify-config
+        tempo_image=$(docker compose config --format json | jq -r '.services.tempo.image')
+        docker run --rm -v "$PWD/internal/config/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro" \
+          "$tempo_image" -config.file=/etc/tempo/tempo.yaml -config.verify=true
+        alertmanager_image=$(docker compose config --format json | jq -r '.services.alertmanager.image')
+        docker run --rm --entrypoint amtool -v "$PWD/internal/config/alertmanager:/etc/alertmanager:ro" \
+          "$alertmanager_image" check-config /etc/alertmanager/alertmanager.yml
 
-    # Grafana is anonymous-admin on purpose, so the VPS itself is the gate: it must
-    # never be published on anything but loopback. This is the one line that keeps
-    # that true when someone edits the ports.
     - name: Grafana stays on loopback
       env:
         DB_PASSWORD: ci
@@ -142,3 +163,131 @@ jobs:
         bindings=$(docker compose config --format json | jq -r '.services.grafana.ports[]? | "\(.host_ip // "0.0.0.0"):\(.published)"')
         echo "grafana publishes: $bindings"
         [ "$bindings" = "127.0.0.1:3000" ] || { echo "grafana must publish only 127.0.0.1:3000" >&2; exit 1; }
+
+    - name: Compose refuses to start without DB_PASSWORD
+      run: |
+        if env -u DB_PASSWORD docker compose config --quiet 2>/dev/null; then
+          echo "docker compose config must fail when DB_PASSWORD is unset" >&2; exit 1
+        fi
+
+# TODO: add these checks somehow to test suite?
+    - name: Deployment checks
+      env:
+        DB_PASSWORD: ci
+      run: |
+        # Every profile too: rclone runs only from scripts/backup.sh, and is pinned all the same.
+        cfg=$(docker compose --profile '*' config --format json)
+        fail() { echo "$1" >&2; exit 1; }
+
+        # Every image pinned by digest (backend is built, so it has none).
+        unpinned=$(jq -r '.services | to_entries[] | select(.value.image != null and (.value.image | test("@sha256:[0-9a-f]{64}$") | not)) | .key' <<<"$cfg")
+        [ -z "$unpinned" ] || fail "images not pinned by digest: $unpinned"
+
+        # No service may gain privileges; the proxy keeps only what nginx needs.
+        missing=$(jq -r '.services | to_entries[] | select((.value.security_opt // []) | index("no-new-privileges:true") | not) | .key' <<<"$cfg")
+        [ -z "$missing" ] || fail "services without no-new-privileges: $missing"
+        jq -e '.services.proxy.cap_drop == ["ALL"]' <<<"$cfg" >/dev/null || fail "proxy must cap_drop ALL"
+        jq -e '.services.proxy.cap_add | sort == ["CHOWN","NET_BIND_SERVICE","SETGID","SETUID"]' <<<"$cfg" >/dev/null \
+          || fail "proxy cap_add must be exactly NET_BIND_SERVICE, CHOWN, SETUID, SETGID"
+
+        # IPv6 on the proxy's network, nginx listening on both families, and the
+        # backend trusting PROXY headers from that network only.
+        jq -e '.networks.edge.enable_ipv6 == true' <<<"$cfg" >/dev/null || fail "edge network must enable IPv6"
+        jq -e '.services.proxy.networks | keys == ["edge"]' <<<"$cfg" >/dev/null || fail "proxy must sit on edge only"
+        subnets=$(jq -r '[.networks.edge.ipam.config[].subnet] | join(",")' <<<"$cfg")
+        trusted=$(jq -r '.services.backend.environment.PROXY_TRUSTED_CIDRS' <<<"$cfg")
+        [ "$trusted" = "$subnets" ] || fail "PROXY_TRUSTED_CIDRS ($trusted) must equal the edge subnets ($subnets)"
+        grep -q 'listen \[::\]:22 ' internal/config/nginx.conf || fail "nginx must listen on [::]:22"
+        grep -q 'listen \[::\]:80;' internal/config/nginx.conf || fail "nginx must listen on [::]:80"
+
+        # Grafana answers only to localhost (DNS rebinding).
+        jq -e '.services.grafana.environment.GF_SERVER_ENFORCE_DOMAIN == "true"' <<<"$cfg" >/dev/null \
+          || fail "grafana must set GF_SERVER_ENFORCE_DOMAIN=true"
+
+        #  Alloy reads Docker through the socket proxy, never the socket.
+        jq -e '[.services.alloy.volumes[]? | .source] | any(test("docker.sock")) | not' <<<"$cfg" >/dev/null \
+          || fail "alloy must not mount the Docker socket"
+        # Nor the host's root: a read-only bind of / still reaches the socket.
+        jq -e '[.services.alloy.volumes[]? | .source] | index("/") | not' <<<"$cfg" >/dev/null \
+          || fail "alloy must not mount the host's /"
+        # The socket proxy passes named GET paths only: never a container's files.
+        jq -e '[.services["docker-socket-proxy"].command[]] | (any(test("archive|export|exec")) or any(startswith("-allowPOST"))) | not' <<<"$cfg" >/dev/null \
+          || fail "docker-socket-proxy must not allow archive, export, exec or POST"
+
+        # No client address reaches Loki from nginx's error log.
+        for d in 'error_log stderr error;' 'limit_req_log_level warn;' 'limit_conn_log_level warn;' \
+                 'limit_req_status 429;' 'proxy_connect_timeout 5s;'; do
+          grep -qF "$d" internal/config/nginx.conf || fail "nginx.conf lost: $d"
+        done
+        grep -q 'stage.replace' internal/config/alloy/config.alloy || fail "alloy must redact nginx client addresses"
+
+        # The database speaks TLS only: the server rejects plaintext TCP and every
+        # client requires TLS.
+        hba=internal/config/postgres/pg_hba.conf
+        grep -qE '^hostnossl[[:space:]]+all[[:space:]]+all[[:space:]]+all[[:space:]]+reject' "$hba" || fail "$hba must reject plaintext TCP"
+        ! grep -qE '^host[[:space:]]' "$hba" || fail "$hba must not accept plain host connections"
+        jq -e '.services.db.command | index("hba_file=/etc/postgresql/pg_hba.conf") and index("ssl=on")' <<<"$cfg" >/dev/null \
+          || fail "db must run ssl=on with the repo's pg_hba.conf"
+        jq -e '.services.backend.environment.DB_SSLMODE == "require"' <<<"$cfg" >/dev/null || fail "backend must use DB_SSLMODE=require"
+        jq -e '.services.migrate.command | any(test("sslmode=require"))' <<<"$cfg" >/dev/null || fail "migrate must use sslmode=require"
+
+        # migrate's password travels in PGPASSWORD, never in its argv (ps, docker inspect).
+        canary=$(DB_PASSWORD=pw-canary-7141 docker compose config --format json)
+        jq -e '.services.migrate.command | tostring | contains("pw-canary") | not' <<<"$canary" >/dev/null \
+          || fail "migrate's command must not carry the database password"
+        jq -e '.services.migrate.environment.PGPASSWORD == "pw-canary-7141"' <<<"$canary" >/dev/null \
+          || fail "migrate must get the password as PGPASSWORD"
+
+        # TLS on the apex: 22, 80 and 443 published and nothing else, nginx on 443 in
+        # both families with TLS 1.2+ and HSTS, the ACME challenge answered on plain
+        # http, and certbot keeping the certificate current.
+        jq -e '[.services.proxy.ports[].published | tonumber] | sort == [22,80,443]' <<<"$cfg" >/dev/null \
+          || fail "proxy must publish exactly 22, 80 and 443"
+        for d in 'listen 443 ssl;' 'listen [::]:443 ssl;' 'ssl_protocols TLSv1.2 TLSv1.3;' 'ssl_session_tickets off;' \
+                 'add_header Strict-Transport-Security "max-age=' 'location ^~ /.well-known/acme-challenge/' \
+                 'return 301 https://$host$request_uri;'; do
+          # Comments stripped: the 443 server used to sit here commented out.
+          grep -v '^[[:space:]]*#' internal/config/nginx.conf | grep -qF "$d" || fail "nginx.conf lost: $d"
+        done
+        jq -e '.services.certbot.image | test("^certbot/certbot:[^@]+@sha256:")' <<<"$cfg" >/dev/null || fail "certbot must be pinned"
+        jq -e '.services.certbot.entrypoint == ["/renew.sh"] and .services.proxy.depends_on["proxy-certs"] != null' <<<"$cfg" >/dev/null \
+          || fail "certbot must run renew.sh, and nginx must wait for its placeholder certificate"
+
+        # The per-network keys nginx limits on, computed by nginx itself from the
+        # http context's maps: a regex that stops matching would silently turn a
+        # limit off. X-Addr stands in for $remote_addr.
+        t=$(mktemp -d)
+        awk '/^http \{/ { h = 1 } h && /map \$remote_addr/ { m = 1 } m { print } m && /^    \}/ { m = 0 }' \
+          internal/config/nginx.conf | sed 's/map \$remote_addr/map $http_x_addr/' > "$t/maps.conf"
+        printf 'events {}\nhttp { include /t/maps.conf; server { listen 8080; return 200 "$client_net|$client_net48"; } }\n' > "$t/nginx.conf"
+        docker run -d --name maps -p 127.0.0.1:18080:8080 -v "$t:/t:ro" "$(jq -r .services.proxy.image <<<"$cfg")" \
+          nginx -c /t/nginx.conf -g 'daemon off;' >/dev/null
+        trap 'docker rm -f maps >/dev/null' EXIT
+        sleep 1
+        while read -r addr want; do
+          got=$(curl -fsS -H "X-Addr: $addr" http://127.0.0.1:18080/)
+          case $got in $want) ;; *) fail "nginx keys $addr as '$got', want '$want'" ;; esac
+        done <<'EOF'
+        2001:db8:aaaa:bbbb:1:2:3:4 2001:db8:aaaa:bbbb|2001:db8:aaaa
+        2001:db8:aaaa::5:6:7:8 2001:db8:aaaa:0|2001:db8:aaaa
+        2001:db8::1:2:3 2001:db8:0:0|2001:db8:0
+        203.0.113.7 *|
+        EOF
+
+        # Backups: the scripts exist, are executable and pass shellcheck, and the host key
+        # is in the set - backup.sh copies the backend's /data/ssh, which must be the
+        # ssh-keys volume and where SSH_KEY_PATH points.
+        for f in scripts/backup.sh scripts/restore.sh scripts/restore-drill.sh internal/config/certbot/renew.sh; do
+          [ -x "$f" ] || fail "$f must exist and be executable"
+        done
+        shellcheck scripts/*.sh internal/config/certbot/renew.sh
+        grep -qF 'docker cp "$backend:/data/ssh/." -' scripts/backup.sh || fail "backup.sh must copy the ssh host key"
+        jq -e '.services.backend.volumes | any(.source == "ssh-keys" and .target == "/data/ssh")' <<<"$cfg" >/dev/null \
+          || fail "the ssh-keys volume must be the backend's /data/ssh"
+        jq -e '.services.backend.environment.SSH_KEY_PATH | startswith("/data/ssh/")' <<<"$cfg" >/dev/null \
+          || fail "SSH_KEY_PATH must live in /data/ssh, the directory backup.sh copies"
+
+        # Local backups never enter the image build context.
+        grep -qx 'backups/' .dockerignore || fail ".dockerignore must exclude backups/"
+
+        echo "deployment hardening holds"

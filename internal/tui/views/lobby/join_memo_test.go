@@ -3,8 +3,8 @@ package lobby
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/lobby"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +13,7 @@ import (
 // unchanged frame must come from the memo, not a fresh ~6.7k-allocation render.
 func TestJoinView_MemoizesUnchangedFrames(t *testing.T) {
 	t.Parallel()
-	g := router.GlobalContext{Width: 100, Height: 30, LobbyManager: lobby.NewManager(t.Context(), nil)}
+	g := router.GlobalContext{Width: 100, Height: 30, LobbyManager: newManager(t)}
 	m := NewJoin(g).(*joinModel)
 
 	first := m.View()
@@ -32,7 +32,7 @@ func TestJoinRenderKey_CoversTheListContents(t *testing.T) {
 	t.Parallel()
 	g := router.GlobalContext{
 		Width: 100, Height: 30,
-		LobbyManager: lobby.NewManager(t.Context(), nil),
+		LobbyManager: newManager(t),
 	}
 	m := NewJoin(g).(*joinModel)
 	m.entries = []lobby.BrowseEntry{{Code: "AAAA", GameName: "Poker", Players: 2, MaxPlayers: 4}}

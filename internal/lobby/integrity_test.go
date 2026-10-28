@@ -1,0 +1,131 @@
+package lobby
+
+import (
+	"testing"
+	"time"
+
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// joinErr keeps the many join-and-assert call sites one line: they only care whether
+// the join was refused.
+func joinErr(_ *Lobby, err error) error { return err }
+
+func isReady(l *Lobby, p *game.Player) bool {
+	seat, _ := l.Snapshot().SeatOf(p)
+	return seat.Ready
+}
+
+func isWaiting(l *Lobby) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.state == waiting
+}
+
+// A guest readied up for the table they saw. Once the leader changes what the table
+// is - ranked, capacity, visibility - that consent no longer covers it, and the
+// leader's own ready must not start a match the guests never agreed to.
+func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
+	t.Parallel()
+
+	changes := map[string]func(l *Lobby, leader *game.Player) error{
+		"ranked":      func(l *Lobby, leader *game.Player) error { return l.SetRanked(leader, true) },
+		"private":     func(l *Lobby, leader *game.Player) error { return l.SetPrivate(leader, false) },
+		"max_players": func(l *Lobby, leader *game.Player) error { return l.SetMaxPlayers(leader, 3) },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m, l := newTestLobby(t, 4)
+			leader := l.Snapshot().Leader.Player
+			guest := mockPlayer("p2", testutil.UID(2))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+			require.NoError(t, m.ToggleReady(guest))
+
+			ch, err := l.Subscribe("watcher")
+			require.NoError(t, err)
+			require.NoError(t, change(l, leader))
+
+			assert.False(t, isReady(l, guest), "the guest's ready survived a setting change")
+			assert.Contains(t, drainEventTypes(ch), EventPlayersUpdated, "the rosters were not told")
+
+			require.NoError(t, m.ToggleReady(leader))
+			assert.Equal(t, waiting, l.state, "the leader started a match the guest never readied for")
+		})
+	}
+}
+
+// The start is only ever checked on a ready toggle, so a roster change that left
+// everyone else ready used to strand the table: all-ready, and nothing to start it.
+// The same rule as a setting change applies - the table changed, so nobody is ready.
+func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
+	t.Parallel()
+
+	removals := map[string]func(m *Manager, leader, holdout *game.Player) error{
+		"the holdout leaves":    func(m *Manager, _, holdout *game.Player) error { m.LeaveLobby(holdout); return nil },
+		"the holdout is kicked": func(m *Manager, leader, holdout *game.Player) error { return m.Kick(leader, holdout) },
+	}
+	for name, remove := range removals {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m, l := newTestLobby(t, 4)
+			leader := l.Snapshot().Leader.Player
+			b := mockPlayer("p2", testutil.UID(2))
+			c := mockPlayer("p3", testutil.UID(3))
+			holdout := mockPlayer("p4", testutil.UID(4))
+			for _, p := range []*game.Player{b, c, holdout} {
+				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), p)))
+			}
+			for _, p := range []*game.Player{leader, b, c} {
+				require.NoError(t, m.ToggleReady(p))
+			}
+
+			require.NoError(t, remove(m, leader, holdout))
+
+			for _, p := range []*game.Player{leader, b, c} {
+				assert.False(t, isReady(l, p), "%s is still ready after the roster changed", p.ID)
+			}
+			assert.Equal(t, waiting, l.state)
+		})
+	}
+
+	t.Run("the leader leaves", func(t *testing.T) {
+		t.Parallel()
+		m, l := newTestLobby(t, 4)
+		leader := l.Snapshot().Leader.Player
+		b := mockPlayer("p2", testutil.UID(2))
+		c := mockPlayer("p3", testutil.UID(3))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), b)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), c)))
+		require.NoError(t, m.ToggleReady(b))
+
+		m.LeaveLobby(leader)
+
+		assert.False(t, isReady(l, b), "the promoted table kept a ready from before the change")
+	})
+}
+
+// A hold can outlive its hand: releaseFinishedGame reopens the table before
+// releaseHeldSeats reaches m.mu, and a kick in that gap unmaps the guest, so the
+// release no longer finds them. The timer then fires a DisconnectGrace later and
+// LeaveLobby takes the player out of whatever table they sit at by then.
+func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
+	t.Parallel()
+	m, l := newTestLobby(t, 4)
+	guest := mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+
+	m.mu.Lock()
+	m.grace.arm(guest.ID, time.Hour, func(uint64) {})
+	m.mu.Unlock()
+
+	require.NoError(t, m.Kick(l.Snapshot().Leader.Player, guest))
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	assert.NotContains(t, m.grace.pending, guest.ID, "the kicked guest's grace timer is still armed")
+}

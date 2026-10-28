@@ -2,20 +2,24 @@ package systemtest
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/game/poker"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 
 	"uuid"
 
 	"github.com/stretchr/testify/require"
 )
+
+// joinErr keeps the join-and-assert call sites one line: they only care whether the
+// join was refused.
+func joinErr(_ *lobby.Lobby, err error) error { return err }
 
 type finalizedMatch struct {
 	gameName string
@@ -63,20 +67,20 @@ func (r *rankedFinalizeRecorder) FinalizeRankedMatch(
 	ref db.GameRef,
 	orderedUserIDs []uuid.UUID,
 	_ []int,
-) error {
+) (map[uuid.UUID]uint32, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	r.mu.Lock()
 	r.finalized = append(r.finalized, finalizedMatch{
 		gameName: ref.Name,
-		userIDs:  append([]uuid.UUID(nil), orderedUserIDs...),
+		userIDs:  slices.Clone(orderedUserIDs),
 	})
 	r.mu.Unlock()
 
 	r.fire()
-	return nil
+	return map[uuid.UUID]uint32{}, nil
 }
 
 func (r *rankedFinalizeRecorder) calls() []finalizedMatch {
@@ -87,26 +91,19 @@ func (r *rankedFinalizeRecorder) calls() []finalizedMatch {
 	for i, call := range r.finalized {
 		calls[i] = finalizedMatch{
 			gameName: call.gameName,
-			userIDs:  append([]uuid.UUID(nil), call.userIDs...),
+			userIDs:  slices.Clone(call.userIDs),
 		}
 	}
 	return calls
-}
-
-func realRegistry(t *testing.T) *game.Registry {
-	t.Helper()
-	registry := game.NewRegistry()
-	for _, entry := range catalog.All {
-		registry.RegisterModule(entry.Module())
-	}
-	return registry
 }
 
 func newPlayer(id uuid.UUID, name string) *game.Player {
 	return lobby.NewPlayer(&db.User{ID: id, Username: name})
 }
 
-func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
+// awaitGameStart waits for l's start event and returns the engine it opened. The event
+// itself only hands out seats, so the engine is read off the lobby, server side.
+func awaitGameStart(t *testing.T, l *lobby.Lobby, events <-chan lobby.Event) *game.Engine {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -118,8 +115,8 @@ func awaitGameStart(t *testing.T, events <-chan lobby.Event) *game.Engine {
 			if event.Type != lobby.EventGameStarted {
 				continue
 			}
-			engine, ok := event.Payload.(*game.Engine)
-			require.True(t, ok, "GAME_STARTED payload must carry the engine")
+			engine := l.ActiveGame()
+			require.NotNil(t, engine, "GAME_STARTED must leave the lobby in game")
 			return engine
 		case <-deadline:
 			t.Fatal("timed out waiting for the game to start")
@@ -133,9 +130,9 @@ func chipsInPlay(t *testing.T, engine *game.Engine) uint {
 	engine.WithState(func(state *game.State) {
 		extra, ok := state.Extra.(*poker.State)
 		require.True(t, ok)
-		total = extra.MainPool
-		for _, chips := range extra.PlayerChips {
-			total += chips
+		total = extra.Pool
+		for _, seat := range extra.Seats {
+			total += seat.Chips
 		}
 	})
 	return total

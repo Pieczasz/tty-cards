@@ -2,11 +2,13 @@ package components
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
@@ -43,7 +45,7 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 				// Worst case: the picked-out card is in the middle of the hand, where
 				// it keeps its own closing border.
 				for _, selected := range []int{-1, 0, n / 2, n - 1} {
-					fan := RenderFan(theme, hand, selected, tuck)
+					fan := RenderFan(theme, hand, Selection(selected), tuck)
 					assert.LessOrEqualf(t, lg.Width(fan), width,
 						"a fan with card %d picked out overran its budget", selected)
 				}
@@ -57,12 +59,12 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 func TestFanTuck_NeverHidesTheSuit(t *testing.T) {
 	t.Parallel()
 
-	assert.GreaterOrEqual(t, minTuckWidth, CentreColumn+1,
+	assert.GreaterOrEqual(t, minTuckWidth, centreColumn+1,
 		"the tightest tuck still has to show the centre pip column")
 
 	theme := styles.NewTheme(true)
 	ace := deck.Card{Rank: deck.Ace, Suit: deck.Spades}
-	fan := stripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, -1, minTuckWidth))
+	fan := tuitest.StripANSI(RenderFan(theme, []deck.Card{ace, ace, ace}, nil, minTuckWidth))
 	assert.Equal(t, 3, strings.Count(fan, "♠"), "every card in the fan shows its suit")
 }
 
@@ -77,7 +79,7 @@ func TestRenderStrip_NamesEveryCardAndWrapsToWidth(t *testing.T) {
 		{Rank: deck.Ace, Suit: deck.Spades},
 		{Rank: deck.King, Suit: deck.Clubs},
 	}
-	out := stripANSI(RenderStrip(theme, hand, nil, 1, 8))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, nil, 1, 8))
 
 	assert.Contains(t, out, "10")
 	assert.Contains(t, out, "A")
@@ -125,13 +127,27 @@ func TestGridPicker_RendersEveryChoiceAndMarksTheCursor(t *testing.T) {
 	out := p.Render(theme)
 
 	for _, label := range p.Labels {
-		assert.Contains(t, stripANSI(out), label)
+		assert.Contains(t, tuitest.StripANSI(out), label)
 	}
 	// Moving the cursor has to change what is drawn, or the highlight is not there.
 	p.Cursor = 0
 	assert.NotEqual(t, out, p.Render(theme))
 
 	assert.Empty(t, GridPicker{}.Render(theme), "nothing to pick, nothing to draw")
+}
+
+// Uno's colour picker paints each cell in the colour it stands for; the suit picker
+// leaves them muted. The choices read the same either way.
+func TestGridPicker_ColorsPaintTheirCells(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+
+	plain := GridPicker{Title: "Pick a colour:", Labels: []string{"Red", "Blue"}}
+	painted := plain
+	painted.Colors = []color.Color{theme.SuitRed, theme.Selection}
+
+	assert.NotEqual(t, plain.Render(theme), painted.Render(theme))
+	assert.Equal(t, tuitest.StripANSI(plain.Render(theme)), tuitest.StripANSI(painted.Render(theme)))
 }
 
 // The whole point of fixed cells is that the rows line up whatever is in them.
@@ -150,13 +166,29 @@ func TestTable_RowsAreAllTheSameWidth(t *testing.T) {
 		tbl.Cells("a name far too long to fit", "42"),
 	})
 
-	lines := strings.Split(stripANSI(out), "\n")
+	lines := strings.Split(tuitest.StripANSI(out), "\n")
 	require.Len(t, lines, 1+1+4, "header, rule, and PadTo data rows")
 	for i, line := range lines {
 		assert.Equalf(t, tbl.Width(), lg.Width(line), "row %d is a different width", i)
 	}
 	assert.Contains(t, lines[2], "1600")
 	assert.Contains(t, lines[3], "...", "a long value is elided, not allowed to push the column")
+}
+
+// A row that styles some of its cells is laid out with the header's own separator, so
+// every value sits under its title.
+func TestTable_RowOfStyledCellsLinesUpWithTheHeader(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	tbl := Table{Cols: []Column{{Title: "Game", Width: 6}, {Title: "Mode", Width: 6}}}
+
+	row := tbl.Row(styles.PadTruncate("uno", 6), theme.Accented.Render(styles.PadTruncate("ranked", 6)))
+
+	header, _, _ := strings.Cut(tuitest.StripANSI(tbl.Header(theme)), "\n")
+	plain := tuitest.StripANSI(row)
+	assert.NotEqual(t, plain, row, "the styled cell keeps its style")
+	assert.Equal(t, strings.Index(header, "Mode"), strings.Index(plain, "ranked"))
+	assert.Equal(t, tbl.Width(), lg.Width(row))
 }
 
 func TestStepCursor_StopsAtBothEnds(t *testing.T) {

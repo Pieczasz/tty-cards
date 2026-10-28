@@ -3,9 +3,9 @@ package lobby
 import (
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/db"
 
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,14 +17,14 @@ import (
 func TestNewPlayer(t *testing.T) {
 	t.Parallel()
 
-	t.Run("flattens rankings by game name", func(t *testing.T) {
+	t.Run("flattens rankings by game slug", func(t *testing.T) {
 		t.Parallel()
 
 		p := NewPlayer(&db.User{ID: testutil.UID(7),
 			Username: "alice",
 			Rankings: []db.Ranking{
-				{Game: db.Game{Name: "Uno"}, Elo: 1700},
-				{Game: db.Game{Name: "Hearts"}, Elo: 1200},
+				{Game: db.Game{Slug: "uno", Name: "Uno"}, Elo: 1700},
+				{Game: db.Game{Slug: "hearts", Name: "Hearts"}, Elo: 1200},
 			},
 		})
 
@@ -32,26 +32,25 @@ func TestNewPlayer(t *testing.T) {
 		assert.Equal(t, testutil.UID(7).String(), p.ID)
 		assert.Equal(t, testutil.UID(7), p.UserID)
 		assert.Equal(t, "alice", p.Name)
-		assert.Equal(t, map[string]uint32{"Uno": 1700, "Hearts": 1200}, p.Ratings)
+		assert.Equal(t, map[string]uint32{"uno": 1700, "hearts": 1200}, p.Ratings, "the slug, so a rename moves nobody")
 	})
 
-	// A ranking whose Game association did not load has no name to key on. Keeping it
-	// would put a rating under "", which is the key a lobby with no card game selected
-	// looks up - so the browse list would order by a rating belonging to no game.
-	t.Run("drops a ranking with no game name", func(t *testing.T) {
+	// A ranking whose Game association did not load has no slug to key on. Keeping it
+	// would put a rating under "", a key belonging to no game.
+	t.Run("drops a ranking with no game slug", func(t *testing.T) {
 		t.Parallel()
 
 		p := NewPlayer(&db.User{ID: testutil.UID(9),
 			Username: "bob",
 			Rankings: []db.Ranking{
 				{Game: db.Game{}, Elo: 3000},
-				{Game: db.Game{Name: "Uno"}, Elo: 1400},
+				{Game: db.Game{Slug: "uno", Name: "Uno"}, Elo: 1400},
 			},
 		})
 
 		require.NotNil(t, p)
-		assert.NotContains(t, p.Ratings, "", "an unnamed game must not become a rating key")
-		assert.Equal(t, map[string]uint32{"Uno": 1400}, p.Ratings)
+		assert.NotContains(t, p.Ratings, "", "a game with no slug must not become a rating key")
+		assert.Equal(t, map[string]uint32{"uno": 1400}, p.Ratings)
 	})
 
 	t.Run("no rankings gives an empty map, not nil lookups", func(t *testing.T) {
@@ -61,7 +60,7 @@ func TestNewPlayer(t *testing.T) {
 
 		require.NotNil(t, p)
 		assert.Empty(t, p.Ratings)
-		_, ok := p.Ratings["Uno"]
+		_, ok := p.Ratings["uno"]
 		assert.False(t, ok)
 	})
 

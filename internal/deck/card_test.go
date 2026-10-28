@@ -37,7 +37,7 @@ func TestZeroRankIsNotACard(t *testing.T) {
 	assert.Zero(t, RankValue(empty.Rank))
 	assert.Zero(t, RunOrder(empty.Rank))
 	assert.Zero(t, PipValue(empty.Rank))
-	assert.NotContains(t, StandardDeck(), empty)
+	assert.NotContains(t, Standard(), empty)
 }
 
 // The zero Suit must be NoSuit for the same reason: a Card built without one is

@@ -7,10 +7,6 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
-    jsonData:
-      exemplarTraceIdDestinations:
-        - name: trace_id
-          datasourceUid: tempo
 
   - name: Loki
     type: loki
@@ -18,6 +14,8 @@ datasources:
     access: proxy
     url: http://loki:3100
     jsonData:
+      # trace_id is structured metadata on every OTLP record (Loki's OTLP endpoint
+      # puts it there), which a "label" matcher reads.
       derivedFields:
         - name: trace_id
           matcherType: label
@@ -35,5 +33,7 @@ datasources:
         datasourceUid: loki
         spanStartTimeShift: -1h
         spanEndTimeShift: 1h
-        filterByTraceID: true
-        filterBySpanID: false
+        # The trace ID is structured metadata, not text in the line, so the default
+        # generated line filter (|= "<id>") would never match.
+        customQuery: true
+        query: '{service_name="tty-cards-server"} | trace_id="$${__trace.traceId}"'

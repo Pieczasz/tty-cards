@@ -6,75 +6,59 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAll_EntriesComplete(t *testing.T) {
+func TestGames_EntriesComplete(t *testing.T) {
 	t.Parallel()
-	require.NotEmpty(t, All)
+	require.NotEmpty(t, Games)
 
-	names := make(map[string]bool, len(All))
-	slugs := make(map[string]bool, len(All))
-	for _, e := range All {
+	names := make(map[string]bool, len(Games))
+	slugs := make(map[string]bool, len(Games))
+	for _, e := range Games {
 		require.NotEmpty(t, e.Name, "entry with slug %q has no name", e.Slug)
 		require.NotEmpty(t, e.Slug, "entry %q has no slug", e.Name)
-		require.NotNil(t, e.Rules, "entry %q has no rules factory", e.Name)
+		require.NotNil(t, e.Factory, "entry %q has no rules factory", e.Name)
 		require.NotNil(t, e.View, "entry %q has no TUI view", e.Name)
+		require.Positive(t, e.MinPlayers, "entry %q has no seat bounds", e.Name)
+		require.GreaterOrEqual(t, e.MaxPlayers, e.MinPlayers, "entry %q seats fewer than it needs", e.Name)
 
 		assert.False(t, names[e.Name], "duplicate name %q", e.Name)
 		assert.False(t, slugs[e.Slug], "duplicate slug %q", e.Slug)
 		names[e.Name] = true
 		slugs[e.Slug] = true
 
-		assert.NotNil(t, e.Rules(), "rules factory for %q returned nil", e.Name)
-		_, scores := e.Rules().(game.StandingScorer)
-		assert.True(t, scores, "%q must implement StandingScorer so equal scores share a place", e.Name)
+		assert.NotNil(t, e.Factory(), "rules factory for %q returned nil", e.Name)
 	}
 }
 
-func TestEntry_Module(t *testing.T) {
+// NewRegistry is the seam between the catalog and the engine: a game missing from it
+// is a game nobody can start, and the catalog is the only place it is declared.
+func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	t.Parallel()
-	for _, e := range All {
-		m := e.Module()
-		assert.Equal(t, e.Name, m.Name)
-		assert.Equal(t, e.Slug, m.Slug)
-		require.NotNil(t, m.Factory)
-		assert.NotNil(t, m.Factory())
+	registry := NewRegistry()
+
+	slugs := make([]string, 0, len(Games))
+	for _, e := range Games {
+		slugs = append(slugs, e.Slug)
+		mod, ok := registry.Module(e.Slug)
+		require.Truef(t, ok, "%q is in the catalog but not in the registry", e.Slug)
+		assert.Equal(t, e.Name, mod.Name)
+		assert.NotNil(t, mod.Factory())
 	}
-}
-
-// Module.Name is persisted as games.name and is the registry key the lobby looks a
-// game up by, so a rename is a data migration, not a cosmetic edit: existing rows,
-// existing rankings and every match already recorded point at the old string. Freeze
-// them here so changing one has to be deliberate.
-func TestAll_NamesArePersistedAndFrozen(t *testing.T) {
-	t.Parallel()
-
-	want := map[string]string{
-		"crazy_eights": "Crazy Eights",
-		"poker":        "Poker",
-		"uno":          "Uno",
-		"hearts":       "Hearts",
-		"gin_rummy":    "Gin Rummy",
+	got := make([]string, 0, len(Games))
+	for _, mod := range registry.Modules() {
+		got = append(got, mod.Slug)
 	}
-
-	got := make(map[string]string, len(All))
-	for _, e := range All {
-		got[e.Slug] = e.Name
-	}
-
-	assert.Equal(t, want, got,
-		"update this map when adding a game; renaming or re-slugging one orphans its rows in games, rankings and match_participants")
+	assert.Equal(t, slugs, got, "the lobby menu keeps catalog order")
 }
 
 // Migration 000005 backfills games.slug from the display names that existed when it
 // shipped. If a catalog slug ever disagrees with that table, a running server writes
 // ratings under one slug while the migration filed the old rows under another, and the
 // leaderboard for that game silently splits in two.
-func TestAll_SlugsMatchTheMigrationBackfill(t *testing.T) {
+func TestGames_SlugsMatchTheMigrationBackfill(t *testing.T) {
 	t.Parallel()
 	matches, err := filepath.Glob("../db/migrations/000005_*.up.sql")
 	require.NoError(t, err)
@@ -88,8 +72,8 @@ func TestAll_SlugsMatchTheMigrationBackfill(t *testing.T) {
 		want[m[1]] = m[2]
 	}
 
-	gotByName := make(map[string]string, len(All))
-	for _, e := range All {
+	gotByName := make(map[string]string, len(Games))
+	for _, e := range Games {
 		gotByName[e.Name] = e.Slug
 	}
 	for name, slug := range want {

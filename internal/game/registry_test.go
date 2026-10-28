@@ -7,85 +7,61 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegistry(t *testing.T) {
-	t.Parallel()
-	r := NewRegistry()
-
-	_, err := r.Create("NotExists")
-	require.Error(t, err)
-
-	r.RegisterModule(Module{
-		Name:    "FakeGame",
-		Slug:    "fakegame",
-		Factory: func() Rules { return &MockRules{} },
-	})
-
-	names := r.GameNames()
-	assert.Len(t, names, 1)
-	assert.Equal(t, "FakeGame", names[0])
-
-	rules, err := r.Create("FakeGame")
-	require.NoError(t, err)
-	assert.NotNil(t, rules)
-
-	mod, ok := r.Module("FakeGame")
-	require.True(t, ok)
-	assert.Equal(t, "fakegame", mod.Slug)
-
-	_, ok = r.Module("NotExists")
-	assert.False(t, ok)
+func fakeModule(name, slug string) Module {
+	return Module{Name: name, Slug: slug, MinPlayers: 2, MaxPlayers: 4, Factory: func() Rules { return &MockRules{} }}
 }
 
-func TestRegistry_RegisterModule(t *testing.T) {
+func TestRegistry_ModuleLooksUpBySlug(t *testing.T) {
 	t.Parallel()
-	r := NewRegistry()
-	r.RegisterModule(Module{
-		Name:    "Crazy Eights",
-		Slug:    "crazy_eights",
-		Factory: func() Rules { return &MockRules{} },
-	})
+	r := NewRegistry(fakeModule("Crazy Eights", "crazy_eights"))
 
-	assert.Equal(t, []string{"Crazy Eights"}, r.GameNames())
-
-	mod, ok := r.Module("Crazy Eights")
+	mod, ok := r.Module("crazy_eights")
 	require.True(t, ok)
-	assert.Equal(t, "crazy_eights", mod.Slug)
+	assert.Equal(t, "Crazy Eights", mod.Name)
+
+	_, ok = r.Module("Crazy Eights")
+	assert.False(t, ok, "the display name is not the registry key")
+}
+
+func TestRegistry_ModulesKeepDeclarationOrder(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry(fakeModule("Poker", "poker"), fakeModule("Hearts", "hearts"), fakeModule("Uno", "uno"))
+
+	mods := r.Modules()
+	require.Len(t, mods, 3)
+	assert.Equal(t, []string{"poker", "hearts", "uno"}, []string{mods[0].Slug, mods[1].Slug, mods[2].Slug})
+
+	mods[0].Slug = "mutated"
+	assert.Equal(t, "poker", r.Modules()[0].Slug, "callers get a copy")
 }
 
 // A half-declared module is a wiring bug, and a registry that accepted one would fail
 // later as a missing route or a nil factory panic at the moment somebody starts a
-// table. catalog_test.go leans on this being loud.
-func TestRegistry_RegisterModuleRejectsAHalfDeclaredGame(t *testing.T) {
+// table. catalog_test.go leans on this being loud. A name declared twice is the
+// same mistake: the menus list names, and two alike cannot be told apart.
+// A slug declared twice files two games' ratings under one identity, and seat bounds
+// no table could satisfy make a game nobody can start.
+func TestNewRegistry_RejectsAMisdeclaredGame(t *testing.T) {
 	t.Parallel()
 
 	factory := func() Rules { return &MockRules{} }
 	tests := []struct {
-		name   string
-		module Module
+		name string
+		mods []Module
 	}{
-		{name: "no display name", module: Module{Slug: "s", Factory: factory}},
-		{name: "no slug", module: Module{Name: "N", Factory: factory}},
-		{name: "no factory", module: Module{Name: "N", Slug: "s"}},
+		{name: "no display name", mods: []Module{{Slug: "s", MinPlayers: 2, MaxPlayers: 2, Factory: factory}}},
+		{name: "no slug", mods: []Module{{Name: "N", MinPlayers: 2, MaxPlayers: 2, Factory: factory}}},
+		{name: "no factory", mods: []Module{{Name: "N", Slug: "s", MinPlayers: 2, MaxPlayers: 2}}},
+		{name: "no seat bounds", mods: []Module{{Name: "N", Slug: "s", Factory: factory}}},
+		{name: "a max below the min", mods: []Module{{Name: "N", Slug: "s", MinPlayers: 4, MaxPlayers: 2, Factory: factory}}},
+		{name: "a name declared twice", mods: []Module{fakeModule("Poker", "old"), fakeModule("Poker", "new")}},
+		{name: "a slug declared twice", mods: []Module{fakeModule("Poker", "poker"), fakeModule("Texas", "poker")}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Panics(t, func() { NewRegistry().RegisterModule(tt.module) })
+			assert.Panics(t, func() { NewRegistry(tt.mods...) })
 		})
 	}
-}
-
-// Re-registering a name replaces the module without listing it twice: GameNames drives
-// the menu, and a duplicate row is a game the player can pick and never reach.
-func TestRegistry_ReRegisterKeepsOneEntry(t *testing.T) {
-	t.Parallel()
-	r := NewRegistry()
-	r.RegisterModule(Module{Name: "Poker", Slug: "old", Factory: func() Rules { return &MockRules{} }})
-	r.RegisterModule(Module{Name: "Poker", Slug: "new", Factory: func() Rules { return &MockRules{} }})
-
-	assert.Equal(t, []string{"Poker"}, r.GameNames())
-	mod, ok := r.Module("Poker")
-	require.True(t, ok)
-	assert.Equal(t, "new", mod.Slug)
 }

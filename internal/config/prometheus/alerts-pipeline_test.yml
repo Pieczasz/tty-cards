@@ -1,0 +1,145 @@
+rule_files:
+  - alerts-pipeline.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="loki", instance="loki:3100"}'
+        values: "1 0x10"
+      - series: 'up{job="tempo", instance="tempo:3200"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PipelineTargetDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: PipelineTargetDown
+        exp_alerts:
+          - exp_labels: {severity: warn, job: loki, instance: "loki:3100"}
+            exp_annotations: {summary: "loki is down"}
+
+  - interval: 1m
+    input_series:
+      - series: 'node_load1{job="integrations/unix"}'
+        values: "1x3 _x10"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: HostMetricsAbsent
+        exp_alerts: []
+      # Staleness keeps the last sample for 5m, then `for` needs 5m more.
+      - eval_time: 15m
+        alertname: HostMetricsAbsent
+        exp_alerts:
+          - exp_labels: {severity: warn}
+            exp_annotations: {summary: "no host metrics are arriving from Alloy"}
+
+  - interval: 1m
+    input_series:
+      - series: 'loki_write_dropped_entries_total{reason="ingester_error"}'
+        values: "0x5 12x10"
+      - series: 'loki_write_dropped_entries_total{reason="rate_limited"}'
+        values: "0x15"
+      - series: 'loki_discarded_samples_total{reason="rate_limited"}'
+        values: "0x5 3x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LogsDropped
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: LogsDropped
+        exp_alerts:
+          - exp_labels: {severity: warn, reason: ingester_error}
+            exp_annotations: {summary: "Alloy dropped container log lines (ingester_error)"}
+      - eval_time: 8m
+        alertname: LokiDiscardingLogs
+        exp_alerts:
+          - exp_labels: {severity: warn, reason: rate_limited}
+            exp_annotations: {summary: "Loki refused log lines (rate_limited)"}
+      # The drops stopped at 6m: ten minutes later the window no longer holds any.
+      - eval_time: 16m
+        alertname: LogsDropped
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_send_failed_log_records_total{component_id="otelcol.exporter.otlphttp.loki"}'
+        values: "0x5 40x10"
+      # The same component refusing two signals: one alert, not a query error.
+      - series: 'otelcol_receiver_refused_spans_total{component_id="otelcol.receiver.otlp.default"}'
+        values: "0x5 7x10"
+      - series: 'otelcol_receiver_refused_log_records_total{component_id="otelcol.receiver.otlp.default"}'
+        values: "0x15"
+      - series: 'otelcol_receiver_refused_metric_points_total{component_id="otelcol.receiver.otlp.default"}'
+        values: "0x5 3x10"
+      - series: 'otelcol_exporter_send_failed_spans_total{component_id="otelcol.exporter.otlp.tempo"}'
+        values: "0x15"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: TelemetryExportFailing
+        exp_alerts:
+          - exp_labels: {severity: warn, component_id: otelcol.exporter.otlphttp.loki}
+            exp_annotations: {summary: "otelcol.exporter.otlphttp.loki is losing telemetry"}
+          - exp_labels: {severity: warn, component_id: otelcol.receiver.otlp.default}
+            exp_annotations: {summary: "otelcol.receiver.otlp.default is losing telemetry"}
+
+  - interval: 1m
+    input_series:
+      - series: 'prometheus_remote_storage_samples_failed_total{url="http://prometheus:9090/api/v1/write"}'
+        values: "0x5 100x10"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: RemoteWriteFailing
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: RemoteWriteFailing
+        exp_alerts:
+          - exp_labels: {severity: warn, url: "http://prometheus:9090/api/v1/write"}
+            exp_annotations: {summary: "Alloy cannot write metrics to Prometheus"}
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{mountpoint="/var/lib/alloy/data", device="/dev/sda1"}'
+        values: "20x10 10x30"
+      - series: 'node_filesystem_size_bytes{mountpoint="/var/lib/alloy/data", device="/dev/sda1"}'
+        values: "100x40"
+      # A nearly full scratch mount elsewhere is not the disk that matters.
+      - series: 'node_filesystem_avail_bytes{mountpoint="/etc/hostname", device="/dev/sdb1"}'
+        values: "1x40"
+      - series: 'node_filesystem_size_bytes{mountpoint="/etc/hostname", device="/dev/sdb1"}'
+        values: "100x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DiskFilling
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: DiskFilling
+        exp_alerts:
+          - exp_labels: {severity: page, mountpoint: /var/lib/alloy/data, device: /dev/sda1}
+            exp_annotations: {summary: "Docker's disk is 10% free"}
+
+  - interval: 1m
+    input_series:
+      - series: 'prometheus_tsdb_size_retentions_total{job="prometheus"}'
+        values: "0x30 1x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: PrometheusSizeRetention
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: PrometheusSizeRetention
+        exp_alerts:
+          - exp_labels: {severity: warn, job: prometheus}
+            exp_annotations: {summary: "Prometheus is deleting blocks to stay under its size cap"}
+
+  - interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{integration="telegram", reason="clientError"}'
+        values: "0x5 2x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AlertDeliveryFailing
+        exp_alerts:
+          - exp_labels: {severity: warn, integration: telegram}
+            exp_annotations: {summary: "Alertmanager cannot deliver to telegram"}

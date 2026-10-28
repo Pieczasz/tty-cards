@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
 	lg "charm.land/lipgloss/v2"
 )
@@ -17,7 +17,7 @@ const (
 	overlapWidth = FaceWidth - 1
 	// The centre pip column and no less: an ace's only pip lives there, and a hand whose
 	// suits are invisible is unplayable.
-	minTuckWidth = CentreColumn + 1
+	minTuckWidth = centreColumn + 1
 	// cardRows is a framed card: the two borders plus the face.
 	cardRows = FaceHeight + 2
 	// FanRows is how many rows a fan occupies, for a caller budgeting height.
@@ -43,9 +43,6 @@ func FanTuck(n, maxWidth int) int {
 // Worst case, so the hand does not change width - shifting the layout - as the cursor
 // moves.
 func fanWidth(n, tuck int) int {
-	if n <= 0 {
-		return 0
-	}
 	width := (n-1)*(1+tuck) + 1 + FaceWidth + 1
 	if n > 1 {
 		width += FaceWidth + 1 - tuck
@@ -53,47 +50,34 @@ func fanWidth(n, tuck int) int {
 	return width
 }
 
-// CardSlotWidth is the visible width of card i in a fan of n at this tuck; selected is
-// the picked-out index or -1. A closed card is wider, so callers have to ask.
-func CardSlotWidth(i, n, selected, tuck int) int {
-	// Every card contributes its left border plus the columns of face it still shows;
-	// a closed one adds its right border too.
-	if i == n-1 || i == selected {
-		return 1 + FaceWidth + 1
+// Selection is the set of picked-out cards a fan is drawn with. Negative indices are
+// dropped, so a single-select caller passes its cursor, or -1 for none.
+func Selection(indices ...int) map[int]struct{} {
+	sel := make(map[int]struct{}, len(indices))
+	for _, i := range indices {
+		if i >= 0 {
+			sel[i] = struct{}{}
+		}
 	}
-	return 1 + tuck
+	return sel
 }
 
-// CardSlotWidthMulti is CardSlotWidth for a multi-select fan.
-func CardSlotWidthMulti(i, n, tuck int, selected map[int]struct{}) int {
-	if i == n-1 {
-		return 1 + FaceWidth + 1
-	}
-	if _, ok := selected[i]; ok {
+// CardSlotWidth is the visible width of card i in a fan of n at this tuck, with the
+// cards in selected picked out. A closed card is wider, so callers have to ask.
+func CardSlotWidth(i, n, tuck int, selected map[int]struct{}) int {
+	// Every card contributes its left border plus the columns of face it still shows;
+	// a closed one adds its right border too.
+	if _, picked := selected[i]; picked || i == n-1 {
 		return 1 + FaceWidth + 1
 	}
 	return 1 + tuck
 }
 
 // RenderFan draws cards overlapping left to right, each covering all but tuck columns of
-// the one before. selected (or -1) keeps its own right border and the selection colour,
-// so it reads as lying on top; there is no vertical lift, which would break the shared
-// top edge that makes the rest read as one hand.
-func RenderFan(t styles.Theme, cards []deck.Card, selected, tuck int) string {
-	sel := map[int]struct{}{}
-	if selected >= 0 {
-		sel[selected] = struct{}{}
-	}
-	return renderFanCore(t, cards, sel, tuck)
-}
-
-// RenderFanMulti is RenderFan for multi-select: every index in selected is drawn as
-// picked out. Used by Hearts' pass phase.
-func RenderFanMulti(t styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
-	return renderFanCore(t, cards, selected, tuck)
-}
-
-func renderFanCore(t styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
+// the one before. Every card in selected keeps its own right border and the selection
+// colour, so it reads as lying on top; there is no vertical lift, which would break the
+// shared top edge that makes the rest read as one hand.
+func RenderFan(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, tuck int) string {
 	if len(cards) == 0 {
 		return ""
 	}
@@ -129,7 +113,7 @@ const stripCellWidth = 4
 // RenderStrip is the hand as rank-and-suit cells wrapped to maxWidth, for when no fan
 // fits: thirteen cards of art run past a hundred columns. selected marks staged cards,
 // cursor the focused one; nil map means single selection.
-func RenderStrip(t styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth int) string {
+func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth int) string {
 	if len(cards) == 0 {
 		return ""
 	}
@@ -150,7 +134,7 @@ func RenderStrip(t styles.Theme, cards []deck.Card, selected map[int]struct{}, c
 	return strings.Join(append(rows, row.String()), "\n")
 }
 
-func stripCell(t styles.Theme, card deck.Card, i int, selected map[int]struct{}, cursor int) string {
+func stripCell(t *styles.Theme, card deck.Card, i int, selected map[int]struct{}, cursor int) string {
 	suit, style := suitStyle(t, card.Suit)
 	marker := " "
 	if _, ok := selected[i]; ok {
@@ -160,7 +144,7 @@ func stripCell(t styles.Theme, card deck.Card, i int, selected map[int]struct{},
 		marker = ">"
 		style = t.PlayerItemSelected
 	}
-	return style.Render(fmt.Sprintf("%s%2s%s", marker, RankLabel(card.Rank), suit))
+	return style.Render(fmt.Sprintf("%s%2s%s", marker, rankLabel(card.Rank), suit))
 }
 
 // columnKey is everything a fan column depends on.
@@ -179,7 +163,7 @@ var columnCache sync.Map // columnKey -> []string
 
 // fanColumn renders one card's slice of the fan: top border, face rows, bottom border.
 // The returned slice is shared with the cache and must not be mutated.
-func fanColumn(t styles.Theme, card deck.Card, selected bool, width int, closed bool) []string {
+func fanColumn(t *styles.Theme, card deck.Card, selected bool, width int, closed bool) []string {
 	key := columnKey{
 		rank: card.Rank, suit: card.Suit, width: width,
 		selected: selected, closed: closed, dark: t.Dark,
@@ -193,7 +177,7 @@ func fanColumn(t styles.Theme, card deck.Card, selected bool, width int, closed 
 	return lines
 }
 
-func renderFanColumn(t styles.Theme, card deck.Card, selected bool, width int, closed bool) []string {
+func renderFanColumn(t *styles.Theme, card deck.Card, selected bool, width int, closed bool) []string {
 	border := t.CardFace
 	if selected {
 		border = t.Selection
@@ -201,7 +185,7 @@ func renderFanColumn(t styles.Theme, card deck.Card, selected bool, width int, c
 	edge := lg.NewStyle().Foreground(border)
 
 	suit, suitStyle := suitStyle(t, card.Suit)
-	cells := FaceCells(card, suit)
+	cells := faceCells(card, suit)
 
 	closeTop, closeMid, closeBot := "", "", ""
 	if closed {

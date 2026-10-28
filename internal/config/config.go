@@ -1,184 +1,209 @@
+// Package config reads the server's environment into one validated Config. Every
+// malformed value fails the boot.
 package config
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
-	"os"
 	"runtime/debug"
 	"strconv"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
+// DefaultAPIPort is the stats API's port when API_PORT is unset.
+const DefaultAPIPort = 6970
+const fallbackVersion = "0.1.0"
+
+const (
+	envProduction  = "production"
+	envDevelopment = "development"
+	envStaging     = "staging"
+)
+
+// Config is the whole of the server's configuration, as Load reads it.
 type Config struct {
-	Env                  string
-	ServerHost           string
-	ServerPort           int
+	Env            string
+	ServerHost     string
+	ServerPort     int
+	ServiceVersion string
+
 	APIPort              int
 	APIAllowOrigin       string
 	APIRequestsPerMinute int
 	APITrustProxy        bool
-	MaxConnections       int
-	SSHKeyPath           string
-	DBHost               string
-	DBPort               int
-	DBUser               string
-	DBName               string
-	DBPassword           string
-	DBSSLMode            string
-	DBMaxOpenConnections int
-	OTelEndpoint         string
-	OTelInsecure         bool
-	ServiceVersion       string
-	RateLimitCount       int
-	RateLimitWindow      time.Duration
-	LogLevel             slog.Level
-	// ProxyProtocol keeps the PROXY-header requirement on the ssh listener. True matches
-	// the nginx deployment; a bare `ssh` client never sends the header, so local
-	// development needs PROXY_PROTOCOL=false.
-	ProxyProtocol bool
+
+	ProxyProtocol     bool
+	ProxyTrustedCIDRs []netip.Prefix
+
+	MaxConnections int
+	SSHKeyPath     string
+
+	DBHost         string
+	DBPort         int
+	DBUser         string
+	DBName         string
+	DBPassword     Secret
+	DBSSLMode      string
+	DBMaxOpenConns int
+
+	// OTelEndpoint is an http:// or https:// URL; the scheme decides TLS.
+	OTelEndpoint string
+	LogLevel     slog.Level
+
+	RateLimitCount     int
+	RateLimitWindow    time.Duration
+	RegistrationLimit  int
+	RegistrationWindow time.Duration
+	// RegistrationLimitWide is the budget per IPv6 /48 (ratelimit.WideKey), beside
+	// RegistrationLimit's per /64: a free tunnel is a /48, 65,536 /64 budgets.
+	RegistrationLimitWide int
+	// RegistrationGlobalLimit is the ceiling across every network, for an attacker
+	// with more networks than any per-network budget can see.
+	RegistrationGlobalLimit int
 }
 
-// intEnvs accumulates integer env lookups so one error check covers all of them
-// instead of one per variable. The first failure is the one reported.
-type intEnvs struct {
-	err error
-}
+func (c *Config) IsProduction() bool  { return c.Env == envProduction }
+func (c *Config) IsDevelopment() bool { return c.Env == envDevelopment }
 
-func (e *intEnvs) get(key string, fallback int) int {
-	value, err := getEnvAsInt(key, fallback)
-	if err != nil && e.err == nil {
-		e.err = fmt.Errorf("invalid %s: %w", key, err)
-	}
-	return value
-}
-
-// resolveEnv reads ENV, loads .env outside production, and falls back to
-// development for any unrecognised value.
-func resolveEnv() string {
-	env := getEnv("ENV", "development")
-	if env != "production" {
-		_ = godotenv.Load()
-	}
-	switch env {
-	case "production", "development", "staging":
-		return env
-	default:
-		return "development"
-	}
-}
-
-// otelInsecure defaults to plaintext outside production, overridable by env.
-func otelInsecure(env string) bool {
-	if v, ok := os.LookupEnv("OTEL_EXPORTER_OTLP_INSECURE"); ok && v != "" {
-		return v == "1" || v == "true" || v == "TRUE"
-	}
-	return env != "production"
-}
-
+// Load reads the environment (and .env outside production) into a validated Config.
 func Load() (*Config, error) {
-	env := resolveEnv()
-
-	ints := &intEnvs{}
-	serverPort := ints.get("SERVER_PORT", 6969)
-	apiPort := ints.get("API_PORT", 6970)
-	maxConnections := ints.get("MAX_CONNECTIONS", 1000)
-	dbPort := ints.get("DB_PORT", 5432)
-	dbMaxOpenConnections := ints.get("DB_MAX_OPEN_CONNS", 25)
-	rateLimitCount := ints.get("RATE_LIMIT_CONNECTIONS", 5)
-	rateLimitWindowMS := ints.get("RATE_LIMIT_WINDOW_MS", 1000)
-	apiRequestsPerMinute := ints.get("API_REQUESTS_PER_MINUTE", 120)
-	if ints.err != nil {
-		return nil, ints.err
-	}
-
-	logLevel, err := parseLogLevel(getEnv("LOG_LEVEL", ""))
+	environment, err := resolveEnvironment()
 	if err != nil {
 		return nil, err
 	}
-
-	defaultSSLMode := "disable"
-	if env == "production" {
-		defaultSSLMode = "require"
+	defaultSSLMode := "require"
+	if environment == envDevelopment {
+		defaultSSLMode = "disable"
+	}
+	defaultOTelEndpoint := "http://localhost:4317"
+	if environment == envProduction {
+		defaultOTelEndpoint = "https://localhost:4317"
 	}
 
+	r := &envReader{}
+	r.removed("RATE_LIMIT_WINDOW_MS", "renamed RATE_LIMIT_WINDOW, a duration such as 1s")
+	r.removed("ALLOW_INSECURE_DB", "removed: plaintext database connections are only accepted with ENV=development")
+	r.removed("OTEL_EXPORTER_OTLP_INSECURE", "removed: the endpoint URL's scheme decides, http:// is plaintext and https:// is TLS")
 	cfg := &Config{
-		Env:            env,
+		Env:            environment,
 		ServerHost:     getEnv("SERVER_HOST", "0.0.0.0"),
-		ServerPort:     serverPort,
-		APIPort:        apiPort,
-		APIAllowOrigin: getEnv("API_ALLOW_ORIGIN", "*"),
-		// Per network, not per visitor, and tunable without a rebuild.
-		APIRequestsPerMinute: apiRequestsPerMinute,
-		// Off by default: trusting X-Forwarded-For on a directly reachable listener lets
-		// any caller forge an address and walk past the rate limit. compose never
-		// publishes the API port, so nginx is the only source there, and it opts in.
-		APITrustProxy:        getEnv("API_TRUST_PROXY", "false") == "true",
-		ProxyProtocol:        getEnv("PROXY_PROTOCOL", "true") != "false",
-		MaxConnections:       maxConnections,
-		SSHKeyPath:           getEnv("SSH_KEY_PATH", ".wishlist/server"),
-		DBHost:               getEnv("DB_HOST", "localhost"),
-		DBPort:               dbPort,
-		DBUser:               getEnv("DB_USER", "postgres"),
-		DBName:               getEnv("DB_NAME", "terminal_card"),
-		DBPassword:           getEnv("DB_PASSWORD", ""),
-		DBSSLMode:            getEnv("DB_SSLMODE", defaultSSLMode),
-		DBMaxOpenConnections: dbMaxOpenConnections,
-		OTelEndpoint:         getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
-		OTelInsecure:         otelInsecure(env),
-		ServiceVersion:       getEnv("SERVICE_VERSION", detectVersion()),
-		RateLimitCount:       rateLimitCount,
-		RateLimitWindow:      time.Duration(rateLimitWindowMS) * time.Millisecond,
-		LogLevel:             logLevel,
+		ServerPort:     r.int("SERVER_PORT", 6969),
+		ServiceVersion: getEnv("SERVICE_VERSION", detectVersion()),
+
+		APIPort:              r.int("API_PORT", DefaultAPIPort),
+		APIAllowOrigin:       getEnv("API_ALLOW_ORIGIN", "*"),
+		APIRequestsPerMinute: r.int("API_REQUESTS_PER_MINUTE", 120),
+		APITrustProxy:        r.bool("API_TRUST_PROXY", false),
+
+		ProxyProtocol:     r.bool("PROXY_PROTOCOL", true),
+		ProxyTrustedCIDRs: r.prefixes("PROXY_TRUSTED_CIDRS"),
+
+		MaxConnections: r.int("MAX_CONNECTIONS", 1000),
+		SSHKeyPath:     getEnv("SSH_KEY_PATH", ".wishlist/server"),
+
+		DBHost:         getEnv("DB_HOST", "localhost"),
+		DBPort:         r.int("DB_PORT", 5432),
+		DBUser:         getEnv("DB_USER", "postgres"),
+		DBName:         getEnv("DB_NAME", "terminal_card"),
+		DBPassword:     Secret(getEnv("DB_PASSWORD", "")),
+		DBSSLMode:      getEnv("DB_SSLMODE", defaultSSLMode),
+		DBMaxOpenConns: r.int("DB_MAX_OPEN_CONNS", 25),
+
+		OTelEndpoint: r.endpointURL("OTEL_EXPORTER_OTLP_ENDPOINT", defaultOTelEndpoint),
+		LogLevel:     r.logLevel("LOG_LEVEL"),
+
+		RateLimitCount:     r.int("RATE_LIMIT_CONNECTIONS", 5),
+		RateLimitWindow:    r.duration("RATE_LIMIT_WINDOW", time.Second),
+		RegistrationLimit:  r.int("REGISTRATION_LIMIT", 5),
+		RegistrationWindow: r.duration("REGISTRATION_WINDOW", time.Hour),
+		// Four /64s' worth per /48: a household or office shares one. 600 an hour is a
+		// launch spike for a 1000-player goal with room to spare, while a botnet that
+		// spreads past every per-network budget still mints at most 14,400 rows a day.
+		RegistrationLimitWide:   r.int("REGISTRATION_LIMIT_WIDE", 20),
+		RegistrationGlobalLimit: r.int("REGISTRATION_GLOBAL_LIMIT", 600),
+	}
+	if r.err != nil {
+		return nil, r.err
 	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-
 	return cfg, nil
 }
 
-// Validate checks production-critical configuration.
+// Validate checks every limit and that only development talks to its database in
+// plaintext.
 func (c *Config) Validate() error {
-	if c.Env == "production" && c.DBPassword == "" {
-		return errors.New("DB_PASSWORD is required when ENV=production")
+	if err := c.validateDB(); err != nil {
+		return err
 	}
-	if c.Env == "production" && c.DBSSLMode == "disable" {
-		allowInsecure := os.Getenv("ALLOW_INSECURE_DB") == "true"
-		internalHost := c.DBHost == "db" || c.DBHost == "localhost" || c.DBHost == "127.0.0.1"
-		if !allowInsecure && !internalHost {
-			return fmt.Errorf("DB_SSLMODE=disable is not allowed in production for host %q; "+
-				"set ALLOW_INSECURE_DB=true only for trusted networks", c.DBHost)
+	if err := c.validateProxy(); err != nil {
+		return err
+	}
+	for _, check := range []struct {
+		bad bool
+		msg string
+	}{
+		{c.RateLimitCount < 1, "RATE_LIMIT_CONNECTIONS must be at least 1"},
+		{c.RateLimitWindow < time.Millisecond, "RATE_LIMIT_WINDOW must be at least 1ms"},
+		{c.APIRequestsPerMinute < 1, "API_REQUESTS_PER_MINUTE must be at least 1"},
+		{c.DBMaxOpenConns < 1, "DB_MAX_OPEN_CONNS must be at least 1"},
+		{c.MaxConnections < 1, "MAX_CONNECTIONS must be at least 1"},
+		{c.RegistrationLimit < 1, "REGISTRATION_LIMIT must be at least 1"},
+		{c.RegistrationLimitWide < 1, "REGISTRATION_LIMIT_WIDE must be at least 1"},
+		{c.RegistrationGlobalLimit < 1, "REGISTRATION_GLOBAL_LIMIT must be at least 1"},
+		{c.RegistrationWindow < time.Second, "REGISTRATION_WINDOW must be at least 1s"},
+	} {
+		if check.bad {
+			return errors.New(check.msg)
 		}
-	}
-	if c.RateLimitCount < 1 {
-		return errors.New("RATE_LIMIT_CONNECTIONS must be at least 1")
-	}
-	if c.RateLimitWindow < time.Millisecond {
-		return errors.New("RATE_LIMIT_WINDOW_MS must be at least 1")
-	}
-	if c.APIRequestsPerMinute < 1 {
-		return errors.New("API_REQUESTS_PER_MINUTE must be at least 1")
-	}
-	if c.DBMaxOpenConnections < 1 {
-		return errors.New("DB_MAX_OPEN_CONNS must be at least 1")
-	}
-	// netutil.LimitListener treats a non-positive limit as "accept nothing", so the
-	// server would bind the port and then refuse every player.
-	if c.MaxConnections < 1 {
-		return errors.New("MAX_CONNECTIONS must be at least 1")
 	}
 	return nil
 }
 
-// DSN carries DBPassword in clear text. Never log the result; log the Config
-// itself, whose String method redacts it.
+// validateDB exempts no host: "db" is only as private as the network compose puts it
+// on, and prefer or allow fall back to plaintext whenever the server declines TLS.
+func (c *Config) validateDB() error {
+	if c.IsProduction() && c.DBPassword == "" {
+		return errors.New("DB_PASSWORD is required when ENV=production")
+	}
+	if c.IsDevelopment() {
+		return nil
+	}
+	switch c.DBSSLMode {
+	case "require", "verify-ca", "verify-full":
+		return nil
+	}
+	return fmt.Errorf("DB_SSLMODE=%s is not allowed with ENV=%s; use require, verify-ca or verify-full",
+		c.DBSSLMode, c.Env)
+}
+
+// validateProxy refuses a listener that trusts a PROXY header or X-Forwarded-For
+// from the whole internet. Development may boot without a trusted list; everywhere
+// else an enabled proxy with nobody trusted, or a list that is the whole net, is a
+// boot failure.
+func (c *Config) validateProxy() error {
+	for _, p := range c.ProxyTrustedCIDRs {
+		if p == netip.MustParsePrefix("0.0.0.0/0") || p == netip.MustParsePrefix("::/0") {
+			return fmt.Errorf("PROXY_TRUSTED_CIDRS must not contain %s", p)
+		}
+	}
+	if c.IsDevelopment() || (!c.ProxyProtocol && !c.APITrustProxy) {
+		return nil
+	}
+	if len(c.ProxyTrustedCIDRs) == 0 {
+		return errors.New("PROXY_TRUSTED_CIDRS is required when PROXY_PROTOCOL or API_TRUST_PROXY is enabled outside development")
+	}
+	return nil
+}
+
+// DSN is the one place the database password is revealed: it is for the driver
+// only and must never be logged.
 //
 // It is a URL and not keyword/value pairs because those need quoting: an empty or
 // spaced password there swallows the keywords that follow it, so the server
@@ -186,7 +211,7 @@ func (c *Config) Validate() error {
 func (c *Config) DSN() string {
 	dsn := url.URL{
 		Scheme: "postgres",
-		User:   url.UserPassword(c.DBUser, c.DBPassword),
+		User:   url.UserPassword(c.DBUser, c.DBPassword.Reveal()),
 		Host:   net.JoinHostPort(c.DBHost, strconv.Itoa(c.DBPort)),
 		Path:   "/" + c.DBName,
 		RawQuery: url.Values{
@@ -197,24 +222,6 @@ func (c *Config) DSN() string {
 	return dsn.String()
 }
 
-// String keeps the database password out of logs. Without it, any %v or
-// slog.Any on a Config prints DB_PASSWORD in clear text, which is one careless
-// debug line away from leaking the credential into log storage.
-func (c *Config) String() string {
-	if c == nil {
-		return "<nil>"
-	}
-	redacted := *c
-	if redacted.DBPassword != "" {
-		redacted.DBPassword = "[REDACTED]"
-	}
-	// plain drops the method set, so formatting it cannot re-enter String.
-	type plain Config
-	return fmt.Sprintf("%+v", plain(redacted))
-}
-
-const fallbackVersion = "0.1.0"
-
 func detectVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -223,45 +230,9 @@ func detectVersion() string {
 	return normalizeVersion(info.Main.Version)
 }
 
-// normalizeVersion rejects the two build stamps that carry no information. Reporting
-// "(devel)" as a service version tells an operator nothing about what is deployed.
 func normalizeVersion(version string) string {
 	if version == "" || version == "(devel)" {
 		return fallbackVersion
 	}
 	return version
-}
-
-// getEnv returns the environment value for key, falling back when it is unset or
-// empty. An empty value must not win: a blank SSH_KEY_PATH or DB_HOST in a .env or
-// compose file would otherwise silently defeat the default. This matches
-// getEnvAsInt, which already treats "" as absent.
-func getEnv(key string, fallback string) string {
-	return cmp.Or(os.Getenv(key), fallback)
-}
-
-// parseLogLevel takes the names slog understands (DEBUG, INFO, WARN, ERROR, +N/-N). A
-// typo fails the boot rather than silently meaning info, which is how an operator ends
-// up believing debug logging is on.
-func parseLogLevel(raw string) (slog.Level, error) {
-	if raw == "" {
-		return slog.LevelInfo, nil
-	}
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(raw)); err != nil {
-		return slog.LevelInfo, fmt.Errorf("invalid LOG_LEVEL %q: %w", raw, err)
-	}
-	return level, nil
-}
-
-func getEnvAsInt(name string, fallback int) (int, error) {
-	valStr := getEnv(name, "")
-	if valStr == "" {
-		return fallback, nil
-	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil {
-		return 0, fmt.Errorf("trying to parse env value failed: %w", err)
-	}
-	return val, nil
 }

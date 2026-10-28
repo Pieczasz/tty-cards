@@ -1,0 +1,13 @@
+# Replaces semgrep's default ignore list, so the defaults we still want are restated.
+:include .gitignore
+.git/
+vendor/
+web/
+
+# The rule tests are written to match; scanning them would fail the build.
+.semgrep/
+
+# Agent and index state, not source (worktrees here hold whole copies of the tree).
+.claude/
+.code-review-graph/
+.review/

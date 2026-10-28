@@ -1,22 +1,23 @@
+// Package profile is the player's own screen: ratings, match history and account
+// deletion.
 package profile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/catalog"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
-	"github.com/Pieczasz/terminal-card/internal/tui/views"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
-
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
 
 	"uuid"
 )
@@ -57,6 +58,10 @@ type deletePhase int
 const (
 	deleteIdle deletePhase = iota
 	deleteConfirming
+	// deleteRunning is the round trip itself. It swallows every key but ctrl+c: backing
+	// out now would let the player navigate away and keep playing on an account that is
+	// already being erased, and a second enter would issue the delete twice.
+	deleteRunning
 	deleteDone
 )
 
@@ -67,7 +72,7 @@ type model struct {
 	err         error
 	historyErr  error
 
-	gameFilters   []string
+	gameFilters   []game.Module
 	gameFilterIdx int
 	resultFilters []string
 	resultIdx     int
@@ -79,13 +84,12 @@ type model struct {
 	notice string
 }
 
+// New builds the profile screen with one game filter per game on offer.
 func New(global router.GlobalContext) tea.Model {
-	gameFilters := make([]string, 0, 1+len(catalog.All))
-	gameFilters = append(gameFilters, filterAllGames)
-	for _, e := range catalog.All {
-		gameFilters = append(gameFilters, e.Name)
-	}
-	return model{
+	global.EnsureTheme()
+	// The first is "All": no slug, so it matches every match.
+	gameFilters := append([]game.Module{{Name: filterAllGames}}, global.Games...)
+	return &model{
 		global:        global,
 		gameFilters:   gameFilters,
 		resultFilters: []string{filterAllResults, filterWins, filterLosses},
@@ -101,27 +105,27 @@ type profileLoadedMsg struct {
 	historyErr error
 }
 
-func loadProfile(ctx context.Context, userRepo db.UserRepository, userID uuid.UUID) tea.Cmd {
+func loadProfile(ctx context.Context, profiles db.Profiles, userID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
-		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		reqCtx, cancel := context.WithTimeout(ctx, views.RequestTimeout)
 		defer cancel()
-		user, err := userRepo.UserProfile(reqCtx, userID)
+		user, err := profiles.UserProfile(reqCtx, userID)
 		if err != nil {
 			return profileLoadedMsg{err: err}
 		}
-		history, historyErr := userRepo.UserMatchHistory(reqCtx, userID, historyFetchLimit)
+		history, historyErr := profiles.UserMatchHistory(reqCtx, userID, historyFetchLimit)
 		return profileLoadedMsg{user: user, history: history, historyErr: historyErr}
 	}
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	if m.global.User == nil {
 		return nil
 	}
-	return loadProfile(m.global.RequestContext(), m.global.UserRepository, m.global.User.ID)
+	return loadProfile(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if handled, cmd := views.HandleCommonMsg(msg, &m.global); handled {
 		return m, cmd
 	}
@@ -133,43 +137,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history = msg.history
 		m.err = msg.err
 		m.historyErr = msg.historyErr
-		if msg.err != nil {
-			slog.Error("database error while loading user profile", "error", msg.err)
-		}
+		logFailure(m.global.RequestContext(), "loading user profile", msg.err)
 		if msg.historyErr != nil {
-			slog.Error("database error while loading match history", "error", msg.historyErr)
+			slog.ErrorContext(m.global.RequestContext(), "database error while loading match history", "error", msg.historyErr)
 		}
 	case tea.KeyPressMsg:
-		if m.phase == deleteConfirming {
-			return m.confirmKey(msg)
-		}
-		m.notice = ""
-		switch msg.String() {
-		case "x":
-			return m.openConfirm()
-		case "g":
-			m.gameFilterIdx = components.CycleIndex(m.gameFilterIdx, 1, len(m.gameFilters))
-			return m, nil
-		case "r":
-			m.resultIdx = components.CycleIndex(m.resultIdx, 1, len(m.resultFilters))
-			return m, nil
-		}
-		if cmd, ok := views.NavigateOn(msg.String()); ok {
-			return m, cmd
-		}
+		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m model) View() tea.View {
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch m.phase {
+	case deleteConfirming:
+		return m.confirmKey(msg)
+	case deleteRunning, deleteDone:
+		return m, nil
+	case deleteIdle:
+	}
+	m.notice = ""
+	switch msg.String() {
+	case "x":
+		return m.openConfirm()
+	case "g":
+		m.gameFilterIdx = components.CycleIndex(m.gameFilterIdx, 1, len(m.gameFilters))
+	case "r":
+		m.resultIdx = components.CycleIndex(m.resultIdx, 1, len(m.resultFilters))
+	default:
+		cmd, _ := views.NavigateOn(msg.String())
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m *model) View() tea.View {
 	actions := []string{"g - Game", "r - Result", "x - Delete account"}
 	return tea.NewView(views.RenderScreen(m.global, "User Profile", actions, m.renderContent))
 }
 
-func (m model) renderContent(contentHeight int) string {
+func (m *model) renderContent(contentHeight int) string {
 	switch m.phase {
 	case deleteConfirming:
 		return m.renderConfirm()
+	case deleteRunning:
+		return "Deleting your account..."
 	case deleteDone:
 		return "Your account has been deleted. Goodbye."
 	case deleteIdle:
@@ -181,6 +192,45 @@ func (m model) renderContent(contentHeight int) string {
 		return "Loading profile..."
 	}
 
+	stacked, rankItems, histItems := tableBudget(styles.InnerWidth(m.global.Width), contentHeight)
+
+	userInfo := "Profile for: " + m.userProfile.Username
+	filters := m.global.Palette().Muted.Render(fmt.Sprintf("Game: %s  Result: %s",
+		styles.PadTruncate(m.gameFilters[m.gameFilterIdx].Name, colGame),
+		styles.PadTruncate(m.resultFilters[m.resultIdx], len(filterLosses)),
+	))
+	if m.notice != "" {
+		filters = m.global.Palette().ErrorText.Render(m.notice)
+	}
+
+	// At the declared 64x20 minimum the title and footer leave six lines, fewer than
+	// two stacked tables need at their smallest. The rankings summary gives way to
+	// the match history, which is what a player opens this screen for.
+	if stacked && contentHeight < twoTableMinHeight {
+		items := max(contentHeight-4, 1) // the two labels and the 2-line header
+		return styles.JoinVertical(lg.Left, userInfo, filters,
+			styles.JoinVertical(lg.Left, m.historyRows(items)...))
+	}
+
+	rankingsStyle := lg.NewStyle().Align(lg.Left).Width(rankingsTable.Width())
+	if !stacked {
+		rankingsStyle = rankingsStyle.MarginRight(tableGap)
+	}
+	rankingsCol := rankingsStyle.Render(styles.JoinVertical(lg.Left, m.rankingRows(rankItems)...))
+	historyCol := lg.NewStyle().Align(lg.Left).Width(historyTable.Width()).
+		Render(styles.JoinVertical(lg.Left, m.historyRows(histItems)...))
+
+	tables := styles.JoinHorizontal(lg.Top, rankingsCol, historyCol)
+	if stacked {
+		tables = styles.JoinVertical(lg.Left, rankingsCol, "", historyCol)
+	}
+
+	return styles.JoinVertical(lg.Left, userInfo, "", filters, "", tables)
+}
+
+// tableBudget decides whether the two tables sit side by side or stacked, and how many
+// rows each may show in contentHeight.
+func tableBudget(innerWidth, contentHeight int) (stacked bool, rankItems, histItems int) {
 	// userInfo, spacer, filter, spacer, and the table header - which is two lines,
 	// its titles and the rule under them.
 	const extraVerticalLines = 6
@@ -189,47 +239,14 @@ func (m model) renderContent(contentHeight int) string {
 	// The two tables are fixed-width, so below a certain terminal they do not fit
 	// beside each other and lipgloss word-wraps the columns into confetti rather
 	// than shrinking them. Stacking is what renderForm does for the same reason.
-	stacked := rankingsTable.Width()+tableGap+historyTable.Width() > styles.InnerWidth(m.global.Width)
-	rankItems, histItems := maxItems, maxItems
-	if stacked {
-		// Both tables now spend height instead of sharing it: two headers and the
-		// spacer between them come out of the same budget.
-		rankItems = max((maxItems-3)/2, 1)
-		histItems = max(maxItems-3-rankItems, 1)
-	}
-
-	userInfo := "Profile for: " + m.userProfile.Username
-	filters := m.global.Theme.Muted.Render(fmt.Sprintf("Game: %s  Result: %s",
-		styles.PadTruncate(m.gameFilters[m.gameFilterIdx], colGame),
-		styles.PadTruncate(m.resultFilters[m.resultIdx], len(filterLosses)),
-	))
-	if m.notice != "" {
-		filters = m.global.Theme.ErrorText.Render(m.notice)
-	}
-
-	// At the declared 64x20 minimum the title and footer leave six lines, fewer than
-	// two stacked tables need at their smallest. The rankings summary gives way to
-	// the match history, which is what a player opens this screen for.
-	if stacked && contentHeight < twoTableMinHeight {
-		items := max(contentHeight-4, 1) // the two labels and the 2-line header
-		return lg.JoinVertical(lg.Left, userInfo, filters,
-			lg.JoinVertical(lg.Left, m.historyRows(items)...))
-	}
-
-	rankingsStyle := lg.NewStyle().Align(lg.Left).Width(rankingsTable.Width())
+	stacked = rankingsTable.Width()+tableGap+historyTable.Width() > innerWidth
 	if !stacked {
-		rankingsStyle = rankingsStyle.MarginRight(tableGap)
+		return false, maxItems, maxItems
 	}
-	rankingsCol := rankingsStyle.Render(lg.JoinVertical(lg.Left, m.rankingRows(rankItems)...))
-	historyCol := lg.NewStyle().Align(lg.Left).Width(historyTable.Width()).
-		Render(lg.JoinVertical(lg.Left, m.historyRows(histItems)...))
-
-	tables := lg.JoinHorizontal(lg.Top, rankingsCol, historyCol)
-	if stacked {
-		tables = lg.JoinVertical(lg.Left, rankingsCol, "", historyCol)
-	}
-
-	return lg.JoinVertical(lg.Left, userInfo, "", filters, "", tables)
+	// Both tables now spend height instead of sharing it: two headers and the
+	// spacer between them come out of the same budget.
+	rankItems = max((maxItems-3)/2, 1)
+	return true, rankItems, max(maxItems-3-rankItems, 1)
 }
 
 // The two tables' cells are fixed so cycling a filter cannot resize the layout.
@@ -255,8 +272,8 @@ func limitRows(n, maxItems int) (show int, more bool) {
 	return max(maxItems-1, 0), true
 }
 
-func (m model) rankingRows(maxItems int) []string {
-	rows := []string{rankingsTable.Header(m.global.Theme)}
+func (m *model) rankingRows(maxItems int) []string {
+	rows := []string{rankingsTable.Header(m.global.Palette())}
 	if len(m.userProfile.Rankings) == 0 {
 		return append(rows, styles.PadTruncate("No games yet.", rankingsTable.Width()))
 	}
@@ -270,12 +287,12 @@ func (m model) rankingRows(maxItems int) []string {
 	return rows
 }
 
-func (m model) filteredHistory() []db.MatchParticipant {
+func (m *model) filteredHistory() []db.MatchParticipant {
 	out := make([]db.MatchParticipant, 0, len(m.history))
-	wantGame := m.gameFilters[m.gameFilterIdx]
+	wantGame := m.gameFilters[m.gameFilterIdx].Slug
 	wantResult := m.resultFilters[m.resultIdx]
 	for _, h := range m.history {
-		if wantGame != filterAllGames && h.Match.Game.Name != wantGame {
+		if wantGame != "" && h.Match.Game.Slug != wantGame {
 			continue
 		}
 		won := h.Placement == 1
@@ -294,10 +311,10 @@ func (m model) filteredHistory() []db.MatchParticipant {
 	return out
 }
 
-func (m model) historyRows(maxItems int) []string {
-	rows := []string{historyTable.Header(m.global.Theme)}
+func (m *model) historyRows(maxItems int) []string {
+	rows := []string{historyTable.Header(m.global.Palette())}
 	if m.historyErr != nil {
-		return append(rows, m.global.Theme.ErrorText.Render("Unable to load match history."))
+		return append(rows, m.global.Palette().ErrorText.Render("Unable to load match history."))
 	}
 	filtered := m.filteredHistory()
 	if len(filtered) == 0 {
@@ -339,15 +356,15 @@ var placementWords = [3]string{"1st place", "2nd place", "3rd place"}
 // is already anonymised and the session has nothing left to authenticate.
 type accountDeletedMsg struct{ err error }
 
-func deleteAccount(ctx context.Context, userRepo db.UserRepository, userID uuid.UUID) tea.Cmd {
+func deleteAccount(ctx context.Context, profiles db.Profiles, userID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
-		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		reqCtx, cancel := context.WithTimeout(ctx, views.RequestTimeout)
 		defer cancel()
-		return accountDeletedMsg{err: userRepo.DeleteAccount(reqCtx, userID)}
+		return accountDeletedMsg{err: profiles.DeleteAccount(reqCtx, userID)}
 	}
 }
 
-func (m model) openConfirm() (tea.Model, tea.Cmd) {
+func (m *model) openConfirm() (tea.Model, tea.Cmd) {
 	if m.global.User == nil {
 		return m, nil
 	}
@@ -365,7 +382,7 @@ func (m model) openConfirm() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key := msg.String(); key {
 	case "esc":
 		m.phase, m.typed, m.notice = deleteIdle, "", ""
@@ -374,7 +391,8 @@ func (m model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.notice = "Type " + deleteConfirmWord + " exactly, then press enter."
 			return m, nil
 		}
-		return m, deleteAccount(m.global.RequestContext(), m.global.UserRepository, m.global.User.ID)
+		m.phase = deleteRunning
+		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
 	case "backspace":
 		if runes := []rune(m.typed); len(runes) > 0 {
 			m.typed = string(runes[:len(runes)-1])
@@ -391,9 +409,22 @@ func (m model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
+// logFailure keeps ERROR for the database: an account gone from under its own
+// session (an operator soft-delete) is a fact about the account, not a fault.
+func logFailure(ctx context.Context, doing string, err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, db.ErrUserNotFound):
+		slog.InfoContext(ctx, "user not found while "+doing, "error", err)
+	default:
+		slog.ErrorContext(ctx, "database error while "+doing, "error", err)
+	}
+}
+
+func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		slog.Error("database error while deleting account", "error", msg.err)
+		logFailure(m.global.RequestContext(), "deleting account", msg.err)
+		m.phase = deleteConfirming
 		m.typed = ""
 		m.notice = "Could not delete the account. Please try again."
 		return m, nil
@@ -407,11 +438,11 @@ func (m model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 // The warning is deliberately not paged or shortened for a small terminal: it fits
 // the declared 64x20 minimum as it is (TestView_FitsTheTerminal), and an erasure
 // warning is the last screen worth trimming to save a row.
-func (m model) renderConfirm() string {
+func (m *model) renderConfirm() string {
 	anonymised := db.AnonymisedUsername(m.global.User.ID)
 	prompt := "> " + styles.PadTruncate(m.typed, deleteTypedMax)
 	lines := []string{
-		m.global.Theme.ErrorText.Render("Delete your account permanently?"),
+		m.global.Palette().ErrorText.Render("Delete your account permanently?"),
 		"",
 		"- SSH keys removed; a new login is a new account",
 		"- ratings removed from every leaderboard",
@@ -424,7 +455,7 @@ func (m model) renderConfirm() string {
 		prompt,
 	}
 	if m.notice != "" {
-		lines = append(lines, m.global.Theme.ErrorText.Render(m.notice))
+		lines = append(lines, m.global.Palette().ErrorText.Render(m.notice))
 	}
-	return lg.JoinVertical(lg.Left, lines...)
+	return styles.JoinVertical(lg.Left, lines...)
 }

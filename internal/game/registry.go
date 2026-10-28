@@ -1,59 +1,63 @@
 package game
 
-import (
-	"errors"
-	"slices"
-	"sync"
-)
+import "fmt"
 
+// Module declares one playable game: its display name, the slug routes and persisted
+// ratings hang off, the seat range it deals for, and the factory that builds a fresh
+// Rules per table. The bounds are the game's, not a table's, so reading them builds
+// nothing.
 type Module struct {
-	Name    string
-	Slug    string // e.g. "crazy_eights"
-	Factory func() Rules
+	Name       string
+	Slug       string // e.g. "crazy_eights"
+	MinPlayers int
+	MaxPlayers int
+	Factory    func() Rules
 }
 
+// Registry is the set of games a server offers, keyed by slug: the identity a game's
+// ratings and history are persisted under. A name is only what a player reads.
 type Registry struct {
-	mu      sync.RWMutex
-	modules map[string]Module // keyed by display name
-	order   []string          // registration order for GameNames
+	modules map[string]Module
+	order   []string
 }
 
-func NewRegistry() *Registry {
-	return &Registry{modules: make(map[string]Module)}
-}
-
-func (r *Registry) RegisterModule(m Module) {
-	if m.Name == "" || m.Slug == "" || m.Factory == nil {
-		panic("game.RegisterModule: Name, Slug, and Factory are required")
+func NewRegistry(mods ...Module) *Registry {
+	r := &Registry{
+		modules: make(map[string]Module, len(mods)),
+		order:   make([]string, 0, len(mods)),
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.modules[m.Name]; !exists {
-		r.order = append(r.order, m.Name)
+	names := make(map[string]bool, len(mods))
+	for _, m := range mods {
+		if m.Name == "" || m.Slug == "" || m.Factory == nil {
+			panic(fmt.Sprintf("game.NewRegistry: %q (slug %q): Name, Slug, and Factory are required", m.Name, m.Slug))
+		}
+		if m.MinPlayers < 1 || m.MaxPlayers < m.MinPlayers {
+			panic(fmt.Sprintf("game.NewRegistry: %q: seat bounds %d..%d", m.Name, m.MinPlayers, m.MaxPlayers))
+		}
+		if names[m.Name] {
+			panic(fmt.Sprintf("game.NewRegistry: %q declared twice", m.Name))
+		}
+		if _, dup := r.modules[m.Slug]; dup {
+			panic(fmt.Sprintf("game.NewRegistry: slug %q declared twice", m.Slug))
+		}
+		names[m.Name] = true
+		r.modules[m.Slug] = m
+		r.order = append(r.order, m.Slug)
 	}
-	r.modules[m.Name] = m
+	return r
 }
 
-func (r *Registry) GameNames() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return slices.Clone(r.order)
+// Modules lists the games in declaration order. The slice is the caller's.
+func (r *Registry) Modules() []Module {
+	mods := make([]Module, len(r.order))
+	for i, slug := range r.order {
+		mods[i] = r.modules[slug]
+	}
+	return mods
 }
 
-func (r *Registry) Module(name string) (Module, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	m, ok := r.modules[name]
+// Module looks a game up by slug.
+func (r *Registry) Module(slug string) (Module, bool) {
+	m, ok := r.modules[slug]
 	return m, ok
-}
-
-// Create builds a fresh Rules for a registered game. The factory runs after the
-// registry lock is dropped: it is caller-supplied code, and holding a lock across it
-// would let a factory that touched the registry deadlock every other reader.
-func (r *Registry) Create(name string) (Rules, error) {
-	m, ok := r.Module(name)
-	if !ok {
-		return nil, errors.New("game not found in registry")
-	}
-	return m.Factory(), nil
 }

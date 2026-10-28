@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/elo"
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/lobby"
-	"github.com/Pieczasz/terminal-card/internal/repository"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/catalog"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/elo"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/repository"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"uuid"
 
@@ -24,28 +25,27 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := newSignallingMatchRepo(repository.NewMatchRepository(gormDB))
-	manager := lobby.NewManager(ctx, matchRepo)
-	registry := realRegistry(t)
+	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
 
 	players := make([]*game.Player, 0, 3)
 	for _, name := range []string{"alice", "bob", "carol"} {
-		user, _, err := userRepo.RegisterUserWithKey(ctx, name, "fingerprint-"+name)
+		user, _, err := userRepo.RegisterUserWithSSHKey(ctx, name, "fingerprint-"+name)
 		require.NoError(t, err)
 		players = append(players, lobby.NewPlayer(user))
 	}
 	leader := players[0]
 
-	l, err := manager.New(leader,
-		lobby.WithCardGame(pokerGame),
+	l, err := manager.CreateLobby(leader,
+		lobby.WithCardGame(pokerSlug),
 		lobby.WithMaxPlayers(3),
 		lobby.WithRanked(true),
 	)
 	require.NoError(t, err)
 	for _, g := range players[1:] {
-		require.NoError(t, manager.JoinLobbyByCode(l.Code(), g))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
 	}
 
 	events, subErr := l.Subscribe(leader.ID)
@@ -53,16 +53,16 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	t.Cleanup(func() { l.Unsubscribe(leader.ID, events) })
 
 	for _, p := range players {
-		require.NoError(t, l.ToggleReady(p, registry))
+		require.NoError(t, manager.ToggleReady(p))
 	}
-	engine := awaitGameStart(t, events)
+	engine := awaitGameStart(t, l, events)
 
 	playOutMatch(t, engine)
 
 	matchRepo.awaitFinalize(t)
 	require.True(t, manager.WaitForFinalizers(30*time.Second), "ranked write must drain")
 
-	best, err := userRepo.BestPlayers(ctx, 10, "")
+	best, err := userRepo.BestPlayers(ctx, "", 10)
 	require.NoError(t, err)
 	require.NotEmpty(t, best, "a finished ranked game must populate the leaderboard")
 
@@ -94,34 +94,33 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 	t.Parallel()
 	gormDB := testutil.SetupTestDB(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	userRepo := repository.NewUserRepository(gormDB)
 	matchRepo := repository.NewMatchRepository(gormDB)
-	manager := lobby.NewManager(ctx, matchRepo)
-	registry := realRegistry(t)
+	manager := lobby.NewManager(ctx, matchRepo, catalog.NewRegistry())
 
 	players := make([]*game.Player, 0, 2)
 	for _, name := range []string{"dave", "erin"} {
-		user, _, err := userRepo.RegisterUserWithKey(ctx, name, "fingerprint-"+name)
+		user, _, err := userRepo.RegisterUserWithSSHKey(ctx, name, "fingerprint-"+name)
 		require.NoError(t, err)
 		players = append(players, lobby.NewPlayer(user))
 	}
 
-	l, err := manager.New(players[0],
-		lobby.WithCardGame(pokerGame),
+	l, err := manager.CreateLobby(players[0],
+		lobby.WithCardGame(pokerSlug),
 		lobby.WithMaxPlayers(2),
 		lobby.WithRanked(false),
 	)
 	require.NoError(t, err)
-	require.NoError(t, manager.JoinLobbyByCode(l.Code(), players[1]))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), players[1])))
 
 	events, subErr := l.Subscribe(players[0].ID)
 	require.NoError(t, subErr)
 	t.Cleanup(func() { l.Unsubscribe(players[0].ID, events) })
 	for _, p := range players {
-		require.NoError(t, l.ToggleReady(p, registry))
+		require.NoError(t, manager.ToggleReady(p))
 	}
-	engine := awaitGameStart(t, events)
+	engine := awaitGameStart(t, l, events)
 
 	playOutMatch(t, engine)
 
@@ -161,8 +160,8 @@ func newSignallingMatchRepo(inner db.MatchRepository) *signallingMatchRepo {
 
 func (s *signallingMatchRepo) FinalizeRankedMatch(
 	ctx context.Context, ref db.GameRef, orderedUserIDs []uuid.UUID, places []int,
-) error {
-	err := s.MatchRepository.FinalizeRankedMatch(ctx, ref, orderedUserIDs, places)
+) (map[uuid.UUID]uint32, error) {
+	ratings, err := s.MatchRepository.FinalizeRankedMatch(ctx, ref, orderedUserIDs, places)
 	s.fire()
-	return err
+	return ratings, err
 }

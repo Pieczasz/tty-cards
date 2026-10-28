@@ -8,14 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	"github.com/Pieczasz/terminal-card/internal/tui/views"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +27,7 @@ import (
 func TestGlobalActionsAllRoute(t *testing.T) {
 	t.Parallel()
 
-	for _, action := range styles.GlobalActions {
+	for _, action := range views.GlobalFooter {
 		key, _, found := strings.Cut(action, " - ")
 		require.True(t, found, "footer entry %q must read '<key> - <label>'", action)
 		key = strings.TrimSpace(key)
@@ -34,7 +36,7 @@ func TestGlobalActionsAllRoute(t *testing.T) {
 			t.Parallel()
 			if key == "ctrl+c" {
 				// Quit is handled by HandleCommonMsg, not by the route table.
-				handled, cmd := views.HandleCommonMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, &router.GlobalContext{})
+				handled, cmd := views.HandleCommonMsg(tuitest.Key("ctrl+c"), &router.GlobalContext{})
 				assert.True(t, handled, "ctrl+c must be handled")
 				assert.NotNil(t, cmd, "ctrl+c must produce the quit command")
 				return
@@ -52,7 +54,7 @@ func TestNavigateOn(t *testing.T) {
 	tests := []struct {
 		name    string
 		key     string
-		want    string
+		want    router.Route
 		handled bool
 	}{
 		{name: "new lobby", key: "n", want: router.RouteLobbyCreate, handled: true},
@@ -111,7 +113,7 @@ func TestSessionPlayer(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{User: &db.User{ID: testutil.UID(7),
 			Username: "alice",
-			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Name: "Poker"}}},
+			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Slug: "poker", Name: "Poker"}}},
 		}}
 
 		p := views.SessionPlayer(g)
@@ -119,7 +121,7 @@ func TestSessionPlayer(t *testing.T) {
 		assert.Equal(t, testutil.UID(7).String(), p.ID)
 		assert.Equal(t, testutil.UID(7), p.UserID)
 		assert.Equal(t, "alice", p.Name)
-		assert.Equal(t, map[string]uint32{"Poker": 1600}, p.Ratings)
+		assert.Equal(t, map[string]uint32{"poker": 1600}, p.Ratings)
 
 		// The ID has to be the same spelling the engine seats the player under, or a
 		// subscription keyed on it silently never fires.
@@ -190,24 +192,38 @@ func TestHandleCommonMsg(t *testing.T) {
 	t.Run("a background change swaps the theme in place", func(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{Theme: styles.NewTheme(true)}
-		require.True(t, g.Theme.Dark)
+		require.True(t, g.Palette().Dark)
 
 		handled, cmd := views.HandleCommonMsg(tea.BackgroundColorMsg{Color: color.White}, &g)
 
 		assert.True(t, handled)
 		assert.Nil(t, cmd)
-		assert.False(t, g.Theme.Dark, "a light terminal must not keep the dark palette")
+		assert.False(t, g.Palette().Dark, "a light terminal must not keep the dark palette")
 
 		handled, _ = views.HandleCommonMsg(tea.BackgroundColorMsg{Color: color.Black}, &g)
 		assert.True(t, handled)
-		assert.True(t, g.Theme.Dark)
+		assert.True(t, g.Palette().Dark)
+	})
+
+	// The view on screen holds its own context too, and it seats, browses and leaves
+	// as SessionPlayer: a reseat it did not take would act with the login's ratings.
+	t.Run("a reseated player replaces the session's", func(t *testing.T) {
+		t.Parallel()
+		g := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
+		p := &game.Player{ID: testutil.UID(1).String(), UserID: testutil.UID(1), Name: "alice"}
+
+		handled, cmd := views.HandleCommonMsg(router.UpdatePlayer(p)(), &g)
+
+		assert.True(t, handled)
+		assert.Nil(t, cmd)
+		assert.Same(t, p, views.SessionPlayer(g))
 	})
 
 	t.Run("ctrl+c quits", func(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{}
 
-		handled, cmd := views.HandleCommonMsg(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, &g)
+		handled, cmd := views.HandleCommonMsg(tuitest.Key("ctrl+c"), &g)
 
 		assert.True(t, handled)
 		require.NotNil(t, cmd)
@@ -220,8 +236,9 @@ func TestHandleCommonMsg(t *testing.T) {
 		g := router.GlobalContext{}
 
 		for _, key := range []tea.KeyPressMsg{
-			{Code: 'g', Text: "g"},
-			{Code: tea.KeyEnter},
+			tuitest.Key("g"),
+			tuitest.Key("enter"),
+			// A bare c, without the ctrl modifier.
 			{Code: 'c'},
 		} {
 			handled, cmd := views.HandleCommonMsg(key, &g)
@@ -278,20 +295,20 @@ func TestRenderScreen_AgreesWithScreenContentHeight(t *testing.T) {
 	}
 }
 
-// styles.GlobalActions is one slice shared by every session. Appending the local
+// The global footer is one slice shared by every session. Appending the local
 // actions onto it would write into the array the other sessions are reading, so
 // the footer is built with slices.Concat - this is what notices if that regresses.
 func TestRenderScreen_LeavesGlobalActionsAlone(t *testing.T) {
 	t.Parallel()
 
-	before := slices.Clone(styles.GlobalActions)
+	before := slices.Clone(views.GlobalFooter)
 	g := router.GlobalContext{Theme: styles.NewTheme(true), Width: 100, Height: 30}
 
 	views.RenderScreen(g, "Profile", []string{"g - Game", "r - Result"}, func(int) string { return "" })
 	views.ScreenContentHeight(g, "Profile", []string{"x - One", "y - Two", "z - Three"})
 
-	assert.Equal(t, before, styles.GlobalActions, "the shared footer list must not be written through")
-	assert.Len(t, styles.GlobalActions, len(before))
+	assert.Equal(t, before, views.GlobalFooter, "the shared footer list must not be written through")
+	assert.Len(t, views.GlobalFooter, len(before))
 }
 
 // The local actions come first so a view's own keys read before the global ones.
@@ -303,13 +320,32 @@ func TestRenderScreen_ShowsLocalAndGlobalActions(t *testing.T) {
 
 	assert.Contains(t, out, "g - Game")
 	assert.Contains(t, out, "body")
-	for _, action := range styles.GlobalActions {
+	for _, action := range views.GlobalFooter {
 		assert.Contains(t, out, action, "the footer must still advertise %q", action)
 	}
 }
 
 // RenderCenteredLayout is what places the framed box on the screen. A zero size is
 // the window every session opens in, before the first WindowSizeMsg arrives.
+// A seated player's menus all lead back to their table, so their screen offers the
+// view's own keys and quit, and none of the global shortcuts.
+func TestRenderSeatedScreen_OffersOnlyLocalActionsAndQuit(t *testing.T) {
+	t.Parallel()
+
+	g := router.GlobalContext{Theme: styles.NewTheme(true), Width: 120, Height: 50}
+	out := views.RenderSeatedScreen(g, "Lobby", []string{"r - Ready"}, func(int) string { return "body" })
+
+	assert.Contains(t, out, "r - Ready")
+	assert.Contains(t, out, "body")
+	for _, action := range views.GlobalFooter {
+		if action == "ctrl+c - Quit" {
+			assert.Contains(t, out, action)
+			continue
+		}
+		assert.NotContains(t, out, action)
+	}
+}
+
 func TestRenderCenteredLayout(t *testing.T) {
 	t.Parallel()
 

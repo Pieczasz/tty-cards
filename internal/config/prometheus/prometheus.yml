@@ -1,23 +1,61 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  # Stamped onto everything this server stores, so a federated or remote reader can
-  # tell these series apart from another deployment's.
   external_labels:
-    deployment: terminal-card
+    deployment: tty-cards
 
 rule_files:
   - /etc/prometheus/alerts.yml
+  - /etc/prometheus/alerts-pipeline.yml
 
-# Retention is a command-line flag, not a config key: see compose.yaml, which sets
-# --storage.tsdb.retention.time=30d and --storage.tsdb.retention.size=8GB. Thirty
-# days is safe to state publicly because nothing here is personal data - every
-# attribute this application records is a bounded enum, which
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# Retention is a command-line flag, not a config key: see compose.yaml (30d, 8GB).
+# Thirty days is safe to state publicly because nothing here is personal data -
+# every attribute the application records is a bounded enum, which
 # internal/observability/metrics_test.go enforces.
+#
+# The application's OTLP metrics and Alloy's host exporter arrive by remote write
+# from Alloy, so the backend has no up{} here. The jobs below are the pipeline
+# itself, scraped directly so that a dead component reads as up == 0 instead of
+# silence. Each keeps only the series alerts-pipeline.yml and the memory panels
+# need: their full /metrics is thousands of series nobody reads.
 scrape_configs:
-  # The only scrape target. Everything else - the application's OTLP metrics and
-  # Alloy's host exporter - arrives by remote write from Alloy, which is why the
-  # alerts file has no up{} for the backend and watches the sessions gauge instead.
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "loki_write_(dropped|sent)_entries_total|otelcol_exporter_(send_failed|sent)_.+|otelcol_processor_refused_.+|otelcol_receiver_refused_.+|prometheus_remote_storage_samples_(failed|total)|prometheus_remote_storage_samples_pending|go_memstats_heap_inuse_bytes|process_resident_memory_bytes"
+        action: keep
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "loki_discarded_samples_total|loki_distributor_(bytes|lines)_received_total|loki_ingester_memory_streams|go_memstats_heap_inuse_bytes|process_resident_memory_bytes"
+        action: keep
+
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "tempo_discarded_spans_total|tempo_distributor_bytes_received_total|tempo_ingester_live_traces|go_memstats_heap_inuse_bytes|process_resident_memory_bytes"
+        action: keep
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "alertmanager_notifications_failed_total|process_resident_memory_bytes"
+        action: keep

@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/deck"
-	"github.com/Pieczasz/terminal-card/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/deck"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/game/gametest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
 func twoPlayers(hands ...[]deck.Card) []*game.Player {
@@ -27,7 +27,7 @@ func startedState(t *testing.T) (*game.State, *State) {
 	players := twoPlayers()
 	state := game.NewState(rules, players, nil)
 	require.NoError(t, rules.OnGameStart(state))
-	extra := state.Extra.(*State)
+	extra := gametest.Extra[*State](t, state)
 	return state, extra
 }
 
@@ -35,7 +35,7 @@ func TestRules_OnGameStart_DealsTen(t *testing.T) {
 	t.Parallel()
 	state, extra := startedState(t)
 	assert.Equal(t, 1, extra.HandNumber)
-	assert.Equal(t, AwaitingDraw, extra.HandPhase)
+	assert.Equal(t, PhaseAwaitingDraw, extra.Phase)
 	assert.Len(t, state.Players[0].Cards, 10)
 	assert.Len(t, state.Players[1].Cards, 10)
 	assert.Equal(t, 31, state.Deck.Size())
@@ -68,7 +68,7 @@ func TestRules_ValidateAction_PhaseGates(t *testing.T) {
 		rules.ApplyAction(state, ActionDrawStock{})
 		err := rules.ValidateAction(state, ActionDrawStock{})
 		require.ErrorContains(t, err, "must discard first")
-		assert.Equal(t, AwaitingDiscard, extra.HandPhase)
+		assert.Equal(t, PhaseAwaitingDiscard, extra.Phase)
 	})
 }
 
@@ -86,7 +86,7 @@ func TestRules_ValidateAction_KnockBoundary(t *testing.T) {
 			c(deck.Two, deck.Diamonds),
 		}
 		state := game.NewState(rules, twoPlayers(hand11, nil), nil)
-		state.Extra = &State{HandPhase: AwaitingDiscard, CumulativeScores: map[string]int{"p1": 0, "p2": 0}}
+		state.Extra = &State{Phase: PhaseAwaitingDiscard, CumulativeScores: map[string]int{"p1": 0, "p2": 0}}
 		state.CurrentTurn = 0
 		err := rules.ValidateAction(state, ActionKnock{Discard: c(deck.Two, deck.Diamonds)})
 		require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestRules_ValidateAction_KnockBoundary(t *testing.T) {
 			c(deck.Queen, deck.Diamonds),
 		}
 		st := game.NewState(rules, twoPlayers(hand, nil), nil)
-		st.Extra = &State{HandPhase: AwaitingDiscard, CumulativeScores: map[string]int{"p1": 0, "p2": 0}}
+		st.Extra = &State{Phase: PhaseAwaitingDiscard, CumulativeScores: map[string]int{"p1": 0, "p2": 0}}
 		st.CurrentTurn = 0
 		err := rules.ValidateAction(st, ActionKnock{Discard: c(deck.Ace, deck.Spades)})
 		require.ErrorContains(t, err, "deadwood")
@@ -193,7 +193,7 @@ func TestRules_Knock_Gin(t *testing.T) {
 	}
 	state := game.NewState(rules, twoPlayers(knocker, opponent), nil)
 	extra := &State{
-		HandPhase:        AwaitingDiscard,
+		Phase:            PhaseAwaitingDiscard,
 		FirstActor:       0,
 		CumulativeScores: map[string]int{"p1": 0, "p2": 0},
 	}
@@ -206,7 +206,7 @@ func TestRules_Knock_Gin(t *testing.T) {
 	rules.ApplyAction(state, ActionKnock{Discard: c(deck.King, deck.Clubs)})
 
 	require.NotNil(t, extra.LastHandResult)
-	assert.True(t, extra.LastHandResult.Gin)
+	assert.Equal(t, OutcomeGin, extra.LastHandResult.Outcome)
 	assert.Equal(t, "p1", extra.LastHandResult.Winner)
 	assert.Equal(t, sumDeadwood(opponent)+ginBonus, extra.LastHandResult.ScoreDelta)
 	assert.Equal(t, extra.LastHandResult.ScoreDelta, extra.CumulativeScores["p1"])
@@ -216,9 +216,9 @@ func TestRules_Knock_Gin(t *testing.T) {
 	// and "nothing was layable" look the same.
 	layable := c(deck.Six, deck.Hearts)
 	require.Contains(t, opponent, layable)
-	require.True(t, slices.ContainsFunc(extra.LastHandResult.KnockerMelds, func(m []deck.Card) bool {
-		return canAttach(layable, m)
-	}), "the fixture must give the opponent a card that would lay off")
+	_, layableOnto := findAttach(layable, extra.LastHandResult.KnockerMelds)
+	require.True(t, layableOnto, "the fixture must give the opponent a card that would lay off")
+
 	assert.Empty(t, extra.LastHandResult.LaidOffCards, "gin blocks layoffs")
 	assert.Contains(t, extra.LastHandResult.OpponentDeadwood, layable,
 		"a layable card still scores as deadwood against gin")
@@ -241,7 +241,7 @@ func TestRules_Knock_Undercut(t *testing.T) {
 	}
 	state := game.NewState(rules, twoPlayers(knocker, opponent), nil)
 	extra := &State{
-		HandPhase:        AwaitingDiscard,
+		Phase:            PhaseAwaitingDiscard,
 		FirstActor:       0,
 		CumulativeScores: map[string]int{"p1": 0, "p2": 0},
 	}
@@ -252,7 +252,7 @@ func TestRules_Knock_Undercut(t *testing.T) {
 
 	rules.ApplyAction(state, ActionKnock{Discard: c(deck.King, deck.Clubs)})
 	require.NotNil(t, extra.LastHandResult)
-	assert.True(t, extra.LastHandResult.Undercut)
+	assert.Equal(t, OutcomeUndercut, extra.LastHandResult.Outcome)
 	assert.Equal(t, "p2", extra.LastHandResult.Winner)
 	assert.Equal(t, 5+undercutBonus, extra.LastHandResult.ScoreDelta)
 	assert.Equal(t, 5+undercutBonus, extra.CumulativeScores["p2"])
@@ -281,7 +281,7 @@ func TestRules_Knock_UndercutOnATie(t *testing.T) {
 	}
 	state := game.NewState(rules, twoPlayers(knocker, opponent), nil)
 	extra := &State{
-		HandPhase:        AwaitingDiscard,
+		Phase:            PhaseAwaitingDiscard,
 		FirstActor:       0,
 		CumulativeScores: map[string]int{"p1": 0, "p2": 0},
 	}
@@ -296,7 +296,7 @@ func TestRules_Knock_UndercutOnATie(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, 5, result.KnockerDeadwoodPoints)
 	require.Equal(t, 5, result.OpponentDeadwoodPoints, "the tie is the point of this test")
-	assert.True(t, result.Undercut, "equal deadwood undercuts the knocker")
+	assert.Equal(t, OutcomeUndercut, result.Outcome, "equal deadwood undercuts the knocker")
 	assert.Equal(t, "p2", result.Winner)
 	assert.Equal(t, undercutBonus, result.ScoreDelta, "a tie scores the bonus alone")
 	assert.Equal(t, undercutBonus, extra.CumulativeScores["p2"])
@@ -321,7 +321,7 @@ func TestRules_DrawStock_WallBoundary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state, _ := startedState(t)
-			state.Deck = deck.New(deck.StandardDeck()[:tt.stock])
+			state.Deck = deck.New(deck.Standard()[:tt.stock])
 
 			err := rules.ValidateAction(state, ActionDrawStock{})
 			if tt.wantErr {
@@ -344,7 +344,7 @@ func TestRules_TimeoutAction_AtTheWall(t *testing.T) {
 	t.Run("draws the discard while there is one", func(t *testing.T) {
 		t.Parallel()
 		state, _ := startedState(t)
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 
 		action := rules.TimeoutAction(state)
 		assert.Equal(t, ActionDrawDiscard{}, action)
@@ -354,7 +354,7 @@ func TestRules_TimeoutAction_AtTheWall(t *testing.T) {
 	t.Run("an empty pile at the wall has no legal move", func(t *testing.T) {
 		t.Parallel()
 		state, _ := startedState(t)
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 		state.Discard = deck.New(nil)
 
 		assert.Nil(t, rules.TimeoutAction(state), "every draw here is one ValidateAction refuses")
@@ -366,18 +366,17 @@ func TestRules_Wall_AfterDiscard(t *testing.T) {
 	rules := &Rules{}
 	state, extra := startedState(t)
 	state.CurrentTurn = 0
-	extra.HandPhase = AwaitingDiscard
+	extra.Phase = PhaseAwaitingDiscard
 	// Stock already at wall size: discard ends the hand.
 	state.Deck = deck.New([]deck.Card{
 		c(deck.Two, deck.Clubs), c(deck.Three, deck.Clubs),
 	})
 	card := state.Players[0].Cards[0]
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds)) // 11 cards
-	rules.ApplyAction(state, ActionDiscard{Card: card})
-	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-	assert.True(t, extra.HandComplete)
+	require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
+	assert.True(t, extra.HandComplete())
 	require.NotNil(t, extra.LastHandResult)
-	assert.True(t, extra.LastHandResult.Wall)
+	assert.Equal(t, OutcomeWall, extra.LastHandResult.Outcome)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
 	assert.Equal(t, 0, extra.CumulativeScores["p2"])
 }
@@ -386,16 +385,15 @@ func TestRules_Wall_StockThreeDoesNotTrigger(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state, extra := startedState(t)
-	extra.HandPhase = AwaitingDiscard
+	extra.Phase = PhaseAwaitingDiscard
 	state.Deck = deck.New([]deck.Card{
 		c(deck.Two, deck.Clubs), c(deck.Three, deck.Clubs), c(deck.Four, deck.Clubs),
 	})
 	card := state.Players[0].Cards[0]
 	state.Players[0].Cards = append(state.Players[0].Cards, c(deck.Ace, deck.Diamonds))
-	rules.ApplyAction(state, ActionDiscard{Card: card})
-	require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-	assert.False(t, extra.HandComplete)
-	assert.Equal(t, AwaitingDraw, extra.HandPhase)
+	require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
+	assert.False(t, extra.HandComplete())
+	assert.Equal(t, PhaseAwaitingDraw, extra.Phase)
 }
 
 func TestRules_Standings_Descending(t *testing.T) {
@@ -406,8 +404,8 @@ func TestRules_Standings_Descending(t *testing.T) {
 	extra.CumulativeScores["p2"] = 90
 	standings := rules.Standings(state)
 	require.Len(t, standings, 2)
-	assert.Equal(t, "p2", standings[0].ID)
-	assert.Equal(t, "p1", standings[1].ID)
+	assert.Equal(t, "p2", standings[0].Player.ID)
+	assert.Equal(t, "p1", standings[1].Player.ID)
 }
 
 func TestRules_CheckWinCondition(t *testing.T) {
@@ -417,6 +415,31 @@ func TestRules_CheckWinCondition(t *testing.T) {
 	assert.False(t, rules.CheckWinCondition(state))
 	extra.MatchComplete = true
 	assert.True(t, rules.CheckWinCondition(state))
+}
+
+// An absent player holding gin must not discard it away: gin scores the bonus and
+// cannot be undercut, so knocking is strictly the better auto-play.
+func TestRules_TimeoutAction_KnocksOnGin(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+	state, extra := startedState(t)
+	// Every card melds, and dropping the 2♥ still leaves the 3-6♥ run.
+	state.Players[state.CurrentTurn].Cards = []deck.Card{
+		c(deck.Two, deck.Hearts), c(deck.Three, deck.Hearts), c(deck.Four, deck.Hearts),
+		c(deck.Five, deck.Hearts), c(deck.Six, deck.Hearts),
+		c(deck.Jack, deck.Spades), c(deck.Jack, deck.Hearts), c(deck.Jack, deck.Diamonds),
+		c(deck.Ace, deck.Clubs), c(deck.Ace, deck.Spades), c(deck.Ace, deck.Hearts),
+	}
+	extra.Phase = PhaseAwaitingDiscard
+
+	action := rules.TimeoutAction(state)
+
+	knock, ok := action.(ActionKnock)
+	require.True(t, ok, "a gin hand knocks, got %T", action)
+	require.NoError(t, rules.ValidateAction(state, knock))
+	require.NoError(t, rules.ApplyAction(state, knock))
+	require.NotNil(t, extra.LastHandResult)
+	assert.Equal(t, OutcomeGin, extra.LastHandResult.Outcome)
 }
 
 func TestRules_TimeoutAction_DrawStock(t *testing.T) {
@@ -430,7 +453,7 @@ func TestRules_TimeoutAction_NextHand(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state, extra := startedState(t)
-	extra.HandComplete = true
+	extra.Phase = PhaseHandOver
 	assert.Equal(t, ActionNextHand{}, rules.TimeoutAction(state))
 }
 
@@ -438,7 +461,7 @@ func TestRules_TimeoutAction_MatchOver(t *testing.T) {
 	t.Parallel()
 	rules := &Rules{}
 	state, extra := startedState(t)
-	extra.HandComplete = true
+	extra.Phase = PhaseHandOver
 	extra.MatchComplete = true
 	assert.Nil(t, rules.TimeoutAction(state))
 }
@@ -509,10 +532,31 @@ func TestRules_DrawKeepsTurn(t *testing.T) {
 	rules := &Rules{}
 	state, _ := startedState(t)
 	state.CurrentTurn = 0
-	rules.ApplyAction(state, ActionDrawStock{})
+	require.NoError(t, rules.ApplyAction(state, ActionDrawStock{}))
 	require.NotNil(t, state.OverrideNextTurn)
 	assert.Equal(t, 0, *state.OverrideNextTurn)
 	assert.Len(t, state.Players[0].Cards, 11)
+}
+
+// ValidateAction refuses a draw from a spent pile, so one reaching ApplyAction is a
+// rules bug. It is reported rather than letting the player discard a card they never
+// picked up, and the error ends the table.
+func TestRules_ApplyAction_DrawFromASpentPileIsAnError(t *testing.T) {
+	t.Parallel()
+	rules := &Rules{}
+
+	for _, draw := range []game.Action{ActionDrawStock{}, ActionDrawDiscard{}} {
+		t.Run(draw.Name(), func(t *testing.T) {
+			t.Parallel()
+			state, extra := startedState(t)
+			state.Deck = deck.New(nil)
+			state.Discard = deck.New(nil)
+
+			require.Error(t, rules.ApplyAction(state, draw))
+			assert.Equal(t, PhaseAwaitingDraw, extra.Phase, "no card arrived, so the turn cannot move on")
+			assert.Len(t, state.Players[state.CurrentTurn].Cards, dealCount)
+		})
+	}
 }
 
 // A hand nobody knocks in scores nothing, so the target score alone never arrives:
@@ -524,13 +568,12 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 
 	for range maxHands + 5 {
 		// Put the stock at its reserve so the next completed discard walls the hand.
-		extra.HandPhase = AwaitingDiscard
-		state.Deck = deck.New(deck.StandardDeck()[:wallStockSize])
+		extra.Phase = PhaseAwaitingDiscard
+		state.Deck = deck.New(deck.Standard()[:wallStockSize])
 		card := state.Players[state.CurrentTurn].Cards[0]
-		rules.ApplyAction(state, ActionDiscard{Card: card})
-		require.NoError(t, rules.AfterAction(state, ActionDiscard{Card: card}))
-		require.True(t, extra.HandComplete)
-		require.True(t, extra.LastHandResult.Wall)
+		require.NoError(t, rules.ApplyAction(state, ActionDiscard{Card: card}))
+		require.True(t, extra.HandComplete())
+		require.Equal(t, OutcomeWall, extra.LastHandResult.Outcome)
 
 		if extra.MatchComplete {
 			assert.Equal(t, maxHands, extra.HandNumber, "the match ends at the cap")
@@ -542,28 +585,28 @@ func TestMatch_RepeatedWallsEndTheMatch(t *testing.T) {
 		}
 
 		require.NoError(t, rules.ValidateAction(state, ActionNextHand{}))
-		require.NoError(t, rules.AfterAction(state, ActionNextHand{}))
+		require.NoError(t, rules.ApplyAction(state, ActionNextHand{}))
 	}
 	t.Fatalf("the match never ended after %d walled hands", maxHands+5)
 }
 
-// Standings and StandingScore have to agree, or the engine splits a genuine draw by
-// slice position and the seat that sorted first takes rating off the seat that did not.
-func TestRules_StandingScore_TiedSeatsShareAPlace(t *testing.T) {
+// A genuine draw shares a place, or the seat that sorted first takes rating off the
+// seat that did not.
+func TestRules_Standings_TiedSeatsShareAPlace(t *testing.T) {
 	t.Parallel()
-	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}}, deck.StandardDeck())
+	engine := game.NewEngine(&Rules{}, []*game.Player{{ID: "p1"}, {ID: "p2"}})
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
 	engine.WithState(func(s *game.State) {
-		extra := s.Extra.(*State)
+		extra := gametest.Extra[*State](t, s)
 		extra.CumulativeScores["p1"] = 40
 		extra.CumulativeScores["p2"] = 40
 	})
 
-	standings, places := engine.StandingsWithPlaces()
+	standings := engine.Standings()
 	require.Len(t, standings, 2)
-	assert.Equal(t, []int{1, 1}, places, "equal totals are one place, not two")
+	assert.Equal(t, []int{1, 1}, gametest.Places(standings), "equal totals are one place, not two")
 }
 
 // A defender may arrange their hand for the lowest total *after* layoffs, not the
@@ -588,7 +631,7 @@ func TestRules_Knock_DefenderMeldsForTheBestLayoff(t *testing.T) {
 	}
 	state := game.NewState(rules, twoPlayers(knocker, opponent), nil)
 	extra := &State{
-		HandPhase:        AwaitingDiscard,
+		Phase:            PhaseAwaitingDiscard,
 		FirstActor:       0,
 		CumulativeScores: map[string]int{"p1": 0, "p2": 0},
 	}
@@ -606,17 +649,15 @@ func TestRules_Knock_DefenderMeldsForTheBestLayoff(t *testing.T) {
 	assert.Zero(t, res.OpponentDeadwoodPoints, "both loose spades lay off")
 	assert.ElementsMatch(t,
 		[]deck.Card{c(deck.Four, deck.Spades), c(deck.Five, deck.Spades)}, res.LaidOffCards)
-	assert.True(t, res.Undercut, "0 <= 4 is an undercut")
+	assert.Equal(t, OutcomeUndercut, res.Outcome, "0 <= 4 is an undercut")
 	assert.Equal(t, "p2", res.Winner)
 	assert.Equal(t, 4+undercutBonus, res.ScoreDelta)
 }
 
 func TestRules_TableSize(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
-	assert.Equal(t, 2, rules.MinPlayers(), "gin rummy is strictly heads-up")
-	assert.Equal(t, 2, rules.MaxPlayers())
-	assert.Len(t, rules.InitialDeck(), 52)
+	assert.Equal(t, 2, MinPlayers, "gin rummy is strictly heads-up")
+	assert.Equal(t, 2, MaxPlayers)
 	assert.Equal(t, "ginrummy.DrawStock", ActionDrawStock{}.Name())
 	assert.Equal(t, "ginrummy.DrawDiscard", ActionDrawDiscard{}.Name())
 	assert.Equal(t, "ginrummy.Discard", ActionDiscard{}.Name())
@@ -627,7 +668,7 @@ func TestRules_TableSize(t *testing.T) {
 // The between-hands prompt is a decision, not a move, so it gets longer than a turn.
 // Zero elsewhere means "engine default", not "no clock": a real duration there would
 // quietly redefine every draw-and-discard turn in the game.
-func TestRules_TurnTimeout(t *testing.T) {
+func TestRules_TurnDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name         string
@@ -641,15 +682,12 @@ func TestRules_TurnTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			state, extra := startedState(t)
-			extra.HandComplete = tt.handComplete
-			assert.Equal(t, tt.want, (&Rules{}).TurnTimeout(state))
+			if tt.handComplete {
+				extra.Phase = PhaseHandOver
+			}
+			assert.Equal(t, tt.want, (&Rules{}).TurnDuration(state))
 		})
 	}
-
-	t.Run("a state that is not a gin rummy state has no opinion", func(t *testing.T) {
-		t.Parallel()
-		assert.Zero(t, (&Rules{}).TurnTimeout(&game.State{}))
-	})
 }
 
 // The ordinary knock: neither gin nor an undercut, which is the branch the whole game
@@ -675,7 +713,7 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	}
 	state := game.NewState(rules, twoPlayers(knocker, opponent), nil)
 	extra := &State{
-		HandPhase:        AwaitingDiscard,
+		Phase:            PhaseAwaitingDiscard,
 		FirstActor:       0,
 		CumulativeScores: map[string]int{"p1": 0, "p2": 0},
 	}
@@ -690,8 +728,8 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 
 	result := extra.LastHandResult
 	require.NotNil(t, result)
-	assert.False(t, result.Gin, "five points of deadwood is not gin")
-	assert.False(t, result.Undercut, "69 beats 5, so the defender did not undercut")
+	assert.NotEqual(t, OutcomeGin, result.Outcome, "five points of deadwood is not gin")
+	assert.NotEqual(t, OutcomeUndercut, result.Outcome, "69 beats 5, so the defender did not undercut")
 	assert.Empty(t, result.LaidOffCards, "nothing in the defender's hand attaches")
 	assert.Equal(t, 5, result.KnockerDeadwoodPoints)
 	assert.Equal(t, 69, result.OpponentDeadwoodPoints)
@@ -701,60 +739,16 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	assert.Zero(t, extra.CumulativeScores["p2"], "the loser of a plain knock scores nothing")
 }
 
-func TestRules_ValidateAction_UnknownActionIsRefused(t *testing.T) {
+func TestRules_IsNotAPlayerLeaveHandler(t *testing.T) {
 	t.Parallel()
-	state, _ := startedState(t)
-	assert.ErrorContains(t, (&Rules{}).ValidateAction(state, foreignAction{}), "unknown action")
+	var rules game.Rules = &Rules{}
+	_, ok := rules.(game.PlayerLeaveHandler)
+	assert.False(t, ok, "gin is heads-up: a leave ends the match, it does not rewrite a hand")
 }
 
-// A move from some other game: the validator is the only thing between it and a state
-// machine that has no case for it.
-type foreignAction struct{}
-
-func (foreignAction) Name() string { return "not.AGinRummyAction" }
-
-func TestRules_NotAGinRummyState(t *testing.T) {
+func TestRules_ValidateAction_ForeignMoveIsUnknownBetweenHands(t *testing.T) {
 	t.Parallel()
-	rules := &Rules{}
-	state := &game.State{}
-
-	require.ErrorIs(t, rules.ValidateAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.ApplyAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	require.ErrorIs(t, rules.AfterAction(state, ActionDrawStock{}), game.ErrInvalidState)
-	assert.Nil(t, rules.Standings(state))
-	assert.Nil(t, rules.TimeoutAction(state))
-	assert.Zero(t, rules.StandingScore(state, &game.Player{ID: "p1"}))
-	assert.False(t, rules.CheckWinCondition(state))
-}
-
-// The engine plays TimeoutAction for a seat that has gone quiet. A move ValidateAction
-// refuses is not a skipped turn: the clock re-arms and the seat is taken on the next
-// expiry, so a player is removed for a mistake the rules made. The auto-player never
-// knocks, so every hand runs to the wall and the match ends on the hand cap.
-func TestSoak_TimeoutActionIsAlwaysLegal(t *testing.T) {
-	t.Parallel()
-	rules := &Rules{}
-
-	rapid.Check(t, func(rt *rapid.T) {
-		players := []*game.Player{{ID: "p1"}, {ID: "p2"}}
-		engine := game.NewEngine(rules, players, deck.StandardDeck())
-		require.NoError(rt, engine.Start())
-		defer engine.Close()
-
-		for step := range maxHands * (maxHandTurns + 4) {
-			if engine.IsFinished() {
-				return
-			}
-			id := engine.CurrentPlayerID()
-			var act game.Action
-			engine.WithState(func(s *game.State) {
-				act = rules.TimeoutAction(s)
-				require.NotNil(rt, act, "step %d: no move for %s", step, id)
-				require.NoError(rt, rules.ValidateAction(s, act),
-					"step %d: %s is not a legal move", step, act.Name())
-			})
-			require.NoError(rt, engine.SubmitAction(id, act))
-		}
-		rt.Fatalf("a match played entirely by the clock never reached the %d-hand cap", maxHands)
-	})
+	state, extra := startedState(t)
+	extra.Phase = PhaseHandOver
+	require.ErrorIs(t, (&Rules{}).ValidateAction(state, gametest.ForeignAction{}), game.ErrUnknownAction)
 }

@@ -1,18 +1,18 @@
 package lobby
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/lobby"
-	"github.com/Pieczasz/terminal-card/internal/tui/components"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
-	"github.com/Pieczasz/terminal-card/internal/tui/views"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -46,10 +46,13 @@ func listLayout(contentHeight int) (rows int, compact bool) {
 	return min(max(contentHeight-chrome, 1), maxVisibleRows), compact
 }
 
-type refreshMsg time.Time
+// refreshMsg names the screen that armed it. The router builds a new join screen on
+// every visit, and a tick in flight from the last one would otherwise re-arm itself
+// here and run a second chain.
+type refreshMsg struct{ owner *joinModel }
 
-func refreshTick() tea.Cmd {
-	return tea.Tick(browseRefresh, func(t time.Time) tea.Msg { return refreshMsg(t) })
+func (m *joinModel) refreshTick() tea.Cmd {
+	return tea.Tick(browseRefresh, func(time.Time) tea.Msg { return refreshMsg{owner: m} })
 }
 
 type joinModel struct {
@@ -65,7 +68,7 @@ type joinModel struct {
 	entries []lobby.BrowseEntry
 	filter  lobby.BrowseFilter
 	// games is the set of games with a table right now, for cycling the filter.
-	games []string
+	games []game.Module
 
 	// lastKey/lastView memoize the rendered frame. The browse tick re-renders this
 	// screen every 2s for every player parked on it, and a frame costs ~6.7k
@@ -74,6 +77,7 @@ type joinModel struct {
 	lastView string
 }
 
+// NewJoin is the join screen: the public lobby browser and the join-by-code prompt.
 func NewJoin(global router.GlobalContext) tea.Model {
 	ti := textinput.New()
 	ti.Placeholder = "8-character code"
@@ -93,7 +97,7 @@ func NewJoin(global router.GlobalContext) tea.Model {
 }
 
 func (m *joinModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, refreshTick())
+	return tea.Batch(textinput.Blink, m.refreshTick())
 }
 
 // refresh re-reads the list and keeps the cursor on a real row. Tables appear and
@@ -101,16 +105,18 @@ func (m *joinModel) Init() tea.Cmd {
 // every time rather than only when the list shrinks to empty.
 func (m *joinModel) refresh() {
 	m.entries = m.global.LobbyManager.BrowseLobbies(views.SessionPlayer(m.global), m.filter)
-	m.games = m.global.LobbyManager.GameNames()
-	if m.cursor >= len(m.entries) {
-		m.cursor = max(len(m.entries)-1, 0)
-	}
+	m.games = m.global.LobbyManager.GamesOnOffer()
+	m.cursor = components.StepCursor(m.cursor, 0, len(m.entries)-1)
 }
 
 func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(refreshMsg); ok {
+	if tick, ok := msg.(refreshMsg); ok {
+		if tick.owner != m {
+			return m, nil
+		}
 		m.refresh()
-		return m, refreshTick()
+		next := m.refreshTick()
+		return m, next
 	}
 
 	// The shared handler claims resizes, the theme switch and ctrl+c, and nothing
@@ -194,15 +200,15 @@ func (m *joinModel) applyFilter() {
 // why, so a game that disappears drops the filter back to any.
 func (m *joinModel) cycleGame() {
 	if len(m.games) == 0 {
-		m.filter.GameName = ""
+		m.filter.Slug = ""
 		m.applyFilter()
 		return
 	}
-	current := slices.Index(m.games, m.filter.GameName)
+	current := m.gameIndex(m.filter.Slug)
 	if current+1 >= len(m.games) {
-		m.filter.GameName = ""
+		m.filter.Slug = ""
 	} else {
-		m.filter.GameName = m.games[current+1]
+		m.filter.Slug = m.games[current+1].Slug
 	}
 	m.applyFilter()
 }
@@ -230,19 +236,15 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	if code == "" {
 		return m, nil
 	}
-	if err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global)); err != nil {
-		m.err = err
+	joined, err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global))
+	if err != nil {
+		m.err = views.PlayerError(m.global.RequestContext(), err)
 		// The table may have filled or started while the list was on screen, so show
 		// the player what is actually joinable now instead of a stale row.
 		m.refresh()
 		return m, nil
 	}
-	joined, err := m.global.LobbyManager.FindLobbyByCode(code)
-	if err != nil || joined == nil {
-		m.err = errors.New("joined lobby but failed to open it")
-		return m, nil
-	}
-	return m, func() tea.Msg { return router.ChangeViewMsg{ViewName: router.RouteLobby, Context: joined} }
+	return m, router.NavigateToLobby(joined)
 }
 
 // modeLabel names the current mode filter for the status line.
@@ -257,16 +259,23 @@ func (m *joinModel) modeLabel() string {
 	return "any"
 }
 
+// gameIndex is where slug sits in games, or -1.
+func (m *joinModel) gameIndex(slug string) int {
+	return slices.IndexFunc(m.games, func(g game.Module) bool { return g.Slug == slug })
+}
+
 func (m *joinModel) filterLine() string {
-	game := "any"
-	if m.filter.GameName != "" {
-		game = m.filter.GameName
+	label := "any"
+	if i := m.gameIndex(m.filter.Slug); i >= 0 {
+		label = m.games[i].Name
+	} else if m.filter.Slug != "" {
+		label = m.filter.Slug
 	}
 	seats := "all tables"
 	if m.filter.OnlyWithRoom {
 		seats = "with seats"
 	}
-	return m.global.Theme.Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", game, m.modeLabel(), seats))
+	return m.global.Palette().Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", label, m.modeLabel(), seats))
 }
 
 // Column widths are fixed so a filter keypress cannot resize the list under the
@@ -290,30 +299,24 @@ var browseTable = components.Table{
 	Lead: " ",
 }
 
-// renderRow lays the cells out itself rather than through Table.Cells: the mode cell
-// is styled, and a styled cell cannot be padded by rune count afterwards without
-// counting the escape sequence as text.
 func (m *joinModel) renderRow(entry lobby.BrowseEntry, selected bool) string {
-	theme := m.global.Theme
+	theme := m.global.Palette()
 
-	mode := styles.PadTruncate("casual", colMode)
-	modeRendered := theme.Muted.Render(mode)
+	mode := theme.Muted.Render(styles.PadTruncate("casual", colMode))
 	if entry.Ranked {
-		modeRendered = theme.Accented.Render(styles.PadTruncate("ranked", colMode))
+		mode = theme.Accented.Render(styles.PadTruncate("ranked", colMode))
 	}
-
-	cells := fmt.Sprintf("%s | %s | %s | %s",
-		styles.PadTruncate(entry.GameName, colGame),
-		styles.PadTruncate(fmt.Sprintf("%d/%d", entry.Players, entry.MaxPlayers), colSeats),
-		modeRendered,
-		styles.PadTruncate(strconv.FormatUint(uint64(entry.AvgElo), 10), colRating),
-	)
 
 	marker := " "
 	if selected {
 		marker = theme.PlayerItemSelected.Render(">")
 	}
-	return marker + cells
+	return marker + browseTable.Row(
+		styles.PadTruncate(entry.GameName, colGame),
+		styles.PadTruncate(fmt.Sprintf("%d/%d", entry.Players, entry.MaxPlayers), colSeats),
+		mode,
+		styles.PadTruncate(strconv.FormatUint(uint64(entry.AvgElo), 10), colRating),
+	)
 }
 
 // visibleWindow is the slice of rows on screen, scrolled to keep the cursor in view.
@@ -327,7 +330,7 @@ func (m *joinModel) visibleWindow(rows int) (start, end int) {
 
 func (m *joinModel) renderList(rows int) string {
 	if len(m.entries) == 0 {
-		return m.global.Theme.Muted.Render("No tables match right now - press g, m or o to widen the filters.")
+		return m.global.Palette().Muted.Render("No tables match right now - press g, m or o to widen the filters.")
 	}
 
 	start, end := m.visibleWindow(rows)
@@ -335,11 +338,11 @@ func (m *joinModel) renderList(rows int) string {
 	for i := start; i < end; i++ {
 		cells = append(cells, m.renderRow(m.entries[i], !m.writingCode && m.cursor == i))
 	}
-	pager := m.global.Theme.Dim.Render(
+	pager := m.global.Palette().Dim.Render(
 		fmt.Sprintf(" %d-%d of %d  ↑/↓ scroll", start+1, end, len(m.entries)))
 	tbl := browseTable
 	tbl.PadTo = rows
-	return tbl.Render(m.global.Theme, cells) + "\n" + pager
+	return tbl.Render(m.global.Palette(), cells) + "\n" + pager
 }
 
 func (m *joinModel) View() tea.View {
@@ -360,15 +363,15 @@ func (m *joinModel) renderContent(contentHeight int) string {
 
 	rows, compact := listLayout(contentHeight)
 	parts := []string{m.filterLine(), "", m.renderList(rows), "",
-		m.global.Theme.Muted.Render(codeInputStr), m.textInput.View()}
+		m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
 	if compact {
 		parts = []string{m.filterLine(), m.renderList(rows),
-			m.global.Theme.Muted.Render(codeInputStr), m.textInput.View()}
+			m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
 	}
-	content := lg.JoinVertical(lg.Left, parts...)
+	content := styles.JoinVertical(lg.Left, parts...)
 
 	if m.err != nil {
-		content += m.global.Theme.ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))
+		content += m.global.Palette().ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))
 	}
 	return content
 }
@@ -379,7 +382,7 @@ func (m *joinModel) renderContent(contentHeight int) string {
 func (m *joinModel) renderKey() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%dx%d|%v|%d|%v|%+v|%v|%s",
-		m.global.Width, m.global.Height, m.global.Theme.Dark,
+		m.global.Width, m.global.Height, m.global.Palette().Dark,
 		m.cursor, m.writingCode, m.filter, m.err, m.textInput.View())
 	for _, e := range m.entries {
 		fmt.Fprintf(&b, "|%s:%s:%d/%d:%v:%d:%d", e.Code, e.GameName, e.Players, e.MaxPlayers, e.Ranked, e.AvgElo, e.EloDelta)

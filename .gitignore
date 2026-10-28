@@ -16,3 +16,6 @@ web/.astro/
 
 # Astro preview output at the repo root
 /.astro/
+# Added by code-review-graph
+.code-review-graph/
+.local/

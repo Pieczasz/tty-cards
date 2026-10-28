@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Pieczasz/terminal-card/internal/db"
-	"github.com/Pieczasz/terminal-card/internal/tui/router"
-	"github.com/Pieczasz/terminal-card/internal/tui/styles"
+	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 )
 
 // BenchmarkLeaderboardView_Render is the cost of one frame. The board renders on
@@ -25,7 +25,7 @@ func BenchmarkLeaderboardView_Render(b *testing.B) {
 	}
 	// filters is not optional: View reads the current one for its footer, so a
 	// literal without it panics where the real view, built by New, never can.
-	m := model{
+	m := &model{
 		global:   router.GlobalContext{Width: 120, Height: 40, Theme: styles.NewTheme(true)},
 		rankings: rankings,
 		filters:  []boardFilter{{label: filterAll}, {label: "Poker", slug: "poker"}},

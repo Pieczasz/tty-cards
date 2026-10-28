@@ -1,16 +1,16 @@
 package lobby
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/Pieczasz/terminal-card/internal/game"
-	"github.com/Pieczasz/terminal-card/internal/ratelimit"
-	"github.com/Pieczasz/terminal-card/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ import (
 // unlimitedJoins swaps the per-player join rate limiter for one that never
 // throttles, so a fan-out of concurrent joins is not masked by rate limiting.
 func unlimitedJoins(m *Manager) {
-	m.joinLimiter = ratelimit.NewSlidingWindowLimiter(1_000_000, time.Hour)
+	m.joinLimiter = ratelimit.New(1_000_000, time.Hour)
 }
 
 // runWithTimeout runs fn in a goroutine and fails the test loudly if it does not
@@ -37,6 +37,29 @@ func runWithTimeout(t *testing.T, d time.Duration, fn func()) {
 	case <-time.After(d):
 		t.Fatalf("timed out after %s waiting for concurrent work to finish (possible deadlock)", d)
 	}
+}
+
+// assertIndexMatchesRosters is the invariant every roster write keeps by updating the
+// manager's index in the same hold of m.mu: every seat at an open table is indexed to
+// that table, and the index holds nobody else. It is what lets FindLobbyByPlayer and
+// RemoveLobby trust the index without repairing it.
+func assertIndexMatchesRosters(t *testing.T, m *Manager) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seated := 0
+	for code, l := range m.lobbies {
+		l.mu.RLock()
+		roster := append([]*game.Player{l.leader}, l.guests...)
+		open := l.state != closed
+		l.mu.RUnlock()
+		assert.True(t, open, "lobby %s is closed but still listed", code)
+		for _, p := range roster {
+			assert.Same(t, l, m.playerLobby[p.ID], "%s sits at %s, but the index says otherwise", p.ID, code)
+		}
+		seated += len(roster)
+	}
+	assert.Len(t, m.playerLobby, seated, "the index holds a player no open table seats")
 }
 
 // guestRef pairs a joiner with the per-goroutine outcome of its join attempt.
@@ -60,7 +83,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(maxPlayers), WithCardGame("TestGame"))
+	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("testgame"))
 	require.NoError(t, err)
 
 	guests := make([]*guestRef, joiners)
@@ -81,12 +104,12 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		go func(g *guestRef) {
 			defer wg.Done()
 			<-start // release all goroutines together to maximise contention
-			err := m.JoinLobbyByCode(l.Code(), g.p)
+			err := joinErr(m.JoinLobbyByCode(l.Code(), g.p))
 			switch {
 			case err == nil:
 				g.joined = true
 				successes.Add(1)
-			case strings.Contains(err.Error(), "full"):
+			case errors.Is(err, errLobbyFull):
 				fullErrs.Add(1)
 			default:
 				otherErrs.Add(1)
@@ -104,7 +127,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	assert.Equal(t, int64(joiners-freeSlots), fullErrs.Load(), "all remaining joiners must be rejected as full")
 
 	// Roster is exactly full and contains no duplicates.
-	assert.Equal(t, maxPlayers, l.CurrentPlayers(), "lobby must end exactly at capacity")
+	assert.Equal(t, maxPlayers, l.Snapshot().Players(), "lobby must end exactly at capacity")
 
 	seen := map[string]bool{leader.ID: true}
 	joinedCount := 0
@@ -121,6 +144,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		}
 	}
 	assert.Equal(t, freeSlots, joinedCount)
+	assertIndexMatchesRosters(t, m)
 }
 
 // TestConcurrent_LeaderAndGuestsLeaveSimultaneously drains a full lobby by having
@@ -133,17 +157,13 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	m := newTestManager(t, nil)
 	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(players), WithCardGame("TestGame"))
+	all := testutil.Players(players)
+	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("testgame"))
 	require.NoError(t, err)
-
-	all := []*game.Player{leader}
-	for i := 1; i < players; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
-		all = append(all, g)
+	for _, g := range all[1:] {
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
 	}
-	require.Equal(t, players, l.CurrentPlayers())
+	require.Equal(t, players, l.Snapshot().Players())
 
 	var (
 		start = make(chan struct{})
@@ -165,7 +185,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	// Lobby must be gone from the manager entirely.
 	_, err = m.FindLobbyByCode(l.Code())
-	require.ErrorContains(t, err, "lobby not found", "empty lobby must be removed")
+	require.ErrorIs(t, err, errLobbyNotFound, "empty lobby must be removed")
 
 	// No ghost membership: the manager's playerLobby map is the authoritative
 	// membership index, and no player may still resolve to a lobby through it.
@@ -174,6 +194,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	for _, p := range all {
 		assert.Nil(t, m.FindLobbyByPlayer(p), "player %q left a ghost playerLobby entry", p.ID)
 	}
+	assertIndexMatchesRosters(t, m)
 }
 
 // TestConcurrent_JoinRacingLastLeave repeatedly interleaves a fresh joiner with
@@ -192,7 +213,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			unlimitedJoins(m)
 
 			leader := mockPlayer(fmt.Sprintf("leader-%d", i), testutil.UID(uint64(2*i+1)))
-			l, err := m.New(leader, WithMaxPlayers(4), WithCardGame("TestGame"))
+			l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
 			code := l.Code()
 
@@ -207,7 +228,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				joinErr = m.JoinLobbyByCode(code, joiner)
+				_, joinErr = m.JoinLobbyByCode(code, joiner)
 			}()
 			go func() {
 				defer wg.Done()
@@ -233,6 +254,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 				assert.Nil(t, m.FindLobbyByPlayer(joiner), "iter %d: rejected joiner left a ghost entry", i)
 				assert.False(t, l.HasPlayer(joiner), "iter %d: rejected joiner still a member", i)
 			}
+			assertIndexMatchesRosters(t, m)
 		}
 	})
 }
@@ -250,25 +272,16 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 		perGoTurns = 40
 	)
 
-	m := newTestManager(t, nil)
-	unlimitedJoins(m)
-	leader := mockPlayer("leader", testutil.UID(1))
-	l, err := m.New(leader, WithMaxPlayers(members), WithCardGame("NeverStarts"))
-	require.NoError(t, err)
-
-	roster := []*game.Player{leader}
-	for i := 1; i < members; i++ {
-		g := mockPlayer(fmt.Sprintf("g%d", i), testutil.UID(uint64(i+1)))
-		require.NoError(t, m.JoinLobbyByCode(l.Code(), g))
-		roster = append(roster, g)
-	}
-
-	// Rules requiring far more players than present: an all-ready roster fails to
+	// A game needing one more player than ever sits down: an all-ready roster fails to
 	// start, so the lobby stays in Waiting and the ready map keeps churning.
-	registry := game.NewRegistry()
-	mockRules := new(MockRules)
-	mockRules.On("MinPlayers").Return(members + 100)
-	registerGame(registry, "NeverStarts", mockRules)
+	m := newManagerFor(t, nil, boundedRegistry("NeverStarts", stubRules{}, members+1, members+1))
+	unlimitedJoins(m)
+	roster := testutil.Players(members)
+	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("neverstarts"))
+	require.NoError(t, err)
+	for _, g := range roster[1:] {
+		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+	}
 
 	var (
 		start = make(chan struct{})
@@ -284,7 +297,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 				// Error is expected sometimes (e.g. "need at least N players" when the
 				// toggle briefly makes everyone ready). We only care that it never
 				// races or deadlocks; correctness of the ready map is checked after.
-				_ = l.ToggleReady(p, registry)
+				_ = m.ToggleReady(p)
 			}
 		}(target)
 	}
@@ -296,12 +309,13 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	// The lobby never had enough players to start, so it must still be Waiting,
 	// with an intact roster and every ready flag a well-defined bool.
-	assert.True(t, l.IsWaiting(), "lobby must remain in Waiting; a start should never have succeeded")
-	assert.Equal(t, members, l.CurrentPlayers(), "roster must be unchanged")
+	assert.True(t, isWaiting(l), "lobby must remain in Waiting; a start should never have succeeded")
+	assert.Equal(t, members, l.Snapshot().Players(), "roster must be unchanged")
 	for _, p := range roster {
-		_ = l.IsReady(p) // must not race or panic
+		_ = isReady(l, p) // must not race or panic
 		assert.True(t, l.HasPlayer(p), "member %q vanished from roster", p.ID)
 	}
+	assertIndexMatchesRosters(t, m)
 }
 
 // seatInvariant is the one thing that must hold after any interleaving of disconnect,
@@ -310,6 +324,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 // player; a seat gone with no index entry is an expired one. Never both, never neither.
 func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int) {
 	t.Helper()
+	assertIndexMatchesRosters(t, m)
 	m.mu.RLock()
 	_, pending := m.grace.pending[p.ID]
 	indexed := m.playerLobby[p.ID]
@@ -319,7 +334,7 @@ func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int)
 	// than emptying it - so the state, not the slice, is what says whether a seat
 	// exists. The manager's index is the authoritative membership record either way.
 	l.mu.RLock()
-	seated := l.state != Closed && l.hasPlayerLocked(p)
+	seated := l.state != closed && l.hasPlayerLocked(p)
 	l.mu.RUnlock()
 
 	assert.False(t, pending, "iter %d: a grace timer is still armed after both paths settled", iter)
@@ -331,8 +346,8 @@ func seatInvariant(t *testing.T, m *Manager, l *Lobby, p *game.Player, iter int)
 }
 
 // The grace timer firing and the player reconnecting are the same seat from two
-// goroutines. Whoever loses must lose completely: a resume that hands back a lobby the
-// expiry has already emptied drops the player into a table that does not hold them.
+// goroutines. Whoever loses must lose completely: a resume that cancels nothing while
+// the expiry empties the seat, or an expiry that runs after a resume kept it.
 func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 	t.Parallel()
 
@@ -343,9 +358,8 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			m.DisconnectPlayer(guest)
 
 			var (
-				wg      sync.WaitGroup
-				gate    = make(chan struct{})
-				resumed *Lobby
+				wg   sync.WaitGroup
+				gate = make(chan struct{})
 			)
 			wg.Add(2)
 			go func() {
@@ -356,23 +370,19 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				resumed = m.ResumePlayer(guest)
+				m.ResumePlayer(guest)
 			}()
 			close(gate)
 			wg.Wait()
 
 			seatInvariant(t, m, l, guest, i)
-			if resumed != nil {
-				assert.True(t, l.HasPlayer(guest), "iter %d: resumed into a seat that was given up", i)
-				assert.Equal(t, l, resumed, "iter %d: resumed into the wrong table", i)
-			}
 		}
 	})
 }
 
 // Two sessions for one account can both reach ResumePlayer - a takeover overlaps the
 // old session's teardown. Exactly one may cancel the grace, and neither may leave one
-// armed or come back with a lobby the player is not in.
+// armed or lose the seat.
 func TestConcurrent_ReconnectTwice(t *testing.T) {
 	t.Parallel()
 
@@ -385,23 +395,18 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
-				got  [2]*Lobby
 			)
-			for slot := range got {
-				wg.Add(1)
-				go func(slot int) {
-					defer wg.Done()
+			for range 2 {
+				wg.Go(func() {
 					<-gate
-					got[slot] = m.ResumePlayer(guest)
-				}(slot)
+					m.ResumePlayer(guest)
+				})
 			}
 			close(gate)
 			wg.Wait()
 
 			seatInvariant(t, m, l, guest, i)
-			for _, resumed := range got {
-				assert.Equal(t, l, resumed, "iter %d: a reconnecting session lost its own table", i)
-			}
+			assert.Equal(t, l, m.FindLobbyByPlayer(guest), "iter %d: a reconnecting session lost its own table", i)
 		}
 	})
 }
@@ -497,11 +502,11 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			target := mockPlayer("target", testutil.UID(2))
 			other := mockPlayer("other", testutil.UID(3))
 
-			table, err := m.New(host, WithMaxPlayers(4), WithCardGame("TestGame"))
+			table, err := m.CreateLobby(host, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
-			elsewhere, err := m.New(other, WithMaxPlayers(4), WithCardGame("TestGame"))
+			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
-			require.NoError(t, m.JoinLobbyByCode(table.Code(), target))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
 
 			var (
 				wg   sync.WaitGroup
@@ -510,7 +515,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			wg.Add(3)
 			go func() { defer wg.Done(); <-gate; _ = m.Kick(host, target) }()
 			go func() { defer wg.Done(); <-gate; m.LeaveLobby(target) }()
-			go func() { defer wg.Done(); <-gate; _ = m.JoinLobbyByCode(elsewhere.Code(), target) }()
+			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(elsewhere.Code(), target)) }()
 			close(gate)
 			wg.Wait()
 
@@ -531,6 +536,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			default:
 				assert.Nil(t, indexed, "iter %d: no seat anywhere, but the index still claims one", i)
 			}
+			assertIndexMatchesRosters(t, m)
 		}
 	})
 }
@@ -555,8 +561,8 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range tables {
-			_, err := m.New(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
-				WithPrivate(false), WithCardGame("TestGame"))
+			_, err := m.CreateLobby(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
+				WithPrivate(false), WithCardGame("testgame"))
 			assert.NoError(t, err)
 		}
 	}()
