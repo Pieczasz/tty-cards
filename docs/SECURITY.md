@@ -214,7 +214,7 @@ land there and are deployed from there.
 
 ## See also
 
-- [`privacy.md`](privacy.md) - what is stored about a player and for how long
+- [`../web/src/legal/privacy.md`](../web/src/legal/privacy.md) - what is stored about a player and for how long
 - [`data-inventory.md`](data-inventory.md) - the same
   question answered per file, for auditors
 - [`architecture.md`](architecture.md) §2 - the layered limits and where each one

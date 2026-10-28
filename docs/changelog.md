@@ -36,28 +36,22 @@ unnoticed for so long.
   one limit. The host's Docker needs IPv6 enabled for user networks.
 - **Explicit data retention.** Logs 14 days, traces 48 hours, metrics 30 days. It
   used to be "until the disk fills".
-- Terms of Service and a Privacy Policy, in the repo and on the site
-  (`docs/privacy.md`, `docs/terms.md`).
+- Terms of Service and a Privacy Policy, on the site
+  (`web/src/legal/`).
 - A security policy with a private disclosure channel (`docs/SECURITY.md`).
 
 ### Documentation
 
 - **Every document except `README.md`, `LICENSE`, `CLAUDE.md` and `AGENTS.md` now
   lives in [`docs/`](README.md)**, with `docs/README.md` as the index.
-  `ARCHITECTURE.md` is `docs/architecture.md`, `READING_GUIDE.md` is
-  `docs/reading-guide.md`, `ONBOARDING.md` is `docs/onboarding.md`,
-  `CHANGELOG.md` is `docs/changelog.md`, `PRIVACY.md` and `TERMS.md` are
-  `docs/privacy.md` and `docs/terms.md`, and
+  `ARCHITECTURE.md` is `docs/architecture.md`, `ONBOARDING.md` is
+  `docs/onboarding.md`, `CHANGELOG.md` is `docs/changelog.md`, and
   `internal/observability/DATA.md` is `docs/data-inventory.md`.
+  The published privacy policy and terms are `web/src/legal/`.
   `docs/CONTRIBUTING.md` and `docs/SECURITY.md` keep their upper-case names so
   GitHub's own UI still links them.
-- **New: [`docs/decisions.md`](decisions.md)** - one record per non-obvious
-  choice, with context, consequences and the code it lives in. Fifty-four of
-  them, from "one mutex per engine" to "the odd chip goes to the lowest-sorted
-  player id".
-- The reading guide is now a **bottom-up** walk: leaves first, so every later
-  file only uses what you already know. Per step it names the files and their
-  size, the invariant to check, and the one test that teaches it.
+- **New: [`docs/decisions.md`](decisions.md)** - the policies a later change
+  has to keep, from "one mutex per engine" to the rating and proxy rules.
 - `docs/architecture.md` is the canonical design document and is readable top to
   bottom by someone who has never seen the code. `docs/onboarding.md` keeps the
   product story, the annotated tree and local development, and links out for

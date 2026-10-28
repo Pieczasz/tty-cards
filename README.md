@@ -194,7 +194,7 @@ internal/
   systemtest/      end-to-end through public APIs only
 
 web/               Astro marketing site (not part of the Go module)
-docs/              the design document, reading guide, decisions, policies
+docs/              architecture, decisions, and the doc index
 ```
 
 ## Configuration
@@ -296,7 +296,7 @@ Keep the `letsencrypt` volume: it holds the ACME account and the certificates, a
 losing it means re-issuing against Let's Encrypt's weekly duplicate limit. HSTS
 starts at `max-age=300`; once the first automatic renewal has gone through (about
 60 days in) raise it in `nginx.conf` to `604800`, then `31536000`
-(`docs/decisions.md`, the TLS entry).
+(`docs/decisions.md`).
 
 ### Backups
 
@@ -378,15 +378,14 @@ and the order to read them in.
 
 | Doc | For |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The canonical design document: contracts, topology, invariants |
-| [`docs/decisions.md`](docs/decisions.md) | One record per non-obvious choice, with its reasoning |
-| [`docs/reading-guide.md`](docs/reading-guide.md) | Ordered bottom-up code tour, "where is X?" index |
+| [`docs/architecture.md`](docs/architecture.md) | Topology, contracts, invariant list |
+| [`docs/decisions.md`](docs/decisions.md) | The policies a later change has to keep |
 | [`docs/onboarding.md`](docs/onboarding.md) | Product story, annotated file tree, day one |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to add a game, test conventions, PR norms |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Reporting a vulnerability; what is in scope |
 | [`docs/data-inventory.md`](docs/data-inventory.md) | Per-field personal-data inventory |
 | [`docs/changelog.md`](docs/changelog.md) | What changed, in user-facing terms |
-| [`docs/privacy.md`](docs/privacy.md) / [`docs/terms.md`](docs/terms.md) | The published policies |
+| [`web/src/legal/`](web/src/legal/) | The published privacy policy and terms |
 | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) | Terse briefs for coding agents |
 
 ## License

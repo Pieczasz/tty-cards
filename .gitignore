@@ -18,3 +18,4 @@ web/.astro/
 /.astro/
 # Added by code-review-graph
 .code-review-graph/
+.local/

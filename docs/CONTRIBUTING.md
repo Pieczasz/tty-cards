@@ -5,7 +5,6 @@ That goal drives most of the rules below: every one of them exists so the next
 person can change the code without reading all of it first.
 
 Start with [`README.md`](../README.md) to run it, then
-[`reading-guide.md`](reading-guide.md) to learn it, then
 [`architecture.md`](architecture.md) for the contracts you must not break.
 
 Security bugs do **not** go in an issue - see [`SECURITY.md`](SECURITY.md).
@@ -23,23 +22,6 @@ make migrate-up
 make test-short
 make build
 ```
-
-### Make targets
-
-| Target | Purpose |
-|---|---|
-| `make test-short` | Unit tests, no Docker |
-| `make test` | `go test -race ./...` |
-| `make test-integration` | `-tags=integration`, needs Docker (testcontainers) |
-| `make lint` | golangci-lint, both build tags |
-| `make deadcode` | fails on any function unreachable from `main` and every test |
-| `make semgrep` | the project-invariant rules in `.semgrep/`, needs `uv` |
-| `make cover` | unit + integration with coverage, fails under 95%, needs Docker |
-| `make fmt` / `make fix` | `go fmt` / `go fix` |
-| `make build` | `bin/server` |
-| `make ci` | fmt, fix, lint, deadcode, semgrep, cover, build - run this before you push |
-| `make migrate-create` / `migrate-up` / `migrate-down` | SQL migrations via `$DB_DSN` |
-| `make loadtest` | SSH concurrency harness against a **running** server |
 
 ### Linting locally
 
@@ -119,8 +101,7 @@ Two rules that have each cost a bug:
 `AfterPlayerRemoved` returns a `game.LeaveOutcome`. If one seat leaving means the
 match cannot go on (hearts is four-handed or nothing), return
 `game.LeaveInterruptsMatch`: the game then ends `EndReasonInterrupted`, and finalize
-charges only the leavers
-([`decisions.md` #39](decisions.md#39-an-interrupted-match-charges-only-its-leavers)).
+charges only the leavers.
 If a lone remaining seat still has a hand to play out (poker's all-in leaver still
 contests the pot), return `game.LeaveKeepsHandOpen`, or the engine hands that seat a
 forfeit win; otherwise `game.LeaveSettled`.
@@ -135,14 +116,11 @@ silent no-op - and a move between hands with `game.ErrHandOver`, and gate
 the between-hands deal with `game.ValidateNextHand`. `internal/game` imports from an
 allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 `internal/game/...`, `uuid`), so a rules package that needs anything else is a
-decision to discuss first
-([`decisions.md` #54](decisions.md#54-the-game-packages-import-from-an-allow-list)).
+decision to discuss first.
 
 Read `State.Extra` through one per-package `extraOf(state) *State` that asserts
-without `ok`, as every game does: the wrong type there is a wiring bug, and the
-engine's recover ends that one table as a rules error
-([`decisions.md` #37](decisions.md#37-a-rules-panic-on-the-turn-timer-ends-one-table-not-the-process)).
-A helper a view calls inside `Frame` is the exception and keeps the `ok` form.
+without `ok`, as every game does: the wrong type there is a wiring bug.
+A helper a view calls inside `Frame` keeps the `ok` form, because `Frame` does not recover.
 
 Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
 `PipValue` answer three different questions and must not be swapped, and
@@ -166,8 +144,7 @@ poker share it). Draw opponents from `BaseState.Opponents`, which already runs
 clockwise from the hero's left. Wire it the way `crazyeight` does:
 - Your key handler closes any prompt of your own on esc first, then calls
   `m.HandleLeaveKey(key)` before its own bindings and returns if it consumed the
-  key - mid-game esc must ask before it forfeits
-  ([`decisions.md` #44](decisions.md#44-leaving-a-live-game-asks-first)).
+  key - mid-game esc must ask before it forfeits.
 - `View` returns `m.LeaveConfirmScreen()` before anything else when it is armed.
 - Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
   render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
@@ -303,8 +280,7 @@ Schema changes are SQL files in `internal/db/migrations/`, applied with
   and a broken migration, or a down that breaks on real data, fails the suite
   rather than production. Add a seed row when your down file rewrites data.
 - **Say so when a down loses data.** `000005_game_slug.down.sql` opens with
-  `-- LOSSY.` and what is lost
-  ([`decisions.md` #48](decisions.md#48-migration-000005s-down-is-lossy)).
+  `-- LOSSY.` and what is lost.
 - **Refuse rather than guess** when existing rows break the new constraint and
   fixing them is an operator's decision: `000006_username_ci.up.sql` names every
   case collision and stops.
@@ -332,10 +308,8 @@ Schema changes are SQL files in `internal/db/migrations/`, applied with
   Docker image build (amd64 + arm64), and `docker compose config`.
 - If you changed a contract - `SessionTracker`, finalize ownership, the grace
   state machine, the `Frame` signature, the catalog shape, a repository interface
-  - update the docs in this order: `CLAUDE.md`, `docs/architecture.md`,
-  `docs/decisions.md` if the *reason* changed, the `docs/reading-guide.md` step
-  that covers the path, and `docs/onboarding.md` only if the day-one story
-  changed.
+  - update `CLAUDE.md` and `docs/architecture.md`, and `docs/decisions.md` if the
+  reason changed. Update `docs/onboarding.md` only if the day-one story changed.
 
 ## Reporting bugs and suggesting features
 

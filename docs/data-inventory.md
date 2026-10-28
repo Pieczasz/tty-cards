@@ -218,7 +218,7 @@ per-user endpoint, no writes, no auth.
 | Log read positions, metrics not yet written | Alloy `alloy-data` volume | until delivered; the WAL is truncated within hours | `compose.yaml` (`--storage.path`) |
 | Metrics | Prometheus | **30 days**, 8 GB cap | `compose.yaml` (`--storage.tsdb.retention.time=30d`) |
 | Container stdout on disk | Docker json-file | 3 × 10 MB, size-bound not time-bound | `compose.yaml` `x-logging` |
-| Backups: the whole database and the SSH host key (optional) | the host's `backups/`, and an off-host rclone remote when `BACKUP_REMOTE` is set | **the newest `BACKUP_KEEP` (14) archives**, in both places - a count, so the age depends on the schedule; written `0600` (`umask 077`), never in the image build context. An erased account survives in older archives until they age out | `scripts/backup.sh`, `.dockerignore`, [`decisions.md` #59](decisions.md#59-backups-hold-the-database-and-the-host-key-go-off-host-and-are-drilled) |
+| Backups: the whole database and the SSH host key (optional) | the host's `backups/`, and an off-host rclone remote when `BACKUP_REMOTE` is set | **the newest `BACKUP_KEEP` (14) archives**, in both places - a count, so the age depends on the schedule; written `0600` (`umask 077`), never in the image build context. An erased account survives in older archives until they age out | `scripts/backup.sh`, `.dockerignore` |
 | Rate-limit counters | process memory | one window (1s SSH auth, 1 min refusal warning, 1h registration, 60s API) | `internal/ratelimit` |
 | Live session and table state | process memory | until disconnect / match end | - |
 
