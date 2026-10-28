@@ -37,13 +37,18 @@ type Engine struct {
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
 type turnClock struct {
 	defaultLength time.Duration
-	seq           uint64
-	timer         *time.Timer
-	deadline      time.Time
-	missed        map[string]int
-	playerID      string
-	length        time.Duration
-	missCharged   bool
+	// generation counts timer (re)starts and stops. armTurnTimerLocked hands the value
+	// to its AfterFunc and stopTurnTimerLocked bumps it, so a callback that lost the
+	// race with a stop or a re-arm sees a number that is no longer current and does
+	// nothing. Written and read under Engine.mu only; the callback's copy is the one
+	// thing that crosses goroutines.
+	generation  uint64
+	timer       *time.Timer
+	deadline    time.Time
+	missed      map[string]int
+	playerID    string
+	length      time.Duration
+	missCharged bool
 }
 
 // EngineOption configures NewEngine.

@@ -49,13 +49,13 @@ func (e *Engine) armTurnTimerLocked() {
 	}
 	e.clock.playerID, e.clock.length = playerID, timeout
 
-	seq := e.clock.seq
+	generation := e.clock.generation
 	e.clock.deadline = time.Now().Add(wait)
-	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(seq) })
+	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(generation) })
 }
 
 func (e *Engine) stopTurnTimerLocked() {
-	e.clock.seq++
+	e.clock.generation++
 	if e.clock.timer != nil {
 		e.clock.timer.Stop()
 		e.clock.timer = nil
@@ -65,8 +65,8 @@ func (e *Engine) stopTurnTimerLocked() {
 
 // onTurnTimeout is the timer's callback. A seat taken for idling is reported to
 // WithOnIdleRemoved only here, once the engine lock is released.
-func (e *Engine) onTurnTimeout(seq uint64) {
-	idle := e.expireTurn(seq)
+func (e *Engine) onTurnTimeout(generation uint64) {
+	idle := e.expireTurn(generation)
 	if idle == "" || e.onIdleRemoved == nil {
 		return
 	}
@@ -86,7 +86,7 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 // so a player's own move either lands before this takes the lock - and moved the
 // generation on - or after it has settled the turn. It returns the seat it took for
 // idling, or "".
-func (e *Engine) expireTurn(seq uint64) (idle string) {
+func (e *Engine) expireTurn(generation uint64) (idle string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
@@ -100,7 +100,7 @@ func (e *Engine) expireTurn(seq uint64) (idle string) {
 
 	// A fired AfterFunc cannot be stopped: one that waited on the lock while the turn
 	// moved on, the table ended or the engine closed finds a newer generation.
-	if seq != e.clock.seq || e.state.Phase != Playing {
+	if generation != e.clock.generation || e.state.Phase != Playing {
 		return ""
 	}
 	current := e.currentPlayerLocked()
