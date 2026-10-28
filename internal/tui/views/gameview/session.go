@@ -219,6 +219,25 @@ func (s *Session) MoveCursor(delta int) {
 	s.Selected = components.StepCursor(s.Selected, delta, len(s.Base.Hand)-1)
 }
 
+// HandleHandKey is the start of every hand-cursor table's key handling: the leave keys,
+// then left/right and the digit keys that move the cursor along the hand. It reports
+// whether it consumed the key; a view keeps its own bindings for the rest. A prompt
+// of the view's own that esc closes first has to be checked before it.
+func (s *Session) HandleHandKey(key string) (tea.Cmd, bool) {
+	if cmd, ok := s.HandleLeaveKey(key); ok {
+		return cmd, true
+	}
+	if dx, ok := components.HorizontalNudge(key); ok {
+		s.MoveCursor(dx)
+		return nil, true
+	}
+	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
+		s.SelectDigit(key)
+		return nil, true
+	}
+	return nil, false
+}
+
 // SelectDigit moves the cursor to the card a number key names, so only the first ten
 // cards are reachable this way.
 func (s *Session) SelectDigit(key string) {

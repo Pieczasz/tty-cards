@@ -25,19 +25,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
+	if cmd, ok := m.HandleHandKey(msg.String()); ok {
 		return m, cmd
 	}
 
-	if dx, ok := components.HorizontalNudge(msg.String()); ok {
-		m.MoveCursor(dx)
-		return m, nil
-	}
-
 	switch msg.String() {
-	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		m.SelectDigit(msg.String())
-		return m, nil
 	// KeySpace, not " ": matching the literal meant the pass phase could not be played
 	// by hand at all - the engine's 45-second auto-pass was the only way out of it.
 	case components.KeySpace:

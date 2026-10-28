@@ -540,3 +540,25 @@ func TestSession_ARefusalClearsWhenTheTurnMovesOn(t *testing.T) {
 	s.Sync(nil)
 	assert.NoError(t, s.ActionErr, "the refusal outlived the turn it was about")
 }
+
+// The prefix hearts and gin rummy share: the cursor keys move along the hand and are
+// consumed, anything else is left to the view.
+func TestSession_HandleHandKey(t *testing.T) {
+	t.Parallel()
+	_, _, s := seatedSession(t)
+	require.Greater(t, len(s.Base.Hand), 3)
+
+	for key, want := range map[string]int{"3": 3, "h": 2, "right": 3, "0": 0} {
+		cmd, handled := s.HandleHandKey(key)
+		assert.True(t, handled, key)
+		assert.Nil(t, cmd, key)
+		assert.Equal(t, want, s.Selected, key)
+	}
+
+	for _, key := range []string{"enter", "d", "space", "x"} {
+		_, handled := s.HandleHandKey(key)
+		assert.False(t, handled, "%q belongs to the view", key)
+	}
+	_, handled := s.HandleHandKey("esc")
+	assert.True(t, handled, "esc arms the leave prompt")
+}
