@@ -138,10 +138,9 @@ services:
       # transparent huge pages). Hence 62.5% of mem_limit, not 75%: 2.5GiB x 1.25 =
       # 3.1GiB, leaving ~900MiB before the kernel kills. GODEBUG=disablethp=1 closed
       # that gap but cost 45% more CPU and a 120ms p95 move round-trip; not worth it.
-      # A session costs ~1.3MiB of heap at the 120x40 floor tier (internal/ssh
+      # A session costs ~1.3MiB of heap at the fixed 120x40 cap (internal/ssh
       # termsize.go), so 1250 of them need ~1.6GiB live (2.8GiB resident at 1250
-      # measured), plus up to ~330MiB for terminals granted more than the floor
-      # (extraCellBudget, decision #61): raise this with MAX_CONNECTIONS, never alone.
+      # measured): raise this with MAX_CONNECTIONS, never alone (decision #60).
       - GOMEMLIMIT=2560MiB
     # The hard ceiling the kernel enforces; GOMEMLIMIT above is sized against it.
     mem_limit: 4g
@@ -176,6 +175,12 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # Started first so the first spans and logs have somewhere to go, but not
+      # required: the exporter is asynchronous, and a broken telemetry stack must
+      # never keep the game from booting.
+      alloy:
+        condition: service_started
+        required: false
 
   db:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873

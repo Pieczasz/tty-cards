@@ -3,6 +3,12 @@
 .DS_Store
 .gocache
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+rclone.conf
+compose.load.yaml
 .idea/
 coverage.out
 bin/
