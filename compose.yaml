@@ -38,7 +38,7 @@ services:
   # sslmode=require encrypts without verifying the certificate, which is what a
   # private network with no CA can offer. Remove the db-tls volume to rotate it.
   db-certs:
-    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
     <<: *defaults
     mem_limit: 32m
     cpus: 0.5
@@ -241,7 +241,7 @@ services:
   # overwrites with the real certificate once issued. Browsers reject the
   # placeholder, which is the honest answer until then.
   proxy-certs:
-    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
     <<: *defaults
     mem_limit: 32m
     cpus: 0.5
