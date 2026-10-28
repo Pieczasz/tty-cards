@@ -2,71 +2,101 @@ package lobby
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/game"
 )
 
+// graceHold is one armed disconnect leave. gen is the generation the timer
+// callback was armed with; a newer arm makes the old callback a no-op. done is
+// closed when that callback finishes, so a reconnect blocked on the expiry can wait
+// it out instead of sitting down into a seat that is about to disappear.
+type graceHold struct {
+	gen   uint64
+	timer *time.Timer
+	done  chan struct{}
+	once  sync.Once
+}
+
+func (h *graceHold) finish() {
+	if h == nil || h.done == nil {
+		return
+	}
+	h.once.Do(func() { close(h.done) })
+}
+
 // graceTimers holds mid-game seats after a dropped session. Caller must hold
 // Manager.mu around every method: the maps are not independently locked.
 type graceTimers struct {
-	pending  map[string]*time.Timer
-	expiring map[string]struct{}
+	seq      uint64
+	pending  map[string]*graceHold
+	expiring map[string]*graceHold
 }
 
 func newGraceTimers() graceTimers {
 	return graceTimers{
-		pending:  make(map[string]*time.Timer),
-		expiring: make(map[string]struct{}),
+		pending:  make(map[string]*graceHold),
+		expiring: make(map[string]*graceHold),
 	}
 }
 
 func (d *graceTimers) clear(id string) {
-	if t, ok := d.pending[id]; ok {
-		t.Stop()
+	if h, ok := d.pending[id]; ok {
+		// Stop failed means the callback is already running and will finish the hold.
+		// Closing here would let a waiter resume before the leave has run.
+		if h.timer.Stop() {
+			h.finish()
+		}
 		delete(d.pending, id)
 	}
 	delete(d.expiring, id)
 }
 
-func (d *graceTimers) arm(id string, wait time.Duration, fire func()) {
-	if t, ok := d.pending[id]; ok {
-		t.Stop()
+func (d *graceTimers) arm(id string, wait time.Duration, fire func(gen uint64)) {
+	if old, ok := d.pending[id]; ok && old.timer.Stop() {
+		old.finish()
 	}
-	d.pending[id] = time.AfterFunc(wait, fire)
+	d.seq++
+	h := &graceHold{gen: d.seq, done: make(chan struct{})}
+	h.timer = time.AfterFunc(wait, func() {
+		fire(h.gen)
+		h.finish()
+	})
+	d.pending[id] = h
 }
 
-// beginExpire moves a pending leave into the expiring set. False if there was
-// nothing to expire (already resumed or cleared).
-//
-// The timer is stopped because releaseHeldSeats claims holds early: left running, it
-// fires at the old deadline into whatever hold the player's next drop armed.
-func (d *graceTimers) beginExpire(id string) bool {
-	t, ok := d.pending[id]
-	if !ok {
-		return false
+// claimExpire moves a pending leave of gen into the expiring set. gen 0 claims
+// whatever is pending (the test and release paths). A callback from an older arm
+// does not match and must not drop the hold a later drop armed.
+func (d *graceTimers) claimExpire(id string, gen uint64) *graceHold {
+	h, ok := d.pending[id]
+	if !ok || (gen != 0 && h.gen != gen) {
+		return nil
 	}
-	t.Stop()
+	h.timer.Stop()
 	delete(d.pending, id)
-	d.expiring[id] = struct{}{}
-	return true
+	d.expiring[id] = h
+	return h
 }
 
 // tryCancel stops a pending leave for reconnect. blocked means expire already
-// owns the seat (or the timer callback is in flight).
-func (d *graceTimers) tryCancel(id string) (cancelled, blocked bool) {
-	if _, ok := d.expiring[id]; ok {
-		return false, true
+// owns the seat (or the timer callback is in flight); done is closed when that
+// expiry finishes.
+func (d *graceTimers) tryCancel(id string) (cancelled, blocked bool, done <-chan struct{}) {
+	if h, ok := d.expiring[id]; ok {
+		return false, true, h.done
 	}
-	t, ok := d.pending[id]
+	h, ok := d.pending[id]
 	if !ok {
-		return false, false
+		return false, false, nil
 	}
-	if !t.Stop() {
-		return false, true
+	if !h.timer.Stop() {
+		return false, true, h.done
 	}
 	delete(d.pending, id)
-	return true, false
+	h.finish()
+	return true, false, nil
 }
 
 // DisconnectPlayer is what a dropped session calls instead of LeaveLobby: a seat
@@ -106,37 +136,54 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		m.LeaveLobby(p)
 		return
 	}
-	m.grace.arm(p.ID, disconnectGrace, func() { m.expireLeave(p) })
+	m.grace.arm(p.ID, disconnectGrace, func(gen uint64) { m.expireLeaveGen(p, gen) })
 	m.mu.Unlock()
 	slog.InfoContext(m.appCtx, "session dropped mid-game, holding the seat",
 		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
-// expireLeave is the grace timer's body, separate so tests can drive the expiry
-// without waiting out the window.
+// expireLeave is the grace timer's body for the hold that is pending now. Tests
+// and releaseHeldSeats drive it without waiting out the window.
 func (m *Manager) expireLeave(p *game.Player) {
-	m.mu.Lock()
-	if !m.grace.beginExpire(p.ID) {
-		m.mu.Unlock()
+	m.expireLeaveGen(p, 0)
+}
+
+// expireLeaveGen gives up the seat if gen is still the pending hold. A stale
+// timer (gen from an earlier arm) returns without touching the newer one.
+func (m *Manager) expireLeaveGen(p *game.Player, gen uint64) {
+	defer m.recoverGoroutine("disconnect grace")
+	if p == nil {
 		return
 	}
+	m.mu.Lock()
+	h := m.grace.claimExpire(p.ID, gen)
 	m.mu.Unlock()
+	if h == nil {
+		return
+	}
+	defer h.finish()
 	slog.InfoContext(m.appCtx, "disconnect grace expired, giving up the seat", "player_id", p.ID)
 	m.LeaveLobby(p)
 }
 
 // ResumePlayer cancels a pending disconnect leave, so a reconnecting session keeps
 // its seat. Routing back to the table is the caller's: the seat stays indexed, and
-// FindLobbyByPlayer finds it. A grace whose expiry is already running is not
-// cancelled - that seat is as good as gone.
+// FindLobbyByPlayer finds it. An expiry already running is not cancelled; this
+// waits until that leave has finished, so the caller does not sit the player back
+// down into a seat that is on its way out.
 func (m *Manager) ResumePlayer(p *game.Player) {
 	if p == nil {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if cancelled, _ := m.grace.tryCancel(p.ID); cancelled {
+	cancelled, blocked, done := m.grace.tryCancel(p.ID)
+	m.mu.Unlock()
+	if cancelled {
 		slog.InfoContext(m.appCtx, "player reconnected inside the grace window", "player_id", p.ID)
+		return
+	}
+	if blocked && done != nil {
+		<-done
 	}
 }
 

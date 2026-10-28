@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -18,6 +19,16 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
+func TestReserveWatcher_ASecondReleaseDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	canStart, release := m.reserveWatcher()
+	require.True(t, canStart)
+	release()
+	release()
+	assert.True(t, m.WaitForFinalizers(time.Second))
+}
 
 // gamesFinished is the ttycards.games.finished total recorded for gameType so far.
 // Each test uses its own game, so parallel tests do not count each other's tables.
@@ -161,4 +172,58 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 	require.Equal(t, "probe", rec["msg"])
 	assert.Equal(t, l.Code(), rec["lobby"])
 	assert.Equal(t, "mock", rec["game"], "the slug, as every game metric labels it")
+}
+
+func TestToggleReady_SubscribeFailureDoesNotStartTheGame(t *testing.T) {
+	t.Parallel()
+	m, l := newTestLobby(t, 2)
+	m.engineOpts = []game.EngineOption{game.WithNoSubscribers(), game.WithTurnTimeout(0)}
+	leader := l.Snapshot().Leader.Player
+	guest := mockPlayer("p2", testutil.UID(2))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, m.ToggleReady(leader))
+
+	err := m.ToggleReady(guest)
+
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrRefused))
+	assert.Nil(t, l.ActiveGame())
+	assert.False(t, l.Snapshot().InGame)
+	require.True(t, m.WaitForFinalizers(time.Second), "the watcher count was left held for a game that never started")
+}
+
+func TestWatchGame_PanicDoesNotEscape(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	engine := game.NewEngine(stubRules{}, []*game.Player{{ID: "p1"}}, game.WithTurnTimeout(0))
+	require.NoError(t, engine.Start())
+	t.Cleanup(engine.Close)
+	feed := make(chan game.Event, 1)
+	feed <- game.Event{Type: game.EventGameEnded}
+	close(feed)
+
+	require.NotPanics(t, func() {
+		m.watchGame(nil, gameStart{engine: engine, feed: feed, req: finalizeRequest{game: gameRef("TestGame")}})
+	})
+}
+
+func TestExpireLeave_NilPlayerDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	require.NotPanics(t, func() { m.expireLeave(nil) })
+}
+
+func TestExpireLeave_StaleGenerationDoesNotDropTheNewGrace(t *testing.T) {
+	t.Parallel()
+	m, l, _, guest := startedGame(t)
+	m.DisconnectPlayer(guest)
+	m.mu.Lock()
+	stale := m.grace.pending[guest.ID].gen
+	m.mu.Unlock()
+
+	m.DisconnectPlayer(guest)
+	m.expireLeaveGen(guest, stale)
+
+	assert.True(t, l.HasPlayer(guest), "a stale grace timer dropped the seat the later drop is holding")
+	assert.True(t, pendingGrace(m, guest.ID))
 }

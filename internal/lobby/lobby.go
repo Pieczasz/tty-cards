@@ -434,8 +434,8 @@ func (l *Lobby) hasPlayerLocked(p *game.Player) bool {
 	return false
 }
 
-// startGameLocked starts a match and returns it for the manager to watch: the zero
-// value if the watch could not subscribe. Caller must hold l.mu. Never more seats
+// startGameLocked starts a match and returns it for the manager to watch. A watch
+// that cannot subscribe is an error and leaves the lobby waiting. Caller must hold l.mu. Never more seats
 // than the game deals for: CreateLobby and SetMaxPlayers keep the cap inside its
 // range, and addGuest keeps the roster under the cap.
 func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
@@ -460,9 +460,15 @@ func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 		return gameStart{}, fmt.Errorf("start game engine for lobby %s (%s): %w", l.code, mod.Slug, err)
 	}
 
-	// Before watchLocked, which snapshots it for the finalize.
+	// Before watchLocked, which snapshots it for the finalize. A watch that cannot
+	// subscribe never opens the table: the engine is closed so its clock does not
+	// keep playing a match the lobby does not know about.
 	l.startedAt = time.Now()
-	start := l.watchLocked(engine, db.GameRef{Slug: mod.Slug, Name: mod.Name})
+	start, err := l.watchLocked(engine, db.GameRef{Slug: mod.Slug, Name: mod.Name})
+	if err != nil {
+		engine.Close()
+		return gameStart{}, fmt.Errorf("watch game for lobby %s (%s): %w", l.code, mod.Slug, err)
+	}
 
 	l.setStateLocked(inGame)
 	l.activeEngine = engine

@@ -120,7 +120,7 @@ func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
 
 	m.mu.Lock()
-	m.grace.arm(guest.ID, time.Hour, func() {})
+	m.grace.arm(guest.ID, time.Hour, func(uint64) {})
 	m.mu.Unlock()
 
 	require.NoError(t, m.Kick(l.Snapshot().Leader.Player, guest))

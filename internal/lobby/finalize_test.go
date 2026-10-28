@@ -359,27 +359,40 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	assert.Nil(t, m.FindLobbyByPlayer(guest), "nothing to resume after expiry")
 }
 
-// expireLeave claims the grace before LeaveLobby runs; a resume in that gap must leave
-// the claim alone; the seat is about to go whatever the reconnect does.
-func TestResumePlayer_LeavesAClaimedExpiryAlone(t *testing.T) {
+// expireLeave claims the grace before LeaveLobby runs. A resume in that gap must
+// not return — and so must not sit the player back down — until the leave finishes.
+func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
 	t.Parallel()
 
 	m, l, _, guest := startedGame(t)
 
 	m.DisconnectPlayer(guest)
 	m.mu.Lock()
-	delete(m.grace.pending, guest.ID) // what expireLeave does before LeaveLobby
-	m.grace.expiring[guest.ID] = struct{}{}
-	stillSeated := m.playerLobby[guest.ID] != nil
+	h := m.grace.pending[guest.ID]
+	delete(m.grace.pending, guest.ID)
+	m.grace.expiring[guest.ID] = h
 	m.mu.Unlock()
-	require.True(t, stillSeated)
+	require.True(t, l.HasPlayer(guest))
 
-	m.ResumePlayer(guest)
-	m.mu.Lock()
-	_, claimed := m.grace.expiring[guest.ID]
-	m.mu.Unlock()
-	assert.True(t, claimed, "grace already claimed: do not resume")
-	assert.True(t, l.HasPlayer(guest), "LeaveLobby has not run yet")
+	returned := make(chan struct{})
+	go func() {
+		m.ResumePlayer(guest)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		t.Fatal("resumed while the expiry still owns the seat")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	m.LeaveLobby(guest)
+	h.finish()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("resume did not return once the expiry finished")
+	}
+	assert.Nil(t, m.FindLobbyByPlayer(guest), "the expiry took the seat before the resume returned")
 }
 
 // A second SSH session can take over a mid-game seat while the first is still
@@ -414,7 +427,7 @@ func TestResumePlayer_RefusedOnceTheTimerHasFired(t *testing.T) {
 	m, l, _, guest := startedGame(t)
 	fired := make(chan struct{})
 	m.mu.Lock()
-	m.grace.arm(guest.ID, time.Nanosecond, func() { close(fired) })
+	m.grace.arm(guest.ID, time.Nanosecond, func(uint64) { close(fired) })
 	m.mu.Unlock()
 	<-fired
 

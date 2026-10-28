@@ -48,6 +48,9 @@ type Manager struct {
 	games               *game.Registry
 	cachedPublicLobbies []*Lobby
 	cacheLastUpdated    time.Time
+	// browseEpoch is the scan publicLobbies is on. A scan publishes only while it
+	// is still the latest, so a slower older scan cannot overwrite a newer one.
+	browseEpoch atomic.Uint64
 	// cacheDirty is set by anything that changes which lobbies are public, a lobby
 	// marking itself in-game included. It is atomic rather than guarded by m.mu
 	// because each lobby shares it (Lobby.cacheDirty) and sets it under its own lock,
@@ -73,6 +76,9 @@ type Manager struct {
 	shuttingDown atomic.Bool
 	// grace holds mid-game seats after a dropped session (see disconnect.go).
 	grace graceTimers
+	// engineOpts is appended to every engine a start builds. Production leaves it
+	// empty; tests set it to force a feed the watcher cannot subscribe to.
+	engineOpts []game.EngineOption
 }
 
 // disconnectGrace is how long a mid-game seat survives its session. The engine's
@@ -194,17 +200,19 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// releaseHeldSeats. It is a no-op unless a finished game is holding the table.
 	m.releaseFinishedGame(l)
 	// The watcher is counted before the game can start, so a drain that begins at any
-	// point after the start waits for it.
-	admitted := m.admitGame()
-	start, err := l.toggleReady(p, admitted, m.seatHook(l))
+	// point after the start waits for it. release is idempotent: the nil-engine
+	// path and a watcher that also returns must not both Done.
+	canStart, release := m.reserveWatcher()
+	opts := make([]game.EngineOption, 0, len(m.engineOpts)+1)
+	opts = append(opts, m.engineOpts...)
+	opts = append(opts, m.seatHook(l))
+	start, err := l.toggleReady(p, canStart, opts...)
 	if start.engine == nil {
-		if admitted {
-			m.watchers.Done()
-		}
+		release()
 		return err
 	}
 	go func() {
-		defer m.watchers.Done()
+		defer release()
 		m.watchGame(l, start)
 	}()
 	return err
@@ -298,24 +306,70 @@ func (m *Manager) dropSeat(l *Lobby, playerID string) {
 	m.leave(&game.Player{ID: playerID}, l)
 }
 
+// reserveWatcher counts a watcher ToggleReady may start. release is safe to call
+// twice and when the gate was already closed: a nil engine and the watcher goroutine
+// must not both Done the same count.
+func (m *Manager) reserveWatcher() (canStart bool, release func()) {
+	if !m.admitGame() {
+		return false, func() {}
+	}
+	var once sync.Once
+	return true, func() { once.Do(m.watchers.Done) }
+}
+
+// heldLocks is the manager lock and, once lockLobby runs, that lobby's lock.
+// unlock drops whichever are still held, lobby first, and a second call does
+// nothing, so the defer and the release before notify cannot both unlock or
+// forget one of them. Lock order stays manager, then lobby.
+type heldLocks struct {
+	manager *sync.RWMutex
+	lobby   *sync.RWMutex
+}
+
+func (m *Manager) holdLocks() heldLocks {
+	m.mu.Lock()
+	return heldLocks{manager: &m.mu}
+}
+
+func (h *heldLocks) lockLobby(l *Lobby) {
+	l.mu.Lock()
+	h.lobby = &l.mu
+}
+
+func (h *heldLocks) unlockLobby() {
+	if h.lobby == nil {
+		return
+	}
+	h.lobby.Unlock()
+	h.lobby = nil
+}
+
+func (h *heldLocks) unlock() {
+	h.unlockLobby()
+	if h.manager == nil {
+		return
+	}
+	h.manager.Unlock()
+	h.manager = nil
+}
+
 // leave is LeaveLobby, limited to a player still indexed to from when it is not nil.
 func (m *Manager) leave(p *game.Player, from *Lobby) {
-	m.mu.Lock()
+	held := m.holdLocks()
+	defer held.unlock()
 	l, ok := m.playerLobby[p.ID]
 	if from != nil && l != from {
-		m.mu.Unlock()
 		return
 	}
 	m.grace.clear(p.ID)
 	if !ok || l == nil {
-		m.mu.Unlock()
 		return
 	}
 
-	l.mu.Lock()
+	held.lockLobby(l)
 	l.unsubscribePlayerLocked(p.ID)
 	leave, found := l.detachPlayerLocked(p)
-	l.mu.Unlock()
+	held.unlockLobby()
 	delete(m.playerLobby, p.ID)
 	// Closed in the same hold that emptied it: a table that is out of the index but
 	// still open is one a later RemoveLobby has to second-guess.
@@ -323,7 +377,7 @@ func (m *Manager) leave(p *game.Player, from *Lobby) {
 	if leave.closeLobby {
 		gone = m.removeLobbyLocked(l)
 	}
-	m.mu.Unlock()
+	held.unlock()
 
 	if !found {
 		return
@@ -369,18 +423,16 @@ func (m *Manager) Kick(host, target *game.Player) error {
 		return errKickSelf
 	}
 
-	m.mu.Lock()
+	held := m.holdLocks()
+	defer held.unlock()
 	l, ok := m.playerLobby[host.ID]
 	if !ok || l == nil {
-		m.mu.Unlock()
 		return errHostNotInLobby
 	}
 	// Hold manager lock while mutating lobby so join/leave cannot interleave.
-	l.mu.Lock()
+	held.lockLobby(l)
 	idx, err := l.kickableGuestLocked(host, target)
 	if err != nil {
-		l.mu.Unlock()
-		m.mu.Unlock()
 		return err
 	}
 
@@ -391,8 +443,7 @@ func (m *Manager) Kick(host, target *game.Player) error {
 	// with the mapping gone that release no longer finds this seat: the timer would
 	// later take the player out of whatever table they had moved on to.
 	m.grace.clear(target.ID)
-	l.mu.Unlock()
-	m.mu.Unlock()
+	held.unlock()
 
 	kicked.notify(target.ID)
 	return nil

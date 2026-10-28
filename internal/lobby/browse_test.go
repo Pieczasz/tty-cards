@@ -252,3 +252,16 @@ func TestBrowseLobbies_RechecksACachedTable(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicLobbies_StaleScanDoesNotReplaceANewerOne(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	fresh := openTable(t, m, "p1", testutil.UID(1), "poker", 0)
+	require.Equal(t, []*Lobby{fresh}, m.publicLobbies())
+
+	stale := m.browseEpoch.Load()
+	m.browseEpoch.Add(1)
+	m.publishPublicLobbies(stale, nil)
+	require.Equal(t, []*Lobby{fresh}, m.cachedPublicLobbies,
+		"an older scan must not replace the list a newer scan already published")
+}

@@ -157,9 +157,9 @@ func (m *Manager) invalidatePublicCache() {
 
 // publicLobbies serves the cache under a read lock and, on a miss, copies
 // the lobby set and releases m.mu before touching any l.mu - the same shape as
-// Stats. Two simultaneous misses both rescan and the later write wins, so the stored
-// list can hold a table that has since gone private or started; browseEntry
-// re-checks each one, which is what keeps that out of the browse.
+// Stats. Two simultaneous misses both rescan; only the scan that is still the
+// latest publishes, so an older snapshot cannot overwrite a newer one. A table
+// that went private or started after the snapshot is dropped by browseEntry.
 func (m *Manager) publicLobbies() []*Lobby {
 	m.mu.RLock()
 	if !m.cacheDirty.Load() && time.Since(m.cacheLastUpdated) < publicLobbyCacheTTL {
@@ -174,6 +174,7 @@ func (m *Manager) publicLobbies() []*Lobby {
 	// the snapshot instead left a window where a table set the flag, this cleared it,
 	// and the snapshot had never seen the table: hidden for the whole TTL.
 	m.cacheDirty.Store(false)
+	epoch := m.browseEpoch.Add(1)
 	all := slices.Collect(maps.Values(m.lobbies))
 	m.mu.RUnlock()
 
@@ -186,10 +187,19 @@ func (m *Manager) publicLobbies() []*Lobby {
 		l.mu.RUnlock()
 	}
 
-	m.mu.Lock()
-	m.cachedPublicLobbies = publicLobbies
-	m.cacheLastUpdated = time.Now()
-	m.mu.Unlock()
-
+	m.publishPublicLobbies(epoch, publicLobbies)
 	return slices.Clone(publicLobbies)
+}
+
+// publishPublicLobbies stores a scan only while epoch is still the latest one
+// started. Two misses can both pass the cache check; the one that snapshotted
+// earlier must not publish after the later one has.
+func (m *Manager) publishPublicLobbies(epoch uint64, lobbies []*Lobby) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.browseEpoch.Load() != epoch {
+		return
+	}
+	m.cachedPublicLobbies = lobbies
+	m.cacheLastUpdated = time.Now()
 }

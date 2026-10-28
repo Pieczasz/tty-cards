@@ -3,6 +3,7 @@ package lobby
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
@@ -19,29 +20,25 @@ type gameStart struct {
 }
 
 // watchLocked subscribes the manager's watcher to engine before l.mu is released, so
-// no seat can act - and no game can end - before the feed is open. The watcher is the
-// only thing that persists a match, so a failed subscribe costs the players their
-// history and Elo - the engine's len(players)+8 broadcaster exists so that cannot
-// happen, and it is logged loudly if it ever does. Caller holds l.mu.
+// no seat can act - and no game can end - before the feed is open. A failed subscribe
+// is returned: the caller must not open the table, because this watcher is the only
+// thing that persists a match. Caller holds l.mu.
 //
 // The finalize snapshot is taken here, not when the game ends: by then the lobby may
 // have reopened and been reconfigured, and the result would be written under the new
 // ranked flag, the new game, and the next hand's start time.
-func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
+func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) (gameStart, error) {
 	ch, err := engine.Subscribe()
 	if err != nil {
-		ctx := context.Background()
-		observability.SubscribeFailure(ctx, "game")
-		slog.ErrorContext(ctx, "cannot watch game for completion; result will not be persisted",
-			"error", err, "lobby", l.code, "game", ref.Slug)
-		return gameStart{}
+		observability.SubscribeFailure(context.Background(), "game")
+		return gameStart{}, err
 	}
 	return gameStart{engine: engine, feed: ch, req: finalizeRequest{
 		lobbyCode: l.code,
 		game:      ref,
 		isRanked:  l.options.isRanked,
 		startedAt: l.startedAt,
-	}}
+	}}, nil
 }
 
 // watchGame is the goroutine ToggleReady starts, and counts in m.watchers, for every
@@ -54,6 +51,7 @@ func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
 // not reach the roster through it but through seatHook, which no dropped event can
 // lose.
 func (m *Manager) watchGame(l *Lobby, start gameStart) {
+	defer m.recoverGoroutine("watch")
 	engine := start.engine
 	defer engine.Unsubscribe(start.feed)
 	ctx := m.appCtx
@@ -104,4 +102,16 @@ func (m *Manager) requestFinalize(l *Lobby, engine *game.Engine, reason game.End
 		time.Since(req.startedAt))
 	m.releaseFinishedGame(l)
 	m.finalizeFinishedGame(req, engine, reason)
+}
+
+// recoverGoroutine stops one lobby goroutine's panic from taking the process down.
+// A rules panic is the engine's to end; this is the timers and the watcher, which
+// have nothing above them.
+func (m *Manager) recoverGoroutine(where string) {
+	r := recover()
+	if r == nil || m == nil {
+		return
+	}
+	slog.ErrorContext(m.appCtx, "lobby goroutine panicked",
+		"where", where, "panic", r, "stack", string(debug.Stack()))
 }
