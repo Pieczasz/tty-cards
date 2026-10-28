@@ -88,15 +88,12 @@ type sessionState struct {
 	// outcome is set by a refusal; finishSession falls back to how the session ended.
 	outcome string
 	input   *inputGuard
-	size    sessionSize
-	// program is set before the program runs, for the retier sweep to nudge.
-	program atomic.Pointer[tea.Program]
 }
 
 // filter is the session's bubbletea message filter: the input guard's bookkeeping and
-// rules, then the terminal size budget.
+// rules, then the terminal size cap.
 func (st *sessionState) filter(m tea.Model, msg tea.Msg) tea.Msg {
-	return st.size.filter(st.input.filter(m, msg))
+	return capWindowSize(st.input.filter(m, msg))
 }
 
 // sessionRegistry maps a live ssh.Session to its state. sessionLifecycle creates the
@@ -105,7 +102,6 @@ func (st *sessionState) filter(m tea.Model, msg tea.Msg) tea.Msg {
 // in one process (every test that starts one) cannot see each other's sessions.
 type sessionRegistry struct {
 	states sync.Map
-	sizes  sizeBudget
 	// live counts session handlers still running. charm ssh runs each on a goroutine
 	// that neither its Shutdown nor its Close waits for, so without this the drain
 	// would move on while teardowns are still giving up seats. liveMu makes admitting
@@ -207,7 +203,7 @@ var errNoTracker = errors.New("ssh server needs a session tracker")
 // NewServer builds the ssh server, creating its host key on first run. The caller
 // owns the listener and calls Serve on it.
 func NewServer(deps Deps) (*Server, error) {
-	return newServer(deps, newSessionRegistry(cellBudget, extraCellBudget))
+	return newServer(deps, &sessionRegistry{})
 }
 
 func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
@@ -497,18 +493,13 @@ func sessionProgram(
 		})
 		pty, _, _ := s.Pty()
 		// The renderer sizes its cell buffers from this and never passes it through
-		// the filter, so it is granted here as well as there.
-		size, moved := st.size.start(&reg.sizes, termSize{pty.Window.Width, pty.Window.Height})
-		program := tea.NewProgram(model, append(bm.MakeOptions(s),
+		// the filter, so it is capped here as well as there.
+		w, h := capSize(pty.Window.Width, pty.Window.Height)
+		return tea.NewProgram(model, append(bm.MakeOptions(s),
 			tea.WithInput(st.input),
-			tea.WithWindowSize(size.w, size.h),
+			tea.WithWindowSize(w, h),
 			tea.WithFPS(sessionFPS),
 			tea.WithFilter(st.filter))...)
-		st.program.Store(program)
-		if moved {
-			go reg.retier()
-		}
-		return program
 	}
 }
 
@@ -521,26 +512,6 @@ func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
 		return tea.ResumeMsg{}
 	}
 	return msg
-}
-
-// retier nudges every session the tier now sizes differently to take its new size.
-// It runs on a goroutine of its own, once per tier change: each Send waits for that
-// session's event loop, and a session's start or end must not wait for all of them.
-// Overlapping sweeps are harmless, as each nudge is granted against the tier as it
-// is when the session reads it.
-func (reg *sessionRegistry) retier() {
-	tier := sizeTiers[reg.sizes.tier.Load()]
-	slog.Info("terminal size tier changed", "tier_width", tier.w, "tier_height", tier.h)
-	reg.states.Range(func(_, v any) bool {
-		st, _ := v.(*sessionState)
-		// A program is stored only once its size has started. Send returns when the
-		// program ends: wish runs every program activeterm lets through, and a run
-		// cancels the program's context however it ends.
-		if p := st.program.Load(); p != nil && st.size.stale() {
-			p.Send(retierMsg{})
-		}
-		return true
-	})
 }
 
 // limitSessionChannels enforces the per-connection channel cap where the channel is
@@ -622,7 +593,6 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			defer reg.recoverSession(s)
 			defer reg.releaseSession(s, deps)
 			defer reg.closeSessionModel(s)
-			defer reg.leaveSizes(s)
 
 			sh(s)
 		}
@@ -711,18 +681,6 @@ func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
 		"panic", r,
 		"remote_addr", addrString(s.RemoteAddr()),
 	)
-}
-
-// leaveSizes gives the session's cells back. It runs after the program has ended, so
-// held is no longer the event loop's.
-func (reg *sessionRegistry) leaveSizes(s ssh.Session) {
-	st, ok := reg.load(s)
-	if !ok || st.program.Load() == nil {
-		return
-	}
-	if st.size.budget.leave(st.size.held) {
-		go reg.retier()
-	}
 }
 
 func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {

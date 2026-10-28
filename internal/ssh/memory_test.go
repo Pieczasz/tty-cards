@@ -43,6 +43,9 @@ type countingDiscard struct{ n atomic.Int64 }
 
 func (w *countingDiscard) Write(p []byte) (int, error) { w.n.Add(int64(len(p))); return len(p), nil }
 
+// termSize is a terminal in cells.
+type termSize struct{ w, h int }
+
 // sessionHeap opens n sessions at once, each asking for a terminal of size, and
 // returns the heap one of them holds - ssh connection, bubbletea program and the
 // home screen - once all have drawn their first frame.
@@ -89,38 +92,32 @@ func sessionHeap(tb testing.TB, addr string, tracker *SessionTracker, n int, siz
 }
 
 // The renderer sizes its cell buffers from the size bubbletea is first given, which
-// never passes through the message filter: clamping only resizes let a client that
-// asked for 2000x600 at pty-req hold over 100 MiB for the life of its session. Now
-// five such sessions share room above the floor for two at the top tier, and what
-// they hold together stays within it: five floors plus that room, at ~260 B a cell,
-// and ~0.5 MiB a session for the connection and the home screen.
+// never passes through the message filter: capping only resizes let a client that
+// asked for 2000x600 at pty-req hold over 100 MiB for the life of its session. Five
+// such sessions together stay within five capped terminals, at ~260 B a cell, and
+// ~0.5 MiB a session for the connection and the home screen.
 //
 //nolint:paralleltest // measures the process heap, so nothing may run beside it
-func TestSession_HeapIsBoundedByTheCellBudget(t *testing.T) {
+func TestSession_HeapIsBoundedByTheSizeCap(t *testing.T) {
 	const n = 5
-	top, floor := sizeTiers[len(sizeTiers)-1], sizeTiers[0]
-	extra := 2 * (top.cells() - floor.cells())
-	reg := newSessionRegistry(cellBudget, extra)
-	addr, tracker := startServerWithRegistry(t, &usersByKey{users: map[string]*db.User{}}, reg)
+	addr, tracker := startServerWith(t, &usersByKey{users: map[string]*db.User{}})
 
 	perSession := sessionHeap(t, addr, tracker, n, termSize{2000, 600})
-	bound := (float64(n*floor.cells()+extra)*260/(1<<20) + n*0.5) / n
+	bound := float64(maxTermWidth*maxTermHeight)*260/(1<<20) + 0.5
 	t.Logf("%.2f MiB/session, bound %.2f MiB", perSession, bound)
-	require.Less(t, perSession, bound, "the sessions hold more than the cell budget granted them")
+	require.Less(t, perSession, bound, "a session holds more than the size cap allows")
 }
 
-// BenchmarkSessionMemory reports the heap one session holds at each size tier.
-// Sessions x MiB/session at the floor, plus extraCellBudget's worth, has to fit
-// GOMEMLIMIT; see cellBudget.
+// BenchmarkSessionMemory reports the heap one session holds at the cap. Sessions x
+// MiB/session has to fit GOMEMLIMIT.
 //
 //	go test -run '^$' -bench SessionMemory -benchtime 3x ./internal/ssh/
 func BenchmarkSessionMemory(b *testing.B) {
-	for _, size := range sizeTiers {
-		b.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(b *testing.B) {
-			addr, tracker := startServerWith(b, &usersByKey{users: map[string]*db.User{}})
-			for b.Loop() {
-				b.ReportMetric(sessionHeap(b, addr, tracker, 20, size), "MiB/session")
-			}
-		})
-	}
+	size := termSize{maxTermWidth, maxTermHeight}
+	b.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(b *testing.B) {
+		addr, tracker := startServerWith(b, &usersByKey{users: map[string]*db.User{}})
+		for b.Loop() {
+			b.ReportMetric(sessionHeap(b, addr, tracker, 20, size), "MiB/session")
+		}
+	})
 }

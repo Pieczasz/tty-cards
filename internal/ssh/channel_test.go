@@ -26,7 +26,7 @@ func startInProcessServer(t *testing.T, user *db.User) (string, *SessionTracker)
 
 func startServerWith(tb testing.TB, repo db.Authenticator) (string, *SessionTracker) {
 	tb.Helper()
-	return startServerWithRegistry(tb, repo, newSessionRegistry(cellBudget, extraCellBudget))
+	return startServerWithRegistry(tb, repo, &sessionRegistry{})
 }
 
 // startServerWithRegistry is startServerWith over a registry the test sized.
