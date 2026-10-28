@@ -356,86 +356,100 @@ func (reg *sessionRegistry) refuseFull(s ssh.Session, err error) {
 		"The server is full right now - please try again in a few minutes.\n")
 }
 
+// sessionModel is the factory wish calls once per session; openSession does the work.
 func sessionModel(
 	deps Deps, reg *sessionRegistry, registerBudget registrationBudget,
 ) func(ssh.Session) tea.Model {
-	return func(s ssh.Session) tea.Model {
-		// Checked first: a session with no state has no teardown to release what it
-		// claims, and must not register an account on its way to being refused.
-		st, ok := reg.load(s)
-		if !ok {
-			err := errors.New("session state missing before the model was installed")
-			slog.ErrorContext(s.Context(), "refusing a session whose state was already torn down",
-				"error", err, "remote_addr", addrString(s.RemoteAddr()))
-			reg.failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
-			return nil
-		}
-		traceCtx := st.traceCtx
-		fingerprint, err := SessionFingerprint(s)
-		if err != nil {
-			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
-			return nil
-		}
-		user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
-			func() (func(), error) {
-				// Before the budget is spent and the account made: a newcomer has no
-				// live session to displace, so a full server would only refuse them
-				// after the fact, leaving an account they never got to use.
-				if deps.Tracker.Full() {
-					return nil, errServerFull
-				}
-				refund, ok := allowRegistration(traceCtx, registerBudget, s)
-				if !ok {
-					return nil, errTooManyRegistrations
-				}
-				return refund, nil
-			})
-		if errors.Is(err, errServerFull) {
-			reg.refuseFull(s, err)
-			return nil
-		}
-		if err != nil {
-			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
-			return nil
-		}
-		// Built before the slot is claimed: a panic in here would otherwise strand a
-		// tracker slot that nothing releases - and that account cannot connect again
-		// until a restart.
-		model := tui.New(tui.Deps{
-			SessionCtx:   traceCtx,
-			User:         *user,
-			Profiles:     deps.Profiles,
-			Leaderboard:  deps.Leaderboard,
-			LobbyManager: deps.LobbyManager,
-			Games:        deps.Games,
-		})
-		// The connection, not the session: closing a channel leaves the socket and any
-		// other channel on it up until the peer notices.
-		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		gen, err := deps.Tracker.Connect(user.ID, conn)
-		if err != nil { // errServerFull, Connect's only refusal
-			model.Close()
-			reg.refuseFull(s, err)
-			return nil
-		}
-		// Recorded the moment the slot is ours, before anything below can panic: the
-		// teardown frees the slot and closes the model only for what it finds here.
-		st.user = user
-		st.gen = gen
-		st.model = model
-		observability.SSHSession(traceCtx, "accepted")
-		// Only once the slot is ours: a refused session must not cancel the grace
-		// timer holding this player's seat, and a displaced one has finished its
-		// teardown by now, so any timer it armed is there to cancel.
-		tui.ResumeSeat(model)
+	return func(s ssh.Session) tea.Model { return reg.openSession(deps, registerBudget, s) }
+}
 
-		// bubbletea's own recover prints to stderr and knows nothing about the span
-		// or the metric, so reportingModel catches Init/Update/View first. Its
-		// catching stays enabled all the same: it is the only thing covering the
-		// goroutines bubbletea spawns per Cmd, and an unrecovered panic there takes
-		// down the process for every connected player, not just this session.
-		return reportingModel{Model: model, session: s, reg: reg}
+// registrationGateFor is the check a newcomer passes before an account is made: before
+// the budget is spent, because a newcomer has no live session to displace, so a full
+// server would only refuse them after the fact, leaving an account they never got to use.
+func registrationGateFor(
+	traceCtx context.Context, deps Deps, registerBudget registrationBudget, s ssh.Session,
+) registrationGate {
+	return func() (func(), error) {
+		if deps.Tracker.Full() {
+			return nil, errServerFull
+		}
+		refund, ok := allowRegistration(traceCtx, registerBudget, s)
+		if !ok {
+			return nil, errTooManyRegistrations
+		}
+		return refund, nil
 	}
+}
+
+// openSession authenticates the session, builds its model and claims the account's
+// tracker slot, or refuses the session and returns nil. It returns the model bubbletea
+// runs.
+func (reg *sessionRegistry) openSession(
+	deps Deps, registerBudget registrationBudget, s ssh.Session,
+) tea.Model {
+	// Checked first: a session with no state has no teardown to release what it
+	// claims, and must not register an account on its way to being refused.
+	st, ok := reg.load(s)
+	if !ok {
+		err := errors.New("session state missing before the model was installed")
+		slog.ErrorContext(s.Context(), "refusing a session whose state was already torn down",
+			"error", err, "remote_addr", addrString(s.RemoteAddr()))
+		reg.failSessionf(s, "rejected", err, "Your session could not be started - please reconnect.\n")
+		return nil
+	}
+	traceCtx := st.traceCtx
+	fingerprint, err := SessionFingerprint(s)
+	if err != nil {
+		reg.failSessionf(s, "auth_failed", err, "%v\n", err)
+		return nil
+	}
+	user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
+		registrationGateFor(traceCtx, deps, registerBudget, s))
+	if errors.Is(err, errServerFull) {
+		reg.refuseFull(s, err)
+		return nil
+	}
+	if err != nil {
+		reg.failSessionf(s, "auth_failed", err, "%v\n", err)
+		return nil
+	}
+	// Built before the slot is claimed: a panic in here would otherwise strand a
+	// tracker slot that nothing releases - and that account cannot connect again
+	// until a restart.
+	model := tui.New(tui.Deps{
+		SessionCtx:   traceCtx,
+		User:         *user,
+		Profiles:     deps.Profiles,
+		Leaderboard:  deps.Leaderboard,
+		LobbyManager: deps.LobbyManager,
+		Games:        deps.Games,
+	})
+	// The connection, not the session: closing a channel leaves the socket and any
+	// other channel on it up until the peer notices.
+	conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
+	gen, err := deps.Tracker.Connect(user.ID, conn)
+	if err != nil { // errServerFull, Connect's only refusal
+		model.Close()
+		reg.refuseFull(s, err)
+		return nil
+	}
+	// Recorded the moment the slot is ours, before anything below can panic: the
+	// teardown frees the slot and closes the model only for what it finds here.
+	st.user = user
+	st.gen = gen
+	st.model = model
+	observability.SSHSession(traceCtx, "accepted")
+	// Only once the slot is ours: a refused session must not cancel the grace
+	// timer holding this player's seat, and a displaced one has finished its
+	// teardown by now, so any timer it armed is there to cancel.
+	tui.ResumeSeat(model)
+
+	// bubbletea's own recover prints to stderr and knows nothing about the span
+	// or the metric, so reportingModel catches Init/Update/View first. Its
+	// catching stays enabled all the same: it is the only thing covering the
+	// goroutines bubbletea spawns per Cmd, and an unrecovered panic there takes
+	// down the process for every connected player, not just this session.
+	return reportingModel{Model: model, session: s, reg: reg}
 }
 
 // reportingModel reports a panic in the TUI against the session's trace context and
