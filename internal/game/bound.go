@@ -14,8 +14,9 @@ type BoundEngine struct {
 	playerID string
 }
 
-// Bind is playerID's handle on engine, or nil for a nil engine. Every BoundEngine
-// method is safe on nil and reports that there is no game.
+// Bind is playerID's handle on engine, or nil for a nil engine. Only that nil is
+// tolerated, and only where a lobby event may carry no engine: the router hands a view
+// a non-nil handle or none at all, so BoundEngine's methods do not guard a nil receiver.
 func Bind(engine *Engine, playerID string) *BoundEngine {
 	if engine == nil {
 		return nil
@@ -25,24 +26,18 @@ func Bind(engine *Engine, playerID string) *BoundEngine {
 
 // PlayerID is the seat this handle acts as.
 func (b *BoundEngine) PlayerID() string {
-	if b == nil {
-		return ""
-	}
 	return b.playerID
 }
 
 // Subscribe joins the engine's event feed. The broadcaster itself stays unreachable: a
 // view holding it could Broadcast or Close the feed for the whole table.
 func (b *BoundEngine) Subscribe() (<-chan Event, error) {
-	if b == nil {
-		return nil, errNoGame
-	}
 	return b.engine.Subscribe()
 }
 
 // Unsubscribe leaves the feed Subscribe joined.
 func (b *BoundEngine) Unsubscribe(events <-chan Event) {
-	if b == nil || events == nil {
+	if events == nil {
 		return
 	}
 	b.engine.Unsubscribe(events)
@@ -50,9 +45,6 @@ func (b *BoundEngine) Unsubscribe(events <-chan Event) {
 
 // Submit plays action as this handle's player.
 func (b *BoundEngine) Submit(action Action) error {
-	if b == nil {
-		return errNoGame
-	}
 	return b.engine.SubmitAction(b.playerID, action)
 }
 
@@ -63,8 +55,5 @@ func (b *BoundEngine) Submit(action Action) error {
 // The *State is unredacted and live: treat it as read-only, copy anything kept past
 // the callback, and filter anything reaching the screen.
 func (b *BoundEngine) Frame(fn func(*State)) (StateSnapshot, []deck.Card, time.Duration) {
-	if b == nil {
-		return StateSnapshot{}, nil, 0
-	}
 	return b.engine.Frame(b.playerID, fn)
 }

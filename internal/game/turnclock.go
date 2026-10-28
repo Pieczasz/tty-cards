@@ -66,9 +66,18 @@ func (e *Engine) stopTurnTimerLocked() {
 // onTurnTimeout is the timer's callback. A seat taken for idling is reported to
 // WithOnIdleRemoved only here, once the engine lock is released.
 func (e *Engine) onTurnTimeout(seq uint64) {
-	if idle := e.expireTurn(seq); idle != "" && e.onIdleRemoved != nil {
-		e.onIdleRemoved(idle)
+	idle := e.expireTurn(seq)
+	if idle == "" || e.onIdleRemoved == nil {
+		return
 	}
+	// A time.AfterFunc goroutine, and the hook is the owner's code, run with no lock
+	// held: a panic in it must not take the process down for every table.
+	defer func() {
+		if r := recover(); r != nil {
+			e.state.Logger().Error("idle-removed hook panicked", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	e.onIdleRemoved(idle)
 }
 
 // expireTurn settles an expired turn in one lock hold: it charges the miss, then

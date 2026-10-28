@@ -113,28 +113,13 @@ func TestBoundEngine_SubscribeAndUnsubscribe(t *testing.T) {
 	bound.Unsubscribe(events)
 	assert.Zero(t, engine.SubscriberCount(), "unsubscribing returns the slot")
 
-	var unbound *BoundEngine
-	_, err = unbound.Subscribe()
-	require.Error(t, err, "a view with no engine is told so rather than handed a nil channel")
-	assert.NotPanics(t, func() { unbound.Unsubscribe(nil) })
 }
 
-// A view can hold a nil BoundEngine: Bind refuses a nil engine, and the session
-// keeps whatever it got. Every method has to answer rather than panic, because the
-// view calls them from its render loop before it knows it has no game.
-func TestBoundEngine_NilIsInert(t *testing.T) {
+// The lobby event that starts a game may carry no engine; Bind answers nil for it so
+// the view can say so, instead of holding a handle that fails on every call.
+func TestBind_NilEngineGivesNoHandle(t *testing.T) {
 	t.Parallel()
-
 	assert.Nil(t, Bind(nil, "1"), "there is no seat without an engine")
-
-	var unbound *BoundEngine
-	assert.Empty(t, unbound.PlayerID())
-	require.ErrorContains(t, unbound.Submit(noopAction{}), "no active game")
-
-	snap, hand, remaining := unbound.Frame(func(*State) { t.Fatal("there is no state to read") })
-	assert.Equal(t, StateSnapshot{}, snap)
-	assert.Nil(t, hand)
-	assert.Zero(t, remaining)
 }
 
 // The bound ID is what scopes everything else a view does.

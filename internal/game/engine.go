@@ -19,7 +19,6 @@ import (
 
 var (
 	errClosed = errors.New("game is closed")
-	errNoGame = errors.New("no active game")
 )
 
 type Engine struct {
@@ -105,9 +104,19 @@ func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 
 // Start opens the table: it picks the first seat and lets the rules set the game up,
 // the deal included. A table whose rules refuse it stays Waiting.
-func (e *Engine) Start() error {
+func (e *Engine) Start() (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// OnGameStart is rules code running under the lock on the caller's goroutine,
+	// ToggleReady's, which is counted in the drain. The table never reached Playing, so
+	// it is refused rather than ended: it stays Waiting and the lobby can try again.
+	defer func() {
+		if r := recover(); r != nil {
+			e.state.Logger().Error("rules panicked starting the table",
+				"panic", r, "stack", string(debug.Stack()))
+			err = errors.New("the game hit an internal error and could not start")
+		}
+	}()
 
 	if e.closed {
 		return errClosed

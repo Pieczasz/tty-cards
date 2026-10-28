@@ -2,6 +2,7 @@ package game
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,4 +101,36 @@ func TestEngine_RemovePlayer_RulesPanicOnAClosedEngineIsRecorded(t *testing.T) {
 
 	assert.True(t, engine.IsFinished())
 	assert.Equal(t, EndReasonRulesError, engine.EndReason())
+}
+
+// startPanicRules panics in OnGameStart, which Start runs under the lock on the
+// caller's goroutine.
+type startPanicRules struct{ *timeoutRules }
+
+func (*startPanicRules) OnGameStart(*State) error { panic("rules bug in deal") }
+
+// A deal that panics used to unwind through ToggleReady with the engine lock held by a
+// deferred unlock only; Start now refuses the table instead, and leaves it Waiting.
+func TestEngine_Start_RulesPanicIsARefusalNotAPanic(t *testing.T) {
+	t.Parallel()
+	engine := NewEngine(&startPanicRules{&timeoutRules{}}, []*Player{{ID: "a"}, {ID: "b"}})
+	t.Cleanup(engine.Close)
+
+	var err error
+	require.NotPanics(t, func() { err = engine.Start() })
+
+	require.Error(t, err)
+	assert.False(t, engine.IsFinished(), "the table never started, so it did not end")
+}
+
+// The idle hook runs on the turn timer's goroutine; a panic in it must not escape.
+func TestEngine_TurnTimeout_PanickingIdleHookDoesNotEscape(t *testing.T) {
+	t.Parallel()
+	engine := NewEngine(&timeoutRules{}, []*Player{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+		WithTurnTimeout(time.Hour), WithOnIdleRemoved(func(string) { panic("hook bug") }))
+	t.Cleanup(engine.Close)
+	require.NoError(t, engine.Start())
+	engine.clock.missed[engine.CurrentPlayerID()] = MaxMissedTurns - 1
+
+	require.NotPanics(t, func() { fireTurnTimeout(t, engine) })
 }
