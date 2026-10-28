@@ -201,3 +201,45 @@ func stripANSI(s string) string {
 	}
 	return out.String()
 }
+
+// The test above binds seat 1 at the smallest table. A leak that depends on seat
+// position (the seat after the dealer, a wrap-around opponent order) or on table size
+// would pass it, so every seat of a larger table is checked as the viewer too.
+func TestGameViews_EverySeatSeesOnlyItsOwnHand(t *testing.T) {
+	t.Parallel()
+
+	for _, entry := range Games {
+		seats := min(entry.MaxPlayers, 4)
+		for viewer := 1; viewer <= seats; viewer++ {
+			t.Run(fmt.Sprintf("%s/seat=%d_of_%d", entry.Slug, viewer, seats), func(t *testing.T) {
+				t.Parallel()
+
+				engine := game.NewEngine(entry.Factory(), testutil.Players(seats))
+				require.NoError(t, engine.Start())
+				t.Cleanup(engine.Close)
+				global := router.GlobalContext{
+					User:   &db.User{ID: testutil.UID(viewer), Username: fmt.Sprintf("p%d", viewer)},
+					Theme:  styles.NewTheme(true),
+					Width:  120,
+					Height: 40,
+				}
+				m := entry.View(global, game.Bind(engine, testutil.SeatID(viewer)), entry.Slug)
+
+				own := heroHand(t, engine, testutil.SeatID(viewer))
+				out := stripANSI(m.View().Content)
+				engine.WithState(func(state *game.State) {
+					for _, p := range state.Players {
+						if p == nil || p.ID == testutil.SeatID(viewer) {
+							continue
+						}
+						for _, card := range p.Cards {
+							if !containsCard(own, card) {
+								assert.NotContains(t, out, cardGlyphs(card), "%v belongs to %s", card, p.ID)
+							}
+						}
+					}
+				})
+			})
+		}
+	}
+}
