@@ -8,6 +8,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
+	"uuid"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -40,8 +42,8 @@ func (m *MockUserRepository) RegisterUserWithSSHKey(ctx context.Context, usernam
 	return args.Get(0).(*db.User), args.Get(1).(*db.PublicSSHKey), args.Error(2)
 }
 
-func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, user *db.User, key *db.PublicSSHKey) error {
-	return m.Called(ctx, user, key).Error(0)
+func (m *MockUserRepository) UpdateUserActivity(ctx context.Context, userID uuid.UUID, keyID uint) error {
+	return m.Called(ctx, userID, keyID).Error(0)
 }
 
 func TestSessionFingerprint_NoPublicKey(t *testing.T) {
@@ -139,7 +141,7 @@ func TestLoadOrRegisterUser_InvalidNameGetsTheReasonAndSpendsNoBudget(t *testing
 
 			asked := 0
 			_, err := LoadOrRegisterUser(t.Context(), repo, tt.username, "fp",
-				func() bool { asked++; return true })
+				func() (bool, func()) { asked++; return true, nil })
 
 			require.ErrorIs(t, err, db.ErrInvalidUsername)
 			require.ErrorContains(t, err, tt.wantText)
@@ -161,7 +163,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
 
 		_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp",
-			func() bool { return false })
+			func() (bool, func()) { return false, nil })
 
 		require.ErrorIs(t, err, errTooManyRegistrations)
 		repo.AssertNotCalled(t, "RegisterUserWithSSHKey", mock.Anything, mock.Anything, mock.Anything)
@@ -176,7 +178,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 
 		asked := 0
 		user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp",
-			func() bool { asked++; return false })
+			func() (bool, func()) { asked++; return false, nil })
 
 		require.NoError(t, err, "an existing account is not a registration")
 		assert.Equal(t, existing, user)
@@ -191,7 +193,7 @@ func TestLoadOrRegisterUser_RegistrationGate(t *testing.T) {
 		repo.On("RegisterUserWithSSHKey", mock.Anything, "new", "fp").Return(fresh, &db.PublicSSHKey{}, nil)
 
 		user, err := LoadOrRegisterUser(t.Context(), repo, "new", "fp",
-			func() bool { return true })
+			func() (bool, func()) { return true, nil })
 
 		require.NoError(t, err)
 		assert.Equal(t, fresh, user)
@@ -204,11 +206,28 @@ func TestLoadOrRegisterUser_ActivityUpdateFailureDoesNotBlockLogin(t *testing.T)
 	existing := &db.User{ID: testutil.UID(3), Username: "known"}
 	repo := new(MockUserRepository)
 	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(existing, &db.PublicSSHKey{}, nil)
-	repo.On("UpdateUserActivity", mock.Anything, existing, mock.Anything).Return(errors.New("deadlock detected"))
+	repo.On("UpdateUserActivity", mock.Anything, existing.ID, mock.Anything).Return(errors.New("deadlock detected"))
 
 	user, err := LoadOrRegisterUser(t.Context(), repo, "known", "fp", nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, existing, user)
 	repo.AssertExpectations(t)
+}
+
+func TestLoadOrRegisterUser_RefundsWhenRegisterCreatesNobody(t *testing.T) {
+	t.Parallel()
+	repo := new(MockUserRepository)
+	repo.On("LoadUserByFingerprint", mock.Anything, "fp").Return(nil, nil, nil)
+	repo.On("RegisterUserWithSSHKey", mock.Anything, "user", "fp").Return(nil, nil, errors.New("db down"))
+	budget := testBudget(1, 1, 1)
+	session := &stubSession{addr: stubAddr{"10.1.1.1:1"}}
+
+	_, err := LoadOrRegisterUser(t.Context(), repo, "user", "fp", func() (bool, func()) {
+		return allowRegistration(t.Context(), budget, session)
+	})
+	require.Error(t, err)
+
+	ok, _ := allowRegistration(t.Context(), budget, session)
+	assert.True(t, ok, "a failed register spent the only registration this network had")
 }

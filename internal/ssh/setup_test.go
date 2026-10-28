@@ -20,6 +20,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
+	"uuid"
+
 	"charm.land/ssh"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -248,7 +250,7 @@ func TestAllowRegistration(t *testing.T) {
 			t.Parallel()
 			var got bool
 			for _, addr := range tt.addrs {
-				got = allowRegistration(t.Context(), tt.budget, &stubSession{addr: stubAddr{addr}})
+				got, _ = allowRegistration(t.Context(), tt.budget, &stubSession{addr: stubAddr{addr}})
 			}
 			assert.Equal(t, tt.want, got)
 		})
@@ -264,8 +266,10 @@ func TestAllowRegistration_ARefusalSpendsNothing(t *testing.T) {
 	first := &stubSession{addr: stubAddr{"[2001:db8:1:1::1]:1"}}
 	sibling := &stubSession{addr: stubAddr{"[2001:db8:1:2::1]:1"}}
 
-	require.True(t, allowRegistration(t.Context(), budget, first))
-	require.False(t, allowRegistration(t.Context(), budget, sibling), "the /48 budget did not hold")
+	ok, _ := allowRegistration(t.Context(), budget, first)
+	require.True(t, ok)
+	ok, _ = allowRegistration(t.Context(), budget, sibling)
+	require.False(t, ok, "the /48 budget did not hold")
 
 	assert.True(t, budget.net.Allow(ratelimit.NetKey("2001:db8:1:2::1")), "the refused /64 spent its own budget")
 	for range 4 {
@@ -310,7 +314,7 @@ func (r stubUserRepo) LoadUserByFingerprint(context.Context, string) (*db.User, 
 	return r.user, &db.PublicSSHKey{}, nil
 }
 
-func (stubUserRepo) UpdateUserActivity(context.Context, *db.User, *db.PublicSSHKey) error { return nil }
+func (stubUserRepo) UpdateUserActivity(context.Context, uuid.UUID, uint) error { return nil }
 
 func newSessionDeps(tb testing.TB, repo db.Authenticator) Deps {
 	tb.Helper()
@@ -488,6 +492,31 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 	assert.NotNil(t, st.model, "closeSessionModel would leave the view's subscriptions running")
 	assert.True(t, release(tracker, user.ID, st.gen), "the session does not own the slot it claimed")
 	assert.Zero(t, s.exited, "an accepted session must not be hung up on")
+}
+
+func TestSessionModel_ResumePanicStillPublishesTheSlot(t *testing.T) {
+	t.Parallel()
+
+	user := &db.User{ID: testutil.UID(7), Username: "player"}
+	s := &stubSession{addr: stubAddr{"10.0.0.11:1"}, pubKey: testPublicKey(t), user: "player"}
+	st := &sessionState{traceCtx: t.Context()}
+	reg := &sessionRegistry{}
+	reg.store(s, st)
+
+	tracker := NewSessionTracker(1)
+	deps := newSessionDeps(t, stubUserRepo{user: user})
+	deps.Tracker = tracker
+	deps.LobbyManager = nil
+
+	require.Panics(t, func() { sessionModel(deps, reg, testBudget(5, 5, 5))(s) })
+	require.NotNil(t, st.user, "teardown skips a session whose user was never stored")
+	assert.NotZero(t, st.gen)
+	require.NotNil(t, st.model)
+	t.Cleanup(func() { st.model.Close() })
+
+	released := false
+	tracker.ReleaseWith(user.ID, st.gen, func() { released = true })
+	assert.True(t, released, "the slot claimed before ResumeSeat must still be releasable")
 }
 
 // sessionProgram is what wish calls; handing it a refused session must produce no

@@ -150,10 +150,18 @@ func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bo
 	if gen == 0 || a.gen != gen {
 		return false
 	}
+	// Clear even when fn panics. A teardown that dies inside DisconnectPlayer
+	// would otherwise leave this generation live and the account counted, and
+	// the slot would not come back.
+	defer func() {
+		if a.gen != gen {
+			return
+		}
+		a.gen, a.conn = 0, nil
+		t.mu.Lock()
+		t.live.Add(-1)
+		t.mu.Unlock()
+	}()
 	fn()
-	a.gen, a.conn = 0, nil
-	t.mu.Lock()
-	t.live.Add(-1)
-	t.mu.Unlock()
 	return true
 }

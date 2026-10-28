@@ -190,6 +190,23 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	require.NoError(t, err, "capacity frees with the seat")
 }
 
+func TestSessionTracker_ReleaseWithFreesTheSlotWhenTheTeardownPanics(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(0)
+	user := testutil.UID(51)
+	gen, err := tracker.Connect(user, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, tracker.Count())
+
+	assert.Panics(t, func() {
+		tracker.ReleaseWith(user, gen, func() { panic("disconnect") })
+	})
+	assert.Equal(t, 0, tracker.Count(), "a panicking teardown still frees the slot")
+	_, err = tracker.Connect(user, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, tracker.Count())
+}
+
 // ReleaseWith is what orders an old session's teardown before a reconnect: while
 // the teardown's DisconnectPlayer runs, the reconnect's Connect has to wait, or it
 // resumes a seat the teardown then puts on a grace timer.

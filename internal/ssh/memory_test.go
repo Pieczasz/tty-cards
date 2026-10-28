@@ -13,6 +13,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
+	"uuid"
+
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
 )
@@ -36,7 +38,7 @@ func (r *usersByKey) LoadUserByFingerprint(_ context.Context, fp string) (*db.Us
 	return u, &db.PublicSSHKey{}, nil
 }
 
-func (*usersByKey) UpdateUserActivity(context.Context, *db.User, *db.PublicSSHKey) error { return nil }
+func (*usersByKey) UpdateUserActivity(context.Context, uuid.UUID, uint) error { return nil }
 
 // countingDiscard is a session's stdout: the first byte is the first frame.
 type countingDiscard struct{ n atomic.Int64 }

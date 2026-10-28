@@ -31,8 +31,6 @@ import (
 	"charm.land/wish/v2/activeterm"
 	bm "charm.land/wish/v2/bubbletea"
 	"github.com/charmbracelet/keygen"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	gossh "golang.org/x/crypto/ssh"
@@ -116,59 +114,6 @@ type sessionRegistry struct {
 	live     sync.WaitGroup
 	// drained is closed by the one waiter goroutine waitSessions ever starts.
 	drained chan struct{}
-}
-
-// admit counts a session handler in, unless the server is draining.
-func (reg *sessionRegistry) admit() bool {
-	reg.liveMu.Lock()
-	defer reg.liveMu.Unlock()
-	if reg.draining {
-		return false
-	}
-	reg.live.Add(1)
-	return true
-}
-
-// waitSessions stops admitting session handlers, then blocks until every admitted
-// one has returned or ctx ends. The waiter is started once and reused, so a caller
-// that times out and calls again does not strand one per attempt.
-func (reg *sessionRegistry) waitSessions(ctx context.Context) error {
-	reg.liveMu.Lock()
-	reg.draining = true
-	if reg.drained == nil {
-		ch := make(chan struct{})
-		reg.drained = ch
-		go func() {
-			reg.live.Wait()
-			close(ch)
-		}()
-	}
-	drained := reg.drained
-	reg.liveMu.Unlock()
-
-	select {
-	case <-drained:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
-	}
-}
-
-func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
-	st, ok := reg.states.Load(s)
-	if !ok {
-		return nil, false
-	}
-	state, ok := st.(*sessionState)
-	return state, ok
-}
-
-func (reg *sessionRegistry) store(s ssh.Session, st *sessionState) {
-	reg.states.Store(s, st)
-}
-
-func (reg *sessionRegistry) delete(s ssh.Session) {
-	reg.states.Delete(s)
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -376,7 +321,7 @@ func sessionModel(
 			return nil
 		}
 		user, err := LoadOrRegisterUser(traceCtx, deps.Auth, s.User(), fingerprint,
-			func() bool { return allowRegistration(traceCtx, registerBudget, s) })
+			func() (bool, func()) { return allowRegistration(traceCtx, registerBudget, s) })
 		if err != nil {
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
@@ -403,14 +348,15 @@ func sessionModel(
 			return nil
 		}
 		observability.SSHSession(traceCtx, "accepted")
-		// Only once the slot is ours: a refused session must not cancel the grace
-		// timer holding this player's seat, and a displaced one has finished its
-		// teardown by now, so any timer it armed is there to cancel.
-		tui.ResumeSeat(model)
-
+		// Published before ResumeSeat: a panic there still has to ReleaseWith, and
+		// releaseSession skips a session whose user was never stored. Only once the
+		// slot is ours, though — a refused session must not cancel the grace timer
+		// holding this player's seat, and a displaced one has finished its teardown
+		// by now, so any timer it armed is there to cancel.
 		st.user = user
 		st.gen = gen
 		st.model = model
+		tui.ResumeSeat(model)
 
 		// bubbletea's own recover prints to stderr and knows nothing about the span
 		// or the metric, so reportingModel catches Init/Update/View first. Its
@@ -448,32 +394,6 @@ func (m reportingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m reportingModel) View() tea.View {
 	defer m.reg.reportPanic(m.session)
 	return m.Model.View()
-}
-
-// reportPanic records a recovered panic and re-panics so the caller's own frame
-// unwinds; the panic stops at bubbletea, which ends the program without taking the
-// process with it. It must be a direct defer - a recover() one call deeper is nil.
-//
-// The notice goes to the session's stderr channel, not its stdout: bubbletea owns the
-// screen and is about to tear it down. Without it the panic is written to the server's
-// stderr and the client just sees the connection close on a frozen screen - the
-// recoverSession message never runs, because nothing panics out of bubbletea.
-func (reg *sessionRegistry) reportPanic(s ssh.Session) {
-	r := recover()
-	if r == nil {
-		return
-	}
-	reg.recordSessionPanic(s, r)
-	notifySessionPanic(s)
-	panic(r)
-}
-
-const panicNotice = "\r\nAn unexpected internal error occurred. The administrators have been notified.\r\n"
-
-func notifySessionPanic(s ssh.Session) {
-	if w := s.Stderr(); w != nil {
-		_, _ = io.WriteString(w, panicNotice)
-	}
 }
 
 func sessionProgram(
@@ -603,197 +523,6 @@ func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error)
 		}
 	}()
 	return ch, out, nil
-}
-
-func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
-	return func(sh ssh.Handler) ssh.Handler {
-		return func(s ssh.Session) {
-			// A handler charm ssh started just before Close can get here after the
-			// drain stopped counting; it refuses itself rather than run untracked.
-			if !reg.admit() {
-				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
-				return
-			}
-			// Registered first, so it runs last: the drain is over only once the
-			// whole teardown below has run.
-			defer reg.live.Done()
-			st := reg.startSession(s)
-			defer reg.finishSession(s, st)
-			defer reg.recoverSession(s)
-			defer reg.releaseSession(s, deps)
-			defer reg.closeSessionModel(s)
-			defer reg.leaveSizes(s)
-
-			sh(s)
-		}
-	}
-}
-
-func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
-	pty, _, _ := s.Pty()
-	tracer := otel.Tracer("tty-cards/ssh")
-	//nolint:spancheck // the span outlives this function: finishSession ends it as the last deferred step
-	ctx, span := tracer.Start(s.Context(), "ssh.session",
-		trace.WithAttributes(
-			// No client address here: the span also carries the username once the
-			// player is known, and joining the two is exactly the record a trace store
-			// should not hold for 48 hours. Abuse investigation has the warn-level logs.
-			attribute.String("client_version", s.Context().ClientVersion()),
-			attribute.Int("terminal.width", pty.Window.Width),
-			attribute.Int("terminal.height", pty.Window.Height),
-		))
-
-	st := &sessionState{traceCtx: ctx, span: span, started: time.Now()}
-	reg.store(s, st)
-
-	slog.InfoContext(ctx, "ssh session connected",
-		"client_net", clientNet(s.RemoteAddr()),
-		"client_version", s.Context().ClientVersion(),
-	)
-	return st //nolint:spancheck // the span outlives this call: finishSession ends it, as the outermost deferred step of sessionLifecycle
-}
-
-func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
-	defer reg.delete(s)
-
-	outcome := st.outcome
-	switch {
-	case st.panicked:
-		outcome = "panic"
-	case st.input != nil && st.input.tripped.Load():
-		outcome = "input_limit"
-	case outcome == "":
-		outcome = "normal"
-	}
-	elapsed := time.Since(st.started)
-
-	observability.SSHSessionEnded(st.traceCtx, elapsed, outcome)
-	slog.InfoContext(st.traceCtx, "ssh session disconnected",
-		"client_net", clientNet(s.RemoteAddr()),
-		"client_version", s.Context().ClientVersion(),
-		"duration_seconds", elapsed.Seconds(),
-		"outcome", outcome,
-	)
-
-	if st.user != nil {
-		st.span.SetAttributes(attribute.String("user", st.user.Username))
-	}
-	st.span.End()
-}
-
-func (reg *sessionRegistry) recoverSession(s ssh.Session) {
-	r := recover()
-	if r == nil {
-		return
-	}
-	reg.recordSessionPanic(s, r)
-	wish.Fatalf(s, "%s", panicNotice)
-}
-
-// recordSessionPanic puts a recovered panic on the session span, the metric and the
-// log, all against the session's own trace context. It reports only: whether the
-// session can be told about it is the caller's business.
-func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
-	err := fmt.Errorf("panic during ssh session: %v", r)
-	var ctx context.Context = s.Context()
-	if st, ok := reg.load(s); ok {
-		if st.traceCtx != nil {
-			ctx = st.traceCtx
-		}
-		st.panicked = true
-		if st.span != nil {
-			st.span.RecordError(err, trace.WithStackTrace(true))
-			st.span.SetStatus(codes.Error, "panic during ssh session")
-		}
-	}
-	observability.SSHPanicRecovered(ctx)
-	slog.ErrorContext(ctx, "critical panic recovered during ssh session",
-		"panic", r,
-		"remote_addr", addrString(s.RemoteAddr()),
-	)
-}
-
-// leaveSizes gives the session's cells back. It runs after the program has ended, so
-// held is no longer the event loop's.
-func (reg *sessionRegistry) leaveSizes(s ssh.Session) {
-	st, ok := reg.load(s)
-	if !ok || st.program.Load() == nil {
-		return
-	}
-	if st.size.budget.leave(st.size.held) {
-		go reg.retier()
-	}
-}
-
-func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
-	if st, ok := reg.load(s); ok && st.model != nil {
-		st.model.Close()
-	}
-}
-
-// releaseSession gives up the seat and the tracker slot as one step under the
-// account's tracker lock. Separately, a reconnect could take the slot and resume the seat in
-// between, and this session's DisconnectPlayer would then arm a grace timer on the
-// seat the replacement is playing. A displaced session (stale generation) touches
-// neither.
-func (reg *sessionRegistry) releaseSession(s ssh.Session, deps Deps) {
-	st, ok := reg.load(s)
-	if !ok || st.user == nil {
-		return
-	}
-	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
-	// for the grace window, so a reconnect resumes the match instead of forfeiting.
-	deps.Tracker.ReleaseWith(st.user.ID, st.gen, func() {
-		deps.LobbyManager.DisconnectPlayer(lobby.NewPlayer(st.user))
-	})
-}
-
-// registrationBudget is what a new account spends, narrowest first: its /64, its /48
-// (a free tunnel is 65,536 /64s) and the server as a whole, for an attacker with more
-// networks than any per-network budget can see. Returning players spend none of it.
-type registrationBudget struct {
-	net, wide, global *ratelimit.SlidingWindow
-}
-
-func newRegistrationBudget(cfg *config.Config) registrationBudget {
-	return registrationBudget{
-		net:    ratelimit.New(cfg.RegistrationLimit, cfg.RegistrationWindow),
-		wide:   ratelimit.New(cfg.RegistrationLimitWide, cfg.RegistrationWindow),
-		global: ratelimit.New(cfg.RegistrationGlobalLimit, cfg.RegistrationWindow),
-	}
-}
-
-// allowRegistration answers whether this network may mint another account. An
-// address that cannot be keyed is refused: registration is the one path where
-// admitting an unmeterable client is worse than turning a real player away.
-func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Session) bool {
-	host, ok := clientHost(s.RemoteAddr())
-	if !ok {
-		return false
-	}
-	spends := []struct {
-		limiter *ratelimit.SlidingWindow
-		key     string
-		name    string
-	}{
-		{budget.net, ratelimit.NetKey(host), "ssh_register"},
-		{budget.wide, ratelimit.WideKey(host), "ssh_register_wide"},
-		{budget.global, "", "ssh_register_global"},
-	}
-	for i, spend := range spends {
-		if spend.limiter.Allow(spend.key) {
-			continue
-		}
-		// Refused, so the account is never made: the narrower budgets get back what
-		// they just admitted, or a flood filling the global ceiling would also lock
-		// every real player who retried out of their own network's budget.
-		for _, admitted := range spends[:i] {
-			admitted.limiter.Refund(admitted.key)
-		}
-		observability.RateLimitReject(ctx, spend.name)
-		return false
-	}
-	return true
 }
 
 // clientNet is what the routine connect/disconnect logs record instead of the address:

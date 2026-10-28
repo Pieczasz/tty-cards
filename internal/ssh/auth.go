@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/observability"
+	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"charm.land/ssh"
 	gossh "golang.org/x/crypto/ssh"
@@ -43,11 +46,12 @@ func SessionFingerprint(s ssh.Session) (string, error) {
 
 // LoadOrRegisterUser resolves a fingerprint to an account, registering one on first
 // sight. allowRegister gates only that first sight - a returning player never spends
-// its budget - and may be nil where registration needs no limit. Auth deliberately
-// knows nothing about how the budget is counted; it only asks.
+// its budget - and may be nil where registration needs no limit. When it allows, its
+// refund undoes that spend if the account is not created. Auth deliberately knows
+// nothing about how the budget is counted; it only asks.
 func LoadOrRegisterUser(
 	ctx context.Context, userRepo db.Authenticator, sshUsername, fingerprint string,
-	allowRegister func() bool,
+	allowRegister func() (bool, func()),
 ) (*db.User, error) {
 	user, key, err := userRepo.LoadUserByFingerprint(ctx, fingerprint)
 	if err != nil {
@@ -56,7 +60,11 @@ func LoadOrRegisterUser(
 	}
 
 	if user != nil {
-		if err := userRepo.UpdateUserActivity(ctx, user, key); err != nil {
+		var keyID uint
+		if key != nil {
+			keyID = key.ID
+		}
+		if err := userRepo.UpdateUserActivity(ctx, user.ID, keyID); err != nil {
 			// Non-fatal: stale activity timestamps must not block a login.
 			slog.WarnContext(ctx, "failed to update user activity", "error", err)
 		}
@@ -67,12 +75,20 @@ func LoadOrRegisterUser(
 	if err := db.ValidateUsername(sshUsername); err != nil {
 		return nil, fmt.Errorf("%w: %w; try another with ssh -l <name>", db.ErrInvalidUsername, err)
 	}
-	if allowRegister != nil && !allowRegister() {
-		slog.WarnContext(ctx, "refused new account registration: network over its budget")
-		return nil, errTooManyRegistrations
+	var refund func()
+	if allowRegister != nil {
+		ok, undo := allowRegister()
+		if !ok {
+			slog.WarnContext(ctx, "refused new account registration: network over its budget")
+			return nil, errTooManyRegistrations
+		}
+		refund = undo
 	}
 	user, _, err = userRepo.RegisterUserWithSSHKey(ctx, sshUsername, fingerprint)
 	if err != nil {
+		if refund != nil {
+			refund()
+		}
 		// A taken name or a key registered by a racing connection is the player's
 		// situation, not a server failure.
 		level := slog.LevelError
@@ -95,5 +111,57 @@ func mapRegisterError(err error) error {
 		return err
 	default:
 		return errRegistrationFailed
+	}
+}
+
+// registrationBudget is what a new account spends, narrowest first: its /64, its /48
+// (a free tunnel is 65,536 /64s) and the server as a whole, for an attacker with more
+// networks than any per-network budget can see. Returning players spend none of it.
+type registrationBudget struct {
+	net, wide, global *ratelimit.SlidingWindow
+}
+
+func newRegistrationBudget(cfg *config.Config) registrationBudget {
+	return registrationBudget{
+		net:    ratelimit.New(cfg.RegistrationLimit, cfg.RegistrationWindow),
+		wide:   ratelimit.New(cfg.RegistrationLimitWide, cfg.RegistrationWindow),
+		global: ratelimit.New(cfg.RegistrationGlobalLimit, cfg.RegistrationWindow),
+	}
+}
+
+// allowRegistration answers whether this network may mint another account. An
+// address that cannot be keyed is refused: registration is the one path where
+// admitting an unmeterable client is worse than turning a real player away.
+func allowRegistration(ctx context.Context, budget registrationBudget, s ssh.Session) (bool, func()) {
+	host, ok := clientHost(s.RemoteAddr())
+	if !ok {
+		return false, nil
+	}
+	spends := []struct {
+		limiter *ratelimit.SlidingWindow
+		key     string
+		name    string
+	}{
+		{budget.net, ratelimit.NetKey(host), "ssh_register"},
+		{budget.wide, ratelimit.WideKey(host), "ssh_register_wide"},
+		{budget.global, "", "ssh_register_global"},
+	}
+	for i, spend := range spends {
+		if spend.limiter.Allow(spend.key) {
+			continue
+		}
+		// Refused, so the account is never made: the narrower budgets get back what
+		// they just admitted, or a flood filling the global ceiling would also lock
+		// every real player who retried out of their own network's budget.
+		for _, admitted := range spends[:i] {
+			admitted.limiter.Refund(admitted.key)
+		}
+		observability.RateLimitReject(ctx, spend.name)
+		return false, nil
+	}
+	return true, func() {
+		for _, spend := range spends {
+			spend.limiter.Refund(spend.key)
+		}
 	}
 }
