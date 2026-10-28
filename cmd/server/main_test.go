@@ -34,6 +34,7 @@ type fakeServer struct {
 	waitErr     error
 	closed      bool
 	closeOnce   sync.Once
+	onClose     func()
 	// stops is the order the drain called Shutdown, Close and WaitSessions in.
 	stops []string
 }
@@ -47,6 +48,9 @@ func (f *fakeServer) Shutdown(context.Context) error {
 
 func (f *fakeServer) Close() error {
 	f.stops = append(f.stops, "close")
+	if f.onClose != nil {
+		f.onClose()
+	}
 	f.closed = true
 	if f.serveErr != nil {
 		f.closeOnce.Do(func() { close(f.serveErr) })
@@ -117,10 +121,14 @@ func TestStopServer_ClosesOnEveryPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stopServer(tt.server)
+			var order []string
+			tt.server.onClose = func() { order = append(order, "close") }
+			stopServer(tt.server, func() { order = append(order, "teardown") })
 
 			assert.True(t, tt.server.closed, "the server was never closed")
 			assert.Equal(t, []string{"shutdown", "close", "wait sessions"}, tt.server.stops)
+			assert.Equal(t, []string{"teardown", "close"}, order,
+				"matches ended by the hang-up must be marked before it happens")
 		})
 	}
 }
@@ -413,5 +421,35 @@ func TestStartStatsAPI_BindFailureIsReported(t *testing.T) {
 		require.ErrorContains(t, err, "stats api stopped")
 	case <-time.After(5 * time.Second):
 		t.Fatal("a bind failure never reached the error channel")
+	}
+}
+
+// An argument the server does not know must not fall through to a full boot.
+func TestDispatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantExit    int
+		wantProceed bool
+		wantOut     string
+		wantErr     string
+	}{
+		{name: "no arguments boots", wantProceed: true},
+		{name: "help", args: []string{"--help"}, wantOut: "Usage: server"},
+		{name: "short help", args: []string{"-h"}, wantOut: "Usage: server"},
+		{name: "version", args: []string{"-version"}, wantOut: "v-test"},
+		{name: "a typo does not boot", args: []string{"-healtcheck"}, wantExit: 2, wantErr: `unknown argument "-healtcheck"`},
+		{name: "a stray word does not boot", args: []string{"serve"}, wantExit: 2, wantErr: "unknown argument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SERVICE_VERSION", "v-test")
+			var out, errOut strings.Builder
+			exit, proceed := dispatch(tt.args, &out, &errOut)
+			assert.Equal(t, tt.wantExit, exit)
+			assert.Equal(t, tt.wantProceed, proceed)
+			assert.Contains(t, out.String(), tt.wantOut)
+			assert.Contains(t, errOut.String(), tt.wantErr)
+		})
 	}
 }

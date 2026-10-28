@@ -8,11 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -48,13 +50,64 @@ const (
 	otelDrainTimeout     = 6 * time.Second
 )
 
+const usage = `tty-cards server: the ssh game server and its read-only stats API.
+
+Usage: server [-healthcheck | -version | -h]
+
+With no argument it runs, configured entirely by environment variables (see
+README.md, "Configuration").
+
+  -healthcheck  probe the local stats API's /healthz and exit 0 if it answers 200
+  -version      print the build version and exit
+  -h, --help    print this text and exit
+`
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
-		os.Exit(healthcheck())
+	exit, proceed := dispatch(os.Args[1:], os.Stdout, os.Stderr)
+	if !proceed {
+		os.Exit(exit)
 	}
 	if run() != nil {
 		os.Exit(1)
 	}
+}
+
+// dispatch handles the command line. An argument it does not know stops the boot: a
+// typo such as -healtcheck used to start the whole server, so a container healthcheck
+// meant to probe it would bring up a second one.
+func dispatch(args []string, stdout, stderr io.Writer) (exit int, proceed bool) {
+	if len(args) == 0 {
+		return 0, true
+	}
+	switch args[0] {
+	case "-healthcheck", "--healthcheck":
+		return healthcheck(), false
+	case "-h", "-help", "--help":
+		_, _ = io.WriteString(stdout, usage)
+		return 0, false
+	case "-version", "--version":
+		_, _ = fmt.Fprintln(stdout, buildVersion())
+		return 0, false
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown argument %q\n\n%s", args[0], usage)
+		return 2, false
+	}
+}
+
+// buildVersion is SERVICE_VERSION when the deploy stamps one, else the VCS revision the
+// toolchain embedded, else "dev".
+func buildVersion() string {
+	if v := os.Getenv("SERVICE_VERSION"); v != "" {
+		return v
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, kv := range info.Settings {
+			if kv.Key == "vcs.revision" && kv.Value != "" {
+				return kv.Value
+			}
+		}
+	}
+	return "dev"
 }
 
 func healthcheck() int {
@@ -158,6 +211,7 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 		apiErr:     apiErr,
 		signals:    signals,
 		onShutdown: lobbyManager.BeginShutdown,
+		onTeardown: lobbyManager.BeginTeardown,
 	})
 }
 
@@ -264,6 +318,7 @@ type serveDeps struct {
 	apiErr     <-chan error
 	signals    <-chan os.Signal
 	onShutdown func()
+	onTeardown func()
 }
 
 func serve(ctx context.Context, d serveDeps) error {
@@ -297,7 +352,7 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
-	defer drainServer(d.onShutdown, server)
+	defer drainServer(d.onShutdown, d.onTeardown, server)
 	select {
 	case err := <-serveErr:
 		if err != nil {
@@ -336,19 +391,24 @@ func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error)
 	return listener, nil
 }
 
-func drainServer(onShutdown func(), server sshServer) {
+func drainServer(onShutdown, onTeardown func(), server sshServer) {
 	if onShutdown != nil {
 		onShutdown()
 	}
-	stopServer(server)
+	stopServer(server, onTeardown)
 }
 
-func stopServer(server sshServer) {
+// stopServer waits for sessions to end on their own, then calls onTeardown (from here
+// on a match ending is unrated) and hangs up on whoever is left.
+func stopServer(server sshServer, onTeardown func()) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), sshDrainTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.WarnContext(shutdownCtx, "sessions outlasted the drain window; closing them",
 			"error", err, "timeout", sshDrainTimeout)
+	}
+	if onTeardown != nil {
+		onTeardown()
 	}
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
