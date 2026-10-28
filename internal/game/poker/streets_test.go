@@ -998,7 +998,8 @@ func TestSettleFailure_HandsThePotBack(t *testing.T) {
 		t.Parallel()
 		state, extra := brokenTable()
 
-		(&Rules{}).AfterPlayerRemoved(state, 0)
+		assert.Panics(t, func() { (&Rules{}).AfterPlayerRemoved(state, 0) },
+			"a leave reports a deal failure the same way ApplyAction does: the match ends")
 
 		assert.True(t, extra.HandComplete(), "the hand is closed, not left on a dead deck")
 		assert.Equal(t, uint(1000), extra.Seats["a"].Chips)

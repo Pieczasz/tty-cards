@@ -38,13 +38,15 @@ type Engine struct {
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
 type turnClock struct {
 	defaultLength time.Duration
-	seq           uint64
-	timer         *time.Timer
-	deadline      time.Time
-	missed        map[string]int
-	playerID      string
-	length        time.Duration
-	missCharged   bool
+	// generation fences the timer: a callback from an older arm does not settle
+	// the turn a newer one is running.
+	generation  uint64
+	timer       *time.Timer
+	deadline    time.Time
+	missed      map[string]int
+	playerID    string
+	length      time.Duration
+	missCharged bool
 }
 
 // EngineOption configures NewEngine.
@@ -64,6 +66,14 @@ func WithLogger(l *slog.Logger) EngineOption {
 func WithTurnTimeout(d time.Duration) EngineOption {
 	return func(e *Engine) {
 		e.clock.defaultLength = d
+	}
+}
+
+// WithNoSubscribers closes the event feed so Subscribe fails. Tests use it to prove
+// a lobby does not open a table it cannot watch.
+func WithNoSubscribers() EngineOption {
+	return func(e *Engine) {
+		e.broadcaster.Close()
 	}
 }
 
@@ -104,10 +114,17 @@ func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 }
 
 // Start opens the table: it picks the first seat and lets the rules set the game up,
-// the deal included. A table whose rules refuse it stays Waiting.
-func (e *Engine) Start() error {
+// the deal included. A table whose rules refuse it stays Waiting. A panic in the
+// setup ends the table, the same way SubmitAction does, instead of the process.
+func (e *Engine) Start() (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			e.endOnRulesPanicLocked(r)
+			err = errors.New("the game hit an internal error and has ended")
+		}
+	}()
 
 	if e.closed {
 		return errClosed

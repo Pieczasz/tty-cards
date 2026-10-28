@@ -41,33 +41,52 @@ func SeatsFor(state *game.State, viewer string) []SeatView {
 	if !ok {
 		return nil
 	}
-	seats := make([]SeatView, 0, len(state.Players))
+	seats := make([]SeatView, 0, len(state.Players)+len(state.LeftPlayers))
 	for i, p := range state.Players {
-		if p == nil {
-			continue
+		if view, ok := seatView(state, extra, p, i, viewer); ok {
+			seats = append(seats, view)
 		}
-		var money Seat
-		if ls := extra.Seats[p.ID]; ls != nil {
-			money = *ls
+	}
+	// An all-in leaver is off the roster but still contests the showdown. Their
+	// hole cards have to be face up with everyone else's, or the board pays a
+	// hand nobody can see.
+	if extra.ReachedShowdown {
+		for _, p := range state.LeftPlayers {
+			view, ok := seatView(state, extra, p, -1, viewer)
+			if ok && !view.Folded {
+				seats = append(seats, view)
+			}
 		}
-		s := SeatView{
-			PlayerID: p.ID,
-			Name:     p.DisplayName(),
-			Chips:    money.Chips,
-			Bet:      money.Bet,
-			Folded:   money.Folded,
-			AllIn:    money.AllIn,
-			IsDealer: i == extra.DealerIndex,
-			IsSB:     i == extra.SBIndex,
-			IsBB:     i == extra.BBIndex,
-			IsTurn:   state.Phase == game.Playing && state.CurrentTurn == i && !extra.HandComplete(),
-			IsHero:   p.ID == viewer,
-			HandSize: len(p.Cards),
-		}
-		if s.IsHero || (extra.ReachedShowdown && !s.Folded) {
-			s.Hole = slices.Clone(p.Cards)
-		}
-		seats = append(seats, s)
 	}
 	return seats
+}
+
+func seatView(state *game.State, extra *State, p *game.Player, i int, viewer string) (SeatView, bool) {
+	if p == nil {
+		return SeatView{}, false
+	}
+	var money Seat
+	if ls := extra.Seats[p.ID]; ls != nil {
+		money = *ls
+	}
+	s := SeatView{
+		PlayerID: p.ID,
+		Name:     p.DisplayName(),
+		Chips:    money.Chips,
+		Bet:      money.Bet,
+		Folded:   money.Folded,
+		AllIn:    money.AllIn,
+		IsHero:   p.ID == viewer,
+		HandSize: len(p.Cards),
+	}
+	if i >= 0 {
+		s.IsDealer = i == extra.DealerIndex
+		s.IsSB = i == extra.SBIndex
+		s.IsBB = i == extra.BBIndex
+		s.IsTurn = state.Phase == game.Playing && state.CurrentTurn == i && !extra.HandComplete()
+	}
+	if s.IsHero || (extra.ReachedShowdown && !s.Folded) {
+		s.Hole = slices.Clone(p.Cards)
+	}
+	return s, true
 }

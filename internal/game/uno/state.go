@@ -35,9 +35,7 @@ func hasColor(hand []deck.Card, color deck.Suit) bool {
 	return slices.ContainsFunc(hand, func(c deck.Card) bool { return !IsWild(c) && c.Suit == color })
 }
 
-// extraOf is the table's Extra, which OnGameStart put there. Anything else is a
-// wiring bug, and the panic ends the one table as a rules error through the engine's
-// recover (decision #37).
+// extraOf is the table's Extra, which OnGameStart put there. Anything else is a wiring bug.
 func extraOf(state *game.State) *State {
-	return state.Extra.(*State) //nolint:forcetypeassert // a wiring bug; the engine's recover ends the table (decision #37)
+	return state.Extra.(*State) //nolint:forcetypeassert // wiring bug
 }

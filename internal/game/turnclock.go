@@ -41,21 +41,22 @@ func (e *Engine) armTurnTimerLocked() {
 	if current := e.currentPlayerLocked(); current != nil {
 		playerID = current.ID
 	}
+	sameTurn := !prevDeadline.IsZero() && playerID == prevPlayer && timeout == prevLength
 	wait := timeout
-	if !prevDeadline.IsZero() && playerID == prevPlayer && timeout == prevLength {
+	if sameTurn {
 		wait = max(time.Until(prevDeadline), min(minTurnRemaining, timeout))
 	} else {
 		e.clock.missCharged = false
 	}
 	e.clock.playerID, e.clock.length = playerID, timeout
 
-	seq := e.clock.seq
+	generation := e.clock.generation
 	e.clock.deadline = time.Now().Add(wait)
-	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(seq) })
+	e.clock.timer = time.AfterFunc(wait, func() { e.onTurnTimeout(generation) })
 }
 
 func (e *Engine) stopTurnTimerLocked() {
-	e.clock.seq++
+	e.clock.generation++
 	if e.clock.timer != nil {
 		e.clock.timer.Stop()
 		e.clock.timer = nil
@@ -65,10 +66,22 @@ func (e *Engine) stopTurnTimerLocked() {
 
 // onTurnTimeout is the timer's callback. A seat taken for idling is reported to
 // WithOnIdleRemoved only here, once the engine lock is released.
-func (e *Engine) onTurnTimeout(seq uint64) {
-	if idle := e.expireTurn(seq); idle != "" && e.onIdleRemoved != nil {
-		e.onIdleRemoved(idle)
+func (e *Engine) onTurnTimeout(generation uint64) {
+	idle := e.expireTurn(generation)
+	if idle == "" || e.onIdleRemoved == nil {
+		return
 	}
+	// The hook runs after the lock is released, on the timer goroutine. A panic
+	// here is the roster's, and nothing above this callback would catch it.
+	defer func() {
+		if r := recover(); r != nil {
+			e.mu.Lock()
+			e.state.Logger().Error("idle-removal hook panicked",
+				"panic", r, "player_id", idle, "stack", string(debug.Stack()))
+			e.mu.Unlock()
+		}
+	}()
+	e.onIdleRemoved(idle)
 }
 
 // expireTurn settles an expired turn in one lock hold: it charges the miss, then
@@ -77,7 +90,7 @@ func (e *Engine) onTurnTimeout(seq uint64) {
 // so a player's own move either lands before this takes the lock - and moved the
 // generation on - or after it has settled the turn. It returns the seat it took for
 // idling, or "".
-func (e *Engine) expireTurn(seq uint64) (idle string) {
+func (e *Engine) expireTurn(generation uint64) (idle string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
@@ -91,7 +104,7 @@ func (e *Engine) expireTurn(seq uint64) (idle string) {
 
 	// A fired AfterFunc cannot be stopped: one that waited on the lock while the turn
 	// moved on, the table ended or the engine closed finds a newer generation.
-	if seq != e.clock.seq || e.state.Phase != Playing {
+	if generation != e.clock.generation || e.state.Phase != Playing {
 		return ""
 	}
 	current := e.currentPlayerLocked()
@@ -108,12 +121,16 @@ func (e *Engine) expireTurn(seq uint64) (idle string) {
 	if e.clock.missed[current.ID] >= MaxMissedTurns {
 		return e.takeIdleSeatLocked(current.ID)
 	}
-	return e.autoPlayLocked(current)
+	if e.autoPlayLocked(current) {
+		return current.ID
+	}
+	return ""
 }
 
-// autoPlayLocked plays the rules' safe move for current, whose turn just expired, and
-// returns current's ID if it took the seat instead. Caller holds e.mu.
-func (e *Engine) autoPlayLocked(current *Player) (idle string) {
+// autoPlayLocked plays the rules' safe move for current, whose turn just expired.
+// removed is set when that move did not exist and the seat was taken instead.
+// Caller holds e.mu.
+func (e *Engine) autoPlayLocked(current *Player) (removed bool) {
 	safe := e.state.Rules.TimeoutAction(e.state)
 	if safe == nil {
 		// No safe move: the seat goes rather than the table waiting. Reaching this in
@@ -121,7 +138,8 @@ func (e *Engine) autoPlayLocked(current *Player) (idle string) {
 		e.state.Logger().Warn("rules returned no safe timeout move; taking the seat",
 			"player_id", current.ID, "phase", e.state.Phase)
 		e.clock.missed[current.ID] = MaxMissedTurns
-		return e.takeIdleSeatLocked(current.ID)
+		e.takeIdleSeatLocked(current.ID)
+		return true
 	}
 	e.broadcaster.Broadcast(Event{Type: EventTurnTimedOut, PlayerID: current.ID})
 
@@ -136,13 +154,13 @@ func (e *Engine) autoPlayLocked(current *Player) (idle string) {
 			"error", err, "player_id", current.ID, "action", safe.Name())
 		e.clock.missCharged = false
 		e.armTurnTimerLocked()
-		return ""
+		return false
 	}
 	if err := e.applyActionLocked(current, safe); err != nil {
 		e.state.Logger().Error("auto-play ended the table on a rules error",
 			"error", err, "player_id", current.ID, "action", safe.Name())
 	}
-	return ""
+	return false
 }
 
 // takeIdleSeatLocked removes a seat that stopped playing and returns its ID. Caller

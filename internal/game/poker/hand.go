@@ -20,6 +20,11 @@ const (
 	minDeckAfterDeal = 1 + BoardSize + 2
 )
 
+var (
+	errChipsInPot  = errors.New("poker hand finished with chips still in the pot")
+	errChipsBroken = errors.New("poker chip conservation broken")
+)
+
 // beginHandOrFinish deals a hand and closes it out when the deal already finished
 // it: blinds big enough to put every funded seat all-in run the board out inside
 // beginHand, before anybody acts. Both the opening deal and every ActionNextHand go
@@ -30,7 +35,7 @@ func beginHandOrFinish(state *game.State, extra *State, dealer int) error {
 		return err
 	}
 	if extra.HandComplete() {
-		finishHand(state, extra)
+		return finishHand(state, extra)
 	}
 	return nil
 }
@@ -174,45 +179,52 @@ func nextFundedSeat(state *game.State, extra *State, from int) int {
 
 // finishHand closes out a hand. It ends the match once the hands run out or only
 // one player still has chips; otherwise it parks the turn on the next dealer, who
-// deals the following hand with ActionNextHand.
-func finishHand(state *game.State, extra *State) {
+// deals the following hand with ActionNextHand. A conservation failure is returned
+// so the engine ends the match: the next deal's reset would otherwise zero a pot
+// that never paid out.
+func finishHand(state *game.State, extra *State) error {
 	extra.Phase = PhaseShowdown
-	checkChipConservation(state, extra)
+	if err := checkChipConservation(state, extra); err != nil {
+		return err
+	}
 	recordBustouts(state, extra)
 	if extra.HandNumber >= extra.HandsTotal || fundedSeats(state, extra) <= 1 {
 		extra.MatchComplete = true
-		return
+		return nil
 	}
 	state.SetTurn(nextFundedSeat(state, extra, extra.DealerIndex))
+	return nil
 }
 
 // checkChipConservation is a money-bug tripwire. Chips only ever move between a stack
 // and the pool, so once a hand is closed out the two together must still add up to
 // what the table had when the hand was dealt, and every one of them must be back in a
 // stack. A mismatch means a pot paid out more or less than it collected, which is
-// worth a log line even though it is too late to fix.
+// worth a log line, and it ends the match: the next resetForHand would zero a pot
+// that never paid out and the hand would go on with the chips missing.
 //
 // The pool is checked separately because the total cannot see it: chipsInPlay counts
-// Pool, so a hand that ends without paying a pot out balances, and the next
-// resetForHand quietly zeroes the stranded chips.
-func checkChipConservation(state *game.State, extra *State) {
+// Pool, so a hand that ends without paying a pot out balances.
+func checkChipConservation(state *game.State, extra *State) error {
 	if extra.Pool != 0 {
 		state.Logger().Error("poker hand finished with chips still in the pot",
 			"hand", extra.HandNumber,
 			"phase", extra.Phase.String(),
 			"pool", extra.Pool,
 		)
+		return errChipsInPot
 	}
 	if extra.handStartChips == 0 {
-		return // a hand-shaped State assembled by hand, not dealt by beginHand
+		return nil // a hand-shaped State assembled by hand, not dealt by beginHand
 	}
 	total := chipsInPlay(extra)
 	if total == extra.handStartChips {
-		return
+		return nil
 	}
 	state.Logger().Error("poker chip conservation broken",
 		"hand", extra.HandNumber,
 		"phase", extra.Phase.String(),
 		"delta", int64(total)-int64(extra.handStartChips), //nolint:gosec // G115: chip totals are far below 2^63
 	)
+	return errChipsBroken
 }

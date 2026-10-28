@@ -101,3 +101,31 @@ func TestEngine_RemovePlayer_RulesPanicOnAClosedEngineIsRecorded(t *testing.T) {
 	assert.True(t, engine.IsFinished())
 	assert.Equal(t, EndReasonRulesError, engine.EndReason())
 }
+
+type startPanicRules struct{ *timeoutRules }
+
+func (*startPanicRules) OnGameStart(*State) error { panic("deal bug") }
+
+func TestEngine_Start_RulesPanicEndsTheTable(t *testing.T) {
+	t.Parallel()
+	engine := NewEngine(&startPanicRules{&timeoutRules{}}, []*Player{{ID: "a"}, {ID: "b"}}, WithTurnTimeout(0))
+	t.Cleanup(engine.Close)
+
+	var err error
+	require.NotPanics(t, func() { err = engine.Start() })
+	require.Error(t, err)
+	assert.True(t, engine.IsFinished())
+	assert.Equal(t, EndReasonRulesError, engine.EndReason())
+}
+
+func TestOnTurnTimeout_IdleHookPanicDoesNotEscape(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, &timeoutRules{safe: namedAction{name: "safe"}}, "a", "b")
+	engine.onIdleRemoved = func(string) { panic("roster") }
+	engine.mu.Lock()
+	id := engine.state.Players[engine.state.CurrentTurn].ID
+	engine.clock.missed[id] = MaxMissedTurns - 1
+	engine.mu.Unlock()
+
+	require.NotPanics(t, func() { fireTurnTimeout(t, engine) })
+}

@@ -151,6 +151,38 @@ func TestSeatsFor_CopiesTheHoleCardsItReveals(t *testing.T) {
 
 // A seat that left mid-hand is a nil entry in State.Players. Skipping it is what keeps
 // the table from panicking on a disconnect the engine has not finished cleaning up.
+// An all-in player who left still contests the showdown. Their cards are on the
+// left-player record, not on a seat the engine still lists.
+func TestSeatsFor_ShowdownIncludesAContestingLeaver(t *testing.T) {
+	t.Parallel()
+
+	live := []deck.Card{{Rank: deck.Ace, Suit: deck.Hearts}, {Rank: deck.King, Suit: deck.Hearts}}
+	mucked := []deck.Card{{Rank: deck.Two, Suit: deck.Clubs}, {Rank: deck.Three, Suit: deck.Clubs}}
+	state := &game.State{
+		Phase: game.Playing,
+		Players: []*game.Player{
+			{ID: "hero", Name: "alice"},
+		},
+		LeftPlayers: []*game.Player{
+			{ID: "allin", Name: "bob", Cards: live},
+			{ID: "mucked", Name: "carol", Cards: mucked},
+		},
+		Extra: &State{
+			ReachedShowdown: true,
+			Seats: map[string]*Seat{
+				"hero":   {Chips: 100},
+				"allin":  {AllIn: true},
+				"mucked": {Folded: true},
+			},
+		},
+	}
+
+	seats := SeatsFor(state, "hero")
+	require.Len(t, seats, 2)
+	assert.Equal(t, live, seats[1].Hole)
+	assert.Equal(t, "allin", seats[1].PlayerID)
+}
+
 func TestSeatsFor_SkipsAnEmptySeat(t *testing.T) {
 	t.Parallel()
 

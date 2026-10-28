@@ -67,7 +67,7 @@ func (e *Engine) missedTurns(playerID string) int {
 func fireTurnTimeout(t *testing.T, e *Engine) {
 	t.Helper()
 	e.mu.Lock()
-	seq := e.clock.seq
+	seq := e.clock.generation
 	e.mu.Unlock()
 	e.onTurnTimeout(seq)
 }
@@ -161,7 +161,7 @@ func TestEngine_TurnTimeout_StaleTimerIsIgnored(t *testing.T) {
 	// Capture the sequence the armed timer holds, then act: this is the player who
 	// moved in the instant before their own clock ran out.
 	engine.mu.Lock()
-	stale := engine.clock.seq
+	stale := engine.clock.generation
 	engine.mu.Unlock()
 
 	acted := engine.CurrentPlayerID()
@@ -280,7 +280,7 @@ func TestEngine_TurnTimeout_TimerActuallyFires(t *testing.T) {
 }
 
 // Spamming moves the rules refuse must not read as presence. A rejected action
-// clears nothing and settles no cursor, so clock.seq is unchanged and the seat still
+// clears nothing and settles no cursor, so clock.generation is unchanged and the seat still
 // goes - otherwise a client could sit out forever by sending garbage once per expiry.
 func TestEngine_TurnTimeout_RefusedMoveBeforeTheExpiryStillLosesTheSeat(t *testing.T) {
 	t.Parallel()
@@ -291,7 +291,7 @@ func TestEngine_TurnTimeout_RefusedMoveBeforeTheExpiryStillLosesTheSeat(t *testi
 	victim := engine.CurrentPlayerID()
 	engine.mu.Lock()
 	engine.clock.missed[victim] = MaxMissedTurns - 1
-	seq := engine.clock.seq
+	seq := engine.clock.generation
 	engine.mu.Unlock()
 
 	// The refusal lands before the expiry takes the lock.
@@ -326,7 +326,7 @@ func TestEngine_TurnTimeout_EventShipsWithTheMiss(t *testing.T) {
 	require.NoError(t, err)
 
 	engine.mu.Lock()
-	seq := engine.clock.seq
+	seq := engine.clock.generation
 	engine.mu.Unlock()
 
 	expired := engine.CurrentPlayerID()
@@ -353,7 +353,7 @@ func TestEngine_TurnTimeout_TakingTheSeatSkipsTheTimedOutEvent(t *testing.T) {
 	victim := engine.CurrentPlayerID()
 	engine.mu.Lock()
 	engine.clock.missed[victim] = MaxMissedTurns - 1
-	seq := engine.clock.seq
+	seq := engine.clock.generation
 	engine.mu.Unlock()
 
 	events, err := engine.Subscribe()
@@ -457,7 +457,7 @@ func TestEngine_TurnTimeout_RulesPanicEndsOnlyThisTable(t *testing.T) {
 	events, err := engine.Subscribe()
 	require.NoError(t, err)
 	engine.mu.Lock()
-	seq := engine.clock.seq
+	seq := engine.clock.generation
 	engine.mu.Unlock()
 
 	require.NotPanics(t, func() { engine.onTurnTimeout(seq) }, "the timer goroutine must recover")

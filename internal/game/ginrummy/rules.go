@@ -385,11 +385,6 @@ func (r *Rules) TimeoutAction(state *game.State) game.Action {
 		if _, ok := state.Discard.Peek(); ok {
 			return ActionDrawDiscard{}
 		}
-		// At the wall with an empty pile nothing is legal: the stock is off limits,
-		// there is nothing to take, and a knock needs the card drawn first. ApplyAction
-		// ends a walled hand before anyone is asked to draw, so this is unreachable in
-		// play - handing back a move the validator refuses is what would turn it into
-		// a silent kick if it ever were reached.
 		return nil
 	case PhaseAwaitingDiscard:
 		if card, ok := ginDiscard(p.Cards, extra.TakenUpcard); ok {

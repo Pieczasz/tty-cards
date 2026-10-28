@@ -127,7 +127,7 @@ func (s *State) commitTo(seat *Seat, streetTotal uint) {
 //
 // MinRaise is the size of the last full raise, and the next legal raise is measured
 // from the raised CurrentBet: a sub-minimum all-in moves the bet but not the increment,
-// which is the standard rule (decisions.md #41).
+// which is the standard rule.
 func applyBetIncrease(state *game.State, extra *State, raiser *game.Player, newBet uint) {
 	if newBet <= extra.CurrentBet {
 		return
@@ -173,8 +173,7 @@ func resolveAfterChange(state *game.State, extra *State, from int) error {
 	if len(live) == 1 {
 		awardUncontested(extra, live[0])
 		extra.Winners = live
-		finishHand(state, extra)
-		return nil
+		return finishHand(state, extra)
 	}
 
 	if !bettingRoundComplete(state, extra) {
@@ -186,7 +185,9 @@ func resolveAfterChange(state *game.State, extra *State, from int) error {
 
 	err := settleOrUnwind(state, extra)
 	if err != nil || extra.HandComplete() {
-		finishHand(state, extra)
+		if ferr := finishHand(state, extra); ferr != nil {
+			return ferr
+		}
 		return err
 	}
 	state.SetTurn(firstToActPostflop(state, extra))

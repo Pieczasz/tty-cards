@@ -357,7 +357,10 @@ func TestChipConservation_LogsThroughTheTableLogger(t *testing.T) {
 
 	// A chip from nowhere: the baseline stays where the deal put it.
 	withExtra(t, engine, func(extra *State) { extra.Seats["p1"].Chips++ })
-	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionFold{}))
+	err := engine.SubmitAction(engine.CurrentPlayerID(), ActionFold{})
+	require.Error(t, err)
+	assert.Equal(t, game.EndReasonRulesError, engine.EndReason(), "a broken pot ends the match")
+	assert.True(t, engine.IsFinished())
 
 	recs := sink.Records(t)
 	require.Len(t, recs, 1)

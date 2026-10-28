@@ -739,6 +739,13 @@ func TestRules_Knock_PlainWinScoresTheDifference(t *testing.T) {
 	assert.Zero(t, extra.CumulativeScores["p2"], "the loser of a plain knock scores nothing")
 }
 
+func TestRules_IsNotAPlayerLeaveHandler(t *testing.T) {
+	t.Parallel()
+	var rules game.Rules = &Rules{}
+	_, ok := rules.(game.PlayerLeaveHandler)
+	assert.False(t, ok, "gin is heads-up: a leave ends the match, it does not rewrite a hand")
+}
+
 func TestRules_ValidateAction_ForeignMoveIsUnknownBetweenHands(t *testing.T) {
 	t.Parallel()
 	state, extra := startedState(t)
