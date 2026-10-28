@@ -2,7 +2,6 @@ package lobby
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -186,7 +185,7 @@ func TestToggleReady_SubscribeFailureDoesNotStartTheGame(t *testing.T) {
 	err := m.ToggleReady(guest)
 
 	require.Error(t, err)
-	assert.False(t, errors.Is(err, ErrRefused))
+	require.NotErrorIs(t, err, ErrRefused)
 	assert.Nil(t, l.ActiveGame())
 	assert.False(t, l.Snapshot().InGame)
 	require.True(t, m.WaitForFinalizers(time.Second), "the watcher count was left held for a game that never started")

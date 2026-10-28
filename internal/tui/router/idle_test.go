@@ -63,12 +63,12 @@ func TestHasRoute(t *testing.T) {
 func TestGlobalContext_RequestContext(t *testing.T) {
 	t.Parallel()
 
-	fallback := GlobalContext{}.RequestContext()
+	fallback := (&GlobalContext{}).RequestContext()
 	require.NotNil(t, fallback, "an unset session context falls back to Background rather than nil")
 	assert.Nil(t, fallback.Done(), "and the fallback is never cancelled")
 
 	ctx := t.Context()
-	assert.Equal(t, ctx, GlobalContext{SessionCtx: ctx}.RequestContext(),
+	assert.Equal(t, ctx, (&GlobalContext{SessionCtx: ctx}).RequestContext(),
 		"the session context is what carries the disconnect")
 }
 

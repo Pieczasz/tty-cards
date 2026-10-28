@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
 	"time"
@@ -31,7 +32,7 @@ func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) (gameStart, err
 	ch, err := engine.Subscribe()
 	if err != nil {
 		observability.SubscribeFailure(context.Background(), "game")
-		return gameStart{}, err
+		return gameStart{}, fmt.Errorf("subscribe to game feed: %w", err)
 	}
 	return gameStart{engine: engine, feed: ch, req: finalizeRequest{
 		lobbyCode: l.code,

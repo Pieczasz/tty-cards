@@ -125,12 +125,12 @@ func (g *GlobalContext) EnsureTheme() {
 }
 
 // Palette is the session theme, or the shared dark one when none is set yet.
-func (g GlobalContext) Palette() *styles.Theme {
+func (g *GlobalContext) Palette() *styles.Theme {
 	return styles.Or(g.Theme)
 }
 
 // RequestContext returns the session context, or Background if unset.
-func (g GlobalContext) RequestContext() context.Context {
+func (g *GlobalContext) RequestContext() context.Context {
 	if g.SessionCtx != nil {
 		return g.SessionCtx
 	}
