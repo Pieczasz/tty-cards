@@ -207,7 +207,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969`; an IPv6 literal host (`::`) binds |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
 | `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
-| `MAX_CONNECTIONS` | `1000` | concurrent sessions (one per account; compose sets 1250, the most measured to hold on its 3 cores); the listener's backstop is twice this. Each session costs memory (`docs/architecture.md` §3.2), so raise it only with `GOMEMLIMIT` and the backend's `mem_limit` |
+| `MAX_CONNECTIONS` | `1000` | concurrent sessions (one per account; compose sets 1250, the most measured to hold on its 3 cores); the listener's backstop is twice this. Each session costs memory (`docs/decisions.md` #60), so raise it only with `GOMEMLIMIT` and the backend's `mem_limit` |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
 | `SERVICE_VERSION` | the build's module version | stamped on `service.version` so dashboards can tell deploys apart |
 | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`); the old `RATE_LIMIT_WINDOW_MS` fails the boot |
@@ -255,6 +255,10 @@ Retention is explicit: **logs 14 days** (`internal/config/loki/loki.yaml`),
 [`docs/data-inventory.md`](docs/data-inventory.md).
 
 ## Self-hosting
+
+The full walk-through for a fresh Ubuntu VPS - accounts, firewall, Docker, a
+read-only checkout, DNS at Cloudflare and the tests to run - is
+[`docs/deployment.md`](docs/deployment.md). The short version:
 
 1. A VM with Docker, with IPv6 enabled for user-defined networks (the `edge`
    network sets `enable_ipv6: true`, so an IPv6 player keeps their own address).
@@ -379,14 +383,12 @@ and the order to read them in.
 | Doc | For |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | The canonical design document: contracts, topology, invariants |
-| [`docs/decisions.md`](docs/decisions.md) | One record per non-obvious choice, with its reasoning |
-| [`docs/reading-guide.md`](docs/reading-guide.md) | Ordered bottom-up code tour, "where is X?" index |
-| [`docs/onboarding.md`](docs/onboarding.md) | Product story, annotated file tree, day one |
+| [`docs/decisions.md`](docs/decisions.md) | The ~20 choices that shape the code, with their reasoning |
+| [`docs/deployment.md`](docs/deployment.md) | Runbook: a fresh VPS to a hardened, running instance |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to add a game, test conventions, PR norms |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Reporting a vulnerability; what is in scope |
 | [`docs/data-inventory.md`](docs/data-inventory.md) | Per-field personal-data inventory |
-| [`docs/changelog.md`](docs/changelog.md) | What changed, in user-facing terms |
-| [`docs/privacy.md`](docs/privacy.md) / [`docs/terms.md`](docs/terms.md) | The published policies |
+| [Privacy](https://www.tty.cards/privacy/) / [Terms](https://www.tty.cards/terms/) | The published policies (source: `web/src/legal/`) |
 | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) | Terse briefs for coding agents |
 
 ## License

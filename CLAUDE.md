@@ -1,159 +1,68 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Operational brief for coding agents. The reasoning is in [`docs/architecture.md`](docs/architecture.md)
+(contracts, invariants) and [`docs/decisions.md`](docs/decisions.md) (the *why*, cited as `#N`).
 
 ## Commands
 
 ```bash
-make test-short # unit tests, no Docker
-make test # go test -race ./...
+make test-short       # unit tests, no Docker
+make test             # go test -race -shuffle=on ./...
 make test-integration # -tags=integration, needs Docker (testcontainers)
-make lint # golangci-lint, both build tags
-make semgrep # .semgrep/ project-invariant rules: their tests, then a scan
-make cover # unit + integration with -race; fails under 95% combined coverage
-make build # -> bin/server
-make ci # fmt, fix, lint, deadcode, semgrep, cover, build (needs Docker and uv)
-
-go test -race -run TestName ./internal/game/poker/ # single test
-go test -race -run 'TestX/subtest_name' ./internal/lobby/ # single subtest
-
-make migrate-create # prompts for name, writes internal/db/migrations/
-make migrate-up # needs $DB_DSN exported
+make lint             # golangci-lint, both build tags
+make semgrep          # project-invariant rules: their tests, then a scan
+make cover            # unit + integration with -race; fails under the coverage floor
+make ci               # fmt, fix, lint, deadcode, semgrep, cover, build (Docker and uv)
+go test -race -run 'TestX/sub' ./internal/lobby/   # one test
+make migrate-create   # new migration in internal/db/migrations/ (up and down)
+./scripts/dev-session.sh   # three tmux SSH clients, throwaway keys; TC_PORT=6969 needs PROXY_PROTOCOL=false
 ```
 
-Local multi-client testing: `./scripts/dev-session.sh` opens three tmux-attached SSH clients against a running server (`TC_PORT=6969` bypasses the nginx proxy; the server then needs `PROXY_PROTOCOL=false`, since a bare ssh client sends no PROXY header). `PROXY_TRUSTED_CIDRS`, when set, is the only set of networks whose PROXY header the ssh listener honors - every other peer is refused - and the stats API's `X-Forwarded-For` is believed only from the same networks; compose sets it to its `edge` subnets.
+## Shape
 
-## Architecture
+SSH -> wish middleware -> Bubble Tea `Router` -> view -> `game.BoundEngine` -> `game.Engine` -> `Rules`.
+`internal/catalog/catalog.go` `Games` is the only place a game is declared (rules + view, #6).
 
-SSH connection -> wish middleware -> Bubble Tea `Router` -> view -> `game.BoundEngine` -> `game.Engine` -> `Rules`.
+## Layer rules (lint-enforced where marked)
 
-### Game registration is a single point
+- `internal/db` is the GORM models **and** the repository interfaces; `internal/repository` implements
+  them and only `cmd/server` imports it (`depguard`). Consumers ask for the smallest interface.
+- `internal/game` is pure: stdlib, `deck`, `broadcaster`, `internal/game/...`, `uuid` (`depguard`
+  `game-is-pure`). Seats are scalars on `game.Player`, never a `*db.User`. No routes, no db, no tui.
+- `internal/rating` and `internal/elo` are pure (`rating-is-pure`). `internal/tui` never names
+  `game.Engine`, `NewEngine`, `Bind` or `ActiveGame` (semgrep): views get a `*game.BoundEngine`
+  from the lobby.
+- Views that subscribe implement `router.Closer`. Anything kept after `Frame`/`Sync` is copied.
 
-`internal/catalog/catalog.go` `Games` is the only place a game is declared: each `catalog.Entry` embeds a `game.Module` (`Name`, `Slug`, the seat range `MinPlayers`/`MaxPlayers` - each rules package exports them as constants - and `Factory`) next to the TUI `View` constructor, which is handed the session's `*game.BoundEngine`, never the engine. `cmd/server/main.go` builds the lobby manager's `game.Registry` from it with `catalog.NewRegistry()` and hands the same entries to `ssh.Deps.Games` -> `tui.Deps.Games`, from which `internal/tui/app.go` registers the routes and fills `router.GlobalContext.Games` (the modules, in menu order) - the list the create form, profile and leaderboard offer. No view holds a registry. The registry is immutable: `game.NewRegistry(mods...)` panics on a half-declared module, seat bounds no table can meet, or a name or slug declared twice, so a wiring bug fails the boot rather than the first table. A game cannot be registered without a view (`catalog_test.go` fails on a missing field or duplicate slug); copying an entry and changing only the rules still compiles, so keep the pair in lockstep by hand.
+## Invariants that bite
 
-One identity, one label: `Slug` is the registry key, the lobby option (`WithCardGame(slug)`, `Lobby.Snapshot().Slug`), the key of `Player.Ratings` and of the browse and profile filters, what the TUI derives routes from (`router.GameRoute(slug)` -> `"game_<slug>"`) **and** the persisted game identity, `games.slug` (migration 000005). `Module.Name` is cosmetic - what a player reads; `db.Game.Name` stores it for display only (decision #7). The pair travels as `db.GameRef{Slug, Name}`, built at game start in `lobby.go`. Changing a slug migrates data; changing a name does not. The slug is also the `game_type` label on every game metric, lobby and view alike (`catalog.Entry.View` is handed it; `TestGames_LobbyAndViewShareOneGameTypeLabel`), so changing one splits a dashboard too. `internal/game` deliberately knows nothing about routes.
-
-### Shared helpers, not per-game copies
-
-`internal/deck` owns card mechanics every game needs: `RemoveOne`/`RemoveEach` (hand
-removal that never aliases), and three distinct rank questions that must not be
-swapped - `RankValue` (Ace high, 14, for poker and Hearts), `RunOrder` (Ace low 1..13,
-courts distinct, for Gin Rummy runs) and `PipValue` (courts count 10, for deadwood).
-All three answer 0 outside Ace..King, Joker included - losing loudly beats tying the ace.
-`IsSuit` is the guard for a named suit (refuses `NoSuit`, the zero value, client garbage).
-Standard ranks are 1-based, so a zero `deck.Card` is detectably empty rather than the
-ace of spades; Uno's extra ranks sit in their own block at 20+. `AllRanks` is what
-makes `Rank`-keyed maps testable for exhaustiveness. `Pile.Shuffle()` returns nothing:
-crypto/rand cannot fail on Go 1.24+, so the plumbed error was an unreachable branch.
-
-`game.AnyScoreAtLeast` is the shared match-target check for Hearts and Gin Rummy. `Rules.Standings` returns places (`[]game.Standing`), draws sharing one and the leavers strictly below the seated (decision #12); `game.RankByScore` is that for a game ranked on one number (hearts, gin rummy, the shedding games), and poker's `rankPlayers` splits its tie groups at the same boundary. `internal/game/turn.go` holds the turn helpers every rules set uses: `State.SetTurn` / `State.OverrideTurn` (never write `CurrentTurn` and `OverrideNextTurn` by hand), `game.SeatAt` / `game.NextSeat` for wrap-around, and `game.ValidateNextHand` for the between-hands deal. `game.ErrUnknownAction` and `game.ErrHandOver` are the shared refusals; every `ApplyAction` ends in a `default:` arm returning `ErrUnknownAction`, so an action the validator learned and the applier did not is a rules error, not a silent no-op. The shedding games (crazy eights, uno) share package `internal/game/shed`: `shed.State` (embedded, carries `Passes`), `shed.Deal` (the opening deal, from `OnGameStart`), `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`, `shed.HandEmptyOrAllPassed`, `shed.Leave` and `shed.Standings`/`shed.Score`.
-
-### Layer boundaries
-
-- `internal/db` - GORM models **and** the repository interfaces. It defines the contract. `db.UserRepository` is only the union of `Authenticator` (ssh sign-in), `Profiles` (the profile screen) and `Leaderboard` (the TUI leaderboard and the stats API); a consumer asks for the smallest that covers what it calls (`ssh.Deps.Auth`, `tui.Deps`/`router.GlobalContext` `Profiles` + `Leaderboard`, `httpapi.Deps.Users`). `MatchRepository` is the lobby's.
-- `internal/repository` - the GORM implementations. Everything else depends on the `db` interfaces, never on this package (except `cmd/server`, which is the composition root; `depguard` enforces it). The auth sentinels `internal/ssh` maps live in `internal/db/errors.go`.
-- `internal/game` - pure rules/engine, no db, no TUI, no routes. The `depguard` rule `game-is-pure` is an allow-list (stdlib, `deck`, `broadcaster`, `internal/game/...`, `uuid`; `gametest` exempt), so a new import there is a decision, not a default. Seat identity is the scalars on `game.Player` (`UserID`, `Name`, `Ratings`), not a `*db.User`; `NewEngine` seats copies without `Cards` or `Ratings` (the lobby reads ratings off its own roster), and `Engine.Standings` hands back copies of `ID`/`UserID`/`Name` with each seat's `Place` and whether it `Left` - which is how finalize finds the leavers.
-- `internal/rating` - the ladder policy as a pure function: `rating.Rate(Table) (Result, error)` decides who a ranked result writes and to what (provisional threshold, 24h pair cap, loss-only interrupted scope, erased seats); `internal/repository/match.go` keeps the locks, reads and writes and calls it. `depguard` `rating-is-pure` (stdlib, `elo`, `uuid`) covers it and `internal/elo`.
-- `internal/tui` - presentation only; reaches state through `router.GlobalContext`, which carries `*lobby.Manager` directly (the one-implementation `lobby.SessionAPI` interface is gone) and never a `MatchRepository`.
-
-### Engine and Rules contract
-
-`Engine` owns a single mutex covering its clock fields and the `State`, held for the whole of `Start`, `SubmitAction`, and `RemovePlayer`. `Rules` methods (and `WithState`/`Frame` callbacks) run with it held, so they must never call back into `Engine` (deadlock) and may mutate `*State` freely. The no-callback rule holds structurally today - `Rules` methods receive only `*State`, which carries no engine handle - so do not add one; and the semgrep rule `rules-package-reaches-the-engine` fails rules code (`internal/game/<game>/`, gametest and tests aside) that names `game.Engine`, calls `game.NewEngine`/`game.Bind` or calls `WithState`/`SubmitAction` on anything.
-
-Per-game state lives in `State.Extra` (`crazyeight.State`, `poker.State`, `uno.State`, `hearts.State`, `ginrummy.State`), which each rules package reads through one `extraOf(state)` that panics on anything else - a wiring bug the engine's recover ends as one rules error (decision #37); the leave hooks run only while `Playing`, so a table that never started is never asked, and exported helpers a view calls inside `Frame` (`poker.RaiseBounds`) keep the `ok` form, since `Frame` has no recover. Poker keeps one `*poker.Seat` per player in `poker.State.Seats`, kept after a leave; poker, hearts and gin rummy name where a hand is with a `Phase` field of a `PhaseX` enum. The turn cursor moves through two functions: after an accepted action `advanceTurnLocked` takes `State.OverrideNextTurn`, else the next seat; `settleTurnLocked` (the start and leave paths) takes the override, else leaves `State.CurrentTurn` where it is. Both clamp and arm the clock - that is how poker picks the next actor from `ApplyAction`. `ApplyAction` is the whole move, the rules' own after-step (poker settling the street, hearts scoring a trick, the next hand's deal) included; an error from it ends the table as `endGameLocked(nil, EndReasonRulesError)` - no winner, and the rules are not asked to rank a state that may be half-applied - so anything checkable up front belongs in `ValidateAction`. `EventGameEnded` carries an `EndReason` (win / rules error / forfeit / abandoned / interrupted) so observers can tell them apart; `endGameLocked` also records it (`Engine.EndReason`, `StateSnapshot.EndReason`, `BaseState.EndReason`), because an end on a closed engine broadcasts nothing and the lobby's watcher still has to finalize it with its real reason. Interrupted is a match one seat's leave ended early for everyone: hearts' `AfterPlayerRemoved` returns `game.LeaveInterruptsMatch`, and `settleAfterLeaveLocked` then reports it instead of a win; the engine knows nothing about what finalize does with it (only the leavers' losses are written). Every end goes through one primitive, `endGameLocked(winner, reason)`; the winner is the engine's own field, never `State`'s, so no rules hook can write it, and views read it as `StateSnapshot.WinnerName`. A rules panic, on the player path or the timer, ends the table the same way, through `endOnRulesPanicLocked`.
-
-Logs name their table: the lobby builds each engine with `game.WithLogger(slog.With("lobby", code, "game", slug))`, the engine's own lines (turn clock, recovered panics) go through it, and rules log through `State.Logger()` (the engine sets it; a hand-built `State` falls back to `slog.Default()`) rather than bare `slog` - the semgrep rule `game-logs-without-its-table` fails a bare `slog` log call anywhere under `internal/game` but gametest and tests.
-
-Mid-hand disconnects: implement the optional `game.PlayerLeaveHandler` (`OnPlayerLeave` before removal, `AfterPlayerRemoved` after seat indices shift). `AfterPlayerRemoved` returns a `game.LeaveOutcome`: `LeaveSettled` (the engine decides - a win, a forfeit to a lone seat, or the next turn; also what rules without the handler get), `LeaveKeepsHandOpen` (a lone seat still has a hand to play - poker's all-in leaver still contests the pot) or `LeaveInterruptsMatch`. `OverrideNextTurn` only ever means who acts next.
-
-### Turn clock
-
-Settling the cursor also arms a per-turn timer (`DefaultTurnTimeout`, 30s). The same seat with the same turn length is the same turn carrying on (gin's draw then discard, a re-armed auto-play, somebody else leaving): `armTurnTimerLocked` keeps its running deadline, floored at `minTurnRemaining` (10s), and a miss is charged once per seat-turn (`clock.missCharged`), not per expiry. An expiry is settled in one engine lock hold (`onTurnTimeout`, with its own in-lock recover like `SubmitAction`'s): it charges the miss, then either broadcasts `EventTurnTimedOut` and plays the move from the optional `game.TurnTimeoutHandler` (`TimeoutAction`), or, after `MaxMissedTurns` (3) consecutive missed turns, broadcasts `EventPlayerIdle` and removes the seat. `game.WithOnIdleRemoved(fn)` is the lossless form of that removal (the feed is latest-wins): `fn` gets each seat the clock took, on the timer goroutine after `Engine.mu` is released, and never from `RemovePlayer`, whose callers may hold the lobby's locks. The lobby's roster follows idle removal through it (`Manager.seatHook` -> `dropSeat`, which acts only while the player is still indexed to that table), not through the feed; `EventPlayerIdle` is only a metric there. A player's own *accepted* action clears their count - a move the rules reject does not, or spamming garbage would dodge removal forever - so this only fires on someone who stopped playing.
-
-`TimeoutAction` is part of `Rules`, so every table has a clock; `game.WithTurnTimeout(0)` is the one off switch. Poker checks when free, calls when no opponent can cover more than it already has out, folds otherwise, and deals between hands (an absent dealer would otherwise freeze the table); crazy eights and uno draw; hearts passes its three most dangerous cards (Q♠, A♠, K♠, then the highest hearts), plays its first legal card, and deals the next hand; gin rummy draws, knocks when a discard leaves it gin, otherwise sheds its priciest deadwood, and deals. `TimeoutAction` must return something `ValidateAction` accepts, or the turn re-arms (as a fresh chargeable turn with the 10s floor) and each refused expiry still costs a miss - gin rummy's `autoDiscard` skips the card the upcard rule forbids for exactly this reason.
-
-`game.TurnDurationHandler` lets a rules set stretch a particular turn: hearts gives the pass phase 45s and the between-hands prompt a minute; poker and gin rummy stretch the between-hands deal the same way. Returning zero keeps the engine default; it cannot resurrect a clock `WithTurnTimeout` disabled.
-
-`clock.seq` (the engine's `turnClock`) is what makes this safe: every cursor change invalidates timers already in flight, and a fired timer that waited on the lock finds the generation moved on and does nothing, so a player who acted as their clock ran out is neither charged a miss nor double-played. `stopTurnTimerLocked` runs from `endGameLocked` (every end, last-player-standing included) and `Close`; the engine's `closed` flag is what stops a concurrently-resolved timeout from re-arming a timer on a closed engine.
-
-The game view quits its bubbletea program on its own `EventPlayerIdle`, which is what ends the ssh session through the ordinary `releaseSession` path - the engine never reaches into the session layer.
-
-A dropped session calls `Manager.DisconnectPlayer`, not `LeaveLobby`: a mid-game seat survives for `disconnectGrace` (90s, with the engine auto-playing and its idle removal as the backstop) so a reconnect - `Manager.ResumePlayer`, reached through `tui.ResumeSeat`, which the ssh layer calls only once the session owns its tracker slot - cancels the grace and resumes the match instead of forfeiting it (the session's home route finds the still-indexed seat through `seatedOr`). A waiting-lobby seat and any seat during shutdown still leave immediately.
-
-### BoundEngine, not Engine, in views
-
-`game.Bind(engine, playerID)` gives a session-scoped handle that only submits as that player and only returns that player's hand. Code under `internal/tui` never holds a `*game.Engine`: the lobby, which owns it, makes the handle - `Lobby.Seat(playerID)` (nil unless that player still holds a seat at a live table; the reconnect path) and `Event.Seat(playerID)` on `EventGameStarted` (the event's engine field is unexported, since one event reaches every subscriber). The lobby view asks for its own session's seat, and the game-route factory (`tui.registerGameViews`) refuses a table bound to anyone else. `Lobby.ActiveGame()`, `Engine.WithState` and `SubmitAction` are the server side's; the semgrep rule `tui-uses-server-engine-api` fails non-test `internal/tui` code that names `game.Engine`, calls `game.NewEngine`/`game.Bind` or reads `ActiveGame` (tests are exempt - they drive the other seats). TUI views use `BoundEngine` / `Session.Sync` (one `Frame` lock hold: snapshot, own hand, clock and `Extra` cannot describe different moments); the waiting room's counterpart is `Lobby.Snapshot()` (one `RLock`), retaken on each lobby event and after the view's own actions. The feed is reached only through `Engine.Subscribe` / `Unsubscribe` / `Dropped` / `SubscriberCount` (and `BoundEngine.Subscribe`/`Unsubscribe`): there is no `Engine.Broadcaster()`, so nothing outside the engine can `Broadcast` on a table's feed or close it.
-
-For reading it is still a façade, not a capability: `Frame`'s callback hands the view the live, unredacted `*State`, and poker reads every seat from it because rendering a table means rendering every seat. There is no `Engine()` escape hatch. Acting as another seat is closed; what reaches the screen is filtered by a named function, and where that is a rule of the game it lives in the rules package (`poker.SeatsFor(state, viewer)`, which the poker view renders).
-
-### gameview.Session is the view baseline
-
-Every game view embeds `gameview.Session` (package `gameview`, `internal/tui/views/gameview/session.go`). It owns the parts that are the same in all five games: subscribing to the seat the lobby bound (`NewSession(global, table, slug)`, `table` a `*game.BoundEngine`), the first commands (`Init`: the feed listener and the turn-clock tick, `clockTick`, so no view writes its own `Init`), reading the feed and the whole `Update` loop (`HandleFrame`), losing a seat to the idle timer (`IdleRemoved`), the last rejected move (`ActionErr`, which `Submit` and `Refuse` keep until the turn moves on, and the hero band renders), the hand cursor (`MoveCursor` / `SelectDigit` / `SelectedCard`), the forfeit prompt (`HandleLeaveKey` / `LeaveConfirmScreen`: mid-game esc asks before leaving), the idle-quit exemption for a live table (`IdleExempt`), leaving the table (`Leave`), and `Close` - which is what satisfies `router.Closer`. The shared layout frame (`gameview.RenderBands`, the compact breakpoints, the width-budgeted `RenderHand`, where a staged set makes it a multi-select) lives in `internal/tui/views/gameview`, with the suit/colour picker crazy eights and uno share (`ChoicePicker`, whose `Lookup` is the one suit/colour label table; both views embed `gameview.ShedTable` - Session plus picker, the shedding key map via `Handle(msg, sync, ShedMoves{...})` and the table via `RenderTable`) and the between-hands screen hearts, gin rummy and poker share (`RenderHandOver(global, HandOver{...})` in the menus' box, `MatchOverTitle`, `InterruptedTitle` for a match a leave cut short, `LobbyHint`), and the shedding tables' stock beside the discard (`RenderPiles`, with `components.FaceDownCard` / `EmptyCardSlot` keeping every card place the same size); a new game implements its own rules rendering and nothing else. Routes are a typed `router.Route` (`router.GameRoute(slug)`), and a view changes screen with `router.Navigate(route)`, `router.NavigateToLobby(l)` or `router.NavigateToGame(slug, table)`: a factory is handed a typed `router.Payload` (`Lobby`, `Table`), never an `any` to cast, and falls back to home when its field is nil.
-
-Read per-game state through the `extra` callback of `Session.Sync` (unredacted table state the view has to filter itself; `BoundEngine.Frame` is the standalone form) - and seat order, display names and stock size through `BaseState` (`Seats`, `SeatOrder()`, `SeatNames()`, `DeckSize`) rather than re-deriving them from the live `*State` - `PlayerSnapshot.Name` already falls back to the player ID. `BaseState.Opponents` drops the hero and runs clockwise from the hero's left (the seat that acts next comes first), the order `SplitZones` lays the table out in; `Seats` is engine order. Snapshot display names are `Name`, `CurrentPlayerName` and `WinnerName`; decide turns on `CurrentPlayerID`.
-
-Anything a view keeps after releasing the engine lock must be copied, not aliased (`maps.Clone`, `HandResult.Clone`). The hand-based views (poker, hearts, gin rummy) copy it out in one pure `readTable(state, ...)` that returns a value, assigned to the model once `Sync` returns, so no callback writes the model under the engine lock and the copy boundary is one function.
-
-### Subscription lifecycle
-
-`broadcaster.Broadcaster[T]` is latest-wins (drops the oldest on a full buffer) and `Subscribe` returns `ErrAtCapacity` / `ErrClosed` rather than a pre-closed channel, so a caller cannot mistake "you will never receive anything" for "the stream ended". Engines size it `len(players)+8` for the ranked-finalize watcher and reconnect overlap. Views surface a failure in their own error line and count it (`SubscribeFailure`, stream `lobby_view` / `game_view`); the lobby logs it loudly because it means a match result will not be persisted.
-
-Any view holding a subscription must implement `router.Closer`. The router closes the active view on navigation; `ssh.closeSessionModel` closes the whole model on disconnect. Skipping `Close()` parks a listener goroutine and burns a subscriber slot until the engine closes.
-
-Lock order is the tracker's per-account lock -> manager (`m.mu`) -> lobby (`l.mu`) -> engine (`Engine.mu`) - see `Manager.Kick` / `RemoveLobby`. A `Lobby` is a leaf: its methods take only `l.mu` (engine calls innermost) and it has no pointer back to its manager - the browse cache's dirty flag is a shared `*atomic.Bool` - so `Manager` is the only type that ever holds two of these locks, and the game watcher (`watchGame`, started by `Manager.ToggleReady`) and finalize are the manager's. Once a ranked write commits, `Manager.refreshRatings` seats a copy of each written player carrying the rating the finalize returned, at whichever table the index has them now (`m.mu` read-held across each `l.mu`), and announces `EventPlayersUpdated`; a seated `*game.Player` and its `Ratings` are never written in place, because snapshots hand them out to readers holding no lock. The lobby view passes a reseat on to the session with `router.UpdatePlayer`, which the router stores in `GlobalContext.Player` (built once in `tui.New`; what `views.SessionPlayer` returns) and forwards to the active view; a player seated nowhere when the write commits keeps the login's ratings until they reconnect. Each watcher is counted in `m.watchers` from before its game can start (`admitGame`) until its finalize returns: `BeginShutdown` closes that gate (a start during the drain is refused, "the server is restarting") and `WaitForFinalizers` waits on the count, so a table a late session teardown ends is still written, unrated (decision #29). The account lock comes first because `ReleaseWith` runs `DisconnectPlayer` under it, so a session's teardown and that account's reconnect cannot interleave. `SessionTracker.mu` guards only the account map, the generation counter and the cap: it is taken after an account's lock, never held while taking one, and never held across a teardown, so one account's slow disconnect stalls no other account's login.
-
-### SSH server
-
-Middleware in `wish.WithMiddleware` runs **last-first**, so `sessionLifecycle` is listed last to be outermost. charm.land/ssh (v0.4.3) recovers on every goroutine it spawns, so `recoverSession` is a second layer - a metric and a clean lobby leave - and it must stay a **direct** `defer` (a `recover()` inside a function called *by* a deferred function returns nil). It is not what the player sees, though: nothing panics *out of* bubbletea, so `reportingModel` wraps Init/Update/View and `notifySessionPanic` writes `panicNotice` to `s.Stderr()`. Per-session state (user, model, span) lives in a `sessionRegistry` that `ssh.NewServer(ssh.Deps{...})` makes per server, never on `s.Context()` - that context is per-**connection** and shared by every channel. charm ssh runs each session handler on a goroutine its `Shutdown` and `Close` never wait for, so `NewServer` returns `*ssh.Server` (the wish server plus `WaitSessions`) and `sessionLifecycle` counts handlers itself: `admit` under `liveMu`, with `live.Done` deferred first so it runs after the whole teardown; one that starts after `WaitSessions` began refuses itself ("server is restarting"). Session channels are capped per connection (`maxSessionsPerConnection`, 2) in the `session` `ChannelHandler`, which rejects the extra one with `ResourceShortage` before `Accept`; `env` requests are capped at 32 / 8 KiB per channel. Auth accepts any public key; identity is the SHA256 fingerprint, first connection registers the username. `SessionTracker.Connect` displaces an existing session for the account **and closes its conn**, outside the account's lock. `Count` takes no lock (an atomic kept under `t.mu`): `ReleaseWith` holds the account's lock across a teardown down to the engine, and the stats API must not wait on that. The auth limiter, keyed by `ratelimit.NetKey` (IPv6 /64), counts *attempts* (an ssh-agent offers each key it holds); `ttycards.ssh.auth.rejects{reason}` counts a refused connection once (`firstAuthRefusal`, on the connection's `ssh.Context`) and stays out of `ttycards.ssh.sessions`, and only the first refusal per /48 per minute logs at warn. Registration spends a `registrationBudget` - `REGISTRATION_LIMIT` per /64, `REGISTRATION_LIMIT_WIDE` per /48 (`ratelimit.WideKey`; IPv4 stays per address, CGNAT), `REGISTRATION_GLOBAL_LIMIT` server-wide, all per `REGISTRATION_WINDOW` (defaults 5 / 20 / 600 per 1h), refunding the narrower ones when a wider one refuses - only on the `user == nil` branch of `LoadOrRegisterUser`, after `db.ValidateUsername` - a typo does not spend the budget, and the player is told why the name is invalid. `NetKey`/`WideKey` are total; `clientHost` is what fails closed on an unkeyable address. The terminal size bubbletea is told comes from a server-wide cell budget (`termsize.go`): tiers 120x40 / 160x50 / 200x60 / 250x80, the active one the largest whose cells x live sessions fit `cellBudget` (5M, the #60 measurement; it climbs back only at 90%, so it does not flap), and each session gets min(its request, the tier) - via `tea.WithWindowSize` at start (the renderer sizes its buffers from that, never through the filter) and `sessionSize.filter` on every resize. A tier change nudges each session it resizes with a `retierMsg` from one sweep goroutine, never under a lock. bubbletea never frees renderer memory on a shrink (`TestRenderer_KeepsItsBuffersAfterAShrink`), so a session keeps the largest tier it was granted until it ends: growth above the 120x40 floor spends `extraCellBudget` (1.5M cells), which caps held memory at sessions x the floor plus that. The floor is always granted (`BenchmarkSessionMemory`: 1.3 / 2.0 / 3.1 / 4.7 MiB a session per tier; decision #61). The renderer runs at `sessionFPS` (20, not bubbletea's 60): every tick compares the whole frame even when nothing changed, so fps x cells is the idle cost per session, and it is what capped capacity - compose's `MAX_CONNECTIONS=1250` is the most measured to hold on the backend's 3 cores (decision #60; re-measure with `cmd/loadtest` before changing either). stdin reaches bubbletea through `inputGuard` (`input.go`): 1 KiB/s after a 16 KiB burst, and at most 32 KiB since the input last paused for 1s - or since a paste began, which it learns from bubbletea's own `PasteStartMsg`, because the decoder buffers an unterminated paste (and anything behind an unparseable byte) without limit. Over either, the session closes with a notice and outcome `input_limit`. `mapRegisterError` folds only taken into `errNameUnavailable` - a distinguishable "taken" is an account-existence oracle; an invalid name is a fixed rule, not a fact about other accounts. Usernames are unique case-insensitively (`idx_users_username_lower`, migration 000006). Connect/disconnect log `client_net` (the /64), not `remote_addr`; the session span carries no client address at all.
-
-### Stats API
-
-`internal/httpapi` serves a read-only JSON feed the website reads: `/v1/stats`
-(players online, hands in play, tables open) and `/v1/leaderboard?limit=N`. It is
-mounted by `cmd/server/main.go` on `API_PORT` (6970) and reached only through the
-proxy's `/api/` location - never published to the host.
-
-It is deliberately narrow: no writes, no auth, no per-user data, nothing the TUI
-leaderboard does not already show any visitor. That is what makes it safe
-unauthenticated. Live counts come from `ssh.SessionTracker.Count` and
-`lobby.Manager.Stats`, so `ssh.NewServer` requires the `Tracker` it shares with the stats API
-(`errNoTracker` without one), and `httpapi.NewServer(addr, httpapi.Deps{...})` refuses a
-missing `Sessions`, `Lobbies`, `Users` or `Health` with `ErrMissingDeps` rather than serving zeros
-(or a `/healthz` that cannot fail).
-
-`API_TRUST_PROXY` makes the per-network limiter read `X-Forwarded-For`, and with
-`PROXY_TRUSTED_CIDRS` set only from a peer inside those networks (6970 is reachable from
-every container on the network, not just nginx). It **defaults
-to false** and compose opts in explicitly: a directly exposed listener that trusts the
-header can be evaded by forging it, so the unsafe direction has to be chosen. nginx
-sets it from `$remote_addr`, not `$proxy_add_x_forwarded_for`, so a client cannot
-prepend its own value.
-
-Both limiters key on `ratelimit.NetKey`, which collapses IPv6 to its /64. Keying on the
-full address is meaningless there: one customer is routinely handed 2^64 of them.
-
-The backend listens on `:6969` behind nginx speaking PROXY protocol. Publishing that port lets clients spoof source IPs and defeat the per-IP rate limiter. Compose publishes 22, 80 and 443 only (443 is the API over TLS, certificate from the `certbot` service), plus Grafana on `127.0.0.1:3000`. The stats API has a noop tracer provider and an empty propagator (every site visitor polls it, and a visitor's `traceparent` is ignored, so no trace id is theirs to choose); the only span on its path is `db.BestPlayers`, around the query a leaderboard cache miss runs - singleflighted, so about once per 5-minute TTL per game - with no visitor data. `otelhttp.WithServerName("stats-api:80")` pins `server.address` and `server.port`, keeping the client's `Host` header out of the metric labels; `internal/httpapi/telemetry_test.go` asserts both.
-
-Retention is explicit: Loki 14d (`internal/config/loki/loki.yaml`), Tempo 48h (`internal/config/tempo/tempo.yaml`), Prometheus 30d (`compose.yaml`); Alertmanager keeps its alert state 5 days (its default, `alertmanager-data`) and Alloy's `alloy-data` only until delivery. Backups are a count, `BACKUP_KEEP` (14) archives of the database and the ssh host key, optionally copied off-host with rclone (`scripts/backup.sh`). Per-field inventory in `docs/data-inventory.md`.
-
-Telemetry identity: the resource is `service.name=tty-cards-server` in every environment, told apart by `deployment.environment.name`, so it is one Prometheus `job` and one Loki `service_name`; there is no `service.instance.id` (a new one per restart would be a new Loki stream and series set). Every application metric is `ttycards.*` (the connection pool is `ttycards.db.pool.*`), and its attribute keys are an allow-list `internal/observability/metrics_test.go` enforces. Prometheus scrapes only the pipeline (Alloy, Loki, Tempo, Alertmanager); the app pushes OTLP. Alerts (`alerts.yml`, `alerts-pipeline.yml`) go to Alertmanager, which delivers to Telegram from a bot token and chat id kept on the host (`ALERTMANAGER_SECRETS_DIR`, default `/etc/tty-cards/alertmanager`; `docs/SECURITY.md`, "Alert delivery"); without them it still runs and only its sends fail.
+- `Engine.mu` is the only engine lock and `Rules` run under it: rules never call the engine, and
+  `State` carries no engine handle (#1). Move the turn only through `State.SetTurn`/`OverrideTurn`.
+- Lock order: tracker account -> `Manager.mu` -> `Lobby.mu` -> `Engine.mu` (#45). A `Lobby` is a leaf.
+- Every goroutine you start recovers its own panic (`Manager.recoverGoroutine` is a direct defer);
+  a rules panic ends one table, not the process (#37).
+- `ApplyAction` ends in `default: return ErrUnknownAction`; checkable-up-front belongs in
+  `ValidateAction`; `TimeoutAction` must return something `ValidateAction` accepts.
+- Never publish `:6969` or `:6970` (PROXY / `X-Forwarded-For` trust, #19). `PROXY_TRUSTED_CIDRS`
+  is the only set of networks whose header is believed.
+- The slug is the persisted game identity; changing one is a data migration (#7).
+- The finalize snapshot is taken when a game starts. Rules error, abandoned and a forced hang-up
+  (`BeginTeardown`) record history without Elo (#11); `NewManager` panics on a nil repository.
+- Terminals are capped at 120x40 (`internal/ssh/termsize.go`, #60): `MAX_CONNECTIONS` x that must fit
+  `GOMEMLIMIT`; re-measure with `cmd/loadtest` before raising either.
+- A lobby refusal the player caused matches `lobby.ErrRefused`; views render errors through
+  `views.PlayerError`. Every screen fits 64x20.
 
 ## Conventions
 
-- Schema changes are SQL migrations in `internal/db/migrations/` (up **and** down). `testutil.SetupTestDB` applies those same files, so the tested schema cannot drift from the deployed one.
-- Integration tests are behind `//go:build integration`; `testutil.SetupTestDB` skips when Docker is absent.
-- Table-driven tests with named subtests, `t.Parallel()` where safe. `pgregory.net/rapid` for property tests, `goleak` for goroutine leaks.
-- Wrap errors with `%w`, lowercase messages.
-- A lobby refusal the player caused matches `lobby.ErrRefused` (built with `refuse`/`refusalf` in `internal/lobby/errors.go`) and its text is what they read; anything else the lobby returns is a failure it does not log. A view renders a lobby call's error through `views.PlayerError(ctx, err)`, which passes a refusal through unlogged and logs a failure once, at Error, behind a generic line.
-- A plaintext database is development-only: every other `ENV` needs `DB_SSLMODE` `require`, `verify-ca` or `verify-full`, whatever the host, and the removed `ALLOW_INSECURE_DB` fails the boot. Compose's Postgres serves TLS from the self-signed cert its one-shot `db-certs` service writes, and its `pg_hba.conf` (`internal/config/postgres/`) rejects plaintext TCP. `DB_PASSWORD` is a `config.Secret`, which redacts under `%v`, slog and JSON; `DSN()` is the one caller of `Reveal()`, and semgrep refuses a DSN or revealed password reaching a log, print, error or span.
-- Boolean env values go through `strconv.ParseBool` (`1`, `t`, `true`, `0`, `f`, `false`, the words also as `True`/`TRUE`); anything else, `PROXY_PROTOCOL=off` included, fails the boot, and `config.Load` reports every bad variable at once. A renamed variable (`RATE_LIMIT_WINDOW_MS` -> `RATE_LIMIT_WINDOW`, a Go duration) fails the boot too, rather than being silently ignored.
-- Every catalog game runs the shared Rules contract, `gametest.RunRules` and `gametest.SoakAmongRandomMoves`, from `internal/catalog/rules_test.go`, whose `moves` map needs a new game's candidate moves. The shedding games also share `gametest.RunShed`; a new one should run it rather than copy tests. Every rules package's tests read `State.Extra` through `gametest.Extra[*State]` and use `gametest.ForeignAction` (another game's move) and `gametest.LogSink` (a `WithLogger` table logger to assert on) rather than their own copies.
-- The `.golangci.yml` size gates (`funlen` 75/40, `cyclop` 16, `gocognit` 20, `nestif` 5, `lll` 140) sit just above the worst surviving function. Split the function rather than raising a threshold.
-- In `internal/tui`, join and pad with `styles.JoinVertical`, `styles.JoinHorizontal` and `styles.MarginTop`, never lipgloss's: they are its output byte for byte (a `rapid` test proves it) at half the CPU, and under 1000 sessions lipgloss's joins were two thirds of frame-building CPU. semgrep (`tui-uses-lipgloss-join`) enforces it. `RenderMainLayout` frames the screen through `renderBox` and `centreWrapped` for the same reason: lipgloss word-wraps a whole frame before bordering it, 38% of all bytes allocated, for a frame already sized to fit. Both take the fast path only for text lipgloss would leave as it is (it fits, and no line leaves a style open or holds a control byte) and hand anything else to lipgloss. Anything a frame draws unchanged every time (card faces, backs, empty slots, footers, banners) is cached per theme, not re-rendered.
-- To profile, build `go build -tags pprof ./cmd/server`: it serves `net/http/pprof` on `127.0.0.1:6060`; drive it with `cmd/loadtest`. The production image never builds the tag.
-- Comments explain *why*, not *what*; the codebase is intentionally light on them.
-- Deliberately deferred design work, each with the trigger that should bring it back, is in `docs/deferred.md` - not in `TODO` markers, which `godox` fails. Delete an entry when you act on it.
-
-## Code graph
-
-`code-review-graph` (an MCP server registered in your local `.mcp.json`; index in the gitignored `.code-review-graph/`) answers call-graph questions: `callers_of`, `tests_for`, impact radius. Refresh it with `uvx code-review-graph update` after a large change. Channel receives and `time.AfterFunc` are not call edges, so an empty result across the engine feed or a timer means a dynamic hop, not dead code; `make deadcode` is authoritative for dead code.
+- Wrap errors with `%w`, lowercase messages. Comments say *why*; the codebase is light on them.
+- Table-driven tests with named subtests, `t.Parallel()` where safe; `rapid` for properties,
+  `goleak` for leaks. Integration tests are behind `//go:build integration`.
+- Every catalog game runs `gametest.RunRules` and `SoakAmongRandomMoves` (`catalog/rules_test.go`).
+- `.golangci.yml` size gates (`funlen`, `cyclop`, `gocognit`, `nestif`, `lll`): split the function,
+  never raise a threshold. Use `styles.JoinVertical/JoinHorizontal/MarginTop`, not lipgloss's
+  (semgrep `tui-uses-lipgloss-join`).
+- Env booleans go through `strconv.ParseBool`; a plaintext database is development-only.
+- Deferred design work lives in `docs/deferred.md`, not `TODO` markers (`godox` fails them).
+- `code-review-graph` (MCP, `.mcp.json`) answers call-graph questions; refresh with
+  `uvx code-review-graph update`. A channel receive or `time.AfterFunc` is not a call edge.

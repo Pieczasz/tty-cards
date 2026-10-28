@@ -5,8 +5,8 @@ That goal drives most of the rules below: every one of them exists so the next
 person can change the code without reading all of it first.
 
 Start with [`README.md`](../README.md) to run it, then
-[`reading-guide.md`](reading-guide.md) to learn it, then
-[`architecture.md`](architecture.md) for the contracts you must not break.
+[`architecture.md`](architecture.md) for the contracts you must not break (its last
+section says where to start reading the code).
 
 Security bugs do **not** go in an issue - see [`SECURITY.md`](SECURITY.md).
 
@@ -136,12 +136,12 @@ the between-hands deal with `game.ValidateNextHand`. `internal/game` imports fro
 allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 `internal/game/...`, `uuid`), so a rules package that needs anything else is a
 decision to discuss first
-([`decisions.md` #54](decisions.md#54-the-game-packages-import-from-an-allow-list)).
+(`docs/architecture.md` §5, "Packages").
 
 Read `State.Extra` through one per-package `extraOf(state) *State` that asserts
 without `ok`, as every game does: the wrong type there is a wiring bug, and the
 engine's recover ends that one table as a rules error
-([`decisions.md` #37](decisions.md#37-a-rules-panic-on-the-turn-timer-ends-one-table-not-the-process)).
+([`decisions.md` #37](decisions.md#37-a-rules-panic-ends-one-table-not-the-process)).
 A helper a view calls inside `Frame` is the exception and keeps the `ok` form.
 
 Use `internal/deck` rather than writing your own: `RankValue` / `RunOrder` /
@@ -167,7 +167,7 @@ clockwise from the hero's left. Wire it the way `crazyeight` does:
 - Your key handler closes any prompt of your own on esc first, then calls
   `m.HandleLeaveKey(key)` before its own bindings and returns if it consumed the
   key - mid-game esc must ask before it forfeits
-  ([`decisions.md` #44](decisions.md#44-leaving-a-live-game-asks-first)).
+  (decision D-8, see `docs/decisions.md`).
 - `View` returns `m.LeaveConfirmScreen()` before anything else when it is armed.
 - Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
   render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
@@ -304,7 +304,7 @@ Schema changes are SQL files in `internal/db/migrations/`, applied with
   rather than production. Add a seed row when your down file rewrites data.
 - **Say so when a down loses data.** `000005_game_slug.down.sql` opens with
   `-- LOSSY.` and what is lost
-  ([`decisions.md` #48](decisions.md#48-migration-000005s-down-is-lossy)).
+  (migration `000005`'s down is lossy: read its header before running it).
 - **Refuse rather than guess** when existing rows break the new constraint and
   fixing them is an operator's decision: `000006_username_ci.up.sql` names every
   case collision and stops.
@@ -333,14 +333,13 @@ Schema changes are SQL files in `internal/db/migrations/`, applied with
 - If you changed a contract - `SessionTracker`, finalize ownership, the grace
   state machine, the `Frame` signature, the catalog shape, a repository interface
   - update the docs in this order: `CLAUDE.md`, `docs/architecture.md`,
-  `docs/decisions.md` if the *reason* changed, the `docs/reading-guide.md` step
-  that covers the path, and `docs/onboarding.md` only if the day-one story
-  changed.
+  and `docs/decisions.md` if the *reason* changed. A decision that is retired
+  is folded into the comment beside its code, not left behind as a stale record.
 
 ## Reporting bugs and suggesting features
 
 Issues: what you did, what you expected, what happened, plus terminal emulator,
 OS and SSH client. For a feature, say who it helps - a player or an operator -
-and which of the invariants in `docs/architecture.md` §12 it would touch.
+and which of the invariants in `docs/architecture.md` §7 it would touch.
 
 Happy coding.

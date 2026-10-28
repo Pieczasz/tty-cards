@@ -21,7 +21,7 @@ The microseconds are fine. Four thousand allocations per keypress is the number 
 ## Profiling
 
 ```sh
-go test -run='^$' -bench=BenchmarkPokerView_Render -memprofile=mem.out ./internal/tui/views/game/poker/
+go test -run='^$' -bench=BenchmarkPokerView_Render -memprofile=mem.out ./internal/tui/views/gameview/poker/
 go tool pprof -sample_index=alloc_objects -top mem.out
 ```
 
@@ -119,6 +119,10 @@ return banner
 Past the cap banners still render, they just stop being remembered. The fixed screen titles
 are in by then.
 
+Later the cap went too. The shared cache now holds fixed titles only - every key is a string
+in the source - and a player's name is rendered outside it and memoised on that player's own
+session, so there is no shared key left for anyone to mint.
+
 A second cache went entirely. Caching the wrapped header and footer was worth ~17%, but its
 keys were whole rendered banners, username included, and nothing forced headers to stay
 static. 17% on a keypress-driven render is not worth leaving that for the next person.
@@ -135,7 +139,7 @@ Which is why the benchmarks call `View()` and not the helpers.
 
 Allocation rate decides whether more cores become more players. On the parallel benchmark,
 `GOGC=100` turned 2->6 cores into 1.4×; GC was the ceiling, not CPU. `GOGC=400` turned the
-same jump into 2.2×. Compose sets that, with `GOMEMLIMIT=1GiB` as the backstop.
+same jump into 2.2×. Compose sets that, with `GOMEMLIMIT` as the backstop.
 
 | | before | after |
 | --- | --- | --- |
@@ -144,6 +148,24 @@ same jump into 2.2×. Compose sets that, with `GOMEMLIMIT=1GiB` as the backstop.
 | Home screen | 1,353 µs / 17,588 allocs | **794 µs / 6,165 allocs** |
 | Parallel render @ 6 cores | 1,917 renders/s | **4,683 renders/s** |
 
-The ~6,000 left in a menu frame are lipgloss composing the 120×40 border and wrapping text.
-No shortcut there, and it only runs on keypress - a browsing player costs a few thousand
-allocations a second against a poker table's fourteen thousand.
+The ~6,000 left in a menu frame were lipgloss composing the 120×40 border and wrapping text,
+and this post used to say there was no shortcut there. There was one.
+
+## Update, October 2026: the border
+
+lipgloss word-wraps a whole frame before it draws the border around it, and by then the frame
+has already been sized to fit, so the wrap never changes anything. Under 1,000 load-tested
+sessions that wrap was 38% of every byte the server allocated. The border, padding and
+centring are now built directly whenever the wrap would leave the text as it is - every line
+fits, none leaves a colour open, none holds a control character - and lipgloss gets
+everything else. The same kind of `rapid` test holds it to lipgloss's output.
+
+| 120×40 menu frame layout | before | after |
+| --- | --- | --- |
+| time | 1,026 µs | 223 µs |
+| allocations | 6,281 | 60 |
+| bytes | 222 KB | 41 KB |
+
+The joins went the same way earlier: lipgloss's grew an unsized builder over a whole-screen
+frame, and zeroing that memory alone was 27% of CPU at 1,000 sessions. Byte-identical
+replacements cut total server CPU there by a third.

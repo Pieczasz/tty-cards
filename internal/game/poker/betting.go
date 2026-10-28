@@ -127,7 +127,7 @@ func (s *State) commitTo(seat *Seat, streetTotal uint) {
 //
 // MinRaise is the size of the last full raise, and the next legal raise is measured
 // from the raised CurrentBet: a sub-minimum all-in moves the bet but not the increment,
-// which is the standard rule (decisions.md #41).
+// which is the standard rule (a short all-in does not reopen the betting by itself).
 func applyBetIncrease(state *game.State, extra *State, raiser *game.Player, newBet uint) {
 	if newBet <= extra.CurrentBet {
 		return

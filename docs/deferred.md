@@ -14,7 +14,7 @@ reason here stops being true, fix the entry.
 
 | What | Trigger | Why not now |
 |---|---|---|
-| Split the domain types from the GORM models (`db.User`, `db.Ranking`, `db.Match` carry `gorm.Model` and are rendered by the TUI and the stats API) | A second store, or a TUI bug from a missed `Preload` | Every consumer reads plain fields; a parallel set of read models would be copied by hand with nothing to swap in. `db` stays the shared contract (decisions #26, #50). |
+| Split the domain types from the GORM models (`db.User`, `db.Ranking`, `db.Match` carry `gorm.Model` and are rendered by the TUI and the stats API) | A second store, or a TUI bug from a missed `Preload` | Every consumer reads plain fields; a parallel set of read models would be copied by hand with nothing to swap in. `db` stays the shared contract (`docs/architecture.md` §4). |
 | Move presence and the session lifecycle out of `internal/ssh` (`SessionTracker`, displacement, the resume generation, `ssh.Deps` forwarding to `tui.Deps`) | A second transport (a web terminal) | It would be a `lobby.Manager` `Attach`/`Detach(user, gen)` and an `ssh`-owned session-factory interface built in `cmd/server`. With one transport the indirection buys nothing. A cheap half-step when it starts: `tui.ReleaseSeat` mirroring `tui.ResumeSeat`, so `ssh` stops importing `lobby`. |
 | A template-method framework for game views (Session owns `Update`/`View` and calls a per-game interface) | A sixth game whose view is mostly hearts/gin plumbing | Poker doesn't fit the frame (its own breakpoint, no hints line), and `ShedTable` already covers the two games where the variation is small. Rule-of-three helpers are listed below instead. |
 | Split `internal/game` into an SPI package (`Rules`, `State`, `Action`) and the engine | Rules packages start needing engine internals, or a second engine | The semgrep rule `rules-package-reaches-the-engine` gives the same guarantee in a few lines, and a split would need an exported setter for `State`'s logger. |
@@ -31,6 +31,26 @@ reason here stops being true, fix the entry.
 - **`lobby.BeginShutdown` ending live tables itself.** The session WaitGroup plus the watcher gate cover the shutdown race. The "server is restarting" notice is mostly unseen, because `Close` has already closed the connection.
 - **Finalize asks `Rules.Standings` on a table that ended with a rules error** (via `Engine.Standings`) to write it unrated (decision #11). The places may come from a half-applied state. Revisit if a rules error ever lands mid-scoring in production.
 - **`RankByScore` orders leavers by score, last to leave first on ties.** Nothing in the five current games can observe the difference, but a game whose leavers keep a meaningful score should check it.
+
+## Left from the 2026-10-28 pass
+
+Each was asked for and looked at; the reason it stayed is the entry.
+
+- **Functional options to plain `Options` structs** (`lobby.WithCardGame` / `WithMaxPlayers` /
+  `WithPrivate` / `WithRanked`, `game.WithTurnTimeout` / `WithLogger` / `WithOnIdleRemoved`).
+  Each has several production call sites and hundreds of test ones; the structs would be a
+  rewrite of every `CreateLobby`/`NewEngine` call for no behaviour. Do it with the next change
+  that touches most of them anyway.
+- **A `Module` var per rules package, so `catalog.Games` is five one-line references.** Name and slug
+  would move into the rules packages, which `internal/game` is deliberately ignorant of (#6, #7) and
+  `catalog_test.go`'s lockstep guard reads. Revisit with a sixth game.
+- **`Session.Bound == nil` guards in `gameview`.** The router never hands a view a nil table (it falls
+  back to home), so they are unreachable in production; `BoundEngine`'s own nil-receiver guards are gone.
+  About thirty view tests build a zero `model{}` with no table, and would each need an engine. Delete
+  the guards when those tests move to a shared bound-table fixture.
+- **Scaling the terminal size with server load.** A fixed 120x40 cap replaced the tiered budget (#60);
+  the tiers bought quiet servers a bigger screen for ~300 lines. Bring them back only with a load test
+  showing the headroom is real.
 
 ## Lower-priority review items
 

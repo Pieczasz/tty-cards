@@ -10,8 +10,9 @@ first; it is the canonical short form and this file does not repeat it.
 | The rules you must not break | [`CLAUDE.md`](CLAUDE.md) |
 | What every document is for, and the order | [`docs/README.md`](docs/README.md) |
 | Contracts, topology, the invariant list | [`docs/architecture.md`](docs/architecture.md) |
-| Why a non-obvious thing is the way it is | [`docs/decisions.md`](docs/decisions.md) |
-| Where to start reading, in order | [`docs/reading-guide.md`](docs/reading-guide.md) |
+| Deploying and hardening | [`docs/deployment.md`](docs/deployment.md), [`docs/SECURITY.md`](docs/SECURITY.md) |
+| Why a non-obvious thing is the way it is (~20 records) | [`docs/decisions.md`](docs/decisions.md) |
+| Where to start reading the code | [`docs/architecture.md`](docs/architecture.md) §8 |
 | How to add a game, test and commit norms | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) |
 | Commands, ports, configuration | [`README.md`](README.md) |
 

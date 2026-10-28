@@ -10,20 +10,21 @@ table, no serialisation anywhere between a keypress and the rules that answer it
 
 ## The locking contract
 
-`Engine` holds two mutexes - its own and the state's - for the whole of `Start`,
-`SubmitAction` and `RemovePlayer`:
+`Engine` holds one mutex, covering its turn clock and the `State`, for the whole of
+`Start`, `SubmitAction` and `RemovePlayer`:
 
 ```go
-func (e *Engine) submitAction(playerID string, action Action, playerPresent bool) error {
+func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	e.mu.Lock()
-	e.state.mu.Lock()
-	defer e.state.mu.Unlock()
 	defer e.mu.Unlock()
 	// ...
 }
 ```
 
-`Rules` methods are always called with both held. That gives implementations a useful
+It used to be two - the engine's and the state's. They were always taken together, so
+the second lock bought nothing but an ordering to get right on every path.
+
+`Rules` methods are always called with it held. That gives implementations a useful
 guarantee: a `Rules` can treat `*State` as if it owned it. Mutate the slice, reassign
 the map, no copying, no retry loop, no version check.
 
@@ -33,18 +34,18 @@ sentence, which is the trade I wanted.
 
 ## Turn resolution
 
-The cursor is settled in one place, `applyNextTurnLocked`, in this order:
-
-1. `State.OverrideNextTurn` if the rules set one
-2. otherwise advance to the next seat
-3. otherwise honour whatever `State.CurrentTurn` says
+The cursor moves through two functions. After an accepted action,
+`advanceTurnLocked` takes `State.OverrideNextTurn` if the rules set one, and otherwise
+advances to the next seat. On the start and leave paths, `settleTurnLocked` takes the
+override, and otherwise leaves `State.CurrentTurn` where it is. Both clamp the cursor
+to a seat that exists and arm the turn clock for it.
 
 Poker needs (1) constantly - after a betting round closes, the next actor is not the
 next seat, it is first-to-act on the new street. So `AfterAction` writes
 `OverrideNextTurn` and the engine picks it up. Crazy Eights almost never sets it and
 just advances.
 
-`ApplyAction` runs, then `AfterAction`. An error from `AfterAction` finishes the game,
+`ApplyAction` runs, then `AfterAction`. An error from either one finishes the game,
 because a rules set that cannot reach a consistent state should not keep dealing. That
 is why anything checkable up front belongs in `ValidateAction` instead.
 
@@ -87,3 +88,10 @@ finishes, so nothing durable is lost, but a hand in progress is not recoverable.
 
 For sessions measured in minutes that is fine. For sessions measured in hours it would
 not be, and the fix would not be a small one.
+
+A dropped connection is a different case from a restart, and that one is now covered: the
+seat is held for 90 seconds, with the turn clock playing for the absent player, so
+reconnecting with the same key puts you back at the table mid-hand.
+
+*Updated October 2026: one engine lock instead of two, the two turn functions, and seats
+held across a dropped connection.*

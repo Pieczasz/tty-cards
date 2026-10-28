@@ -1,4 +1,4 @@
-# Project invariants from CLAUDE.md that golangci-lint and depguard cannot express.
+# Project invariants.
 # Every rule is proven by .semgrep/tty-cards.go (`semgrep --test .semgrep/`) and
 # must stay at zero findings on the tree (`make semgrep`).
 rules:
@@ -57,7 +57,7 @@ rules:
     message: >-
       A rules package is driven by the Engine and never drives one: every hook runs
       with Engine.mu held and receives only *State, so a call into an Engine from
-      rules code deadlocks on that lock or acts on some other table (decision #2).
+      rules code deadlocks on that lock or acts on some other table (decision #1).
       Naming game.Engine, building one (game.NewEngine), binding one (game.Bind) or
       calling WithState / SubmitAction has no place in internal/game/<game>/. Tests
       and gametest are exempt: they drive tables.
