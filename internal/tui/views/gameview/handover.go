@@ -28,6 +28,21 @@ type HandOver struct {
 // LobbyHint is the hand-over hint once the match is over.
 const LobbyHint = "esc / enter -> lobby"
 
+// NextHandHint is the between-hands prompt for the games where the engine waits on one
+// seat to start the next hand (hearts, gin rummy, poker's dealer). Only that seat is
+// told to press enter; everyone else is told whom they wait for, because their enter
+// does nothing and a hint that promised it would read as a broken key.
+func NextHandHint(myTurn bool, waitingOn, act, leave string) string {
+	switch {
+	case myTurn:
+		return "enter: " + act + " | " + leave
+	case waitingOn != "":
+		return "waiting for " + waitingOn + " to " + act + " | " + leave
+	default:
+		return "waiting for the next hand | " + leave
+	}
+}
+
 // MatchOverTitle is the headline once the match is over, naming the winner when there
 // is one.
 func MatchOverTitle(winner string) string {

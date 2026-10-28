@@ -36,7 +36,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 	// constructed exactly as app.go builds it.
 	global := router.GlobalContext{
 		User:         testUser(),
-		LobbyManager: lobby.NewManager(t.Context(), nil, game.NewRegistry()),
+		LobbyManager: lobby.NewManager(t.Context(), testutil.NopMatches{}, game.NewRegistry()),
 		Width:        80,
 		Height:       40,
 	}
@@ -251,7 +251,7 @@ func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	require.NoError(t, err)
 	global := router.GlobalContext{
 		User:         &db.User{ID: id, Username: "hero"},
-		LobbyManager: lobby.NewManager(t.Context(), nil, game.NewRegistry()),
+		LobbyManager: lobby.NewManager(t.Context(), testutil.NopMatches{}, game.NewRegistry()),
 		Width:        80,
 		Height:       40,
 	}
@@ -339,4 +339,18 @@ func TestUpdate_IgnoresWhatIsNotAKey(t *testing.T) {
 	_, cmd := m.Update(struct{}{})
 	assert.Nil(t, cmd)
 	assert.Equal(t, before, m.Selected)
+}
+
+func TestHandOver_OnlyTheDealerIsToldToPressEnter(t *testing.T) {
+	t.Parallel()
+	_, m := startedTable(t)
+	m.phase = logic.PhaseHandOver
+
+	m.Base.MyTurn, m.Base.CurrentPlayerName = true, "me"
+	assert.Contains(t, tuitest.StripANSI(m.renderHandOver()), "enter: deal the next hand")
+
+	m.Base.MyTurn, m.Base.CurrentPlayerName = false, "bob"
+	out := tuitest.StripANSI(m.renderHandOver())
+	assert.Contains(t, out, "waiting for bob to deal the next hand")
+	assert.NotContains(t, out, "enter: deal")
 }

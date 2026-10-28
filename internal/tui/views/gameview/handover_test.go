@@ -88,3 +88,12 @@ func TestRenderHandOver_FitsTheTerminal(t *testing.T) {
 		assert.LessOrEqualf(t, lg.Height(out), size.h, "%dx%d", size.w, size.h)
 	}
 }
+
+// Only the seat the engine waits on can start the next hand, so only that seat is told
+// to press enter; for everyone else the same prompt promised a key that does nothing.
+func TestNextHandHint(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "enter: deal | esc: leave", NextHandHint(true, "bob", "deal", "esc: leave"))
+	assert.Equal(t, "waiting for bob to deal | esc: leave", NextHandHint(false, "bob", "deal", "esc: leave"))
+	assert.Equal(t, "waiting for the next hand | esc: leave", NextHandHint(false, "", "deal", "esc: leave"))
+}

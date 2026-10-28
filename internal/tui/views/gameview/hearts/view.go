@@ -17,7 +17,6 @@ const (
 	keyHintsPlay = "<-/h: left | ->/l: right | enter: play | esc: leave"
 	//nolint:gosec // G101: "Pass" is the card pass, not a credential
 	keyHintsPass = "<-/h: left | ->/l: right | space: toggle | enter: pass 3 | esc: leave"
-	keyHintsOver = "enter: next hand | esc: leave match"
 )
 
 func (m *model) View() tea.View {
@@ -166,7 +165,7 @@ func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
 		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Header: fmt.Sprintf("%-12s  %8s  %9s", "player", "hand", "total"),
-		Hint:   keyHintsOver,
+		Hint:   gameview.NextHandHint(m.Base.MyTurn, m.Base.CurrentPlayerName, "deal the next hand", "esc: leave match"),
 	}
 	switch {
 	case m.Base.EndReason == game.EndReasonInterrupted:

@@ -78,7 +78,7 @@ func (m *model) renderHandOver() string {
 		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Body:   m.renderHandResult(),
 		Header: fmt.Sprintf("%-12s  %9s", "player", "total"),
-		Hint:   "enter: deal next hand | esc: leave",
+		Hint:   gameview.NextHandHint(m.Base.MyTurn, m.Base.CurrentPlayerName, "deal the next hand", "esc: leave"),
 	}
 	if m.matchComplete || m.Base.Phase == game.Finished {
 		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
