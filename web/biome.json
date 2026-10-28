@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "files": {
     "includes": ["src/**/*.ts", "src/**/*.astro", "*.mjs", "*.json"]
   },
@@ -10,7 +10,7 @@
   },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": { "preset": "recommended" }
   },
   "assist": {
     "actions": { "source": { "organizeImports": "on" } }
