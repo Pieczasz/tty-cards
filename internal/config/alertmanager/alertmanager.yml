@@ -2,7 +2,7 @@
 # host, never written here (bot_token_file needs v0.26+, chat_id_file v0.31+; the
 # pinned image is v0.34.1), and only when a notification is sent: without them
 # Alertmanager still runs and shows alerts at alertmanager:9093, logs each failed
-# send, and fires AlertmanagerNotificationsFailing. Setup: "Alert delivery" in
+# send, and fires AlertDeliveryFailing. Setup: "Alert delivery" in
 # docs/SECURITY.md.
 route:
   receiver: telegram
