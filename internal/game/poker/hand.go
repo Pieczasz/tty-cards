@@ -1,7 +1,7 @@
 package poker
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -49,9 +49,8 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 		return err
 	}
 	if state.Deck.Size() < minDeckAfterDeal {
-		state.Logger().Error("poker deck too small to run the board",
-			"hand", extra.HandNumber, "size", state.Deck.Size(), "want", minDeckAfterDeal)
-		return errors.New("not enough cards to run the board")
+		return fmt.Errorf("not enough cards to run the board: hand %d has %d left, want %d",
+			extra.HandNumber, state.Deck.Size(), minDeckAfterDeal)
 	}
 
 	// Seats are counted before the blinds are posted: a blind big enough to bust a
@@ -104,16 +103,15 @@ func dealHoleCards(state *game.State, extra *State) error {
 		}
 		cards, ok := state.Deck.DrawN(HoleCards)
 		if !ok {
-			state.Logger().Error("poker deck empty dealing hole cards",
-				"hand", extra.HandNumber, "player", p.ID, "dealt", funded)
-			return errors.New("not enough cards to deal")
+			return fmt.Errorf("not enough cards to deal: hand %d, player %s, %d seats dealt",
+				extra.HandNumber, p.ID, funded)
 		}
 		p.Cards = cards
 		funded++
 	}
 	if funded < 2 {
-		state.Logger().Error("poker cannot deal a hand", "hand", extra.HandNumber, "funded", funded)
-		return errors.New("not enough funded players to deal a hand")
+		return fmt.Errorf("not enough funded players to deal a hand: hand %d, %d funded",
+			extra.HandNumber, funded)
 	}
 	return nil
 }

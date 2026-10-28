@@ -2,7 +2,7 @@ package poker
 
 import (
 	"cmp"
-	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -105,15 +105,13 @@ func advanceStreet(state *game.State, extra *State) (bool, error) {
 
 func dealCommunity(state *game.State, extra *State, n int) error {
 	if _, ok := state.Deck.Draw(); !ok {
-		state.Logger().Error("poker deck empty during burn", "phase", extra.Phase.String(), "hand", extra.HandNumber)
-		return errors.New("deck empty during burn")
+		return fmt.Errorf("deck empty during burn: %s, hand %d", extra.Phase, extra.HandNumber)
 	}
 	for range n {
 		c, ok := state.Deck.Draw()
 		if !ok {
-			state.Logger().Error("poker deck empty during community deal",
-				"phase", extra.Phase.String(), "hand", extra.HandNumber, "want", n)
-			return errors.New("deck empty during community deal")
+			return fmt.Errorf("deck empty during community deal: %s, hand %d, want %d",
+				extra.Phase, extra.HandNumber, n)
 		}
 		extra.Table = append(extra.Table, c)
 	}
