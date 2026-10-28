@@ -19,7 +19,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: true
 
     - name: Download dependencies
@@ -36,7 +36,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: true
 
     - name: Download dependencies
@@ -65,7 +65,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
         cache: false
 
     - name: golangci-lint
@@ -95,7 +95,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.27.1'
+        go-version: '1.27.3'
 
     - name: govulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

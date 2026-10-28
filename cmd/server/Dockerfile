@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
 
-# Pinned by digest, not just by tag: `golang:1.27.1-alpine` is republished whenever
+# Pinned by digest, not just by tag: `golang:1.27.3-alpine` is republished whenever
 # its Alpine base is rebuilt, so the tag alone does not describe what was built. The
 # tag is kept alongside for readability - update both together, with
 # `docker buildx imagetools inspect golang:<tag> --format '{{.Manifest.Digest}}'`.
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 
 WORKDIR /code
 

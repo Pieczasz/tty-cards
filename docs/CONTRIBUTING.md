@@ -11,7 +11,7 @@ Security bugs do **not** go in an issue - see [`SECURITY.md`](SECURITY.md).
 
 ## Setup
 
-Go **1.27.1** (see `go.mod`; CI pins the same). PostgreSQL 18 for anything that
+Go **1.27.3** (see `go.mod`; CI pins the same). PostgreSQL 18 for anything that
 touches the database. Docker for the integration suite.
 
 ```bash
