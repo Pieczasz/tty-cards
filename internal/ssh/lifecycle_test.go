@@ -418,3 +418,20 @@ func TestSessionTracker_ConnectClosesTheDisplacedSession(t *testing.T) {
 	assert.False(t, release(tracker, testutil.UID(7), gen1), "the displaced generation frees nothing")
 	assert.True(t, release(tracker, testutil.UID(7), gen2))
 }
+
+// The teardown's DisconnectPlayer runs inside ReleaseWith. If it panics, the slot must
+// still be freed: it counts against the server cap, and a leaked one refuses that
+// account as "server full" until a restart.
+func TestSessionTracker_ReleaseWithFreesTheSlotWhenTheTeardownPanics(t *testing.T) {
+	t.Parallel()
+	tracker := NewSessionTracker(1)
+	user := testutil.UID(31)
+	gen, err := tracker.Connect(user, nil)
+	require.NoError(t, err)
+
+	require.Panics(t, func() { tracker.ReleaseWith(user, gen, func() { panic("teardown bug") }) })
+
+	assert.Equal(t, 0, tracker.Count(), "the panicking teardown stranded the slot")
+	_, err = tracker.Connect(user, nil)
+	require.NoError(t, err)
+}

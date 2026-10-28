@@ -157,10 +157,14 @@ func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bo
 	if gen == 0 || a.gen != gen {
 		return false
 	}
+	// Deferred: a panic in fn (the lobby's disconnect path) must not strand the slot,
+	// or this account is refused as "server full" until a restart.
+	defer func() {
+		a.gen, a.conn = 0, nil
+		t.mu.Lock()
+		t.live.Add(-1)
+		t.mu.Unlock()
+	}()
 	fn()
-	a.gen, a.conn = 0, nil
-	t.mu.Lock()
-	t.live.Add(-1)
-	t.mu.Unlock()
 	return true
 }

@@ -415,19 +415,19 @@ func sessionModel(
 		gen, err := deps.Tracker.Connect(user.ID, conn)
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
-			reg.failSessionf(s, "rejected_full", err,
-				"The server is full right now - please try again in a few minutes.\n")
+			reg.refuseFull(s, err)
 			return nil
 		}
+		// Recorded the moment the slot is ours, before anything below can panic: the
+		// teardown frees the slot and closes the model only for what it finds here.
+		st.user = user
+		st.gen = gen
+		st.model = model
 		observability.SSHSession(traceCtx, "accepted")
 		// Only once the slot is ours: a refused session must not cancel the grace
 		// timer holding this player's seat, and a displaced one has finished its
 		// teardown by now, so any timer it armed is there to cancel.
 		tui.ResumeSeat(model)
-
-		st.user = user
-		st.gen = gen
-		st.model = model
 
 		// bubbletea's own recover prints to stderr and knows nothing about the span
 		// or the metric, so reportingModel catches Init/Update/View first. Its
