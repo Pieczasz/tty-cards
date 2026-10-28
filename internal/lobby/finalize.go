@@ -20,6 +20,10 @@ type finalizeRequest struct {
 	game      db.GameRef
 	isRanked  bool
 	startedAt time.Time
+	// tornDown is whether BeginTeardown had run when the game ended. It is read once,
+	// at the end: reopening the table can wait on m.mu, and a teardown that begins in
+	// that wait must not turn a hand that ended during the drain into an unrated one.
+	tornDown bool
 }
 
 // finalizeFinishedGame persists the result of a game that just ended. It runs on the
@@ -109,7 +113,7 @@ func (m *Manager) persistFinishedMatch(
 	// An interrupted match stays rated, but only against its leavers: see
 	// recordFinishedMatch.
 	rated := req.isRanked
-	if why := unratedReason(reason, m.tearingDown.Load()); rated && why != "" {
+	if why := unratedReason(reason, req.tornDown); rated && why != "" {
 		rated = false
 		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
 	}

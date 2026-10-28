@@ -102,6 +102,7 @@ func (m *Manager) watchGame(l *Lobby, start gameStart) {
 func (m *Manager) requestFinalize(l *Lobby, engine *game.Engine, reason game.EndReason, req finalizeRequest) {
 	observability.GameFinished(m.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
+	req.tornDown = m.tearingDown.Load()
 	m.releaseFinishedGame(l)
 	m.finalizeFinishedGame(req, engine, reason)
 }

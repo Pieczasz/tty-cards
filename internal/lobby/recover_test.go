@@ -48,10 +48,10 @@ func TestRecoverGoroutine_StopsAPanicAtTheGoroutineFrame(t *testing.T) {
 	})
 }
 
-// A rules set whose factory panics fails ToggleReady on the caller's goroutine, after
-// the drain was told to expect a watcher. The count has to come back, or shutdown waits
+// A rules set whose factory panics is refused like a failed deal: the table stays
+// Waiting with no seat left ready, and the drain's count comes back, or shutdown waits
 // out its whole timeout for a game that never existed.
-func TestToggleReady_APanicBeforeTheWatcherStartsStillGivesTheCountBack(t *testing.T) {
+func TestToggleReady_APanickingFactoryIsRefusedAndTheTableRecovers(t *testing.T) {
 	t.Parallel()
 	reg := game.NewRegistry(game.Module{
 		Name: "Boom", Slug: "boom", MinPlayers: 1, MaxPlayers: 2,
@@ -62,9 +62,39 @@ func TestToggleReady_APanicBeforeTheWatcherStartsStillGivesTheCountBack(t *testi
 	_, err := m.CreateLobby(leader, WithMaxPlayers(1), WithCardGame("boom"))
 	require.NoError(t, err)
 
-	assert.Panics(t, func() { _ = m.ToggleReady(leader) })
+	require.NotPanics(t, func() { err = m.ToggleReady(leader) })
+	require.ErrorContains(t, err, "factory")
 
+	l := m.FindLobbyByPlayer(leader)
+	assert.True(t, isWaiting(l))
+	assert.Nil(t, l.ActiveGame())
+	l.mu.RLock()
+	assert.Empty(t, l.ready, "seats were left ready for a game that never started")
+	l.mu.RUnlock()
 	assert.True(t, m.WaitForFinalizers(time.Second), "a watcher that never started is still counted")
+}
+
+// A hand that ends during the drain is a real result. Reopening the table can wait on
+// m.mu, so BeginTeardown may land between the end and the write; the decision is the
+// one taken at the end.
+func TestFinalize_RankedMatchEndedBeforeTeardownStaysRatedWhenTeardownLandsMidFinalize(t *testing.T) {
+	t.Parallel()
+	repo := new(MockMatchRepo)
+	repo.On("FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	m, l, engine := newFinishedGameLobby(t, repo)
+	m.BeginShutdown()
+
+	m.mu.Lock()
+	endHand(engine, stubWin)
+	// Waiting again means the watcher passed its snapshot and is parked on m.mu.
+	require.Eventually(t, func() bool { return isWaiting(l) }, 2*time.Second, time.Millisecond)
+	m.BeginTeardown()
+	m.mu.Unlock()
+
+	require.True(t, m.WaitForFinalizers(2*time.Second))
+	repo.AssertExpectations(t)
+	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
 }
 
 // Players may still be playing while the server waits for sessions to leave on their

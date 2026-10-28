@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -322,7 +323,12 @@ func (l *Lobby) toggleReady(p *game.Player, canStart bool, opts ...game.EngineOp
 	start, err := l.startGameLocked(opts)
 	if err != nil {
 		// The ready flip is already committed, so the other clients have to see it even
-		// though the start failed, or their rosters disagree with the server.
+		// though the start failed, or their rosters disagree with the server. A refusal
+		// the players caused keeps their ready flags; a failure in the game's own code
+		// would otherwise leave every seat ready for a hand that cannot be dealt.
+		if !errors.Is(err, ErrRefused) {
+			clear(l.ready)
+		}
 		l.broadcastLocked(Event{Type: EventPlayersUpdated})
 		return gameStart{}, err
 	}
@@ -449,14 +455,17 @@ func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 	}
 
 	// The slug, not the display name, is what the match is persisted under.
-	rules := mod.Factory()
+	rules, err := newRules(mod)
+	if err != nil {
+		return gameStart{}, err
+	}
 	players := slices.Concat([]*game.Player{l.leader}, l.guests)
 	logger := slog.With("lobby", l.code, "game", mod.Slug)
 	engine := game.NewEngine(rules, players, append(opts, game.WithLogger(logger))...)
 
 	// A failure, not a refusal, and the caller logs it: the error names the table,
 	// since that is all the log line will know of it.
-	if err := engine.Start(); err != nil {
+	if err = engine.Start(); err != nil {
 		return gameStart{}, fmt.Errorf("start game engine for lobby %s (%s): %w", l.code, mod.Slug, err)
 	}
 
@@ -476,6 +485,20 @@ func (l *Lobby) startGameLocked(opts []game.EngineOption) (gameStart, error) {
 	l.broadcastLocked(Event{Type: EventGameStarted, engine: engine})
 
 	return start, nil
+}
+
+// newRules builds mod's rules. Factory is game code running under l.mu on the caller's
+// goroutine, and engine.Start already refuses a panicking OnGameStart rather than
+// ending the table, so a panicking factory is refused the same way.
+func newRules(mod game.Module) (rules game.Rules, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("game factory panicked", "game", mod.Slug,
+				"panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("game factory for %s panicked", mod.Slug)
+		}
+	}()
+	return mod.Factory(), nil
 }
 
 // releaseFinishedGameLocked returns a finished lobby to Waiting and hands back the

@@ -856,9 +856,6 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 			repo := new(MockMatchRepo)
 			tt.expect(repo)
 			m := newTestManager(t, repo)
-			if tt.shutdown {
-				m.tearingDown.Store(true)
-			}
 
 			engine := game.NewEngine(&stubRules{}, seated)
 			t.Cleanup(engine.Close)
@@ -866,6 +863,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 
 			m.finalizeFinishedGame(finalizeRequest{
 				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
+				tornDown: tt.shutdown,
 			}, engine, game.EndReasonInterrupted)
 
 			repo.AssertExpectations(t)
