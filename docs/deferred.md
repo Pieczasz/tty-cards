@@ -52,6 +52,29 @@ Each was asked for and looked at; the reason it stayed is the entry.
   the tiers bought quiet servers a bigger screen for ~300 lines. Bring them back only with a load test
   showing the headroom is real.
 
+## Left from the readability review
+
+Taken from the review of the same name; the key vocabulary (`components.Key*`, `HorizontalNudge`),
+teardown names, grace-hold generations and the error-audience fixes landed, these did not.
+
+- **Rename the per-game view packages** (`pokerview` and the like, against the rules packages of the
+  same name). Every import alias and half the test files move for a naming gain.
+- **Split `lobby.Manager`.** It holds the roster, the grace holds, the finalize gate and the public
+  cache behind one lock order (#45); a split is a lock-order redesign, so wait for a feature that
+  needs a seam.
+- **`CreateLobby` taking a settings struct instead of `Option`s.** Same cost as the options entry in
+  the 2026-10-28 pass above; `resolveOptions` is the seam if it is ever done.
+- **Typed `State.Extra`, and the shed-shaped `Deck` fields on `State`.** Every rules package reads
+  `Extra` through its own `extraOf`; making it generic ripples through the engine, lobby and catalog
+  (see the `Engine[S]` row above).
+- **A key-binding framework for every screen** (bubbles `key.Binding` and help). The shared constants
+  and nudge table are enough until a screen needs remapping; the hint strings are tested against the
+  table in `components/keys_test.go`, not generated from it.
+- **`Broadcaster.Broadcast` returning a delivery result.** The latest-wins contract is relied on in
+  the engine, the lobby and the views; changing the signature touches all three.
+- **Poker through `gameview.RenderBands`.** Its own breakpoint and hints line do not fit the frame
+  (see the template-method row above).
+
 ## Lower-priority review items
 
 Small, local, and safe to pick up whenever their file is open anyway.
@@ -59,7 +82,7 @@ Small, local, and safe to pick up whenever their file is open anyway.
 - **TUI**
   - `router.GlobalContext` is about 12.9 KB (12.8 KB of it `styles.Theme`) and mixes three lifetimes: session deps, router-owned screen state and derived identity. Split it into a validated `Session` and a router-owned `Screen`, which would also remove the nil branches production code carries for partly built test contexts.
   - `styles.Theme` is a pure function of one bool. Two immutable package-level themes would make the per-theme caches correct by construction. The five copy-pasted `sync.Map` caches rely on convention for their size bound (`RenderFigureASCII` is exported and takes any string).
-  - View plumbing repeated across hearts, gin rummy and the shedding table: `Session.HandleCursorKey`, a `Session.Overlay` for the forfeit, hand-over and waiting prelude, a shared hero-hand band, and one catalog-wide test that mid-game esc shows the forfeit prompt and a following non-`y` key neither leaves nor plays.
+  - View plumbing repeated across hearts, gin rummy and the shedding table: a `Session.Overlay` for the forfeit, hand-over and waiting prelude, a shared hero-hand band, and one catalog-wide test that mid-game esc shows the forfeit prompt and a following non-`y` key neither leaves nor plays.
   - `gameview.RenderHand` picks single-select or multi-select by `staged == nil` versus empty; make the mode explicit.
   - Poker's raise prompt is an unnamed modal sub-state; extract a `raisePrompt` type like `ChoicePicker`. `RenderBands` could skip an empty hints line, and the hero rotation could be generic, so poker stops copying both.
   - `gameview.Session.Bound` is still exported: hearts' view tests build `model{Bound: ...}` without a subscription.
