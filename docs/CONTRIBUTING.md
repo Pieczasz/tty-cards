@@ -25,12 +25,12 @@ make build
 
 ### Linting locally
 
-CI runs golangci-lint **v2.13.2** via `golangci/golangci-lint-action@v7` with
+CI runs golangci-lint **v2.15.0** via `golangci/golangci-lint-action@v7` with
 `install-mode: goinstall` - prebuilt binaries lag the module's Go version and
 refuse `go 1.27.x`. Match it locally the same way:
 
 ```bash
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 ~/go/bin/golangci-lint run      # or `make lint` if it is on your PATH
 ```
 

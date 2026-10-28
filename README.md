@@ -132,7 +132,7 @@ against a running server, which is the fastest way to test anything multiplayer.
 make test-short        # unit tests, no Docker
 make test              # go test -race ./...
 make test-integration  # -tags=integration, needs Docker (testcontainers)
-make lint              # golangci-lint (v2.13.2 in CI)
+make lint              # golangci-lint (v2.15.0 in CI)
 make ci                # fmt, fix, lint, test, build
 
 go test -race -run TestName ./internal/game/poker/
