@@ -142,6 +142,9 @@ func (c *Config) Validate() error {
 	if err := c.validateDB(); err != nil {
 		return err
 	}
+	if err := c.validateProxy(); err != nil {
+		return err
+	}
 	for _, check := range []struct {
 		bad bool
 		msg string
@@ -159,6 +162,17 @@ func (c *Config) Validate() error {
 		if check.bad {
 			return errors.New(check.msg)
 		}
+	}
+	return nil
+}
+
+// validateProxy refuses a production boot that believes a forwarded client address
+// from any peer: with PROXY_TRUSTED_CIDRS empty the PROXY header and X-Forwarded-For
+// are honored from everyone, which lets a client pick its own rate-limit key.
+func (c *Config) validateProxy() error {
+	if c.IsProduction() && (c.ProxyProtocol || c.APITrustProxy) && len(c.ProxyTrustedCIDRs) == 0 {
+		return errors.New("PROXY_TRUSTED_CIDRS is required when ENV=production and " +
+			"PROXY_PROTOCOL or API_TRUST_PROXY is on")
 	}
 	return nil
 }

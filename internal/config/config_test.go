@@ -50,6 +50,41 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.NotEmpty(t, cfg.ServiceVersion)
 }
 
+// Empty PROXY_TRUSTED_CIDRS makes the PROXY header and X-Forwarded-For believed from
+// every peer, so a production boot with either trust flag on must name its proxies.
+func TestLoad_ProductionTrustFlagsRequireTrustedCIDRs(t *testing.T) {
+	tests := []struct {
+		name, env, protocol, apiTrust, cidrs string
+		wantErr                              bool
+	}{
+		{"proxy protocol, no cidrs", "production", "true", "false", "", true},
+		{"api trust, no cidrs", "production", "false", "true", "", true},
+		{"proxy protocol, cidrs", "production", "true", "false", "172.30.0.0/24", false},
+		{"both off, no cidrs", "production", "false", "false", "", false},
+		{"development, no cidrs", "development", "true", "true", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ENV", tt.env)
+			t.Setenv("DB_PASSWORD", "secret")
+			t.Setenv("DB_SSLMODE", "require")
+			if tt.env == "development" {
+				t.Setenv("DB_SSLMODE", "disable")
+			}
+			t.Setenv("PROXY_PROTOCOL", tt.protocol)
+			t.Setenv("API_TRUST_PROXY", tt.apiTrust)
+			t.Setenv("PROXY_TRUSTED_CIDRS", tt.cidrs)
+
+			_, err := config.Load()
+			if tt.wantErr {
+				require.ErrorContains(t, err, "PROXY_TRUSTED_CIDRS")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestLoad_ProductionRequiresPassword(t *testing.T) {
 	t.Setenv("ENV", "production")
 	t.Setenv("DB_PASSWORD", "")
@@ -68,6 +103,7 @@ func TestLoad_SSLModeDefaultsToTLSOutsideDevelopment(t *testing.T) {
 			t.Setenv("ENV", env)
 			t.Setenv("DB_PASSWORD", "secret")
 			t.Setenv("DB_SSLMODE", "")
+			t.Setenv("PROXY_PROTOCOL", "false")
 
 			cfg, err := config.Load()
 			require.NoError(t, err)
@@ -251,6 +287,7 @@ func TestLoad_OTelEndpointIsAURL(t *testing.T) {
 			t.Setenv("DB_PASSWORD", "secret")
 			t.Setenv("DB_SSLMODE", "require")
 			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+			t.Setenv("PROXY_PROTOCOL", "false")
 
 			cfg, err := config.Load()
 			require.NoError(t, err)
@@ -327,6 +364,7 @@ func TestLoad_ExplicitSSLModeIsHonored(t *testing.T) {
 	t.Setenv("ENV", "production")
 	t.Setenv("DB_PASSWORD", "secret")
 	t.Setenv("DB_SSLMODE", "verify-full")
+	t.Setenv("PROXY_PROTOCOL", "false")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -353,6 +391,7 @@ func TestResolveEnv_DotEnvLoadedOutsideProductionOnly(t *testing.T) {
 
 			t.Setenv("ENV", tt.env)
 			t.Setenv("DB_PASSWORD", "secret")
+			t.Setenv("PROXY_PROTOCOL", "false")
 			// godotenv never overrides a variable that is already present, so this one
 			// has to be genuinely absent for the file to be observable at all.
 			t.Setenv("DB_NAME", "")
