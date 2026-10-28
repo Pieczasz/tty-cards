@@ -86,6 +86,17 @@ closed as "working as intended":
   account. There is no password reset and no second factor.
 - **Usernames are public**, on the in-game leaderboard and through
   `/v1/leaderboard`. So is the fact that two accounts played each other.
+- **Leaving a hearts match ends it for everyone, and rage-quits cost only the leaver.**
+  One seat leaving cuts the match short (`EndReasonInterrupted`); only the leavers are
+  charged Elo, and only downwards, so quitting a match you are losing costs you and pays
+  nobody. A forfeit by the last opponent is rated as the win it is. Leavers rank strictly
+  below players who stayed, so a rage-quit cannot become a rated draw; the 24h pair cap
+  bounds trading wins between two accounts. Neither is a bug report. A real farming
+  pattern that gets around them is.
+- **Capacity is a measured number, not a promise.** `MAX_CONNECTIONS=1250` and the fixed
+  120x40 terminal cap come from `cmd/loadtest` on a laptop's Docker VM with the backend capped at
+  3 cores; re-measure on your hardware before raising either. Past the cap players are told the
+  server is full.
 - **Denial of service by volume** against a host you do not operate. Please do
   not load-test the public server; `make loadtest` exists for your own.
 - **Missing security headers on the static site**, or findings from an automated
@@ -100,7 +111,9 @@ closed as "working as intended":
 ## Hardening the deployment you run
 
 If you self-host, the properties below are what the shipped configuration
-assumes. Breaking one is how a safe deployment becomes an unsafe one.
+assumes. Breaking one is how a safe deployment becomes an unsafe one. The
+tick-box version, with the commands, is the first section of
+[`deployment.md`](deployment.md).
 
 - **Never publish `:6969`.** The backend trusts the PROXY protocol header for the
   client address, so a client that can reach it directly can forge that address
@@ -168,8 +181,18 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
   would follow it to Cloudflare's addresses and fail.
 - **No password in argv.** `migrate` gets the database password as `PGPASSWORD`,
   not in its URL, so it is not in `ps` or `docker inspect`'s `Args`; CI asserts it.
-- **Keep the host's own `sshd` off port 22** (the game proxy owns it) and keep
-  your admin SSH port firewalled to trusted addresses.
+- **Keep the host's own `sshd` off port 22** (the game proxy owns it; a system sshd
+  still listening there stops the proxy from binding) and keep your admin SSH port
+  key-only and firewalled to trusted addresses. Docker-published ports skip `ufw`, so
+  `compose.yaml`'s `ports:` list is the real firewall for containers.
+- **Secrets stay out of git.** `.env`, `*.pem`, `*.key`, `rclone.conf` and
+  `compose.load.yaml` are ignored; the Alertmanager bot token and chat id live in
+  `ALERTMANAGER_SECRETS_DIR` on the host, outside the checkout. Keep `.env` at `0600`.
+- **The apex is DNS-only at Cloudflare.** A proxied apex cannot carry ssh. If you
+  front the website (a different name) with a proxy, that is fine.
+- **A healthcheck is a label, not a repair.** Compose marks an unhealthy container;
+  nothing restarts it for that. Watch `docker compose ps` or add an auto-healer if
+  unattended recovery matters.
 - **Keep the `ssh-keys` volume** across redeploys, or every client sees a
   host-key change - which is indistinguishable from an attack.
 
@@ -179,7 +202,7 @@ Alertmanager delivers every alert to Telegram. The bot token and chat id are fil
 on the host, outside the checkout so neither can be committed, and Alertmanager
 reads them only when it sends. Until they are in place it still runs and shows
 alerts at `alertmanager:9093`, logs each failed send, and Prometheus fires
-`AlertmanagerNotificationsFailing`. To set it up:
+`AlertDeliveryFailing`. To set it up:
 
 1. Message [@BotFather](https://t.me/BotFather), send `/newbot`, and keep the token
    it gives you.
@@ -214,8 +237,8 @@ land there and are deployed from there.
 
 ## See also
 
-- [`privacy.md`](privacy.md) - what is stored about a player and for how long
-- [`data-inventory.md`](data-inventory.md) - the same
-  question answered per file, for auditors
+- [`deployment.md`](deployment.md) - the step-by-step runbook and its hardening checklist
+- [`data-inventory.md`](data-inventory.md) - what is stored about a player and for how long, per field
+- the published [Privacy Policy](https://www.tty.cards/privacy/) and [Terms](https://www.tty.cards/terms/)
 - [`architecture.md`](architecture.md) §2 - the layered limits and where each one
   is enforced
