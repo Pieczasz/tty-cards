@@ -24,6 +24,12 @@ import (
 
 var errInjected = errors.New("injected fault")
 
+// neverSentError is what pgx reports for a failure before a byte reached the server.
+type neverSentError struct{}
+
+func (neverSentError) Error() string     { return "connection refused" }
+func (neverSentError) SafeToRetry() bool { return true }
+
 type hookKey struct{}
 
 type statementHook struct {
@@ -211,6 +217,20 @@ func TestFinalizeRetriesATransactionPostgresAborted(t *testing.T) {
 		var pgErr *pgconn.PgError
 		require.ErrorAs(t, err, &pgErr)
 		assert.Equal(t, int32(3), ran.Load())
+	})
+
+	t.Run("a connection failure before anything was sent", func(t *testing.T) {
+		t.Parallel()
+		ids := seatPair(t, database, "retryconn")
+		var ran atomic.Int32
+		ctx := withHook(t.Context(), `INSERT INTO "matches"`, func(tx *gorm.DB) {
+			if ran.Add(1) == 1 {
+				_ = tx.AddError(neverSentError{})
+			}
+		})
+		require.NoError(t, matches.RecordCasualMatch(ctx, db.GameRef{Slug: "retry_conn", Name: "Retry"}, ids))
+		assert.Equal(t, int32(2), ran.Load())
+		assert.Equal(t, int64(2), snapshotFinalize(t, database, "retry_conn", ids).participants)
 	})
 
 	t.Run("does not retry any other failure", func(t *testing.T) {

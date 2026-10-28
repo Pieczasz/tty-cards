@@ -158,3 +158,33 @@ func TestIsUniqueViolation(t *testing.T) {
 
 // finalizeErr drops what a finalize wrote, for a test that asserts only its error.
 func finalizeErr(_ map[uuid.UUID]uint32, err error) error { return err }
+
+type neverSentError struct{}
+
+func (neverSentError) Error() string     { return "dial failed" }
+func (neverSentError) SafeToRetry() bool { return true }
+
+// A failure that provably never reached Postgres wrote nothing, so the finalize runs
+// again; a conflict abort does too; anything that may have committed does not.
+func TestIsRetryable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"serialization failure", &pgconn.PgError{Code: pgSerializationFailureCode}, true},
+		{"deadlock", &pgconn.PgError{Code: pgDeadlockDetectedCode}, true},
+		{"never reached the server", neverSentError{}, true},
+		{"never reached the server, wrapped", errors.Join(errors.New("ctx"), neverSentError{}), true},
+		{"unique violation", &pgconn.PgError{Code: "23505"}, false},
+		{"unknown failure, maybe committed", errors.New("connection reset by peer"), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isRetryable(tt.err))
+		})
+	}
+}

@@ -46,13 +46,20 @@ const (
 	finalizeAttempts = 3
 )
 
-// isRetryableAbort is a transaction Postgres rolled back to break a conflict. Both
-// codes are raised before commit, so nothing was written and running it again is
-// safe; a dropped connection is not on the list, because it may have committed.
-func isRetryableAbort(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) &&
-		(pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
+// finalizeBackoff is the pause before attempt n+1, so a restarting Postgres or a
+// connection blip gets a moment instead of three failures inside a millisecond.
+const finalizeBackoff = 200 * time.Millisecond
+
+// isRetryable is a failure after which nothing was written, so running the transaction
+// again is safe: a transaction Postgres rolled back to break a conflict (both codes are
+// raised before commit), or one pgx says never reached the server (a failed dial, a
+// refused connection). A connection dropped mid-transaction is not on the list: it may
+// have committed.
+func isRetryable(err error) bool {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode
+	}
+	return pgconn.SafeToRetry(err)
 }
 
 // transactRetrying runs fn as one transaction, again when Postgres aborted it. Without
@@ -61,10 +68,15 @@ func isRetryableAbort(err error) bool {
 func transactRetrying(ctx context.Context, conn *gorm.DB, fn func(tx *gorm.DB) error) error {
 	for attempt := 1; ; attempt++ {
 		err := conn.WithContext(ctx).Transaction(fn)
-		if attempt == finalizeAttempts || !isRetryableAbort(err) {
+		if attempt == finalizeAttempts || !isRetryable(err) {
 			return err //nolint:wrapcheck // the caller names the write
 		}
-		slog.WarnContext(ctx, "finalize aborted by postgres; retrying", "error", err, "attempt", attempt)
+		slog.WarnContext(ctx, "finalize failed before writing; retrying", "error", err, "attempt", attempt)
+		select {
+		case <-time.After(time.Duration(attempt) * finalizeBackoff):
+		case <-ctx.Done():
+			return err //nolint:wrapcheck // the caller names the write
+		}
 	}
 }
 
