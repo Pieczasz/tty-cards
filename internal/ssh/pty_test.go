@@ -63,7 +63,7 @@ func TestSessionLifecycle_PanicClosingTheViewStillReleasesTheSession(t *testing.
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
 
-	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), Tracker: tracker}
+	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry()), Tracker: tracker}
 	reg := &sessionRegistry{}
 	srv := &ssh.Server{
 		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {

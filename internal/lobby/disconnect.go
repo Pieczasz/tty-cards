@@ -106,7 +106,11 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		m.LeaveLobby(p)
 		return
 	}
-	m.grace.arm(p.ID, disconnectGrace, func() { m.expireLeave(p) })
+	m.grace.arm(p.ID, disconnectGrace, func() {
+		// An AfterFunc goroutine: a panic leaving the roster would end the process.
+		defer m.recoverGoroutine("disconnect grace expiry")
+		m.expireLeave(p)
+	})
 	m.mu.Unlock()
 	slog.InfoContext(m.appCtx, "session dropped mid-game, holding the seat",
 		"player_id", p.ID, "grace", disconnectGrace.String())

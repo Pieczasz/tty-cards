@@ -17,7 +17,7 @@ import (
 func TestLobby_Snapshot(t *testing.T) {
 	t.Parallel()
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("leader", testutil.UID(1))
 	leader.Ratings = map[string]uint32{"testgame": 1650}
 	guest := mockPlayer("guest", testutil.UID(2))
@@ -51,7 +51,7 @@ func TestLobby_Snapshot(t *testing.T) {
 func TestLobby_SnapshotDoesNotAlias(t *testing.T) {
 	t.Parallel()
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("leader", testutil.UID(1))
 	first := mockPlayer("first", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithCardGame("testgame"), WithMaxPlayers(4))
@@ -81,7 +81,7 @@ func TestLobby_SnapshotDoesNotAlias(t *testing.T) {
 func TestLobby_SnapshotIsConsistentUnderChurn(t *testing.T) {
 	t.Parallel()
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
 	// The anchor never leaves or readies, so the table neither closes nor starts.

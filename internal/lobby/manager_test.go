@@ -19,7 +19,7 @@ import (
 
 func TestManager_New(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 
 	l, err := m.CreateLobby(leader, WithMaxPlayers(3), WithPrivate(false), WithCardGame("testgame"))
@@ -42,7 +42,7 @@ func TestManager_New(t *testing.T) {
 
 func TestManager_JoinLobbyByCode(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest1 := mockPlayer("g1", testutil.UID(2))
 	guest2 := mockPlayer("g2", testutil.UID(3))
@@ -67,7 +67,7 @@ func TestManager_JoinLobbyByCode(t *testing.T) {
 
 func TestManager_LeaveLobby(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest1 := mockPlayer("g1", testutil.UID(2))
 	guest2 := mockPlayer("g2", testutil.UID(3))
@@ -93,7 +93,7 @@ func TestManager_LeaveLobby(t *testing.T) {
 
 func TestManager_BrowseLobbies_ListsOnlyPublicTables(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	p1 := mockPlayer("p1", testutil.UID(1))
 	p2 := mockPlayer("p2", testutil.UID(2))
@@ -114,7 +114,7 @@ func TestManager_BrowseLobbies_ListsOnlyPublicTables(t *testing.T) {
 
 func TestManager_GenerateLobbyCode(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	// Exhausting a 36^8 code space to force a collision is not practical, so this only
 	// pins the shape of what generateLobbyCodeLocked hands out.
@@ -127,7 +127,7 @@ func TestManager_GenerateLobbyCode(t *testing.T) {
 
 func TestManager_BrowseLobbiesCacheAndSorting(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	p1 := mockPlayer("p1", testutil.UID(1))
 	p2 := mockPlayer("p2", testutil.UID(2))
@@ -145,7 +145,7 @@ func TestManager_BrowseLobbiesCacheAndSorting(t *testing.T) {
 
 func TestManager_RejectMidGameJoin(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 	late := mockPlayer("p3", testutil.UID(3))
@@ -165,7 +165,7 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 
 func TestManager_Kick(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 	guest2 := mockPlayer("p4", testutil.UID(4))
@@ -189,7 +189,7 @@ func TestManager_Kick(t *testing.T) {
 
 func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	m.joinLimiter = ratelimit.New(2, time.Minute)
 
 	leader := mockPlayer("leader", testutil.UID(1))
@@ -221,7 +221,7 @@ func TestValidLobbyCode(t *testing.T) {
 
 func TestManager_BrowseLobbies_ClosestRatingFirst(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	p1 := mockPlayer("p1", testutil.UID(1)) // average Elo = 1000
 	p1.Ratings = map[string]uint32{"game": 1000}
@@ -245,11 +245,11 @@ func TestManager_BrowseLobbies_ClosestRatingFirst(t *testing.T) {
 
 func TestManager_WaitForFinalizers(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	assert.True(t, m.WaitForFinalizers(time.Second), "nothing in flight drains immediately")
 
-	m = newTestManager(t, nil)
+	m = newTestManager(t, testutil.NopMatches{})
 	require.True(t, m.admitGame())
 	// Guarded: a timeout that is not honored blocks here forever, and a suite that
 	// hangs says far less than one that fails.
@@ -263,7 +263,7 @@ func TestManager_WaitForFinalizers(t *testing.T) {
 
 func TestManager_WaitForFinalizers_StopsNewGames(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	require.True(t, m.admitGame())
 
 	drained := make(chan bool, 1)
@@ -300,7 +300,7 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 	f.Add("ABCD123\x00")
 
 	f.Fuzz(func(t *testing.T, code string) {
-		m := newTestManager(t, nil)
+		m := newTestManager(t, testutil.NopMatches{})
 		host := &game.Player{ID: "host", UserID: testutil.UID(1)}
 		l, err := m.CreateLobby(host, WithCardGame("poker"), WithMaxPlayers(4))
 		require.NoError(t, err)
@@ -322,7 +322,7 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 func TestManager_NilContextStillYieldsAUsableOne(t *testing.T) {
 	t.Parallel()
 	var missing context.Context
-	m := NewManager(missing, nil, testGames)
+	m := NewManager(missing, testutil.NopMatches{}, testGames)
 
 	require.NotNil(t, m.appCtx)
 	assert.NoError(t, m.appCtx.Err(), "and it must not arrive already cancelled")
@@ -333,7 +333,7 @@ func TestManager_NilContextStillYieldsAUsableOne(t *testing.T) {
 func TestNewManager_ANilRegistryIsAWiringBug(t *testing.T) {
 	t.Parallel()
 	assert.PanicsWithValue(t, "lobby.NewManager: nil game registry", func() {
-		NewManager(t.Context(), nil, nil)
+		NewManager(t.Context(), testutil.NopMatches{}, nil)
 	})
 }
 
@@ -366,7 +366,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 // flight, and must return once it finishes. The return value is true either way.
 func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	require.True(t, m.admitGame())
 
 	drained := make(chan bool, 1)
@@ -393,7 +393,7 @@ func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 // re-reads on a timer - not to hide changes.
 func TestManager_BrowseLobbiesReuseTheScanUntilSomethingChanges(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	_, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithPrivate(false), WithCardGame("testgame"))
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func TestManager_BrowseLobbiesReuseTheScanUntilSomethingChanges(t *testing.T) {
 // A table appearing or closing has to show up on the next browse.
 func TestManager_BrowseLobbiesSeeChangesImmediately(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	first, err := m.CreateLobby(mockPlayer("p1", testutil.UID(1)), WithPrivate(false), WithCardGame("testgame"))
 	require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestManager_BrowseLobbiesSeeChangesImmediately(t *testing.T) {
 // even though nothing went through the manager to remove it.
 func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 
@@ -449,7 +449,7 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 // RemoveLobby is the only place a lobby's broadcaster is torn down.
 func TestManager_RemoveLobbyClosesSubscribers(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 
@@ -479,7 +479,7 @@ func TestManager_RemoveLobbyClosesSubscribers(t *testing.T) {
 // for every lobby: the browse list would then be sorted around a rating the player does not have.
 func TestManager_BrowseLobbies_IgnoresUnnamedRankings(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	weak, err := m.CreateLobby(mockPlayer("weak", testutil.UID(1)), WithPrivate(false), WithCardGame("crazyeights"))
 	require.NoError(t, err)
@@ -543,7 +543,7 @@ func TestLobby_IsLeader(t *testing.T) {
 // entry point a teardown reaches has to shrug it off rather than panic the session.
 func TestManager_NilPlayerIsANoOp(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	assert.NotPanics(t, func() {
 		m.LeaveLobby(nil)
 		m.DisconnectPlayer(nil)
@@ -588,7 +588,7 @@ func TestManager_CreateLobby_HoldsTheTableToItsGame(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			m := newManagerFor(t, nil, games)
+			m := newManagerFor(t, testutil.NopMatches{}, games)
 			leader := mockPlayer("p1", testutil.UID(1))
 
 			l, err := m.CreateLobby(leader, tt.opts...)
@@ -611,7 +611,7 @@ func TestManager_CreateLobby_HoldsTheTableToItsGame(t *testing.T) {
 
 func TestManager_FindLobbyByCode_RefusesAMalformedCode(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	_, err := m.FindLobbyByCode("abc")
 	require.ErrorIs(t, err, errInvalidCode)
 }

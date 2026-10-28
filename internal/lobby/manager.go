@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"math/big"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -87,13 +89,16 @@ type Manager struct {
 const disconnectGrace = 90 * time.Second
 
 // NewManager is a Manager opening tables for the games in games, whose finished
-// matches are written to matchRepo, or nowhere when it is nil. ctx is the process
-// lifetime, not a request. A nil games panics, the way game.NewRegistry does on a
-// half-declared module: a manager that can open no table is a wiring bug, and it
-// should fail the boot rather than every player's first create.
+// matches are written to matchRepo. ctx is the process lifetime, not a request. A nil
+// games or matchRepo panics, the way game.NewRegistry does on a half-declared module:
+// a manager that can open no table, or that would silently drop every finished match,
+// is a wiring bug, and it should fail the boot rather than every player's first game.
 func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.Registry) *Manager {
 	if games == nil {
 		panic("lobby.NewManager: nil game registry")
+	}
+	if matchRepo == nil {
+		panic("lobby.NewManager: nil match repository")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -106,6 +111,17 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.R
 		matchRepo:   matchRepo,
 		appCtx:      ctx,
 		joinLimiter: ratelimit.New(joinRateLimitCount, joinRateLimitWindow),
+	}
+}
+
+// recoverGoroutine ends a panic on a goroutine the lobby started - the game watcher,
+// a grace timer - at the goroutine's own frame: nothing above it recovers, so one
+// bad table would otherwise take every player's session down with the process. It must
+// be deferred directly, since a recover() one call deeper returns nil.
+func (m *Manager) recoverGoroutine(what string) {
+	if r := recover(); r != nil {
+		slog.ErrorContext(m.appCtx, "lobby goroutine panicked; recovered",
+			"goroutine", what, "panic", r, "stack", string(debug.Stack()))
 	}
 }
 
@@ -201,15 +217,23 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// The watcher is counted before the game can start, so a drain that begins at any
 	// point after the start waits for it.
 	admitted := m.admitGame()
-	start, err := l.toggleReady(p, admitted, m.seatHook(l))
-	if start.engine == nil {
-		if admitted {
+	launched := false
+	// Deferred, not inline: a rules panic inside toggleReady (OnGameStart) must still
+	// give the count back, or WaitForFinalizers waits out its whole timeout for a
+	// watcher that never existed.
+	defer func() {
+		if admitted && !launched {
 			m.watchers.Done()
 		}
+	}()
+	start, err := l.toggleReady(p, admitted, m.seatHook(l))
+	if start.engine == nil {
 		return err
 	}
+	launched = true
 	go func() {
 		defer m.watchers.Done()
+		defer m.recoverGoroutine("game watcher")
 		m.watchGame(l, start)
 	}()
 	return err
@@ -293,7 +317,10 @@ func (m *Manager) LeaveLobby(p *game.Player) {
 // latest-wins feed: a dropped event would leave the seat on the roster with the
 // engine no longer holding it, and the table could never reach all-ready again.
 func (m *Manager) seatHook(l *Lobby) game.EngineOption {
-	return game.WithOnIdleRemoved(func(playerID string) { m.dropSeat(l, playerID) })
+	return game.WithOnIdleRemoved(func(playerID string) {
+		defer m.recoverGoroutine("idle seat drop")
+		m.dropSeat(l, playerID)
+	})
 }
 
 // dropSeat gives up the seat l's engine took from playerID. Only while the player is

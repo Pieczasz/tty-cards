@@ -40,7 +40,7 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 	user := &db.User{ID: testutil.UID(11), Username: "shared"}
 	gen, err := tracker.Connect(user.ID, nil)
 	require.NoError(t, err)
-	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), Tracker: tracker}
+	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry()), Tracker: tracker}
 	reg := &sessionRegistry{}
 
 	// Both channels of one connection, so they would share an ssh.Context.
@@ -68,7 +68,7 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	t.Parallel()
 
-	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+	manager := lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry())
 	host := &db.User{ID: testutil.UID(1), Username: "host"}
 	guest := &db.User{ID: testutil.UID(2), Username: "guest"}
 	guestPlayer := lobby.NewPlayer(guest)

@@ -27,7 +27,7 @@ func (bogusAction) Name() string { return "bogus" }
 func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 	for _, entry := range Games {
 		t.Run(entry.Slug, func(t *testing.T) {
-			m := lobby.NewManager(t.Context(), nil, NewRegistry())
+			m := lobby.NewManager(t.Context(), testutil.NopMatches{}, NewRegistry())
 			players := testutil.Players(entry.MinPlayers)
 			l, err := m.CreateLobby(players[0], lobby.WithCardGame(entry.Slug), lobby.WithMaxPlayers(len(players)))
 			require.NoError(t, err)

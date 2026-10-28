@@ -162,7 +162,7 @@ func mockPlayer(id string, dbID uuid.UUID) *game.Player {
 func TestLobby_ToggleReady(t *testing.T) {
 	t.Parallel()
 	mockRules := new(MockRules)
-	m := newManagerFor(t, nil, boundedRegistry("MockGame", mockRules, 2, 4))
+	m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("MockGame", mockRules, 2, 4))
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 
@@ -189,7 +189,7 @@ func TestLobby_ToggleReady(t *testing.T) {
 
 func TestLobby_SettersAndGetters(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p1", testutil.UID(1))
 
 	cardGame := "crazyeights"
@@ -212,7 +212,7 @@ func TestLobby_SettersAndGetters(t *testing.T) {
 
 func TestLobby_DefaultCasual(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("leader", testutil.UID(1))
 	l, err := m.CreateLobby(leader, WithCardGame("testgame"))
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestLobby_DefaultCasual(t *testing.T) {
 
 func TestLobby_BasicGetters(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("leader", testutil.UID(1))
 
 	cardGame := "crazyeights"
@@ -338,7 +338,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 
 func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	leader := mockPlayer("p5", testutil.UID(5))
 	guest := mockPlayer("p6", testutil.UID(6))
 	nobody := mockPlayer("p3", testutil.UID(3))
@@ -364,7 +364,7 @@ func TestLobby_ToggleReady_EdgeCases(t *testing.T) {
 // tests that care about lobby bookkeeping rather than the game.
 func newTestLobby(t *testing.T, maxPlayers int) (*Manager, *Lobby) {
 	t.Helper()
-	m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, 2, maxPlayers))
+	m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("Mock", stubRules{}, 2, maxPlayers))
 	leader := mockPlayer("p1", testutil.UID(1))
 
 	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("mock"))
@@ -491,7 +491,7 @@ func TestLobby_SetMaxPlayers_Bounds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			start := cmp.Or(tt.rulesMax, 9)
-			m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, cmp.Or(tt.rulesMin, 1), start))
+			m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("Mock", stubRules{}, cmp.Or(tt.rulesMin, 1), start))
 			roster := testutil.Players(tt.guests + 1)
 			l, err := m.CreateLobby(roster[0], WithCardGame("mock"), WithMaxPlayers(start))
 			require.NoError(t, err)
@@ -966,7 +966,7 @@ func TestLobby_FailedStartKeepsTheTableWaiting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			m := newManagerFor(t, nil, boundedRegistry("Mock", tt.rules, cmp.Or(tt.min, 1), 9))
+			m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("Mock", tt.rules, cmp.Or(tt.min, 1), 9))
 			seats := []*game.Player{mockPlayer("p1", testutil.UID(1))}
 			l, err := m.CreateLobby(seats[0], WithCardGame("mock"))
 			require.NoError(t, err)

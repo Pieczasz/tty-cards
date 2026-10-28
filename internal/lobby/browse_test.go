@@ -35,7 +35,7 @@ func codesOf(entries []BrowseEntry) []string {
 
 func TestBrowseLobbies_CapsToTheClosestTables(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	for i := range 30 {
 		rating := uint32(1000 + i*50)
@@ -58,7 +58,7 @@ func TestBrowseLobbies_CapsToTheClosestTables(t *testing.T) {
 
 func TestBrowseLobbies_LimitIsConfigurable(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	for i := range 5 {
 		openTable(t, m, fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1)), "poker", 1500)
 	}
@@ -69,7 +69,7 @@ func TestBrowseLobbies_LimitIsConfigurable(t *testing.T) {
 
 func TestBrowseLobbies_LimitIsHardCapped(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	for i := range MaxBrowseLimit + 10 {
 		openTable(t, m, fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1)), "poker", 1500)
 	}
@@ -80,7 +80,7 @@ func TestBrowseLobbies_LimitIsHardCapped(t *testing.T) {
 
 func TestBrowseLobbies_Filters(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	poker := openTable(t, m, "poker", testutil.UID(1), "poker", 1500, WithRanked(true))
 	eights := openTable(t, m, "eights", testutil.UID(2), "crazyeights", 1500)
@@ -134,7 +134,7 @@ func TestBrowseLobbies_Filters(t *testing.T) {
 
 func TestBrowseLobbies_RowCarriesWhatTheListShows(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	l := openTable(t, m, "leader", testutil.UID(1), "poker", 1800, WithRanked(true), WithMaxPlayers(4))
 	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), mockPlayer("guest", testutil.UID(2)))))
 
@@ -161,7 +161,7 @@ func TestBrowseEntry_HasRoom(t *testing.T) {
 
 func TestBrowseLobbies_UnratedPlayerIsMatchedAtTheStartingRating(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	near := openTable(t, m, "near", testutil.UID(1), "poker", elo.ToUint32(elo.DefaultRating))
 	openTable(t, m, "far", testutil.UID(2), "poker", 3000)
 
@@ -174,7 +174,7 @@ func TestBrowseLobbies_UnratedPlayerIsMatchedAtTheStartingRating(t *testing.T) {
 
 func TestBrowseLobbies_EqualRatingsKeepAStableOrder(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	for i := range 6 {
 		openTable(t, m, fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1)), "poker", 1500)
 	}
@@ -188,7 +188,7 @@ func TestBrowseLobbies_EqualRatingsKeepAStableOrder(t *testing.T) {
 
 func TestManager_GamesOnOffer(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	openTable(t, m, "a", testutil.UID(1), "poker", 1500)
 	openTable(t, m, "b", testutil.UID(2), "crazyeights", 1500)
 	openTable(t, m, "c", testutil.UID(3), "poker", 1500)
@@ -207,7 +207,7 @@ func TestManager_GamesOnOffer(t *testing.T) {
 
 func TestBrowseLobbies_VisibilityChangeShowsUpImmediately(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	l := openTable(t, m, "leader", testutil.UID(1), "poker", 1500)
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1, "the list is now cached")
 
@@ -239,7 +239,7 @@ func TestBrowseLobbies_RechecksACachedTable(t *testing.T) {
 	for name, flip := range flips {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			m := newTestManager(t, nil)
+			m := newTestManager(t, testutil.NopMatches{})
 			l := openTable(t, m, "p1", testutil.UID(1), "poker", 0)
 			require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1, "the table is cached as public")
 

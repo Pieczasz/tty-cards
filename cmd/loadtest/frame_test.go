@@ -42,7 +42,7 @@ func seatGlobal(t *testing.T, mgr *lobby.Manager, n int) router.GlobalContext {
 // caller closes it: a table has only so many subscriber slots.
 func seatView(t *testing.T, engine *game.Engine, n int) tea.Model {
 	t.Helper()
-	return crazyview.New(seatGlobal(t, lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), n), game.Bind(engine, testutil.SeatID(n)), "crazy_eights")
+	return crazyview.New(seatGlobal(t, lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry()), n), game.Bind(engine, testutil.SeatID(n)), "crazy_eights")
 }
 
 func closeView(m tea.Model) { m.(router.Closer).Close() }
@@ -90,7 +90,7 @@ func press(m tea.Model, keys string) tea.Model {
 // the menus' shared footer does not make every one of them read as home.
 func TestClassify_RealScreens(t *testing.T) {
 	t.Parallel()
-	mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+	mgr := lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry())
 	g := seatGlobal(t, mgr, 1)
 	l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("crazy_eights"))
 	require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestCreateKey_DrivesTheRealFormToTheTable(t *testing.T) {
 	for seats := 2; seats <= 6; seats++ {
 		t.Run(strconv.Itoa(seats), func(t *testing.T) {
 			t.Parallel()
-			m := lobbyview.NewCreate(seatGlobal(t, lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), 1))
+			m := lobbyview.NewCreate(seatGlobal(t, lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry()), 1))
 			for range 20 {
 				lines := frameLines(m.View().Content)
 				key := createKey(lines, seats)
@@ -298,7 +298,7 @@ func TestLobbyScreen_CodeAndGuests(t *testing.T) {
 	for guests := range 6 {
 		t.Run(strconv.Itoa(guests), func(t *testing.T) {
 			t.Parallel()
-			mgr := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+			mgr := lobby.NewManager(t.Context(), testutil.NopMatches{}, catalog.NewRegistry())
 			g := seatGlobal(t, mgr, 1)
 			l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("crazy_eights"), lobby.WithMaxPlayers(6))
 			require.NoError(t, err)

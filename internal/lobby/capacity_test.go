@@ -10,7 +10,7 @@ import (
 
 func TestLobby_EveryPlayerGetsAFeedAfterTheTableGrows(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	seats := testutil.Players(10)
 	leader := seats[0]
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("uno"))

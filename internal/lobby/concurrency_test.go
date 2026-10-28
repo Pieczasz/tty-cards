@@ -80,7 +80,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	)
 	freeSlots := maxPlayers - 1 // leader already occupies one slot
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	unlimitedJoins(m)
 	leader := mockPlayer("leader", testutil.UID(1))
 	l, err := m.CreateLobby(leader, WithMaxPlayers(maxPlayers), WithCardGame("testgame"))
@@ -155,7 +155,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 
 	const players = 8 // leader + 7 guests
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	unlimitedJoins(m)
 	all := testutil.Players(players)
 	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("testgame"))
@@ -209,7 +209,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
-			m := newTestManager(t, nil)
+			m := newTestManager(t, testutil.NopMatches{})
 			unlimitedJoins(m)
 
 			leader := mockPlayer(fmt.Sprintf("leader-%d", i), testutil.UID(uint64(2*i+1)))
@@ -274,7 +274,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 
 	// A game needing one more player than ever sits down: an all-ready roster fails to
 	// start, so the lobby stays in Waiting and the ready map keeps churning.
-	m := newManagerFor(t, nil, boundedRegistry("NeverStarts", stubRules{}, members+1, members+1))
+	m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("NeverStarts", stubRules{}, members+1, members+1))
 	unlimitedJoins(m)
 	roster := testutil.Players(members)
 	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("neverstarts"))
@@ -495,7 +495,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 	const iterations = 300
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
-			m := newTestManager(t, nil)
+			m := newTestManager(t, testutil.NopMatches{})
 			unlimitedJoins(m)
 
 			host := mockPlayer("host", testutil.UID(1))
@@ -548,7 +548,7 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	t.Parallel()
 
 	const tables = 60
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 
 	var wg sync.WaitGroup
 	wg.Add(2)

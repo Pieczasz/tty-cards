@@ -70,7 +70,7 @@ func TestFinalize_EveryFinishedGameIsCounted(t *testing.T) {
 			name: "no match repository",
 			setup: func(t *testing.T, games *game.Registry) *Manager {
 				t.Helper()
-				return newManagerFor(t, nil, games)
+				return newManagerFor(t, testutil.NopMatches{}, games)
 			},
 		},
 		{
