@@ -18,23 +18,30 @@ PORT="${TC_PORT:-22}"
 SESSION="${TC_SESSION:-tty-cards}"
 LAYOUT="${TC_LAYOUT:-windows}"
 
+# Throwaway identities, generated on first use: none of the developer's own keys
+# ever reach a dev server. The directory is kept between runs so the three accounts
+# (and their ratings) survive; delete it to start from new players.
+KEYDIR="${TC_KEYDIR:-${TMPDIR:-/tmp}/tty-cards-dev-keys}"
 PLAYERS=(
-	"one:$HOME/.ssh/id_localhost_1"
-	"two:$HOME/.ssh/id_ed25519"
-	"three:$HOME/.ssh/id_ed25519_second_user"
+	"one:$KEYDIR/one"
+	"two:$KEYDIR/two"
+	"three:$KEYDIR/three"
 )
 
 command -v tmux >/dev/null || {
 	echo "tmux not found" >&2
 	exit 1
 }
+command -v ssh-keygen >/dev/null || {
+	echo "ssh-keygen not found" >&2
+	exit 1
+}
 
+umask 077
+mkdir -p "$KEYDIR"
 for player in "${PLAYERS[@]}"; do
 	key="${player#*:}"
-	[ -r "$key" ] || {
-		echo "missing ssh key: $key" >&2
-		exit 1
-	}
+	[ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "tty-cards-dev-${player%%:*}" -f "$key"
 done
 
 # IdentitiesOnly stops a loaded ssh-agent from offering another key first and
