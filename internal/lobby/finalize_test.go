@@ -143,6 +143,7 @@ func TestShutdown_AGameEndingAfterBeginShutdownIsRecorded(t *testing.T) {
 			m, l, _ := newFinishedGameLobby(t, repo)
 			guest := l.Snapshot().Guests[0].Player
 			m.BeginShutdown()
+			m.BeginTeardown()
 
 			if endsWhileWaiting {
 				assert.False(t, m.WaitForFinalizers(50*time.Millisecond),
@@ -233,7 +234,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	t.Parallel()
 
-	m := newManagerFor(t, nil, boundedRegistry("Mock", stubRules{}, 3, 4))
+	m := newManagerFor(t, testutil.NopMatches{}, boundedRegistry("Mock", stubRules{}, 3, 4))
 	leader := mockPlayer("p1", testutil.UID(1))
 	guest := mockPlayer("p2", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("mock"))
@@ -257,7 +258,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 func TestWaitForFinalizers_TimeoutDoesNotLeakItsWaiter(t *testing.T) {
 	t.Parallel()
 
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	require.True(t, m.admitGame())
 
 	assert.False(t, m.WaitForFinalizers(10*time.Millisecond), "a game in play blocks the drain")
@@ -291,6 +292,7 @@ func TestFinalize_RankedMatchEndingDuringShutdownIsRecordedWithoutElo(t *testing
 
 	m, _, engine := newFinishedGameLobby(t, repo)
 	m.BeginShutdown()
+	m.BeginTeardown()
 
 	engine.RemovePlayer("guest") // the last seat standing is a forfeit
 
@@ -396,7 +398,7 @@ func TestResumePlayer_TakeoverWithoutPendingLeave(t *testing.T) {
 // A dropped session that was not at any table has no seat to hold.
 func TestDisconnectPlayer_UnseatedPlayerHoldsNothing(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	p := mockPlayer("p1", testutil.UID(1))
 
 	m.DisconnectPlayer(p)
@@ -489,7 +491,7 @@ func pendingGrace(m *Manager, id string) bool {
 func TestLobby_IdleRemovalLeavesTheRoster(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		m := newTestManager(t, nil)
+		m := newTestManager(t, testutil.NopMatches{})
 		leader, guest := mockPlayer("p1", testutil.UID(1)), mockPlayer("p2", testutil.UID(2))
 		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mock"))
 		require.NoError(t, err)
@@ -855,7 +857,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 			tt.expect(repo)
 			m := newTestManager(t, repo)
 			if tt.shutdown {
-				m.shuttingDown.Store(true)
+				m.tearingDown.Store(true)
 			}
 
 			engine := game.NewEngine(&stubRules{}, seated)
@@ -922,7 +924,7 @@ func TestFinalize_RefreshesTheSeatedPlayersRatings(t *testing.T) {
 // then: the rating follows them there, and a player seated nowhere is skipped.
 func TestRefreshRatings_FollowsEachPlayerToTheirCurrentTable(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	stayed, moved, gone := seated(1), seated(2), seated(3)
 	here, err := m.CreateLobby(stayed, WithCardGame("mockgame"))
 	require.NoError(t, err)
@@ -944,7 +946,7 @@ func TestRefreshRatings_FollowsEachPlayerToTheirCurrentTable(t *testing.T) {
 // refresh must replace it, never write its Ratings map, or this races.
 func TestRefreshRatings_DoesNotRaceReadersOfTheOldSeat(t *testing.T) {
 	t.Parallel()
-	m := newTestManager(t, nil)
+	m := newTestManager(t, testutil.NopMatches{})
 	p := seated(1)
 	l, err := m.CreateLobby(p, WithCardGame("mockgame"))
 	require.NoError(t, err)

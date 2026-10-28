@@ -25,9 +25,6 @@ type finalizeRequest struct {
 // finalizeFinishedGame persists the result of a game that just ended. It runs on the
 // game's watcher, which WaitForFinalizers waits for.
 func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine, reason game.EndReason) {
-	if m.matchRepo == nil {
-		return
-	}
 	parentCtx := m.appCtx
 
 	if req.game.Slug == "" {
@@ -55,14 +52,14 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 // decided who was left holding cards. Rules errors are the same class - half-applied
 // state must not move the ladder. So is a table every seat left: standings are then
 // reverse leave order, so rating it pays the last to quit.
-func unratedReason(reason game.EndReason, shuttingDown bool) string {
+func unratedReason(reason game.EndReason, tearingDown bool) string {
 	switch {
 	case reason == game.EndReasonRulesError:
 		return "rules error ended the match; recording without Elo"
 	case reason == game.EndReasonAbandoned:
 		return "every seat left the match; recording without Elo"
-	case shuttingDown:
-		return "server is shutting down; recording the ranked match without Elo"
+	case tearingDown:
+		return "server is hanging up on its sessions; recording the ranked match without Elo"
 	}
 	return ""
 }
@@ -112,15 +109,18 @@ func (m *Manager) persistFinishedMatch(
 	// An interrupted match stays rated, but only against its leavers: see
 	// recordFinishedMatch.
 	rated := req.isRanked
-	if why := unratedReason(reason, m.shuttingDown.Load()); rated && why != "" {
+	if why := unratedReason(reason, m.tearingDown.Load()); rated && why != "" {
 		rated = false
 		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
 	}
 
 	written, err := m.recordFinishedMatch(ctx, res, rated)
 	if err != nil {
+		// The ids and places are what an operator needs to replay the write by hand; the
+		// id is already the player_id every log line carries (docs/data-inventory.md).
 		slog.ErrorContext(ctx, "record finished match",
-			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated)
+			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated,
+			"user_ids", res.userIDs, "places", res.places)
 		observability.MatchFinalize(ctx, "error", req.isRanked)
 		return
 	}
@@ -205,8 +205,9 @@ func (m *Manager) admitGame() bool {
 }
 
 // BeginShutdown marks the process as going away and stops new games, without
-// stopping the ones in play: a hand that ends while sessions are torn down still
-// belongs in the players' history, it just must not move anyone's rating.
+// stopping the ones in play: players may finish them while the server waits for
+// sessions to end on their own, and those results are rated as usual. BeginTeardown is
+// the point after which they are not.
 //
 // Seats still held for a reconnect are given up here. Their timers would fire long
 // after the drain, so the lobby would never be removed and its engine never closed -
@@ -226,6 +227,15 @@ func (m *Manager) BeginShutdown() {
 	for _, p := range held {
 		m.LeaveLobby(p)
 	}
+}
+
+// BeginTeardown is called right before the server closes the sessions still connected.
+// A match a forced hang-up ends has no honest winner, so it is recorded without Elo.
+func (m *Manager) BeginTeardown() {
+	if m == nil {
+		return
+	}
+	m.tearingDown.Store(true)
 }
 
 // WaitForFinalizers stops new games (BeginShutdown normally has already), then blocks

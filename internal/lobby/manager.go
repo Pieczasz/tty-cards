@@ -68,9 +68,14 @@ type Manager struct {
 	// Created lazily and reused, so a timed-out drain does not strand a waiter per
 	// call the way a fresh goroutine per invocation did.
 	drained chan struct{}
-	// shuttingDown is set before sessions are torn down: a match ending during the
-	// drain must still be recorded, just not rated. See persistFinishedMatch.
+	// shuttingDown is set when the drain begins: no new game starts and a dropped
+	// session gives its seat up at once. A match ending now is still rated - players
+	// are still playing it out.
 	shuttingDown atomic.Bool
+	// tearingDown is set just before the server hangs up on the sessions still
+	// connected (BeginTeardown): from then on SSH teardown order, not play, decides who
+	// is left holding cards, so a ranked result is recorded but not rated.
+	tearingDown atomic.Bool
 	// grace holds mid-game seats after a dropped session (see disconnect.go).
 	grace graceTimers
 }
