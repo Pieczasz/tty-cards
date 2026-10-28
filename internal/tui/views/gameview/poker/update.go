@@ -53,16 +53,29 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "1", "2", "3", "4":
 		m.addChip(msg.String())
 		return m, nil
-	case "[", "h":
-		m.stepRaise(-1)
-		return m, nil
-	case "]", "l":
-		m.stepRaise(+1)
+	case "0", "[", "h", "left", "]", "l", "right":
+		m.adjustRaise(msg.String())
 		return m, nil
 	case "enter":
 		return m.confirm()
 	}
 	return m, nil
+}
+
+// adjustRaise handles the keys that only shape a pending raise: the arrows and brackets
+// step it, and 0 resets it (the chip keys only add, so without it the way to undo a
+// stack of them was esc and starting over).
+func (m *model) adjustRaise(key string) {
+	switch key {
+	case "0":
+		if m.raising {
+			m.raiseAmount = m.raiseMin
+		}
+	case "[", "h", "left":
+		m.stepRaise(-1)
+	default:
+		m.stepRaise(+1)
+	}
 }
 
 // addChip pushes one chip of the keyed denomination into the pending raise, which

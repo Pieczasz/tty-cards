@@ -466,3 +466,23 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 	// view that armed only one of them either stops updating or freezes its clock.
 	assert.NotNil(t, m.Init())
 }
+
+// The arrow keys step the raise like [ and ], and 0 drops the stacked chips back to the
+// minimum: the chip keys only ever add.
+func TestRaisePrompt_ArrowsStepAndZeroResets(t *testing.T) {
+	t.Parallel()
+	_, m := startedTable(t)
+	m.raising = true
+	m.raiseMin, m.raiseMax = 20, 1000
+	m.raiseAmount = 20
+
+	_, _ = m.Update(tuitest.Key("right"))
+	stepped := m.raiseAmount
+	assert.Greater(t, stepped, uint(20), "right did not raise the amount")
+	_, _ = m.Update(tuitest.Key("left"))
+	assert.Less(t, m.raiseAmount, stepped, "left did not lower it")
+
+	_, _ = m.Update(tuitest.Key("3"))
+	_, _ = m.Update(tuitest.Key("0"))
+	assert.Equal(t, uint(20), m.raiseAmount, "0 did not reset to the minimum")
+}

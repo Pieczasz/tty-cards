@@ -321,7 +321,7 @@ func (m *model) renderActionBar() string {
 func (m *model) renderRaisePrompt() string {
 	total := m.Global.Theme.Accented.Render(fmt.Sprintf("RAISE TO %d", m.raiseAmount))
 	bounds := m.Global.Theme.Muted.Render(fmt.Sprintf("(min %d, max %d)", m.raiseMin, m.raiseMax))
-	keys := m.Global.Theme.Dim.Render("[/]: fine | enter: confirm | esc: cancel")
+	keys := m.Global.Theme.Dim.Render("<-/->: fine | 1-4: add chip | 0: reset | enter: confirm | esc: cancel")
 	return styles.JoinVertical(lg.Center,
 		styles.JoinHorizontal(lg.Center, total, "  ", bounds),
 		renderChipRack(m.Global.Theme),
