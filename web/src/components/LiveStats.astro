@@ -67,9 +67,13 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "https://tty.cards/api";
     hands_in_play: number;
     tables_open: number;
   };
-  type Entry = { rank: number; username: string; elo: number };
+  type Entry = { rank: number; username: string; game?: string; elo: number };
 
   const MEDAL = ["text-gold", "text-silver", "text-bronze"];
+
+  // Names and game labels come from the server; neither may become markup.
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   for (const root of document.querySelectorAll<HTMLElement>(
     "[data-live-stats]",
@@ -118,13 +122,14 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "https://tty.cards/api";
         .map((r, i) => {
           const medal = MEDAL[i] ?? "text-dim";
           const sep = i > 0 ? "border-t border-dotted border-frame" : "";
-          const name = r.username
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
+          const name = esc(r.username);
+          // The board spans every game, so the same player can appear twice: the
+          // game says which ladder each row is from.
+          const game = r.game ? esc(r.game.replace(/_/g, " ")) : "";
           return `<li class="flex items-baseline gap-gutter py-row ${sep}">
             <span class="shrink-0 font-bold whitespace-pre ${medal}">${String(i + 1).padStart(2, " ")}.</span>
             <span class="min-w-0 flex-1 truncate">${name}</span>
+            <span class="shrink-0 text-[0.8rem] text-dim">${game}</span>
             <span class="shrink-0 tabular-nums text-dim">${Number(r.elo) || 0}</span>
           </li>`;
         })
