@@ -10,43 +10,64 @@ import (
 // graceTimers holds mid-game seats after a dropped session. Caller must hold
 // Manager.mu around every method: the maps are not independently locked.
 type graceTimers struct {
-	pending  map[string]*time.Timer
+	pending  map[string]graceHold
 	expiring map[string]struct{}
+	// last is the newest generation handed out; it only grows, so 0 never names a hold.
+	last uint64
 }
+
+// graceHold is one armed hold. Stop cannot recall a timer whose callback is already
+// waiting on Manager.mu, so that callback names the generation it was armed with and
+// beginExpire refuses it once a newer hold replaced it.
+type graceHold struct {
+	timer      *time.Timer
+	generation uint64
+}
+
+// anyGeneration claims whichever hold is pending, for the callers that act on the seat
+// itself rather than on one timer's expiry.
+const anyGeneration uint64 = 0
 
 func newGraceTimers() graceTimers {
 	return graceTimers{
-		pending:  make(map[string]*time.Timer),
+		pending:  make(map[string]graceHold),
 		expiring: make(map[string]struct{}),
 	}
 }
 
 func (d *graceTimers) clear(id string) {
-	if t, ok := d.pending[id]; ok {
-		t.Stop()
+	if h, ok := d.pending[id]; ok {
+		h.timer.Stop()
 		delete(d.pending, id)
 	}
 	delete(d.expiring, id)
 }
 
-func (d *graceTimers) arm(id string, wait time.Duration, fire func()) {
-	if t, ok := d.pending[id]; ok {
-		t.Stop()
+// arm replaces any hold on id with one that calls fire with its generation.
+func (d *graceTimers) arm(id string, wait time.Duration, fire func(generation uint64)) {
+	if h, ok := d.pending[id]; ok {
+		h.timer.Stop()
 	}
-	d.pending[id] = time.AfterFunc(wait, fire)
+	d.last++
+	generation := d.last
+	d.pending[id] = graceHold{
+		timer:      time.AfterFunc(wait, func() { fire(generation) }),
+		generation: generation,
+	}
 }
 
 // beginExpire moves a pending leave into the expiring set. False if there was
-// nothing to expire (already resumed or cleared).
+// nothing to expire (already resumed or cleared), or if generation names a hold that a
+// later one replaced.
 //
 // The timer is stopped because releaseHeldSeats claims holds early: left running, it
 // fires at the old deadline into whatever hold the player's next drop armed.
-func (d *graceTimers) beginExpire(id string) bool {
-	t, ok := d.pending[id]
-	if !ok {
+func (d *graceTimers) beginExpire(id string, generation uint64) bool {
+	h, ok := d.pending[id]
+	if !ok || (generation != anyGeneration && generation != h.generation) {
 		return false
 	}
-	t.Stop()
+	h.timer.Stop()
 	delete(d.pending, id)
 	d.expiring[id] = struct{}{}
 	return true
@@ -58,11 +79,11 @@ func (d *graceTimers) tryCancel(id string) (cancelled, blocked bool) {
 	if _, ok := d.expiring[id]; ok {
 		return false, true
 	}
-	t, ok := d.pending[id]
+	h, ok := d.pending[id]
 	if !ok {
 		return false, false
 	}
-	if !t.Stop() {
+	if !h.timer.Stop() {
 		return false, true
 	}
 	delete(d.pending, id)
@@ -88,39 +109,56 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		m.LeaveLobby(p)
 		return
 	}
-	l, ok := m.playerLobby[p.ID]
-	if !ok || l == nil {
+	seated, playing := m.seatToHoldLocked(p)
+	if !seated {
 		m.mu.Unlock()
 		return
 	}
-	l.mu.Lock()
-	playing := l.state == inGame
-	if playing {
-		// The session is gone, so its event channels must close now - but the seat
-		// stays, and the engine's turn clock plays for it until they return.
-		l.unsubscribePlayerLocked(p.ID)
-	}
-	l.mu.Unlock()
 	if !playing {
 		m.mu.Unlock()
 		m.LeaveLobby(p)
 		return
 	}
-	m.grace.arm(p.ID, disconnectGrace, func() {
+	m.grace.arm(p.ID, disconnectGrace, func(generation uint64) {
 		// An AfterFunc goroutine: a panic leaving the roster would end the process.
 		defer m.recoverGoroutine("disconnect grace expiry")
-		m.expireLeave(p)
+		m.expireHold(p, generation)
 	})
 	m.mu.Unlock()
 	slog.InfoContext(m.appCtx, "session dropped mid-game, holding the seat",
 		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
-// expireLeave is the grace timer's body, separate so tests can drive the expiry
-// without waiting out the window.
+// seatToHoldLocked reports whether p has a seat at all and whether its table is mid-
+// game, which is the only seat worth holding. For a seat in a running game it also
+// closes the session's event channels: the session is gone, so they must close now,
+// but the seat stays and the engine's turn clock plays for it until they return.
+// Caller holds m.mu; this takes the lobby's.
+func (m *Manager) seatToHoldLocked(p *game.Player) (seated, playing bool) {
+	l, ok := m.playerLobby[p.ID]
+	if !ok || l == nil {
+		return false, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.state != inGame {
+		return true, false
+	}
+	l.unsubscribePlayerLocked(p.ID)
+	return true, true
+}
+
+// expireLeave gives up p's held seat now, whichever hold it is.
 func (m *Manager) expireLeave(p *game.Player) {
+	m.expireHold(p, anyGeneration)
+}
+
+// expireHold is the grace timer's body, separate so tests can drive the expiry without
+// waiting out the window. A generation that is no longer the pending one is a callback
+// the player's next drop outlived, and it does nothing.
+func (m *Manager) expireHold(p *game.Player, generation uint64) {
 	m.mu.Lock()
-	if !m.grace.beginExpire(p.ID) {
+	if !m.grace.beginExpire(p.ID, generation) {
 		m.mu.Unlock()
 		return
 	}

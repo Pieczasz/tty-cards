@@ -70,6 +70,9 @@ type Manager struct {
 	// Created lazily and reused, so a timed-out drain does not strand a waiter per
 	// call the way a fresh goroutine per invocation did.
 	drained chan struct{}
+	// Two phases, two words. Shutdown is the drain (BeginShutdown, shuttingDown); teardown
+	// is the forced hang-up that follows it (BeginTeardown, tearingDown).
+	//
 	// shuttingDown is set when the drain begins: no new game starts and a dropped
 	// session gives its seat up at once. A match ending now is still rated - players
 	// are still playing it out.
@@ -153,24 +156,9 @@ func validCode(code string) bool {
 // name a game the manager offers; the defaults are 4 seats (clamped to what the game
 // deals for), private and casual.
 func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, error) {
-	options := setupDefaultOptions()
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	if options.cardGame == "" {
-		return nil, errNoCardGame
-	}
-	mod, ok := m.games.Module(options.cardGame)
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", errUnknownGame, options.cardGame)
-	}
-	if options.maxPlayers == 0 {
-		options.maxPlayers = min(max(defaultMaxPlayers, mod.MinPlayers), mod.MaxPlayers)
-	}
-	if options.maxPlayers < mod.MinPlayers || options.maxPlayers > mod.MaxPlayers {
-		return nil, refusalf("max players must be between %d and %d for %s",
-			mod.MinPlayers, mod.MaxPlayers, mod.Name)
+	options, mod, err := m.resolveOptions(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	m.mu.Lock()
@@ -202,6 +190,31 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	m.playerLobby[leader.ID] = lobby
 	m.invalidatePublicCache()
 	return lobby, nil
+}
+
+// resolveOptions applies opts over the defaults and checks them against the game they
+// name, before any lock is taken.
+func (m *Manager) resolveOptions(opts []Option) (*options, game.Module, error) {
+	options := setupDefaultOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if options.cardGame == "" {
+		return nil, game.Module{}, errNoCardGame
+	}
+	mod, ok := m.games.Module(options.cardGame)
+	if !ok {
+		return nil, game.Module{}, fmt.Errorf("%w: %q", errUnknownGame, options.cardGame)
+	}
+	if options.maxPlayers == 0 {
+		options.maxPlayers = min(max(defaultMaxPlayers, mod.MinPlayers), mod.MaxPlayers)
+	}
+	if options.maxPlayers < mod.MinPlayers || options.maxPlayers > mod.MaxPlayers {
+		return nil, game.Module{}, refusalf("max players must be between %d and %d for %s",
+			mod.MinPlayers, mod.MaxPlayers, mod.Name)
+	}
+	return options, mod, nil
 }
 
 // ToggleReady flips p's ready flag at the table p sits at, and starts the game once

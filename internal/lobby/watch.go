@@ -2,7 +2,7 @@ package lobby
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
@@ -20,28 +20,26 @@ type gameStart struct {
 
 // watchLocked subscribes the manager's watcher to engine before l.mu is released, so
 // no seat can act - and no game can end - before the feed is open. The watcher is the
-// only thing that persists a match, so a failed subscribe costs the players their
-// history and Elo - the engine's len(players)+8 broadcaster exists so that cannot
-// happen, and it is logged loudly if it ever does. Caller holds l.mu.
+// only thing that persists a match, so a failed subscribe fails the start rather than
+// letting a table play whose result nobody would write. The engine's len(players)+8
+// broadcaster exists so that cannot happen; the error is the caller's to log. Caller
+// holds l.mu.
 //
 // The finalize snapshot is taken here, not when the game ends: by then the lobby may
 // have reopened and been reconfigured, and the result would be written under the new
 // ranked flag, the new game, and the next hand's start time.
-func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
+func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) (gameStart, error) {
 	ch, err := engine.Subscribe()
 	if err != nil {
-		ctx := context.Background()
-		observability.SubscribeFailure(ctx, "game")
-		slog.ErrorContext(ctx, "cannot watch game for completion; result will not be persisted",
-			"error", err, "lobby", l.code, "game", ref.Slug)
-		return gameStart{}
+		observability.SubscribeFailure(context.Background(), "game")
+		return gameStart{}, fmt.Errorf("watch game %s for completion in lobby %s: %w", ref.Slug, l.code, err)
 	}
 	return gameStart{engine: engine, feed: ch, req: finalizeRequest{
 		lobbyCode: l.code,
 		game:      ref,
 		isRanked:  l.options.isRanked,
 		startedAt: l.startedAt,
-	}}
+	}}, nil
 }
 
 // watchGame is the goroutine ToggleReady starts, and counts in m.watchers, for every
@@ -53,6 +51,9 @@ func (l *Lobby) watchLocked(engine *game.Engine, ref db.GameRef) gameStart {
 // finalizeFinishedGame already no-ops without a repository. Idle-removed seats do
 // not reach the roster through it but through seatHook, which no dropped event can
 // lose.
+//
+// It has no recover of its own: the goroutine ToggleReady starts defers
+// recoverGoroutine directly, which is the frame a panic here has to unwind to.
 func (m *Manager) watchGame(l *Lobby, start gameStart) {
 	engine := start.engine
 	defer engine.Unsubscribe(start.feed)
@@ -90,7 +91,9 @@ func (m *Manager) watchGame(l *Lobby, start gameStart) {
 
 // requestFinalize reopens the finished table and persists its result. req was
 // snapshotted by watchLocked when this game started, so a lobby that has since
-// reopened cannot rewrite what the finished match is recorded as.
+// reopened cannot rewrite what the finished match is recorded as. The one field it
+// fills in here is teardownBegun, read as the game ends: reopening can wait on m.mu,
+// and a hang-up that starts in that wait is not what ended this hand.
 //
 // Reopen, then persist: a 15s write must not pin InGame while the TUI is already
 // back in the lobby. Both run on the watcher goroutine, which WaitForFinalizers has
@@ -102,7 +105,7 @@ func (m *Manager) watchGame(l *Lobby, start gameStart) {
 func (m *Manager) requestFinalize(l *Lobby, engine *game.Engine, reason game.EndReason, req finalizeRequest) {
 	observability.GameFinished(m.appCtx, req.game.Slug, req.isRanked, reason.String(),
 		time.Since(req.startedAt))
-	req.tornDown = m.tearingDown.Load()
+	req.teardownBegun = m.tearingDown.Load()
 	m.releaseFinishedGame(l)
 	m.finalizeFinishedGame(req, engine, reason)
 }

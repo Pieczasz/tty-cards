@@ -20,10 +20,16 @@ type finalizeRequest struct {
 	game      db.GameRef
 	isRanked  bool
 	startedAt time.Time
-	// tornDown is whether BeginTeardown had run when the game ended. It is read once,
+	// teardownBegun is whether BeginTeardown had run when the game ended. It is read once,
 	// at the end: reopening the table can wait on m.mu, and a teardown that begins in
 	// that wait must not turn a hand that ended during the drain into an unrated one.
-	tornDown bool
+	teardownBegun bool
+}
+
+// logAttrs is the identity every finalize log line carries, so one match's lines can
+// be found together.
+func (r finalizeRequest) logAttrs() []any {
+	return []any{"lobby", r.lobbyCode, "game", r.game.Slug, "ranked", r.isRanked}
 }
 
 // finalizeFinishedGame persists the result of a game that just ended. It runs on the
@@ -56,13 +62,13 @@ func (m *Manager) finalizeFinishedGame(req finalizeRequest, engine *game.Engine,
 // decided who was left holding cards. Rules errors are the same class - half-applied
 // state must not move the ladder. So is a table every seat left: standings are then
 // reverse leave order, so rating it pays the last to quit.
-func unratedReason(reason game.EndReason, tearingDown bool) string {
+func unratedReason(reason game.EndReason, teardownBegun bool) string {
 	switch {
 	case reason == game.EndReasonRulesError:
 		return "rules error ended the match; recording without Elo"
 	case reason == game.EndReasonAbandoned:
 		return "every seat left the match; recording without Elo"
-	case tearingDown:
+	case teardownBegun:
 		return "server is hanging up on its sessions; recording the ranked match without Elo"
 	}
 	return ""
@@ -87,7 +93,7 @@ func (m *Manager) persistFinishedMatch(
 		// so there is no history to write - but it is still a finished match that
 		// produced no row, which is what the counter tracks.
 		slog.WarnContext(ctx, "finished match had no standings; nothing recorded",
-			"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked, "reason", reason.String())
+			append(req.logAttrs(), "reason", reason.String())...)
 		observability.MatchFinalize(ctx, "dropped", req.isRanked)
 		return
 	}
@@ -99,7 +105,7 @@ func (m *Manager) persistFinishedMatch(
 		p := s.Player
 		if p == nil || p.UserID == uuid.Nil() {
 			slog.ErrorContext(ctx, "standing player has no database user; match not recorded",
-				"lobby", req.lobbyCode, "game", req.game.Slug, "ranked", req.isRanked, "player_index", i)
+				append(req.logAttrs(), "player_index", i)...)
 			observability.MatchFinalize(ctx, "dropped", req.isRanked)
 			return
 		}
@@ -113,9 +119,9 @@ func (m *Manager) persistFinishedMatch(
 	// An interrupted match stays rated, but only against its leavers: see
 	// recordFinishedMatch.
 	rated := req.isRanked
-	if why := unratedReason(reason, req.tornDown); rated && why != "" {
+	if why := unratedReason(reason, req.teardownBegun); rated && why != "" {
 		rated = false
-		slog.WarnContext(ctx, why, "lobby", req.lobbyCode, "game", req.game.Slug)
+		slog.WarnContext(ctx, why, req.logAttrs()...)
 	}
 
 	written, err := m.recordFinishedMatch(ctx, res, rated)
@@ -123,8 +129,8 @@ func (m *Manager) persistFinishedMatch(
 		// The ids and places are what an operator needs to replay the write by hand; the
 		// id is already the player_id every log line carries (docs/data-inventory.md).
 		slog.ErrorContext(ctx, "record finished match",
-			"error", err, "lobby", req.lobbyCode, "game", req.game.Slug, "ranked", rated,
-			"user_ids", res.userIDs, "places", res.places)
+			append(req.logAttrs(), "error", err, "rated", rated,
+				"user_ids", res.userIDs, "places", res.places)...)
 		observability.MatchFinalize(ctx, "error", req.isRanked)
 		return
 	}

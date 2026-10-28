@@ -75,7 +75,7 @@ func TestLobby_SeatIsNilWithoutALiveSeat(t *testing.T) {
 		t.Parallel()
 		_, l, leader, _ := startedGame(t)
 		engine := l.ActiveGame()
-		endHand(engine, stubWin)
+		require.NoError(t, endHand(engine, stubWin))
 		require.True(t, engine.IsFinished())
 
 		assert.Nil(t, l.Seat(leader.ID))

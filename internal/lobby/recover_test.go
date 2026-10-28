@@ -27,8 +27,8 @@ func TestWatchGame_APanicInFinalizeIsRecovered(t *testing.T) {
 	repo.On("FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Run(func(mock.Arguments) { panic("repository bug") })
 
-	m, _, engine := newFinishedGameLobby(t, repo)
-	endHand(engine, stubWin)
+	m, _, engine := newStartedGameLobby(t, repo)
+	require.NoError(t, endHand(engine, stubWin))
 
 	require.True(t, m.WaitForFinalizers(2*time.Second),
 		"the recovered watcher must still give its count back to the drain")
@@ -82,11 +82,11 @@ func TestFinalize_RankedMatchEndedBeforeTeardownStaysRatedWhenTeardownLandsMidFi
 	repo := new(MockMatchRepo)
 	repo.On("FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-	m, l, engine := newFinishedGameLobby(t, repo)
+	m, l, engine := newStartedGameLobby(t, repo)
 	m.BeginShutdown()
 
 	m.mu.Lock()
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
 	// Waiting again means the watcher passed its snapshot and is parked on m.mu.
 	require.Eventually(t, func() bool { return isWaiting(l) }, 2*time.Second, time.Millisecond)
 	m.BeginTeardown()
@@ -105,9 +105,9 @@ func TestFinalize_RankedMatchEndingBeforeTeardownIsStillRated(t *testing.T) {
 	repo := new(MockMatchRepo)
 	repo.On("FinalizeRankedMatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-	m, _, engine := newFinishedGameLobby(t, repo)
+	m, _, engine := newStartedGameLobby(t, repo)
 	m.BeginShutdown()
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
 
 	require.True(t, m.WaitForFinalizers(2*time.Second))
 	repo.AssertExpectations(t)

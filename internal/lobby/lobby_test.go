@@ -282,7 +282,7 @@ func TestLobby_StartGameAndBroadcasterEvents(t *testing.T) {
 	l.mu.RUnlock()
 	require.NotNil(t, engine)
 
-	endHand(engine, stubAction("move"))
+	require.NoError(t, endHand(engine, stubAction("move")))
 
 	select {
 	case <-done:
@@ -324,7 +324,7 @@ func TestLobby_CasualGameIsRecordedWithoutElo(t *testing.T) {
 
 	engine := l.activeEngine
 	require.NotNil(t, engine)
-	endHand(engine, stubAction("move"))
+	require.NoError(t, endHand(engine, stubAction("move")))
 
 	select {
 	case <-done:
@@ -796,8 +796,11 @@ const (
 // endHand plays a on the seat to act, which is how these tests finish a real hand.
 // The error is dropped: stubBoom returns one by design, and a finished or closed
 // engine refusing the move is what the racing tests are about.
-func endHand(engine *game.Engine, a game.Action) {
-	_ = engine.SubmitAction(engine.CurrentPlayerID(), a)
+// endHand submits a as the seat on turn. The error is the caller's to assert: a hand
+// that was meant to end and was refused would otherwise leave the test waiting on a
+// result that is never written.
+func endHand(engine *game.Engine, a game.Action) error {
+	return engine.SubmitAction(engine.CurrentPlayerID(), a)
 }
 
 // acceptAnyAction lets a MockRules table take any move, so a test can end the hand
@@ -918,7 +921,7 @@ func TestLobby_FinalizeUsesTheSettingsTheGameStartedWith(t *testing.T) {
 	l.options.isRanked = false
 	l.mu.Unlock()
 
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
 
 	select {
 	case <-done:

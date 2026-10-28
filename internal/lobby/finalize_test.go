@@ -22,9 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newFinishedGameLobby is a two-seat ranked lobby whose game ends the moment both
-// players are ready, with the watcher goroutine running.
-func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lobby, *game.Engine) {
+// newStartedGameLobby is a two-seat ranked lobby whose game has just started: both
+// players are ready, the watcher goroutine is running and the hand is still open. The
+// test ends it with endHand.
+func newStartedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lobby, *game.Engine) {
 	t.Helper()
 	m := newTestManager(t, repo)
 	leader := mockPlayer("leader", testutil.UID(1))
@@ -56,11 +57,11 @@ func TestConcurrent_FinalizeRacesRemoveLobby(t *testing.T) {
 		Run(func(mock.Arguments) { recorded <- struct{}{} }).
 		Return(nil)
 
-	m, l, engine := newFinishedGameLobby(t, repo)
+	m, l, engine := newStartedGameLobby(t, repo)
 	// The hand really is over before RemoveLobby closes the feed, so the event is
 	// already buffered: a closed channel still delivers it, and the watcher must write
 	// the rated row once rather than again through the finished engine at feed end.
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
 	go m.RemoveLobby(l.Code())
 
 	select {
@@ -84,10 +85,10 @@ func TestFinalize_IsNotAppliedTwice(t *testing.T) {
 		Run(func(mock.Arguments) { calls <- struct{}{} }).
 		Return(nil)
 
-	m, _, engine := newFinishedGameLobby(t, repo)
+	m, _, engine := newStartedGameLobby(t, repo)
 
-	endHand(engine, stubWin)
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
+	require.Error(t, endHand(engine, stubWin), "a second end of the same hand is refused")
 
 	select {
 	case <-calls:
@@ -112,12 +113,12 @@ func TestShutdown_MatchEndingDuringDrainIsRecorded(t *testing.T) {
 		repo.On("RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything).
 			Run(func(mock.Arguments) { recorded.Add(1) }).Return(nil)
 
-		m, l, engine := newFinishedGameLobby(t, repo)
+		m, l, engine := newStartedGameLobby(t, repo)
 
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			endHand(engine, stubWin)
+			assert.NoError(t, endHand(engine, stubWin))
 		}()
 		drained := m.WaitForFinalizers(2 * time.Second)
 		<-done
@@ -140,7 +141,7 @@ func TestShutdown_AGameEndingAfterBeginShutdownIsRecorded(t *testing.T) {
 			t.Parallel()
 			repo := new(MockMatchRepo)
 			repo.On("RecordCasualMatch", mock.Anything, gameRef("MockGame"), mock.Anything).Return(nil).Once()
-			m, l, _ := newFinishedGameLobby(t, repo)
+			m, l, _ := newStartedGameLobby(t, repo)
 			guest := l.Snapshot().Guests[0].Player
 			m.BeginShutdown()
 			m.BeginTeardown()
@@ -290,7 +291,7 @@ func TestFinalize_RankedMatchEndingDuringShutdownIsRecordedWithoutElo(t *testing
 		Run(func(mock.Arguments) { recorded <- struct{}{} }).
 		Return(nil)
 
-	m, _, engine := newFinishedGameLobby(t, repo)
+	m, _, engine := newStartedGameLobby(t, repo)
 	m.BeginShutdown()
 	m.BeginTeardown()
 
@@ -316,8 +317,8 @@ func TestFinalize_RulesErrorIsRecordedWithoutElo(t *testing.T) {
 		Run(func(mock.Arguments) { recorded <- struct{}{} }).
 		Return(nil)
 
-	_, _, engine := newFinishedGameLobby(t, repo)
-	endHand(engine, stubBoom)
+	_, _, engine := newStartedGameLobby(t, repo)
+	require.ErrorContains(t, endHand(engine, stubBoom), "boom", "the rules error is what ends the table")
 
 	select {
 	case <-recorded:
@@ -416,7 +417,7 @@ func TestResumePlayer_RefusedOnceTheTimerHasFired(t *testing.T) {
 	m, l, _, guest := startedGame(t)
 	fired := make(chan struct{})
 	m.mu.Lock()
-	m.grace.arm(guest.ID, time.Nanosecond, func() { close(fired) })
+	m.grace.arm(guest.ID, time.Nanosecond, func(uint64) { close(fired) })
 	m.mu.Unlock()
 	<-fired
 
@@ -788,9 +789,9 @@ func TestFinalize_DrainWaitsForAWatcherStillReopeningTheTable(t *testing.T) {
 	repo.On("RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(mock.Arguments) { recorded <- struct{}{} }).Return(nil)
 
-	m, l, engine := newFinishedGameLobby(t, repo)
+	m, l, engine := newStartedGameLobby(t, repo)
 	m.mu.Lock()
-	endHand(engine, stubWin)
+	require.NoError(t, endHand(engine, stubWin))
 	// The table is Waiting again, so the watcher is parked in releaseHeldSeats on m.mu.
 	require.Eventually(t, func() bool {
 		l.mu.RLock()
@@ -824,7 +825,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 	tests := []struct {
 		name     string
 		ranked   bool
-		shutdown bool
+		teardown bool
 		expect   func(r *MockMatchRepo)
 	}{
 		{
@@ -842,9 +843,9 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 			},
 		},
 		{
-			name:     "shutdown: not even the leaver is rated",
+			name:     "teardown: not even the leaver is rated",
 			ranked:   true,
-			shutdown: true,
+			teardown: true,
 			expect: func(r *MockMatchRepo) {
 				r.On("RecordCasualMatch", mock.Anything, gameRef("Mock"), standings).Return(nil).Once()
 			},
@@ -863,7 +864,7 @@ func TestFinalize_InterruptedMatchNamesItsLeavers(t *testing.T) {
 
 			m.finalizeFinishedGame(finalizeRequest{
 				lobbyCode: "CCCCCCCC", game: gameRef("Mock"), isRanked: tt.ranked, startedAt: time.Now(),
-				tornDown: tt.shutdown,
+				teardownBegun: tt.teardown,
 			}, engine, game.EndReasonInterrupted)
 
 			repo.AssertExpectations(t)
@@ -898,7 +899,7 @@ func TestFinalize_RefreshesTheSeatedPlayersRatings(t *testing.T) {
 	require.NoError(t, m.ToggleReady(guest))
 	drainEventTypes(events)
 
-	endHand(l.ActiveGame(), stubWin)
+	require.NoError(t, endHand(l.ActiveGame(), stubWin))
 	// Not WaitForFinalizers: a drain records a ranked match unrated.
 	for _, why := range []string{"the reopened table", "its new ratings"} {
 		select {

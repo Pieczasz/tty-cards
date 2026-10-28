@@ -53,7 +53,7 @@ func playFinishedTable(t *testing.T, m *Manager, slug string) {
 	require.NoError(t, m.ToggleReady(leader))
 	require.NoError(t, m.ToggleReady(guest))
 
-	endHand(l.ActiveGame(), stubWin)
+	require.NoError(t, endHand(l.ActiveGame(), stubWin))
 	require.Eventually(t, func() bool { return isWaiting(l) }, 2*time.Second, time.Millisecond)
 }
 
@@ -161,4 +161,18 @@ func TestLobby_EngineLogsNameTheTable(t *testing.T) {
 	require.Equal(t, "probe", rec["msg"])
 	assert.Equal(t, l.Code(), rec["lobby"])
 	assert.Equal(t, "mock", rec["game"], "the slug, as every game metric labels it")
+}
+
+// A table nobody watches would play and never write its result, so a watch that cannot
+// subscribe is a failed start, not a started game with a log line.
+func TestWatchLocked_AFailedSubscribeIsAnError(t *testing.T) {
+	t.Parallel()
+	_, l := newTestLobby(t, 2)
+	engine := game.NewEngine(&stubRules{}, []*game.Player{mockPlayer("a", testutil.UID(1))})
+	engine.Close()
+
+	start, err := l.watchLocked(engine, gameRef("MockGame"))
+
+	require.Error(t, err)
+	assert.Nil(t, start.engine, "nothing is handed over to watch")
 }
