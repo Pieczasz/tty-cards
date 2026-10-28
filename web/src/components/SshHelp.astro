@@ -1,0 +1,37 @@
+---
+/*
+ * What the bare `ssh tty.cards` does not say. The first connection registers an
+ * account under whichever key ssh offers first and the login name it sends, so a
+ * newcomer with no key, several keys, or a different local user name gets either an
+ * error or an account they did not choose. A <details>, not a modal: no script, and
+ * it stays out of the way for the people the one-liner already works for.
+ */
+const rows: [string, string][] = [
+  ["Pick your name (first connection only)", "ssh -l yourname tty.cards"],
+  ["No ssh key yet", "ssh-keygen -t ed25519"],
+  [
+    "Several keys? Choose which one is you",
+    "ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l yourname tty.cards",
+  ],
+];
+---
+
+<details class="mt-gutter max-w-[62ch] text-[0.9rem] text-muted">
+  <summary class="cursor-pointer text-dim hover:text-accent">
+    First time? Name, keys, and what ssh sends
+  </summary>
+  <p class="mt-cell text-pretty">
+    Your ssh key is your account: there is no password. The name you connect with the
+    first time becomes your username (1-16 letters, numbers or underscores).
+  </p>
+  <dl class="mt-cell grid gap-cell">
+    {
+      rows.map(([label, cmd]) => (
+        <div>
+          <dt class="text-dim">{label}</dt>
+          <dd><code class="text-accent break-all">{cmd}</code></dd>
+        </div>
+      ))
+    }
+  </dl>
+</details>
