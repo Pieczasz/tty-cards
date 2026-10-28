@@ -69,7 +69,10 @@ func bestMeldSplitAgainst(
 }
 
 // bestSplitBy searches every disjoint set of candidate melds and keeps the split
-// score rates lowest. score is handed the deadwood the split leaves.
+// score rates lowest. score is handed the deadwood the split leaves, in a buffer the
+// search reuses for the next candidate: score may read it and may not keep it. Cloning
+// it per candidate would put an allocation in the hottest loop of a knock for a hazard
+// no caller has (sumDeadwood reads, applyLayoffs clones what it keeps).
 func bestSplitBy(
 	hand []deck.Card, score func(deadwood []deck.Card) int,
 ) (melds [][]deck.Card, deadwood []deck.Card, deadwoodPts int) {

@@ -76,6 +76,8 @@ func Calculate(players []Player) map[string]float64 {
 	return newRatings
 }
 
+// clampRating keeps a rating on the scale; NaN is logged and replaced by the default
+// because it would otherwise poison every comparison it reaches.
 func clampRating(rating float64) float64 {
 	if math.IsNaN(rating) {
 		slog.Error("NaN rating clamped to the default", "default", DefaultRating)
@@ -84,6 +86,10 @@ func clampRating(rating float64) float64 {
 	return min(max(rating, MinRating), MaxRating)
 }
 
+// unpaidAgainstProvisional is the provisional-account rule for one pair. Between two
+// accounts of the same kind the transfer stands. Between an established account and a
+// provisional one the established side may lose rating but never gain it, so a new
+// account cannot be farmed for points; the provisional side keeps both directions.
 func unpaidAgainstProvisional(upper, lower Player, up, down float64) (float64, float64) {
 	if upper.Provisional == lower.Provisional {
 		return up, down
@@ -97,6 +103,9 @@ func unpaidAgainstProvisional(upper, lower Player, up, down float64) (float64, f
 	return up, down
 }
 
+// normalizeTies orders each run of players sharing a non-zero Place by rating, then ID,
+// so a tied pair's result does not depend on the order the caller listed them in.
+// Place 0 means "unplaced", never a tie.
 func normalizeTies(players []Player) {
 	for start := 0; start < len(players); {
 		end := start + 1
@@ -112,6 +121,9 @@ func normalizeTies(players []Player) {
 	}
 }
 
+// rawTransfer is the rating the upper player takes from the lower one: the actual
+// score (a win, or half for a draw) less the expected score, times K. It is negative
+// only for a draw the upper player was favoured to win.
 func rawTransfer(upper, lower Player) float64 {
 	score := 1.0
 	if drew(upper, lower) {
@@ -124,6 +136,10 @@ func expectedScore(ratingA, ratingB float64) float64 {
 	return 1.0 / (1.0 + math.Pow(10.0, (ratingB-ratingA)/400.0))
 }
 
+// capTransfer limits moved so neither side leaves [MinRating, MaxRating]. moved is
+// what the upper player gains from the lower one; gainsRating and losesRating are their
+// ratings with the deltas already applied from earlier pairs. A negative moved runs the
+// other way, so the roles of the two limits swap with its sign.
 func capTransfer(moved, gainsRating, losesRating float64) float64 {
 	if moved < 0 {
 		return -min(-moved, max(MaxRating-losesRating, 0), max(gainsRating-MinRating, 0))

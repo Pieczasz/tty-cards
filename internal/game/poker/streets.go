@@ -156,6 +156,11 @@ func contenders(state *game.State, extra *State) []*game.Player {
 	return out
 }
 
+// buildSidePots cuts the pool into layers, one per distinct contribution level. A layer
+// is everything seats put in between the previous level and this one, and only the live
+// players who reached the level can win it; the first layer is the main pot, the rest
+// are side pots. deadMoney is a layer no live player reached (every contributor
+// folded), which cannot be paid out where it is and rides on to the next layer.
 func buildSidePots(extra *State, live []*game.Player) []Pot {
 	eligibleIDs := make(map[string]bool, len(live))
 	for _, p := range live {
@@ -173,42 +178,42 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 	levels = slices.DeleteFunc(levels, func(c uint) bool { return c == 0 })
 
 	var pots []Pot
-	var orphan uint
+	var deadMoney uint
 	prev := uint(0)
-	for _, lvl := range levels {
+	for _, level := range levels {
 		var eligible []string
 		var amount uint
 		for id, seat := range extra.Seats {
 			// A contribution below this level is always below prev too: every
 			// non-zero contribution is itself one of the levels, so by the time the
 			// loop passes it, prev has already reached it. Nothing to collect.
-			if seat.Contributed < lvl {
+			if seat.Contributed < level {
 				continue
 			}
-			amount += lvl - prev
+			amount += level - prev
 			if eligibleIDs[id] {
 				eligible = append(eligible, id)
 			}
 		}
-		prev = lvl
+		prev = level
 		// A level always has at least one contributor sitting exactly on it - every
-		// level is somebody's contribution - and lvl > prev, so amount is never zero.
-		amount += orphan
-		orphan = 0
+		// level is somebody's contribution - and level > prev, so amount is never zero.
+		amount += deadMoney
+		deadMoney = 0
 		if len(eligible) == 0 {
 			// Dead money carries forward to the next pot layer.
-			orphan = amount
+			deadMoney = amount
 			continue
 		}
 		slices.Sort(eligible) // stable pot eligibility order
 		pots = append(pots, Pot{Amount: amount, Eligible: eligible})
 	}
-	if orphan > 0 {
+	if deadMoney > 0 {
 		// Levels above the largest eligible contribution can only hold money somebody
 		// matched - refundUncalled already took the unmatched part out - so this is
 		// dead money from players who folded, and it rides with the last live layer.
 		// A layer always formed: every contender had to match the big blind to be one.
-		pots[len(pots)-1].Amount += orphan
+		pots[len(pots)-1].Amount += deadMoney
 	}
 	return pots
 }
