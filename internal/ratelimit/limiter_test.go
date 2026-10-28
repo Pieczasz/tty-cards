@@ -104,10 +104,15 @@ func TestSlidingWindow_EvictionKeepsTheTableBounded(t *testing.T) {
 	}
 }
 
+// BenchmarkAllow runs the limiter at the shape the server configures it (a handful of
+// attempts per key per window), so after the first few calls it measures the common
+// production path: a key over its limit being refused. A limit of a million, as this
+// once had, kept every call on the admit path with a log that grew for the whole run,
+// which is not a state the server is ever in.
 func BenchmarkAllow(b *testing.B) {
 	for _, keys := range []int{1, 64, 10_000} {
 		b.Run(fmt.Sprintf("keys=%d", keys), func(b *testing.B) {
-			l := ratelimit.New(1_000_000, time.Minute)
+			l := ratelimit.New(10, time.Minute)
 			ids := make([]string, keys)
 			for i := range keys {
 				ids[i] = strconv.Itoa(i)
