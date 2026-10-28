@@ -8,6 +8,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/game/crazyeight"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
@@ -142,7 +143,7 @@ func TestReady_GenuineStartFailuresAreLoggedOnceRefusalsAreShown(t *testing.T) {
 				Name: testGameName, Slug: testGameSlug,
 				MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers, Factory: tt.factory,
 			}
-			manager := lobby.NewManager(t.Context(), nil, game.NewRegistry(mod))
+			manager := lobby.NewManager(t.Context(), testutil.NopMatches{}, game.NewRegistry(mod))
 			leaderUser := testUser(1, "alice")
 			l, err := manager.CreateLobby(lobby.NewPlayer(leaderUser), lobby.WithCardGame(testGameSlug))
 			require.NoError(t, err)

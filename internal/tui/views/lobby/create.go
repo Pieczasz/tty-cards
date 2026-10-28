@@ -40,9 +40,11 @@ type createModel struct {
 // declared, and it would offer a game the lobby manager refuses.
 func NewCreate(global router.GlobalContext) tea.Model {
 	return &createModel{
-		global:      global,
-		cursor:      0,
-		isPrivate:   true,
+		global: global,
+		cursor: 0,
+		// Public: a newcomer has nobody to hand a code to, and an unlisted table is one
+		// nobody can find. Private is one toggle away, and the row says which it is.
+		isPrivate:   false,
 		isRanked:    false, // casual, the lobby's own default
 		maxPlayers:  defaultMaxPlayers,
 		gameOptions: global.Games,
@@ -84,8 +86,31 @@ func (m *createModel) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.cursor == createCursorSubmit {
 			return m.createLobby()
 		}
+		// Enter on a setting changes it, like right, but wraps round: a key that does
+		// nothing on four of the five rows reads as a broken form.
+		m.cycleSetting()
 	}
 	return m, nil
+}
+
+// cycleSetting steps the highlighted setting forward and wraps from its last value to
+// its first.
+func (m *createModel) cycleSetting() {
+	switch m.cursor {
+	case createCursorGame:
+		if n := len(m.gameOptions); n > 0 {
+			m.gameIndex = (m.gameIndex + 1) % n
+			m.clampMaxPlayers()
+		}
+	case createCursorPlayers:
+		minP, maxP := m.playerBounds()
+		m.maxPlayers++
+		if m.maxPlayers > maxP {
+			m.maxPlayers = minP
+		}
+	default:
+		m.adjustSetting(+1)
+	}
 }
 
 // adjustSetting moves the highlighted setting by delta. The two booleans toggle in
@@ -171,12 +196,17 @@ func (m *createModel) clampMaxPlayers() {
 }
 
 // renderOption is one "label: < value >" settings row, marked when the cursor is on it.
-func renderOption(t styles.Theme, selected bool, label, value string) string {
+// A row nobody can change is drawn with no chevrons: "< value >" promises a key that
+// works.
+func renderOption(t styles.Theme, selected, adjustable bool, label, value string) string {
 	cursor := "  "
 	if selected {
 		cursor = "> "
 		label = t.PlayerItemSelected.Render(label)
 		value = t.PlayerItemSelected.Render(value)
+	}
+	if !adjustable {
+		return fmt.Sprintf("%s%s: %s", cursor, label, value)
 	}
 	return fmt.Sprintf("%s%s: < %s >", cursor, label, value)
 }
@@ -203,10 +233,10 @@ func (m *createModel) View() tea.View {
 	if gameName == "" {
 		gameName = "none available"
 	}
-	gameStr := renderOption(t, m.cursor == createCursorGame, "Game", gameName)
-	playersStr := renderOption(t, m.cursor == createCursorPlayers, "Max Players", strconv.Itoa(m.maxPlayers))
-	visStr := renderOption(t, m.cursor == createCursorVisibility, "Visibility", visibilityLabel(m.isPrivate))
-	modeStr := renderOption(t, m.cursor == createCursorMode, "Mode", modeLabel(m.isRanked))
+	gameStr := renderOption(t, m.cursor == createCursorGame, len(m.gameOptions) > 1, "Game", gameName)
+	playersStr := renderOption(t, m.cursor == createCursorPlayers, true, "Max Players", strconv.Itoa(m.maxPlayers))
+	visStr := renderOption(t, m.cursor == createCursorVisibility, true, "Visibility", visibilityLabel(m.isPrivate))
+	modeStr := renderOption(t, m.cursor == createCursorMode, true, "Mode", modeLabel(m.isRanked))
 
 	submitCursor := "  "
 	submitText := "[ Create Lobby ]"
@@ -230,7 +260,7 @@ func (m *createModel) View() tea.View {
 		content += "\n\n" + m.global.Theme.ErrorText.Render(fmt.Sprintf("Error: %v", m.err))
 	}
 
-	actions := []string{"enter - Confirm"}
+	actions := []string{"up/down - Move", "left/right - Change", "enter - Change / Create"}
 	return tea.NewView(views.RenderScreen(m.global, "Create New Lobby", actions,
 		func(int) string { return content }))
 }

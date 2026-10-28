@@ -232,14 +232,14 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 			name: "visibility toggles either way", cursor: createCursorVisibility, keys: []string{"l"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				assert.False(t, m.isPrivate)
+				assert.True(t, m.isPrivate)
 			},
 		},
 		{
 			name: "visibility toggles back", cursor: createCursorVisibility, keys: []string{"l", "h"},
 			check: func(t *testing.T, m *createModel) {
 				t.Helper()
-				assert.True(t, m.isPrivate)
+				assert.False(t, m.isPrivate)
 			},
 		},
 		{
@@ -255,7 +255,7 @@ func TestCreate_AdjustSettingPerRow(t *testing.T) {
 				t.Helper()
 				assert.Zero(t, m.gameIndex)
 				assert.Equal(t, 4, m.maxPlayers)
-				assert.True(t, m.isPrivate)
+				assert.False(t, m.isPrivate, "the form starts public: an unlisted table cannot be found")
 				assert.False(t, m.isRanked)
 			},
 		},
@@ -406,4 +406,28 @@ func TestSettingLabels_KeepOneWidth(t *testing.T) {
 	assert.Equal(t, "Ranked", modeLabel(true))
 	assert.Len(t, visibilityLabel(false), len(visibilityLabel(true)))
 	assert.Len(t, modeLabel(false), len(modeLabel(true)))
+}
+
+// Enter on a setting changes it and wraps, instead of doing nothing on four of the
+// form's five rows.
+func TestCreate_EnterCyclesTheHighlightedSetting(t *testing.T) {
+	t.Parallel()
+	m := newCreateModel(t)
+
+	m.cursor = createCursorVisibility
+	m.Update(tuitest.Key("enter"))
+	assert.True(t, m.isPrivate)
+
+	m.cursor = createCursorMode
+	m.Update(tuitest.Key("enter"))
+	assert.True(t, m.isRanked)
+
+	m.cursor = createCursorPlayers
+	minP, maxP := m.playerBounds()
+	for range maxP - m.maxPlayers {
+		m.Update(tuitest.Key("enter"))
+	}
+	require.Equal(t, maxP, m.maxPlayers)
+	m.Update(tuitest.Key("enter"))
+	assert.Equal(t, minP, m.maxPlayers, "past the ceiling it wraps to the floor")
 }

@@ -264,6 +264,10 @@ func (m *model) View() tea.View {
 	}
 
 	actions := []string{"x - Leave Lobby", "r - Ready"}
+	if m.snap.IsLeader(views.SessionPlayer(m.global)) {
+		// Only the leader's keys differ, and they are otherwise undiscoverable.
+		actions = append(actions, "up/down - Select", "left/right - Change setting", "enter - Kick guest")
+	}
 	return tea.NewView(views.RenderSeatedScreen(m.global, "Lobby", actions, func(height int) string {
 		if m.showLeaveConfirm {
 			redYes := m.global.Theme.ErrorText.Bold(true).Render("Yes")
@@ -342,10 +346,10 @@ func (m *model) renderSettings(isLeader bool) string {
 	return styles.JoinVertical(lg.Left,
 		"  "+t.SectionHeading.Render("Settings"),
 		"  Lobby Code: "+t.LobbyCode.Render(m.snap.Code),
-		renderOption(t, on(cursorGame), "Game", m.snap.GameName),
-		renderOption(t, on(cursorMaxPlayers), "Max Players", strconv.Itoa(m.snap.Limit)),
-		renderOption(t, on(cursorVisibility), "Visibility", visibilityLabel(m.snap.Private)),
-		renderOption(t, on(cursorMode), "Mode", modeLabel(m.snap.Ranked)),
+		renderOption(t, on(cursorGame), false, "Game", m.snap.GameName),
+		renderOption(t, on(cursorMaxPlayers), true, "Max Players", strconv.Itoa(m.snap.Limit)),
+		renderOption(t, on(cursorVisibility), true, "Visibility", visibilityLabel(m.snap.Private)),
+		renderOption(t, on(cursorMode), true, "Mode", modeLabel(m.snap.Ranked)),
 	)
 }
 

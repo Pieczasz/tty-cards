@@ -543,3 +543,15 @@ func TestJoin_FilterLineNamesEveryFilter(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinView_ListSaysEnterJoins(t *testing.T) {
+	t.Parallel()
+	mgr := newManager(t)
+	l, err := mgr.CreateLobby(lobby.NewPlayer(testUser(7, "host")),
+		lobby.WithCardGame(testGameSlug), lobby.WithPrivate(false))
+	require.NoError(t, err)
+	_ = l
+	m := newJoinModel(t, mgr)
+	m.refresh()
+	assert.Contains(t, m.View().Content, "enter/space: join")
+}

@@ -339,7 +339,7 @@ func (m *joinModel) renderList(rows int) string {
 		cells = append(cells, m.renderRow(m.entries[i], !m.writingCode && m.cursor == i))
 	}
 	pager := m.global.Theme.Dim.Render(
-		fmt.Sprintf(" %d-%d of %d  ↑/↓ scroll", start+1, end, len(m.entries)))
+		fmt.Sprintf(" %d-%d of %d  ↑/↓ scroll  enter/space: join", start+1, end, len(m.entries)))
 	tbl := browseTable
 	tbl.PadTo = rows
 	return tbl.Render(m.global.Theme, cells) + "\n" + pager

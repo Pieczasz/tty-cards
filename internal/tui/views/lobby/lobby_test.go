@@ -47,7 +47,7 @@ func testGames() []game.Module {
 // newManager is a manager offering every game in the catalog, the way the server's is.
 func newManager(tb testing.TB) *lobby.Manager {
 	tb.Helper()
-	return lobby.NewManager(tb.Context(), nil, catalog.NewRegistry())
+	return lobby.NewManager(tb.Context(), testutil.NopMatches{}, catalog.NewRegistry())
 }
 
 // leaderView returns the lobby view as seen by the lobby's leader.
@@ -798,4 +798,28 @@ func TestLobbyEvent_ReseatedPlayerUpdatesTheSession(t *testing.T) {
 	assert.Same(t, seat, m.global.Player, "the view acts as the reseated player at once")
 
 	assert.Nil(t, m.syncPlayer(), "an unchanged seat was announced again")
+}
+
+// The leader's keys are otherwise undiscoverable; a guest has none of them.
+func TestView_OnlyTheLeaderIsOfferedTheFormKeys(t *testing.T) {
+	t.Parallel()
+	m, l := leaderView(t)
+	assert.Contains(t, m.View().Content, "Kick guest")
+
+	addGuest(t, m, l, 2, "bob")
+	guest := *m
+	guest.global.User = testUser(2, "bob")
+	guest.global.Player = nil
+	assert.NotContains(t, guest.View().Content, "Kick guest")
+}
+
+// The game cannot change once a lobby exists, so its row must not offer chevrons.
+func TestView_TheGameRowIsNotDrawnAsEditable(t *testing.T) {
+	t.Parallel()
+	m, _ := leaderView(t)
+
+	out := m.View().Content
+
+	assert.Contains(t, out, "Max Players: < ")
+	assert.NotRegexp(t, `Game: < `, out)
 }
