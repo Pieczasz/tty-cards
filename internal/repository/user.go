@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const (
@@ -298,22 +297,22 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 }
 
 // UpdateUserActivity stamps both last-seen fields; the caller decides whether a stale
-// timestamp matters.
+// timestamp matters. Updating by id, not the preloaded structs: those carry rankings
+// and the user association, and GORM's save hooks would rewrite every one of them.
 func (q *UserRepository) UpdateUserActivity(
-	ctx context.Context, user *db.User, key *db.PublicSSHKey,
+	ctx context.Context, userID uuid.UUID, keyID uint,
 ) (err error) {
 	ctx, span := tracer.Start(ctx, "db.UpdateUserActivity")
 	defer func() { recordSpanResult(span, err); span.End() }()
 
-	// Omit(clause.Associations) on both: user arrives with Rankings and their Games
-	// preloaded and key with its User, and GORM's save hooks upsert every association
-	// it can see - so stamping a timestamp on login re-wrote each of that player's
-	// ranking rows. "User" alone was not enough, and it was the wrong association.
-	if err = q.db.WithContext(ctx).Model(user).Omit(clause.Associations).
+	if err = q.db.WithContext(ctx).Model(&db.User{}).Where("id = ?", userID).
 		Update("LastSeenAt", time.Now()).Error; err != nil {
 		return fmt.Errorf("update last seen: %w", err)
 	}
-	if err = q.db.WithContext(ctx).Model(key).Omit(clause.Associations).
+	if keyID == 0 {
+		return nil
+	}
+	if err = q.db.WithContext(ctx).Model(&db.PublicSSHKey{}).Where("id = ?", keyID).
 		Update("LastUsedAt", time.Now()).Error; err != nil {
 		return fmt.Errorf("update key last used: %w", err)
 	}

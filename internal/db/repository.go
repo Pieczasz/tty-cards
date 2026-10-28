@@ -21,7 +21,7 @@ type Authenticator interface {
 	// can act on wraps ErrInvalidUsername, ErrUsernameTaken or ErrKeyAlreadyRegistered.
 	RegisterUserWithSSHKey(ctx context.Context, username, fingerprint string) (*User, *PublicSSHKey, error)
 	// UpdateUserActivity stamps the account's last-seen and the key's last-used times.
-	UpdateUserActivity(ctx context.Context, user *User, key *PublicSSHKey) error
+	UpdateUserActivity(ctx context.Context, userID uuid.UUID, keyID uint) error
 }
 
 // Profiles is one player's own data: what the profile screen shows, and erasing it.

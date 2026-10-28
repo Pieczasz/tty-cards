@@ -351,7 +351,7 @@ func TestUpdateUserActivityReportsAFailedKeyStamp(t *testing.T) {
 	user, key, err := users.RegisterUserWithSSHKey(t.Context(), "stamp", "fp_stamp")
 	require.NoError(t, err)
 
-	err = users.UpdateUserActivity(failAt(t.Context(), `UPDATE "public_keys"`), user, key)
+	err = users.UpdateUserActivity(failAt(t.Context(), `UPDATE "public_keys"`), user.ID, key.ID)
 	require.ErrorIs(t, err, errInjected)
 	assert.ErrorContains(t, err, "update key last used")
 }

@@ -70,7 +70,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		},
 		{
 			name: "stamping activity",
-			call: func() error { return users.UpdateUserActivity(ctx, user, key) },
+			call: func() error { return users.UpdateUserActivity(ctx, user.ID, key.ID) },
 			want: "update last seen",
 		},
 		{

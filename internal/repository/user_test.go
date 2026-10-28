@@ -159,7 +159,7 @@ func TestUserRepository_UpdateUserActivity(t *testing.T) {
 	require.NoError(t, database.Model(&db.PublicSSHKey{}).Where("id = ?", key.ID).
 		Update("last_used_at", stale).Error)
 
-	require.NoError(t, repo.UpdateUserActivity(t.Context(), user, key))
+	require.NoError(t, repo.UpdateUserActivity(t.Context(), user.ID, key.ID))
 
 	updatedUser, updatedKey, err := repo.LoadUserByFingerprint(t.Context(), "fingerprint_xyz")
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestUserRepository_UpdateUserActivityDoesNotWriteUsers(t *testing.T) {
 	user, key, err := repo.LoadUserByFingerprint(ctx, "activity_fp2")
 	require.NoError(t, err)
 	require.NotNil(t, user)
-	require.NoError(t, repo.UpdateUserActivity(ctx, user, key))
+	require.NoError(t, repo.UpdateUserActivity(ctx, user.ID, key.ID))
 
 	var reloaded db.PublicSSHKey
 	require.NoError(t, database.First(&reloaded, createdKey.ID).Error)
@@ -533,7 +533,7 @@ func TestUserRepository_UpdateUserActivityWritesNoAssociations(t *testing.T) {
 	var before db.Ranking
 	require.NoError(t, database.Where("user_id = ?", user.ID.String()).First(&before).Error)
 
-	require.NoError(t, repo.UpdateUserActivity(ctx, loaded, loadedKey))
+	require.NoError(t, repo.UpdateUserActivity(ctx, loaded.ID, loadedKey.ID))
 
 	var after db.Ranking
 	require.NoError(t, database.Where("user_id = ?", user.ID.String()).First(&after).Error)
