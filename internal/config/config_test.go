@@ -68,6 +68,7 @@ func TestLoad_SSLModeDefaultsToTLSOutsideDevelopment(t *testing.T) {
 			t.Setenv("ENV", env)
 			t.Setenv("DB_PASSWORD", "secret")
 			t.Setenv("DB_SSLMODE", "")
+			t.Setenv("PROXY_PROTOCOL", "false")
 
 			cfg, err := config.Load()
 			require.NoError(t, err)
@@ -250,6 +251,7 @@ func TestLoad_OTelEndpointIsAURL(t *testing.T) {
 			t.Setenv("ENV", tc.env)
 			t.Setenv("DB_PASSWORD", "secret")
 			t.Setenv("DB_SSLMODE", "require")
+			t.Setenv("PROXY_PROTOCOL", "false")
 			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 
 			cfg, err := config.Load()
@@ -327,6 +329,7 @@ func TestLoad_ExplicitSSLModeIsHonored(t *testing.T) {
 	t.Setenv("ENV", "production")
 	t.Setenv("DB_PASSWORD", "secret")
 	t.Setenv("DB_SSLMODE", "verify-full")
+	t.Setenv("PROXY_PROTOCOL", "false")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -353,6 +356,7 @@ func TestResolveEnv_DotEnvLoadedOutsideProductionOnly(t *testing.T) {
 
 			t.Setenv("ENV", tt.env)
 			t.Setenv("DB_PASSWORD", "secret")
+			t.Setenv("PROXY_PROTOCOL", "false")
 			// godotenv never overrides a variable that is already present, so this one
 			// has to be genuinely absent for the file to be observable at all.
 			t.Setenv("DB_NAME", "")
@@ -550,6 +554,40 @@ func TestLoad_ProxyTrustedCIDRs(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "PROXY_TRUSTED_CIDRS")
 	})
+}
+
+func TestLoad_ProxyTrustRequiresACIDROutsideDevelopment(t *testing.T) {
+	t.Setenv("ENV", "production")
+	t.Setenv("DB_PASSWORD", "secret")
+	t.Setenv("DB_SSLMODE", "require")
+	t.Setenv("PROXY_PROTOCOL", "true")
+
+	_, err := config.Load()
+	require.ErrorContains(t, err, "PROXY_TRUSTED_CIDRS")
+}
+
+func TestLoad_APITrustProxyRequiresACIDROutsideDevelopment(t *testing.T) {
+	t.Setenv("ENV", "staging")
+	t.Setenv("DB_PASSWORD", "secret")
+	t.Setenv("DB_SSLMODE", "require")
+	t.Setenv("PROXY_PROTOCOL", "false")
+	t.Setenv("API_TRUST_PROXY", "true")
+
+	_, err := config.Load()
+	require.ErrorContains(t, err, "PROXY_TRUSTED_CIDRS")
+}
+
+func TestLoad_ProxyTrustRejectsTheWholeNet(t *testing.T) {
+	for _, cidr := range []string{"0.0.0.0/0", "::/0"} {
+		t.Run(cidr, func(t *testing.T) {
+			t.Setenv("ENV", "development")
+			t.Setenv("PROXY_TRUSTED_CIDRS", cidr)
+
+			_, err := config.Load()
+			require.ErrorContains(t, err, "PROXY_TRUSTED_CIDRS")
+			require.ErrorContains(t, err, cidr)
+		})
+	}
 }
 
 // Each of these limits is "at least one", so one itself has to pass.

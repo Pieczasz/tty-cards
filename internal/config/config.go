@@ -142,6 +142,9 @@ func (c *Config) Validate() error {
 	if err := c.validateDB(); err != nil {
 		return err
 	}
+	if err := c.validateProxy(); err != nil {
+		return err
+	}
 	for _, check := range []struct {
 		bad bool
 		msg string
@@ -178,6 +181,25 @@ func (c *Config) validateDB() error {
 	}
 	return fmt.Errorf("DB_SSLMODE=%s is not allowed with ENV=%s; use require, verify-ca or verify-full",
 		c.DBSSLMode, c.Env)
+}
+
+// validateProxy refuses a listener that trusts a PROXY header or X-Forwarded-For
+// from the whole internet. Development may boot without a trusted list; everywhere
+// else an enabled proxy with nobody trusted, or a list that is the whole net, is a
+// boot failure.
+func (c *Config) validateProxy() error {
+	for _, p := range c.ProxyTrustedCIDRs {
+		if p == netip.MustParsePrefix("0.0.0.0/0") || p == netip.MustParsePrefix("::/0") {
+			return fmt.Errorf("PROXY_TRUSTED_CIDRS must not contain %s", p)
+		}
+	}
+	if c.IsDevelopment() || (!c.ProxyProtocol && !c.APITrustProxy) {
+		return nil
+	}
+	if len(c.ProxyTrustedCIDRs) == 0 {
+		return errors.New("PROXY_TRUSTED_CIDRS is required when PROXY_PROTOCOL or API_TRUST_PROXY is enabled outside development")
+	}
+	return nil
 }
 
 // DSN is the one place the database password is revealed: it is for the driver
