@@ -606,8 +606,12 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
 				return
 			}
-			// Registered first, so it runs last: the drain is over only once the
-			// whole teardown below has run.
+			// Defers run last-in first-out, so the teardown order is the reverse of the
+			// order written here: closeSessionModel (stop listening), releaseSession
+			// (seat and tracker slot), recoverSession (a panic from either of those or
+			// from the handler), finishSession (span and metrics, which must see a
+			// panic recoverSession recorded), then live.Done - registered first, so the
+			// drain is over only once the whole teardown has run.
 			defer reg.live.Done()
 			st := reg.startSession(s)
 			defer reg.finishSession(s, st)

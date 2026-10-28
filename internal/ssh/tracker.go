@@ -30,9 +30,10 @@ type account struct {
 // cap. Its generations are what let a displaced session's teardown tell that it no
 // longer owns the account's slot.
 //
-// The lock order is an account's mu, then the tracker's: mu guards only the map, the
-// generation counter and the cap, and is never held while an account's lock is
-// taken, so one account's teardown never stalls another account's login.
+// Lock order: an account's mu first, then SessionTracker.mu. The tracker's mu guards
+// only the map, the generation counter and the cap, and is never held while an
+// account's mu is being taken, so one account's teardown never stalls another
+// account's login.
 type SessionTracker struct {
 	mu       sync.Mutex
 	accounts map[uuid.UUID]*account
