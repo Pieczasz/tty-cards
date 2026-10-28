@@ -43,7 +43,7 @@ func FansHand(handSize, maxWidth, maxRows int) bool {
 // cursor lifts nothing. A non-nil staged is a multi-card move (hearts' pass): the staged
 // cards are lifted and starred, even when none are yet, and cursor only focuses.
 func RenderHand(
-	t styles.Theme,
+	t *styles.Theme,
 	hand []deck.Card,
 	cursor int,
 	staged map[int]struct{},
@@ -59,7 +59,7 @@ func RenderHand(
 // renderHand draws the fan with picked cards lifted and an index row under it, or the
 // strip with staged cards starred when no fan fits.
 func renderHand(
-	t styles.Theme,
+	t *styles.Theme,
 	hand []deck.Card,
 	picked, staged map[int]struct{},
 	cursor, maxWidth, maxRows int,
@@ -111,7 +111,7 @@ const topCardsFrame = 8
 // renderTopCards draws count face-down cards along the top edge. Past maxWidth the stack
 // is cut short rather than run off screen; the seat's hand count beside the art is what a
 // player actually reads. Zero or less means unbounded.
-func renderTopCards(t styles.Theme, count, maxWidth int) string {
+func renderTopCards(t *styles.Theme, count, maxWidth int) string {
 	if maxWidth > 0 {
 		count = min(count, maxWidth-topCardsFrame)
 	}
@@ -135,7 +135,7 @@ const sideCardsFrame = 5
 
 // renderLeftCards draws count face-down cards down the left edge. Unbounded stacks were
 // the one place a table outgrew the terminal: an Uno hand runs past twenty cards.
-func renderLeftCards(t styles.Theme, count, maxRows int) string {
+func renderLeftCards(t *styles.Theme, count, maxRows int) string {
 	count = capSideCards(count, maxRows)
 	if count <= 0 {
 		return ""
@@ -149,7 +149,7 @@ func renderLeftCards(t styles.Theme, count, maxRows int) string {
 	return buildVerticalCardsString(count, topEdge, midEdge, botEdge, cardBody)
 }
 
-func renderRightCards(t styles.Theme, count, maxRows int) string {
+func renderRightCards(t *styles.Theme, count, maxRows int) string {
 	count = capSideCards(count, maxRows)
 	if count <= 0 {
 		return ""
@@ -190,7 +190,7 @@ func buildVerticalCardsString(count int, topEdge, midEdge, botEdge, cardBody str
 // RenderPiles is a shedding table's two piles: the stock face down, with how many
 // cards are left in it, beside the discard. A spent stock keeps its place as an empty
 // slot, so the discard does not slide over when the last card is drawn.
-func RenderPiles(t styles.Theme, stock int, discard string) string {
+func RenderPiles(t *styles.Theme, stock int, discard string) string {
 	back := components.FaceDownCard(t)
 	if stock <= 0 {
 		back = components.EmptyCardSlot(t)
@@ -203,7 +203,7 @@ func RenderPiles(t styles.Theme, stock int, discard string) string {
 // take: columns across for a seat on the top edge, rows down for one stacked at a
 // side. Zero means unbounded.
 func RenderOpponent(
-	t styles.Theme,
+	t *styles.Theme,
 	o game.PlayerSnapshot,
 	isCurrentTurn bool,
 	orientation Orientation,
@@ -231,13 +231,13 @@ func RenderOpponent(
 
 // RenderOpponentMinimal is a seat as its name and hand count on one line, for a table
 // with no room for card art.
-func RenderOpponentMinimal(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) string {
+func RenderOpponentMinimal(t *styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) string {
 	name, count := seatLabel(t, o, isCurrentTurn)
 	return styles.JoinHorizontal(lg.Center, name, " ", count)
 }
 
 // seatLabel is a seat's name, lit while it is on turn, and its hand count.
-func seatLabel(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) (name, count string) {
+func seatLabel(t *styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) (name, count string) {
 	nameStyle := t.SectionHeading
 	if isCurrentTurn {
 		nameStyle = t.TurnName
@@ -249,7 +249,7 @@ func seatLabel(t styles.Theme, o game.PlayerSnapshot, isCurrentTurn bool) (name,
 // whatever the game stacks under it, then the last action the engine rejected. Empty
 // rows are dropped rather than joined as blank ones - the band's height comes straight
 // off the middle band's, so a stray line costs a row of the table.
-func RenderHeroBand(t styles.Theme, actionErr error, rows ...string) string {
+func RenderHeroBand(t *styles.Theme, actionErr error, rows ...string) string {
 	parts := make([]string, 0, len(rows)+1)
 	for _, row := range rows {
 		if row != "" {
@@ -264,7 +264,7 @@ func RenderHeroBand(t styles.Theme, actionErr error, rows ...string) string {
 
 // RenderStatus names whose turn it is, with the countdown on the same line: a second row
 // would grow botHeight and shove the discard pile every time the clock arms.
-func RenderStatus(t styles.Theme, currentPlayer string, isMyTurn bool, remaining time.Duration) string {
+func RenderStatus(t *styles.Theme, currentPlayer string, isMyTurn bool, remaining time.Duration) string {
 	statusStyle := t.Dim.MarginTop(1).MarginBottom(1)
 	statusStr := "Current turn: " + currentPlayer
 	if isMyTurn {
@@ -318,7 +318,7 @@ func formatTurnClock(remaining time.Duration, precise bool) string {
 
 // RenderTurnClock turns urgent in the last seconds for whoever reads it, but counts in
 // tenths only for the player those seconds belong to.
-func RenderTurnClock(t styles.Theme, remaining time.Duration, precise bool) string {
+func RenderTurnClock(t *styles.Theme, remaining time.Duration, precise bool) string {
 	clock := formatTurnClock(remaining, precise)
 	if clock == "" {
 		return ""
@@ -385,7 +385,7 @@ func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string
 // renderGameNotice is the full-screen frame a table shows in place of itself.
 func renderGameNotice(g router.GlobalContext, content string) string {
 	titleFig := styles.RenderFigureASCII("Active Game", styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height))
-	header := g.Theme.Title.Render(titleFig)
-	footer := views.SeatedFooter(g.Theme, nil)
+	header := g.Palette().Title.Render(titleFig)
+	footer := views.SeatedFooter(g.Palette(), nil)
 	return views.RenderCenteredLayout(g, header, content, footer)
 }

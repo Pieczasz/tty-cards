@@ -26,6 +26,7 @@ type nameBannerKey struct {
 
 // New builds the home screen.
 func New(global router.GlobalContext) tea.Model {
+	global.EnsureTheme()
 	return &model{global: global}
 }
 
@@ -58,7 +59,7 @@ func (m *model) View() tea.View {
 		name = m.global.User.Username
 	}
 
-	g, theme := m.global, m.global.Theme
+	g, theme := m.global, m.global.Palette()
 	footer := views.Footer(theme, nil)
 	width := styles.InnerWidth(g.Width)
 	// The title, the greeting and the name are one group, centred together: the

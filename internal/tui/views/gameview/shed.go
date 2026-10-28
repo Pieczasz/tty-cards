@@ -129,20 +129,20 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 	// Seat art is the first thing to go: it costs seven rows per seat, and a name
 	// with a hand count says everything a player reads off somebody else's seat.
 	minimalSeats := IsCompact(g.Width, g.Height)
-	top := RenderOpponentTop(g.Theme, t.Base, g.Width, minimalSeats)
+	top := RenderOpponentTop(g.Palette(), t.Base, g.Width, minimalSeats)
 	if t.Picker.Open {
-		center = t.Picker.Render(g.Theme)
+		center = t.Picker.Render(g.Palette())
 	}
 
 	return tea.NewView(RenderBands(g, top, t.renderHero(aboveHand), HandKeyHints, func(height int) string {
-		left, right := RenderOpponentSides(g.Theme, t.Base, height, minimalSeats)
+		left, right := RenderOpponentSides(g.Palette(), t.Base, height, minimalSeats)
 		return RenderTableRow(g.Width, height, left, styles.MarginTop(1, center), right)
 	}))
 }
 
 func (t *ShedTable) renderHero(aboveHand string) string {
 	g := t.Global
-	status := RenderStatus(g.Theme, t.Base.CurrentPlayerName, t.Base.MyTurn, t.Base.TurnRemaining)
-	hand := RenderHand(g.Theme, t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Height))
-	return RenderHeroBand(g.Theme, t.ActionErr, status, aboveHand, hand)
+	status := RenderStatus(g.Palette(), t.Base.CurrentPlayerName, t.Base.MyTurn, t.Base.TurnRemaining)
+	hand := RenderHand(g.Palette(), t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Height))
+	return RenderHeroBand(g.Palette(), t.ActionErr, status, aboveHand, hand)
 }

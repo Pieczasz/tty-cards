@@ -14,7 +14,7 @@ import (
 type Choice struct {
 	Label string
 	Suit  deck.Suit
-	Tone  func(styles.Theme) color.Color
+	Tone  func(*styles.Theme) color.Color
 }
 
 // ChoicePicker is the modal grid a wild card opens over the table to ask which suit
@@ -63,7 +63,7 @@ func (p *ChoicePicker) Lookup(suit deck.Suit) (Choice, bool) {
 }
 
 // Render draws the open picker, or nothing while it is closed.
-func (p *ChoicePicker) Render(t styles.Theme) string {
+func (p *ChoicePicker) Render(t *styles.Theme) string {
 	if !p.Open {
 		return ""
 	}

@@ -43,7 +43,7 @@ func GridStep(cursor, n, dx, dy int) int {
 }
 
 // Render draws the picker: a title, then the cells in rows of gridCols, framed.
-func (p GridPicker) Render(t styles.Theme) string {
+func (p GridPicker) Render(t *styles.Theme) string {
 	if len(p.Labels) == 0 {
 		return ""
 	}

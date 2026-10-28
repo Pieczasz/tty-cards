@@ -67,6 +67,7 @@ type model struct {
 
 // New builds the board with one filter per game on offer, in menu order.
 func New(global router.GlobalContext) tea.Model {
+	global.EnsureTheme()
 	filters := make([]boardFilter, 1, 1+len(global.Games))
 	filters[0] = boardFilter{label: filterAll}
 	for _, mod := range global.Games {
@@ -284,16 +285,16 @@ func (m *model) renderRankings(contentWidth int) string {
 		cells = append(cells, m.renderPlayerRow(tbl, i, m.rankings[i]))
 	}
 
-	table := tbl.Render(m.global.Theme, cells)
-	headingStyle := m.global.Theme.Title.Bold(true)
+	table := tbl.Render(m.global.Palette(), cells)
+	headingStyle := m.global.Palette().Title.Bold(true)
 	if !compact {
 		headingStyle = headingStyle.MarginBottom(1)
 	}
 	heading := headingStyle.Render("Filter: " + m.filterLabel())
-	pager := m.global.Theme.Dim.Render(fmt.Sprintf("page %d/%d  ranks %d-%d of %d",
+	pager := m.global.Palette().Dim.Render(fmt.Sprintf("page %d/%d  ranks %d-%d of %d",
 		m.page+1, m.pageCount(), start+1, end, len(m.rankings)))
 	if m.loading {
-		pager = m.global.Theme.Dim.Render("loading…")
+		pager = m.global.Palette().Dim.Render("loading…")
 	}
 	if compact {
 		return styles.JoinVertical(lg.Center, heading, table, pager)
@@ -305,7 +306,7 @@ func (m *model) renderRankings(contentWidth int) string {
 func (m *model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) string {
 	userStr := styles.PadTruncate(r.User.Username, tbl.Cols[1].Width)
 	if m.global.User != nil && r.User.ID == m.global.User.ID {
-		userStr = m.global.Theme.PlayerItemSelected.Bold(true).Render(userStr)
+		userStr = m.global.Palette().PlayerItemSelected.Bold(true).Render(userStr)
 	}
 	return tbl.Row(
 		styles.PadTruncate(strconv.Itoa(index+1), colRank),

@@ -171,7 +171,7 @@ func (m *createModel) clampMaxPlayers() {
 }
 
 // renderOption is one "label: < value >" settings row, marked when the cursor is on it.
-func renderOption(t styles.Theme, selected bool, label, value string) string {
+func renderOption(t *styles.Theme, selected bool, label, value string) string {
 	cursor := "  "
 	if selected {
 		cursor = "> "
@@ -198,7 +198,7 @@ func modeLabel(ranked bool) string {
 }
 
 func (m *createModel) View() tea.View {
-	t := m.global.Theme
+	t := m.global.Palette()
 	gameName := m.selectedGame().Name
 	if gameName == "" {
 		gameName = "none available"
@@ -212,7 +212,7 @@ func (m *createModel) View() tea.View {
 	submitText := "[ Create Lobby ]"
 	if m.cursor == createCursorSubmit {
 		submitCursor = "> "
-		submitText = m.global.Theme.SuccessText.Render(submitText)
+		submitText = m.global.Palette().SuccessText.Render(submitText)
 	}
 	submitStr := fmt.Sprintf("%s%s", submitCursor, submitText)
 
@@ -227,7 +227,7 @@ func (m *createModel) View() tea.View {
 
 	content := form
 	if m.err != nil {
-		content += "\n\n" + m.global.Theme.ErrorText.Render(fmt.Sprintf("Error: %v", m.err))
+		content += "\n\n" + m.global.Palette().ErrorText.Render(fmt.Sprintf("Error: %v", m.err))
 	}
 
 	actions := []string{"enter - Confirm"}

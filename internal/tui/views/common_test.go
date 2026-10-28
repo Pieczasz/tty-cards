@@ -192,17 +192,17 @@ func TestHandleCommonMsg(t *testing.T) {
 	t.Run("a background change swaps the theme in place", func(t *testing.T) {
 		t.Parallel()
 		g := router.GlobalContext{Theme: styles.NewTheme(true)}
-		require.True(t, g.Theme.Dark)
+		require.True(t, g.Palette().Dark)
 
 		handled, cmd := views.HandleCommonMsg(tea.BackgroundColorMsg{Color: color.White}, &g)
 
 		assert.True(t, handled)
 		assert.Nil(t, cmd)
-		assert.False(t, g.Theme.Dark, "a light terminal must not keep the dark palette")
+		assert.False(t, g.Palette().Dark, "a light terminal must not keep the dark palette")
 
 		handled, _ = views.HandleCommonMsg(tea.BackgroundColorMsg{Color: color.Black}, &g)
 		assert.True(t, handled)
-		assert.True(t, g.Theme.Dark)
+		assert.True(t, g.Palette().Dark)
 	})
 
 	// The view on screen holds its own context too, and it seats, browses and leaves

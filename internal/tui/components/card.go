@@ -106,7 +106,7 @@ type cardKey struct {
 var cardCache sync.Map // cardKey -> string
 
 // RenderCard draws card face up, lifted out of the hand and recoloured when selected.
-func RenderCard(t styles.Theme, card deck.Card, selected bool) string {
+func RenderCard(t *styles.Theme, card deck.Card, selected bool) string {
 	key := cardKey{rank: card.Rank, suit: card.Suit, selected: selected, dark: t.Dark}
 	if cached, ok := cardCache.Load(key); ok {
 		rendered, _ := cached.(string)
@@ -117,7 +117,7 @@ func RenderCard(t styles.Theme, card deck.Card, selected bool) string {
 	return rendered
 }
 
-func renderCard(t styles.Theme, card deck.Card, selected bool) string {
+func renderCard(t *styles.Theme, card deck.Card, selected bool) string {
 	style := t.CardFrame
 	if selected {
 		// A selected card is lifted out of the hand as well as recoloured, so the
@@ -131,7 +131,7 @@ func renderCard(t styles.Theme, card deck.Card, selected bool) string {
 
 // faceLines renders the seven inner rows of a face, styled but unbordered, so a caller
 // can frame one card or overlap several into a fan.
-func faceLines(t styles.Theme, card deck.Card) []string {
+func faceLines(t *styles.Theme, card deck.Card) []string {
 	suit, suitStyle := suitStyle(t, card.Suit)
 	lines := make([]string, 0, FaceHeight)
 	for _, row := range faceCells(card, suit) {
@@ -241,7 +241,7 @@ func blankRow() []string {
 }
 
 // suitStyle is the one-column symbol for a suit, and the style it is drawn in.
-func suitStyle(t styles.Theme, suit deck.Suit) (string, lg.Style) {
+func suitStyle(t *styles.Theme, suit deck.Suit) (string, lg.Style) {
 	switch suit {
 	case deck.Hearts:
 		// The text-presentation selector keeps the heart one column wide; without it
@@ -281,7 +281,7 @@ const miniRankWidth = 2
 // EmptyCardSlot is a place a card has not landed in yet, in RenderCard's footprint:
 // the same Theme.CardFrame chrome, so a board or a trick does not jump by a column
 // when the card arrives.
-func EmptyCardSlot(t styles.Theme) string {
+func EmptyCardSlot(t *styles.Theme) string {
 	return cachedChrome(chromeKey{slot: true, dark: t.Dark}, func() string {
 		blank := strings.Repeat(" ", FaceWidth)
 		inner := blank + strings.Repeat("\n"+blank, FaceHeight-1)
@@ -311,7 +311,7 @@ func cachedChrome(key chromeKey, render func() string) string {
 
 // FaceDownCard is a card back in RenderCard's footprint, so a hole card that is later
 // turned up, or a stock pile beside a discard, does not change size.
-func FaceDownCard(t styles.Theme) string {
+func FaceDownCard(t *styles.Theme) string {
 	return cachedChrome(chromeKey{dark: t.Dark}, func() string {
 		lines := make([]string, FaceHeight)
 		fill := lg.NewStyle().Foreground(t.CardBack).Render(strings.Repeat("░", FaceWidth))
@@ -326,18 +326,18 @@ func FaceDownCard(t styles.Theme) string {
 // face: poker's board on a short terminal, and Hearts' trick when the middle band
 // cannot hold three rows of card art. Nine rows per played card is what a trick costs,
 // and a trick a player cannot see all of is a trick they cannot play into.
-func RenderMiniCard(t styles.Theme, c deck.Card) string {
+func RenderMiniCard(t *styles.Theme, c deck.Card) string {
 	suit, style := miniSuit(t, c.Suit)
 	return style.Render(fmt.Sprintf("[%*s%s]", miniRankWidth, rankLabel(c.Rank), suit))
 }
 
 // MiniCardBack is a face-down card at mini size, the same footprint as RenderMiniCard.
-func MiniCardBack(t styles.Theme) string {
+func MiniCardBack(t *styles.Theme) string {
 	return t.Dim.Render("[" + strings.Repeat("?", miniRankWidth+1) + "]")
 }
 
 // MiniCardSlot is an empty place for a mini card, the same footprint as RenderMiniCard.
-func MiniCardSlot(t styles.Theme) string {
+func MiniCardSlot(t *styles.Theme) string {
 	return t.Dim.Render("[" + strings.Repeat(" ", miniRankWidth+1) + "]")
 }
 
@@ -345,7 +345,7 @@ func MiniCardSlot(t styles.Theme) string {
 // sharing suitStyle: a mini card is one cell of text, so the heart needs no
 // text-presentation selector to hold the grid open, and an unknown suit has to be
 // visible rather than blank.
-func miniSuit(t styles.Theme, s deck.Suit) (string, lg.Style) {
+func miniSuit(t *styles.Theme, s deck.Suit) (string, lg.Style) {
 	switch s {
 	case deck.Hearts:
 		return "♥", lg.NewStyle().Foreground(t.SuitRed)

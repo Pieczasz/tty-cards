@@ -14,8 +14,8 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) renderCenterTable() string {
-	discard := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
-	return styles.JoinVertical(lg.Center, gameview.RenderPiles(m.Global.Theme, m.Base.DeckSize, discard),
+	discard := components.RenderCard(m.Global.Palette(), m.Base.TopDiscard, false)
+	return styles.JoinVertical(lg.Center, gameview.RenderPiles(m.Global.Palette(), m.Base.DeckSize, discard),
 		m.renderCurrentSuitIndicator())
 }
 
@@ -26,6 +26,6 @@ func (m *model) renderCurrentSuitIndicator() string {
 	if !ok {
 		return ""
 	}
-	return m.Global.Theme.Muted.Render("Current Suit: ") +
-		lg.NewStyle().Bold(true).Foreground(m.Global.Theme.Text).Render(c.Label)
+	return m.Global.Palette().Muted.Render("Current Suit: ") +
+		lg.NewStyle().Bold(true).Foreground(m.Global.Palette().Text).Render(c.Label)
 }

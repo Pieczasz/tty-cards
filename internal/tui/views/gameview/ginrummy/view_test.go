@@ -67,6 +67,26 @@ func TestView_HandOverWallBanner(t *testing.T) {
 	assert.Contains(t, out, "WALL")
 }
 
+func TestView_InterruptedMatchDoesNotNameAWinner(t *testing.T) {
+	t.Parallel()
+	m := &model{
+		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: 80, Height: 24},
+		Base: gameview.BaseState{
+			Phase: game.Finished, EndReason: game.EndReasonInterrupted, WinnerName: "alice",
+			Seats: aliceAndBob,
+		},
+		phase:            logic.PhaseHandOver,
+		handNumber:       2,
+		matchComplete:    true,
+		leavers:          []string{"bob"},
+		cumulativeScores: map[string]int{"1": 0, "2": 0},
+	}
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "MATCH ENDED EARLY - bob left the table")
+	assert.NotContains(t, out, "wins")
+}
+
 var aliceAndBob = []game.PlayerSnapshot{{ID: "1", Name: "alice"}, {ID: "2", Name: "bob"}}
 
 func handOf(n int) []deck.Card {
@@ -264,4 +284,31 @@ func TestView_WaitingScreen(t *testing.T) {
 	m := viewAt(80, 24)
 	m.Base.Phase = game.Waiting
 	assert.Contains(t, m.View().Content, "Waiting for game to start")
+}
+
+func TestView_NextHandHintOnlyWhenOnTurn(t *testing.T) {
+	t.Parallel()
+	m := viewAt(80, 24)
+	m.phase = logic.PhaseHandOver
+	m.Base.MyTurn = false
+
+	assert.NotContains(t, m.View().Content, "enter: deal next hand")
+	assert.Contains(t, m.View().Content, "waiting for the next hand")
+
+	m.Base.MyTurn = true
+	assert.Contains(t, m.View().Content, "enter: deal next hand")
+}
+
+func TestView_ForfeitShowsTheScoreboard(t *testing.T) {
+	t.Parallel()
+	m := viewAt(80, 24)
+	m.Base.Phase = game.Finished
+	m.Base.WinnerName = "alice"
+	m.phase = logic.PhaseAwaitingDiscard
+	m.matchComplete = false
+
+	out := m.View().Content
+	assert.NotContains(t, out, "Press Esc to go back")
+	assert.Contains(t, out, "alice")
+	assert.Contains(t, out, "40")
 }

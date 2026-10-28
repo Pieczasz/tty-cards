@@ -20,9 +20,9 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) renderCenterTable() string {
-	discard := components.RenderCard(m.Global.Theme, m.Base.TopDiscard, false)
+	discard := components.RenderCard(m.Global.Palette(), m.Base.TopDiscard, false)
 	return styles.JoinVertical(lg.Center,
-		gameview.RenderPiles(m.Global.Theme, m.Base.DeckSize, discard),
+		gameview.RenderPiles(m.Global.Palette(), m.Base.DeckSize, discard),
 		m.renderCurrentColorIndicator(),
 		m.renderDirectionIndicator(),
 	)
@@ -35,8 +35,8 @@ func (m *model) renderCurrentColorIndicator() string {
 	if !ok {
 		return ""
 	}
-	return m.Global.Theme.Muted.Render("Color: ") +
-		lg.NewStyle().Bold(true).Foreground(c.Tone(m.Global.Theme)).Render(c.Label)
+	return m.Global.Palette().Muted.Render("Color: ") +
+		lg.NewStyle().Bold(true).Foreground(c.Tone(m.Global.Palette())).Render(c.Label)
 }
 
 func (m *model) renderDirectionIndicator() string {
@@ -44,7 +44,7 @@ func (m *model) renderDirectionIndicator() string {
 	if m.direction < 0 {
 		dir = "⟲ Counterclockwise"
 	}
-	return m.Global.Theme.Dim.Render(dir)
+	return m.Global.Palette().Dim.Render(dir)
 }
 
 // renderHandColorRow paints a Uno color glyph above each card so four colors stay
@@ -64,14 +64,14 @@ func (m *model) renderHandColorRow(maxWidth, maxRows int) string {
 	parts := make([]string, 0, n)
 	for i, c := range hand {
 		w := components.CardSlotWidth(i, n, tuck, selected)
-		glyph, fg := colorGlyph(m.Global.Theme, c)
+		glyph, fg := colorGlyph(m.Global.Palette(), c)
 		cell := lg.NewStyle().Foreground(fg).Width(w).Align(lg.Center).Render(glyph)
 		parts = append(parts, cell)
 	}
 	return strings.Join(parts, "")
 }
 
-func colorGlyph(t styles.Theme, c deck.Card) (string, color.Color) {
+func colorGlyph(t *styles.Theme, c deck.Card) (string, color.Color) {
 	if logic.IsWild(c) {
 		return "★", t.TextMuted
 	}

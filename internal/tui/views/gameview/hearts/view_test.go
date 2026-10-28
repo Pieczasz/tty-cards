@@ -45,6 +45,21 @@ func TestView_HandOverShowsScores(t *testing.T) {
 	assert.Contains(t, out, "25")
 }
 
+func TestView_NextHandHintOnlyWhenOnTurn(t *testing.T) {
+	t.Parallel()
+	m := &model{
+		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: 80, Height: 24},
+		Base:   gameview.BaseState{Phase: game.Playing, Seats: []game.PlayerSnapshot{{ID: "1", Name: "alice"}}},
+		phase:  logic.PhaseHandOver,
+	}
+
+	assert.NotContains(t, m.View().Content, "enter: next hand")
+	assert.Contains(t, m.View().Content, "waiting for the next hand")
+
+	m.Base.MyTurn = true
+	assert.Contains(t, m.View().Content, "enter: next hand")
+}
+
 func TestView_HeartsBrokenIndicator(t *testing.T) {
 	t.Parallel()
 	m := &model{

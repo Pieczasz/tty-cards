@@ -188,7 +188,7 @@ func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 			msg:  tea.BackgroundColorMsg{Color: color.White},
 			verify: func(t *testing.T, r *Router) {
 				t.Helper()
-				assert.False(t, r.Global.Theme.Dark, "a white background is a light palette")
+				assert.False(t, r.Global.Palette().Dark, "a white background is a light palette")
 			},
 		},
 		{
@@ -196,7 +196,7 @@ func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 			msg:  tea.BackgroundColorMsg{Color: color.Black},
 			verify: func(t *testing.T, r *Router) {
 				t.Helper()
-				assert.True(t, r.Global.Theme.Dark)
+				assert.True(t, r.Global.Palette().Dark)
 			},
 		},
 	}
@@ -222,7 +222,7 @@ func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 // background query still has to be legible.
 func TestRouter_DefaultsToTheDarkPalette(t *testing.T) {
 	t.Parallel()
-	assert.True(t, New(GlobalContext{}).Global.Theme.Dark)
+	assert.True(t, New(GlobalContext{}).Global.Palette().Dark)
 }
 
 // Navigating is what the router is for, and an unknown destination must not tear down

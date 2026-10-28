@@ -27,10 +27,10 @@ type model struct {
 var colorPicker = gameview.ChoicePicker{
 	Title: "Pick a color:",
 	Choices: []gameview.Choice{
-		{Label: "♥ Red", Suit: logic.ColorRed, Tone: func(t styles.Theme) color.Color { return t.UnoRed }},
-		{Label: "♦ Yellow", Suit: logic.ColorYellow, Tone: func(t styles.Theme) color.Color { return t.UnoYellow }},
-		{Label: "♣ Green", Suit: logic.ColorGreen, Tone: func(t styles.Theme) color.Color { return t.UnoGreen }},
-		{Label: "♠ Blue", Suit: logic.ColorBlue, Tone: func(t styles.Theme) color.Color { return t.UnoBlue }},
+		{Label: "♥ Red", Suit: logic.ColorRed, Tone: func(t *styles.Theme) color.Color { return t.UnoRed }},
+		{Label: "♦ Yellow", Suit: logic.ColorYellow, Tone: func(t *styles.Theme) color.Color { return t.UnoYellow }},
+		{Label: "♣ Green", Suit: logic.ColorGreen, Tone: func(t *styles.Theme) color.Color { return t.UnoGreen }},
+		{Label: "♠ Blue", Suit: logic.ColorBlue, Tone: func(t *styles.Theme) color.Color { return t.UnoBlue }},
 	},
 }
 

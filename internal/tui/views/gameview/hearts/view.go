@@ -34,10 +34,19 @@ func (m *model) View() tea.View {
 	// Seat art is the first thing to go: it costs seven rows per seat, and a name
 	// with a hand count says everything a player reads off somebody else's seat.
 	minimalSeats := gameview.IsCompact(m.Global.Width, m.Global.Height)
-	top := gameview.RenderOpponentTop(m.Global.Theme, m.Base, m.Global.Width, minimalSeats)
+	top := gameview.RenderOpponentTop(m.Global.Palette(), m.Base, m.Global.Width, minimalSeats)
 
 	return tea.NewView(gameview.RenderBands(m.Global, top, m.renderPlayerSection(), m.keyHints(),
 		func(height int) string { return m.renderMiddleLayer(height, minimalSeats) }))
+}
+
+// handOverHint offers enter only to the seat that deals. Everyone else is waiting,
+// and an enter hint there is a key that does nothing.
+func (m *model) handOverHint() string {
+	if m.Base.MyTurn {
+		return keyHintsOver
+	}
+	return "waiting for the next hand | esc: leave match"
 }
 
 func (m *model) keyHints() string {
@@ -48,7 +57,7 @@ func (m *model) keyHints() string {
 }
 
 func (m *model) renderMiddleLayer(height int, minimalSeats bool) string {
-	leftOpponent, rightOpponent := gameview.RenderOpponentSides(m.Global.Theme, m.Base, height, minimalSeats)
+	leftOpponent, rightOpponent := gameview.RenderOpponentSides(m.Global.Palette(), m.Base, height, minimalSeats)
 	centerStack := styles.JoinVertical(lg.Center,
 		m.renderTrickArea(height),
 		m.renderHeartsBrokenIndicator(),
@@ -123,21 +132,21 @@ func (m *model) renderTrickSlot(playerID string, mini bool) string {
 	card, ok := m.trickCards[playerID]
 	if playerID == "" || !ok {
 		if mini {
-			return components.MiniCardSlot(m.Global.Theme)
+			return components.MiniCardSlot(m.Global.Palette())
 		}
-		return components.EmptyCardSlot(m.Global.Theme)
+		return components.EmptyCardSlot(m.Global.Palette())
 	}
 	if mini {
-		return components.RenderMiniCard(m.Global.Theme, card)
+		return components.RenderMiniCard(m.Global.Palette(), card)
 	}
-	return components.RenderCard(m.Global.Theme, card, false)
+	return components.RenderCard(m.Global.Palette(), card, false)
 }
 
 func (m *model) renderHeartsBrokenIndicator() string {
 	if m.heartsBroken {
-		return lg.NewStyle().Foreground(m.Global.Theme.Warning).Render("♥ Hearts: broken")
+		return m.Global.Palette().WarningText.Render("♥ Hearts: broken")
 	}
-	return m.Global.Theme.Muted.Render("♥ Hearts: not yet broken")
+	return m.Global.Palette().Muted.Render("♥ Hearts: not yet broken")
 }
 
 func (m *model) renderPassDirection() string {
@@ -146,37 +155,32 @@ func (m *model) renderPassDirection() string {
 	}
 	// PassDirection.String is the one label table for the enum; a hold hand never
 	// reaches the passing stage, so its "hold" label cannot show here anyway.
-	return m.Global.Theme.Dim.Render("Pass: " + m.passDirection.String())
+	return m.Global.Palette().Dim.Render("Pass: " + m.passDirection.String())
 }
 
 func (m *model) renderPlayerSection() string {
-	statusView := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
+	statusView := gameview.RenderStatus(m.Global.Palette(), m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth := gameview.HandWidth(m.Global.Width)
 	handRows := gameview.HandRows(m.Global.Height)
 	var staged map[int]struct{}
 	if m.phase == logic.PhasePassing {
 		staged = m.passIndices()
 	}
-	handView := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, staged, handWidth, handRows)
+	handView := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, m.Selected, staged, handWidth, handRows)
 
-	return gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, statusView, handView)
+	return gameview.RenderHeroBand(m.Global.Palette(), m.ActionErr, statusView, handView)
 }
 
 func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
 		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Header: fmt.Sprintf("%-12s  %8s  %9s", "player", "hand", "total"),
-		Hint:   keyHintsOver,
+		Hint:   m.handOverHint(),
 	}
-	switch {
-	case m.Base.EndReason == game.EndReasonInterrupted:
-		h.Title, h.Hint = gameview.InterruptedTitle(m.leavers), gameview.LobbyHint
-	case m.matchComplete || m.Base.Phase == game.Finished:
-		h.Title, h.Hint = gameview.MatchOverTitle(m.Base.WinnerName), gameview.LobbyHint
-	}
+	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, m.leavers)
 
 	for _, seat := range m.Base.Seats {
-		h.Rows = append(h.Rows, m.Global.Theme.Muted.Render(fmt.Sprintf("%-12s  %8d  %9d",
+		h.Rows = append(h.Rows, m.Global.Palette().Muted.Render(fmt.Sprintf("%-12s  %8d  %9d",
 			styles.PadTruncate(seat.Name, 12), m.handPoints[seat.ID], m.cumulativeScores[seat.ID])))
 	}
 	return gameview.RenderHandOver(m.Global, h)

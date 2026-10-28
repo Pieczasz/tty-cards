@@ -37,7 +37,7 @@ func TooSmall(screenWidth, screenHeight int) bool {
 
 // RenderTooSmall fills the terminal with the resize prompt. It reports the current
 // size as well as the required one, so the player can see which way to drag.
-func (t Theme) RenderTooSmall(screenWidth, screenHeight int) string {
+func (t *Theme) RenderTooSmall(screenWidth, screenHeight int) string {
 	msg := JoinVertical(lg.Center,
 		t.Accented.Render("Terminal too small"),
 		"",
@@ -235,7 +235,7 @@ func renderFigure(text, font string) figureBanner {
 
 // RenderMainLayout frames a full-screen view: the header on top, the footer at the
 // bottom and the content centred in the rows between, inside the capped box.
-func (t Theme) RenderMainLayout(width, height int, header, content, footer string) string {
+func (t *Theme) RenderMainLayout(width, height int, header, content, footer string) string {
 	header, footer, hContent := layoutHeights(width, height, header, footer)
 	inner := InnerWidth(width)
 
@@ -263,7 +263,7 @@ type footerKey struct {
 var footerCache sync.Map // footerKey -> string
 
 // RenderActionFooter is the key-hint footer for actions, one styled item each.
-func (t Theme) RenderActionFooter(actions []string) string {
+func (t *Theme) RenderActionFooter(actions []string) string {
 	key := footerKey{actions: strings.Join(actions, "\x00"), dark: t.Dark}
 	if cached, ok := footerCache.Load(key); ok {
 		footer, _ := cached.(string)

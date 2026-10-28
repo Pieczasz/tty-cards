@@ -129,14 +129,14 @@ func NavigateOn(key string) (tea.Cmd, bool) {
 //
 // slices.Concat, never append: globalFooter is shared by every session, and appending
 // writes into the array the others are reading.
-func Footer(t styles.Theme, localActions []string) string {
+func Footer(t *styles.Theme, localActions []string) string {
 	return t.RenderActionFooter(slices.Concat(localActions, globalFooter))
 }
 
 // SeatedFooter is the action line for a player holding a seat: a view's own actions
 // and quit. Every menu route sends a seated player back to their table (tui.New), so
 // advertising the global shortcuts there would advertise keys that go nowhere.
-func SeatedFooter(t styles.Theme, localActions []string) string {
+func SeatedFooter(t *styles.Theme, localActions []string) string {
 	return t.RenderActionFooter(append(slices.Clip(localActions), quitAction))
 }
 
@@ -168,12 +168,12 @@ func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) 
 // RenderScreen is the header/footer/frame ritual every full-screen view repeats.
 // content receives the rows left once the title and footer have taken theirs.
 func RenderScreen(g router.GlobalContext, title string, localActions []string, content func(height int) string) string {
-	return renderFramed(g, screenHeader(g, title), Footer(g.Theme, localActions), content)
+	return renderFramed(g, screenHeader(g, title), Footer(g.Palette(), localActions), content)
 }
 
 // RenderSeatedScreen is RenderScreen with SeatedFooter, for a player holding a seat.
 func RenderSeatedScreen(g router.GlobalContext, title string, localActions []string, content func(height int) string) string {
-	return renderFramed(g, screenHeader(g, title), SeatedFooter(g.Theme, localActions), content)
+	return renderFramed(g, screenHeader(g, title), SeatedFooter(g.Palette(), localActions), content)
 }
 
 func renderFramed(g router.GlobalContext, header, footer string, content func(height int) string) string {
@@ -185,11 +185,11 @@ func renderFramed(g router.GlobalContext, header, footer string, content func(he
 // in Update, before render time, so this is the one computation both share - deriving
 // it twice is how a board ends up paging by twenty and drawing however many fit.
 func ScreenContentHeight(g router.GlobalContext, title string, localActions []string) int {
-	return styles.AvailableContentHeight(g.Width, g.Height, screenHeader(g, title), Footer(g.Theme, localActions))
+	return styles.AvailableContentHeight(g.Width, g.Height, screenHeader(g, title), Footer(g.Palette(), localActions))
 }
 
 func screenHeader(g router.GlobalContext, title string) string {
-	return g.Theme.Title.Render(styles.RenderFigureASCII(
+	return g.Palette().Title.Render(styles.RenderFigureASCII(
 		title, styles.InnerWidth(g.Width), styles.TitleHeightBudget(g.Height)))
 }
 
@@ -198,6 +198,6 @@ func RenderCenteredLayout(g router.GlobalContext, header, content, footer string
 	return styles.Place(
 		g.Width, g.Height,
 		lg.Center, lg.Center,
-		g.Theme.RenderMainLayout(g.Width, g.Height, header, content, footer),
+		g.Palette().RenderMainLayout(g.Width, g.Height, header, content, footer),
 	)
 }

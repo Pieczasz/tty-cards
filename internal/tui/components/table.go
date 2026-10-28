@@ -65,7 +65,7 @@ func (tb Table) Row(cells ...string) string {
 }
 
 // Header is the column titles and the rule under them, two lines.
-func (tb Table) Header(t styles.Theme) string {
+func (tb Table) Header(t *styles.Theme) string {
 	titles := make([]string, 0, len(tb.Cols))
 	for _, c := range tb.Cols {
 		titles = append(titles, styles.PadTruncate(c.Title, c.Width))
@@ -75,7 +75,7 @@ func (tb Table) Header(t styles.Theme) string {
 }
 
 // Render is the header, the rows, and blank rows up to PadTo.
-func (tb Table) Render(t styles.Theme, rows []string) string {
+func (tb Table) Render(t *styles.Theme, rows []string) string {
 	out := make([]string, 0, len(rows)+tb.PadTo+2)
 	out = append(out, tb.Header(t))
 	out = append(out, rows...)

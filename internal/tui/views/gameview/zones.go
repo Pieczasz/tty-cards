@@ -48,7 +48,7 @@ const artSeatLimit = 3
 
 // RenderOpponentTop is the row of opponents across the top edge, laid out in at most
 // width columns.
-func RenderOpponentTop(t styles.Theme, base BaseState, width int, compact bool) string {
+func RenderOpponentTop(t *styles.Theme, base BaseState, width int, compact bool) string {
 	zones := SplitZones(base.Opponents)
 	if len(zones.Top) == 0 {
 		return ""
@@ -69,7 +69,7 @@ func RenderOpponentTop(t styles.Theme, base BaseState, width int, compact bool) 
 
 // RenderOpponentSides fits each side stack into height rows, which is the middle band's
 // height rather than the terminal's.
-func RenderOpponentSides(t styles.Theme, base BaseState, height int, compact bool) (left, right string) {
+func RenderOpponentSides(t *styles.Theme, base BaseState, height int, compact bool) (left, right string) {
 	zones := SplitZones(base.Opponents)
 	minimal := minimalSeats(base, compact)
 	return renderOpponentStack(t, base, zones.Left, OrientationLeft, seatBudget(height, len(zones.Left)), minimal),
@@ -90,7 +90,7 @@ func seatBudget(total, seats int) int {
 }
 
 func renderOpponentStack(
-	t styles.Theme,
+	t *styles.Theme,
 	base BaseState,
 	seats []game.PlayerSnapshot,
 	orientation Orientation,
@@ -118,7 +118,7 @@ func seatArtFloor(orientation Orientation) int {
 }
 
 func renderOpponentSeat(
-	t styles.Theme,
+	t *styles.Theme,
 	base BaseState,
 	o game.PlayerSnapshot,
 	orientation Orientation,

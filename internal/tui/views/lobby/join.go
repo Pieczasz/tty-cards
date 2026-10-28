@@ -275,7 +275,7 @@ func (m *joinModel) filterLine() string {
 	if m.filter.OnlyWithRoom {
 		seats = "with seats"
 	}
-	return m.global.Theme.Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", label, m.modeLabel(), seats))
+	return m.global.Palette().Muted.Render(fmt.Sprintf("game: %s   mode: %s   showing: %s", label, m.modeLabel(), seats))
 }
 
 // Column widths are fixed so a filter keypress cannot resize the list under the
@@ -300,7 +300,7 @@ var browseTable = components.Table{
 }
 
 func (m *joinModel) renderRow(entry lobby.BrowseEntry, selected bool) string {
-	theme := m.global.Theme
+	theme := m.global.Palette()
 
 	mode := theme.Muted.Render(styles.PadTruncate("casual", colMode))
 	if entry.Ranked {
@@ -330,7 +330,7 @@ func (m *joinModel) visibleWindow(rows int) (start, end int) {
 
 func (m *joinModel) renderList(rows int) string {
 	if len(m.entries) == 0 {
-		return m.global.Theme.Muted.Render("No tables match right now - press g, m or o to widen the filters.")
+		return m.global.Palette().Muted.Render("No tables match right now - press g, m or o to widen the filters.")
 	}
 
 	start, end := m.visibleWindow(rows)
@@ -338,11 +338,11 @@ func (m *joinModel) renderList(rows int) string {
 	for i := start; i < end; i++ {
 		cells = append(cells, m.renderRow(m.entries[i], !m.writingCode && m.cursor == i))
 	}
-	pager := m.global.Theme.Dim.Render(
+	pager := m.global.Palette().Dim.Render(
 		fmt.Sprintf(" %d-%d of %d  ↑/↓ scroll", start+1, end, len(m.entries)))
 	tbl := browseTable
 	tbl.PadTo = rows
-	return tbl.Render(m.global.Theme, cells) + "\n" + pager
+	return tbl.Render(m.global.Palette(), cells) + "\n" + pager
 }
 
 func (m *joinModel) View() tea.View {
@@ -363,15 +363,15 @@ func (m *joinModel) renderContent(contentHeight int) string {
 
 	rows, compact := listLayout(contentHeight)
 	parts := []string{m.filterLine(), "", m.renderList(rows), "",
-		m.global.Theme.Muted.Render(codeInputStr), m.textInput.View()}
+		m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
 	if compact {
 		parts = []string{m.filterLine(), m.renderList(rows),
-			m.global.Theme.Muted.Render(codeInputStr), m.textInput.View()}
+			m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
 	}
 	content := styles.JoinVertical(lg.Left, parts...)
 
 	if m.err != nil {
-		content += m.global.Theme.ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))
+		content += m.global.Palette().ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))
 	}
 	return content
 }
@@ -382,7 +382,7 @@ func (m *joinModel) renderContent(contentHeight int) string {
 func (m *joinModel) renderKey() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%dx%d|%v|%d|%v|%+v|%v|%s",
-		m.global.Width, m.global.Height, m.global.Theme.Dark,
+		m.global.Width, m.global.Height, m.global.Palette().Dark,
 		m.cursor, m.writingCode, m.filter, m.err, m.textInput.View())
 	for _, e := range m.entries {
 		fmt.Fprintf(&b, "|%s:%s:%d/%d:%v:%d:%d", e.Code, e.GameName, e.Players, e.MaxPlayers, e.Ranked, e.AvgElo, e.EloDelta)

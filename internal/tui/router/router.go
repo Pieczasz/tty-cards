@@ -113,7 +113,20 @@ type GlobalContext struct {
 	// Theme is per session, not global: two players can have opposite terminal
 	// backgrounds, and a shared palette would leave one of them reading white on
 	// white. It is resolved from tea.BackgroundColorMsg and defaults to dark.
-	Theme styles.Theme
+	Theme *styles.Theme
+}
+
+// EnsureTheme fills the dark palette when the session has not resolved one.
+// A render holds the pointer; the unset zero is nil, not a usable palette.
+func (g *GlobalContext) EnsureTheme() {
+	if g.Theme == nil {
+		g.Theme = styles.NewTheme(true)
+	}
+}
+
+// Palette is the session theme, or the shared dark one when none is set yet.
+func (g GlobalContext) Palette() *styles.Theme {
+	return styles.Or(g.Theme)
 }
 
 // RequestContext returns the session context, or Background if unset.
@@ -278,7 +291,7 @@ func (r *Router) View() tea.View {
 	// wraps tables into unreadable confetti instead of failing, so no view can
 	// render anything useful.
 	case styles.TooSmall(r.Global.Width, r.Global.Height):
-		v = tea.NewView(r.Global.Theme.RenderTooSmall(r.Global.Width, r.Global.Height))
+		v = tea.NewView(r.Global.Palette().RenderTooSmall(r.Global.Width, r.Global.Height))
 	case r.active != nil:
 		v = r.active.View()
 	default:

@@ -57,7 +57,7 @@ func renderBottomBand(g router.GlobalContext, player, hints string) string {
 	// Wrapped to the terminal, not clamped to it: the key line is longer than 64
 	// columns, and cutting it would both hide the last key and drag every row of the
 	// hand above it sideways, since the band is centred on its widest line.
-	hintLine := g.Theme.Dim.Width(g.Width).Align(lg.Center).Render(hints)
+	hintLine := g.Palette().Dim.Width(g.Width).Align(lg.Center).Render(hints)
 
 	var band string
 	if IsCompact(g.Width, g.Height) {

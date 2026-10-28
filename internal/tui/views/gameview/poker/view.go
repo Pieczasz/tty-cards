@@ -74,14 +74,14 @@ func (m *model) renderHandOver() string {
 
 	for _, s := range m.seats {
 		// Chip glyphs carry their own colour, so they are joined in rather than
-		// rendered through m.Global.Theme.Muted.
-		line := m.Global.Theme.Muted.Render(fmt.Sprintf("%s %6d  ", styles.PadTruncate(s.Name, seatNameWidth), s.Chips)) +
-			renderChipStack(m.Global.Theme, s.Chips)
+		// rendered through m.Global.Palette().Muted.
+		line := m.Global.Palette().Muted.Render(fmt.Sprintf("%s %6d  ", styles.PadTruncate(s.Name, seatNameWidth), s.Chips)) +
+			renderChipStack(m.Global.Palette(), s.Chips)
 		if s.Folded {
-			line += m.Global.Theme.Muted.Render("  folded")
+			line += m.Global.Palette().Muted.Render("  folded")
 		}
 		if len(s.Hole) == logic.HoleCards {
-			line += "  " + components.RenderMiniCard(m.Global.Theme, s.Hole[0]) + components.RenderMiniCard(m.Global.Theme, s.Hole[1])
+			line += "  " + components.RenderMiniCard(m.Global.Palette(), s.Hole[0]) + components.RenderMiniCard(m.Global.Palette(), s.Hole[1])
 		}
 		h.Rows = append(h.Rows, line)
 	}
@@ -157,14 +157,14 @@ func (m *model) renderSideStack(seats []seat, compact bool, orientation gameview
 
 func (m *model) renderCenter(compact bool) string {
 	board := m.renderBoard(compact)
-	potLine := m.Global.Theme.Accented.Render(fmt.Sprintf("POT %d", m.pot))
+	potLine := m.Global.Palette().Accented.Render(fmt.Sprintf("POT %d", m.pot))
 	if m.sidePots > 1 {
-		potLine += m.Global.Theme.Muted.Render(fmt.Sprintf("  (%d pots)", m.sidePots))
+		potLine += m.Global.Palette().Muted.Render(fmt.Sprintf("  (%d pots)", m.sidePots))
 	}
-	street := m.Global.Theme.Accented.Render(fmt.Sprintf("%s | hand %d/%d", m.street, m.handNumber, m.handsTotal))
-	betLine := m.Global.Theme.Muted.Render(fmt.Sprintf("bet %d | to call %d", m.currentBet, m.toCall))
+	street := m.Global.Palette().Accented.Render(fmt.Sprintf("%s | hand %d/%d", m.street, m.handNumber, m.handsTotal))
+	betLine := m.Global.Palette().Muted.Render(fmt.Sprintf("bet %d | to call %d", m.currentBet, m.toCall))
 
-	return styles.JoinVertical(lg.Center, board, "", potLine, renderChipStack(m.Global.Theme, m.pot), street, betLine)
+	return styles.JoinVertical(lg.Center, board, "", potLine, renderChipStack(m.Global.Palette(), m.pot), street, betLine)
 }
 
 func (m *model) renderBoard(compact bool) string {
@@ -172,20 +172,20 @@ func (m *model) renderBoard(compact bool) string {
 	for i := range slots {
 		switch {
 		case i < len(m.board) && compact:
-			slots[i] = components.RenderMiniCard(m.Global.Theme, m.board[i])
+			slots[i] = components.RenderMiniCard(m.Global.Palette(), m.board[i])
 		case i < len(m.board):
-			slots[i] = components.RenderCard(m.Global.Theme, m.board[i], false)
+			slots[i] = components.RenderCard(m.Global.Palette(), m.board[i], false)
 		case compact:
-			slots[i] = components.MiniCardSlot(m.Global.Theme)
+			slots[i] = components.MiniCardSlot(m.Global.Palette())
 		default:
-			slots[i] = components.EmptyCardSlot(m.Global.Theme)
+			slots[i] = components.EmptyCardSlot(m.Global.Palette())
 		}
 	}
 	return styles.JoinHorizontal(lg.Bottom, slots...)
 }
 
 func (m *model) renderSeat(s seat, compact bool, orientation gameview.Orientation) string {
-	t := m.Global.Theme
+	t := m.Global.Palette()
 	ns := lg.NewStyle().Bold(true).Foreground(t.Accent)
 	if s.IsTurn {
 		ns = t.TurnName
@@ -196,25 +196,25 @@ func (m *model) renderSeat(s seat, compact bool, orientation gameview.Orientatio
 	badges := seatBadges(s)
 	name := ns.Render(s.Name)
 	if badges != "" {
-		name = styles.JoinHorizontal(lg.Center, name, " ", m.Global.Theme.SuccessText.Render(badges))
+		name = styles.JoinHorizontal(lg.Center, name, " ", m.Global.Palette().SuccessText.Render(badges))
 	}
 
-	stack := m.Global.Theme.Muted.Render(strconv.FormatUint(uint64(s.Chips), 10))
+	stack := m.Global.Palette().Muted.Render(strconv.FormatUint(uint64(s.Chips), 10))
 	if s.Bet > 0 {
-		stack = styles.JoinHorizontal(lg.Center, stack, m.Global.Theme.Muted.Render(fmt.Sprintf(" | bet %d", s.Bet)))
+		stack = styles.JoinHorizontal(lg.Center, stack, m.Global.Palette().Muted.Render(fmt.Sprintf(" | bet %d", s.Bet)))
 	}
 	if s.AllIn && !s.Folded {
-		stack = styles.JoinHorizontal(lg.Center, stack, " ", m.Global.Theme.Accented.Render("ALL-IN"))
+		stack = styles.JoinHorizontal(lg.Center, stack, " ", m.Global.Palette().Accented.Render("ALL-IN"))
 	}
 	if s.Folded {
-		stack = m.Global.Theme.Dim.Render("folded")
+		stack = m.Global.Palette().Dim.Render("folded")
 	}
 
 	cards := m.renderSeatCards(s, compact)
 	rows := []string{cards, name, stack}
 	if !compact {
 		// A short terminal needs the row for cards more than for decoration.
-		rows = append(rows, renderChipStack(m.Global.Theme, s.Chips))
+		rows = append(rows, renderChipStack(m.Global.Palette(), s.Chips))
 	}
 	pad := lg.NewStyle().Padding(0, 1)
 	block := pad.Render(styles.JoinVertical(lg.Center, rows...))
@@ -246,12 +246,12 @@ func (m *model) renderSeatCards(s seat, compact bool) string {
 	if len(s.Hole) == logic.HoleCards {
 		if compact {
 			return styles.JoinHorizontal(lg.Center,
-				components.RenderMiniCard(m.Global.Theme, s.Hole[0]),
-				components.RenderMiniCard(m.Global.Theme, s.Hole[1]))
+				components.RenderMiniCard(m.Global.Palette(), s.Hole[0]),
+				components.RenderMiniCard(m.Global.Palette(), s.Hole[1]))
 		}
 		return styles.JoinHorizontal(lg.Bottom,
-			components.RenderCard(m.Global.Theme, s.Hole[0], false),
-			components.RenderCard(m.Global.Theme, s.Hole[1], false),
+			components.RenderCard(m.Global.Palette(), s.Hole[0], false),
+			components.RenderCard(m.Global.Palette(), s.Hole[1], false),
 		)
 	}
 	// A busted seat is dealt nothing, so the count is what says so: a fixed pair of
@@ -259,13 +259,13 @@ func (m *model) renderSeatCards(s seat, compact bool) string {
 	if !compact {
 		backs := make([]string, 0, s.HandSize)
 		for range s.HandSize {
-			backs = append(backs, components.FaceDownCard(m.Global.Theme))
+			backs = append(backs, components.FaceDownCard(m.Global.Palette()))
 		}
 		return styles.JoinHorizontal(lg.Bottom, backs...)
 	}
 	backs := make([]string, 0, s.HandSize)
 	for range s.HandSize {
-		backs = append(backs, components.MiniCardBack(m.Global.Theme))
+		backs = append(backs, components.MiniCardBack(m.Global.Palette()))
 	}
 	return strings.Join(backs, "")
 }
@@ -277,10 +277,10 @@ func (m *model) renderHero(compact bool) string {
 		seatBlock = m.renderSeat(*hero, compact, gameview.OrientationTop)
 	}
 
-	status := gameview.RenderStatus(m.Global.Theme, m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
+	status := gameview.RenderStatus(m.Global.Palette(), m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	actions := m.renderActionBar()
 
-	block := gameview.RenderHeroBand(m.Global.Theme, m.ActionErr, seatBlock, status, actions)
+	block := gameview.RenderHeroBand(m.Global.Palette(), m.ActionErr, seatBlock, status, actions)
 	if !compact {
 		return lg.NewStyle().MarginBottom(1).Render(block)
 	}
@@ -309,22 +309,22 @@ func (m *model) renderActionBar() string {
 	}
 	if len(opts) == 0 {
 		if m.handComplete || m.Base.Phase == game.Finished {
-			return m.Global.Theme.Muted.Render("esc -> lobby")
+			return m.Global.Palette().Muted.Render("esc -> lobby")
 		}
-		return m.Global.Theme.Muted.Render("waiting…")
+		return m.Global.Palette().Muted.Render("waiting…")
 	}
-	return m.Global.Theme.Accented.Render(strings.Join(opts, " | "))
+	return m.Global.Palette().Accented.Render(strings.Join(opts, " | "))
 }
 
 // renderRaisePrompt shows the raise being built: the running total, the chips that
 // can be pushed onto it, and how far it can still go.
 func (m *model) renderRaisePrompt() string {
-	total := m.Global.Theme.Accented.Render(fmt.Sprintf("RAISE TO %d", m.raiseAmount))
-	bounds := m.Global.Theme.Muted.Render(fmt.Sprintf("(min %d, max %d)", m.raiseMin, m.raiseMax))
-	keys := m.Global.Theme.Dim.Render("[/]: fine | enter: confirm | esc: cancel")
+	total := m.Global.Palette().Accented.Render(fmt.Sprintf("RAISE TO %d", m.raiseAmount))
+	bounds := m.Global.Palette().Muted.Render(fmt.Sprintf("(min %d, max %d)", m.raiseMin, m.raiseMax))
+	keys := m.Global.Palette().Dim.Render("[/]: fine | enter: confirm | esc: cancel")
 	return styles.JoinVertical(lg.Center,
 		styles.JoinHorizontal(lg.Center, total, "  ", bounds),
-		renderChipRack(m.Global.Theme),
+		renderChipRack(m.Global.Palette()),
 		keys,
 	)
 }

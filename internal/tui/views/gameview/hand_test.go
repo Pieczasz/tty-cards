@@ -286,7 +286,7 @@ func TestRenderBands_KeepsTheKeyLineAtEverySize(t *testing.T) {
 
 func BenchmarkRenderBands(b *testing.B) {
 	g := testContext(120, 50)
-	theme := g.Theme
+	theme := g.Palette()
 	hand := RenderHand(theme, testHand(13), 4, nil, HandWidth(120), 0)
 	top := strings.Repeat("seat  ", 4)
 	mid := strings.Repeat("table\n", 10)

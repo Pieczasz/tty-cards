@@ -22,6 +22,8 @@ type table struct {
 	cumulativeScores map[string]int
 	matchComplete    bool
 	lastHandResult   *logic.HandResult
+	// leavers are who left, by name, for an interrupted match's end screen.
+	leavers []string
 }
 
 // model is the Gin Rummy view of one seat at the table.
@@ -49,15 +51,18 @@ func (m *model) syncState() {
 // readTable copies one frame of the table out of the live state, the scores and the
 // last hand's result cloned. Caller holds the engine lock.
 func readTable(state *game.State) table {
+	t := table{leavers: make([]string, 0, len(state.LeftPlayers))}
+	for _, p := range state.LeftPlayers {
+		t.leavers = append(t.leavers, p.Name)
+	}
 	s, ok := state.Extra.(*logic.State)
 	if !ok {
-		return table{}
+		return t
 	}
-	return table{
-		phase:            s.Phase,
-		handNumber:       s.HandNumber,
-		cumulativeScores: maps.Clone(s.CumulativeScores),
-		matchComplete:    s.MatchComplete,
-		lastHandResult:   s.LastHandResult.Clone(),
-	}
+	t.phase = s.Phase
+	t.handNumber = s.HandNumber
+	t.cumulativeScores = maps.Clone(s.CumulativeScores)
+	t.matchComplete = s.MatchComplete
+	t.lastHandResult = s.LastHandResult.Clone()
+	return t
 }

@@ -60,6 +60,7 @@ type Session struct {
 // before it reached the view. The error is for display, not a failure: an unsubscribed
 // view still renders, it just never updates, so it tells the player to rejoin.
 func NewSession(global router.GlobalContext, table *game.BoundEngine, slug string) (Session, error) {
+	global.EnsureTheme()
 	s := Session{Global: global, Bound: table, slug: slug}
 	if s.Bound == nil {
 		return s, nil
@@ -253,8 +254,8 @@ func (s *Session) IdleExempt() bool {
 var _ router.IdleExempt = (*Session)(nil)
 
 // HandleLeaveKey owns the keys that leave a table, and a view calls it before its own
-// bindings - after closing any prompt of its own on esc (decision D-8). Mid-game one
-// esc used to forfeit, a ranked loss on a stray key, so while playing esc only arms a
+// bindings - after closing any prompt of its own on esc. Mid-game one esc used to
+// forfeit, a ranked loss on a stray key, so until the game is over esc only arms a
 // confirmation: y then leaves, and any other key disarms and is swallowed rather than
 // also playing a card. Once the game is over esc and enter leave at once. It reports
 // whether the key was consumed.
@@ -266,10 +267,10 @@ func (s *Session) HandleLeaveKey(key string) (tea.Cmd, bool) {
 		return s.Leave(), true
 	case armed:
 		return nil, true
-	case key == "esc" && s.Base.Phase == game.Playing:
+	case key == "esc" && s.Base.Phase != game.Finished:
 		s.confirmLeave = true
 		return nil, true
-	case key == "esc", key == "enter" && s.Base.Phase == game.Finished:
+	case (key == "esc" || key == "enter") && s.Base.Phase == game.Finished:
 		return s.Leave(), true
 	}
 	return nil, false
@@ -278,7 +279,7 @@ func (s *Session) HandleLeaveKey(key string) (tea.Cmd, bool) {
 // confirmingLeave drops a prompt the game outlived: a finished table has nothing left
 // to forfeit.
 func (s *Session) confirmingLeave() bool {
-	return s.confirmLeave && s.Base.Phase == game.Playing
+	return s.confirmLeave && s.Base.Phase != game.Finished
 }
 
 // LeaveConfirmScreen is the forfeit prompt while it is armed; a view returns it from
@@ -289,7 +290,7 @@ func (s *Session) LeaveConfirmScreen() (string, bool) {
 	if !s.confirmingLeave() {
 		return "", false
 	}
-	t := s.Global.Theme
+	t := s.Global.Palette()
 	return renderGameNotice(s.Global, styles.JoinVertical(lg.Center,
 		t.ErrorText.Render("Leave and forfeit this game?"),
 		"",

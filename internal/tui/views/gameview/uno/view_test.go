@@ -114,7 +114,7 @@ func TestRenderHandColorRow_LinesUpWithTheHandBelowIt(t *testing.T) {
 
 					handWidth, handRows := gameview.HandWidth(width), gameview.HandRows(height)
 					row := m.renderHandColorRow(handWidth, handRows)
-					hand := gameview.RenderHand(m.Global.Theme, m.Base.Hand, m.Selected, nil, handWidth, handRows)
+					hand := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, m.Selected, nil, handWidth, handRows)
 
 					if !gameview.FansHand(handSize, handWidth, handRows) {
 						assert.Empty(t, row, "the strip has no card columns for the row to sit over")
@@ -141,7 +141,7 @@ func TestRenderHandColorRow_DropsTheSelectionBehindThePicker(t *testing.T) {
 
 	m.Picker.Open = true
 	withPicker := m.renderHandColorRow(handWidth, handRows)
-	unselected := gameview.RenderHand(m.Global.Theme, m.Base.Hand, -1, nil, handWidth, handRows)
+	unselected := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, -1, nil, handWidth, handRows)
 
 	assert.Equal(t, lg.Width(unselected), lg.Width(withPicker),
 		"with nothing selected the row has to match the unselected fan's slots")
@@ -214,10 +214,10 @@ func TestRenderColorPicker_OffersEveryColour(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 50, "bob")
-	assert.Empty(t, m.Picker.Render(m.Global.Theme), "closed, the picker draws nothing")
+	assert.Empty(t, m.Picker.Render(m.Global.Palette()), "closed, the picker draws nothing")
 
 	m.Picker.Open = true
-	out := m.Picker.Render(m.Global.Theme)
+	out := m.Picker.Render(m.Global.Palette())
 	for _, c := range colorPicker.Choices {
 		assert.Contains(t, out, c.Label)
 	}

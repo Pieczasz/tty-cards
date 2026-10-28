@@ -3,6 +3,7 @@ package gameview
 import (
 	"strings"
 
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
@@ -47,9 +48,21 @@ func InterruptedTitle(leavers []string) string {
 	return "MATCH ENDED EARLY - " + strings.Join(leavers, ", ") + " left the table"
 }
 
+// ApplyMatchEnd sets the headline once the match is over. An interrupted match
+// wins over a winner: the seats that stayed are not a result. A hand still inside
+// the match keeps the title and hint the caller set.
+func (h *HandOver) ApplyMatchEnd(reason game.EndReason, matchOver bool, phase game.Phase, winner string, leavers []string) {
+	switch {
+	case reason == game.EndReasonInterrupted:
+		h.Title, h.Hint = InterruptedTitle(leavers), LobbyHint
+	case matchOver || phase == game.Finished:
+		h.Title, h.Hint = MatchOverTitle(winner), LobbyHint
+	}
+}
+
 // RenderHandOver draws h centred on the whole screen and clamped to it.
 func RenderHandOver(g router.GlobalContext, h HandOver) string {
-	t := g.Theme
+	t := g.Palette()
 	parts := []string{t.Accented.Bold(true).Render(h.Title)}
 	if h.Subtitle != "" {
 		parts = append(parts, t.Accented.Render(h.Subtitle))

@@ -161,11 +161,11 @@ func TestRenderSuitPicker_OffersEverySuit(t *testing.T) {
 	t.Parallel()
 
 	m := viewAt(100, 40, "bob")
-	assert.Empty(t, m.Picker.Render(m.Global.Theme), "closed, the picker draws nothing")
+	assert.Empty(t, m.Picker.Render(m.Global.Palette()), "closed, the picker draws nothing")
 
 	m.Picker.Open = true
 	m.Picker.Cursor = 2
-	out := m.Picker.Render(m.Global.Theme)
+	out := m.Picker.Render(m.Global.Palette())
 	for _, c := range suitPicker.Choices {
 		assert.Contains(t, out, c.Label)
 	}

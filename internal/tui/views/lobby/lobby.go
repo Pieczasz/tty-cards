@@ -52,6 +52,7 @@ func listenToLobbyBroadcaster(ch <-chan lobby.Event) tea.Cmd {
 // New is the waiting room for activeLobby, subscribed to its feed. A nil lobby is a
 // view that goes straight home.
 func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
+	global.EnsureTheme()
 	m := &model{global: global, currentLobby: activeLobby}
 	if activeLobby == nil {
 		return m
@@ -266,7 +267,7 @@ func (m *model) View() tea.View {
 	actions := []string{"x - Leave Lobby", "r - Ready"}
 	return tea.NewView(views.RenderSeatedScreen(m.global, "Lobby", actions, func(height int) string {
 		if m.showLeaveConfirm {
-			redYes := m.global.Theme.ErrorText.Bold(true).Render("Yes")
+			redYes := m.global.Palette().ErrorText.Bold(true).Render("Yes")
 			return fmt.Sprintf("Are you sure you want to leave the lobby?\n\n[y] %s   [n] No", redYes)
 		}
 
@@ -277,7 +278,7 @@ func (m *model) View() tea.View {
 		}
 		// Wrapped before it is measured: on a narrow terminal the message is two rows,
 		// and a budget that assumed one puts the form back over the frame.
-		errText := m.global.Theme.ErrorText.Width(innerWidth).Render(m.actionErr.Error())
+		errText := m.global.Palette().ErrorText.Width(innerWidth).Render(m.actionErr.Error())
 		form := m.renderForm(isLeader, innerWidth, height-lg.Height(errText)-1)
 		return styles.JoinVertical(lg.Center, form, "", errText)
 	}))
@@ -337,7 +338,7 @@ func capRoster(rows []string, maxRows int) []string {
 }
 
 func (m *model) renderSettings(isLeader bool) string {
-	t := m.global.Theme
+	t := m.global.Palette()
 	on := func(row int) bool { return isLeader && m.cursor == row }
 	return styles.JoinVertical(lg.Left,
 		"  "+t.SectionHeading.Render("Settings"),
@@ -354,11 +355,11 @@ func (m *model) renderSettings(isLeader bool) string {
 func (m *model) renderPlayerList(isLeader bool) []string {
 	guests := m.snap.Guests
 	rows := make([]string, 0, 2+len(guests))
-	rows = append(rows, "  "+m.global.Theme.SectionHeading.Render("Players"))
+	rows = append(rows, "  "+m.global.Palette().SectionHeading.Render("Players"))
 
 	leader := m.snap.Leader
 	rows = append(rows, fmt.Sprintf("  %s %s (Elo: %d)%s",
-		m.global.Theme.HostTag.Render("[Leader]"), leader.Player.DisplayName(), leader.Elo, m.readyMark(leader)))
+		m.global.Palette().HostTag.Render("[Leader]"), leader.Player.DisplayName(), leader.Elo, m.readyMark(leader)))
 
 	for i, g := range guests {
 		cursor := "  "
@@ -367,9 +368,9 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 			cursor = "> "
 		}
 		row := fmt.Sprintf("%s%s %s (Elo: %d)%s",
-			cursor, m.global.Theme.GuestTag.Render("[Guest] "), g.Player.DisplayName(), g.Elo, m.readyMark(g))
+			cursor, m.global.Palette().GuestTag.Render("[Guest] "), g.Player.DisplayName(), g.Elo, m.readyMark(g))
 		if isSelected {
-			row = m.global.Theme.PlayerItemSelected.Render(row)
+			row = m.global.Palette().PlayerItemSelected.Render(row)
 		}
 		rows = append(rows, row)
 	}
@@ -380,7 +381,7 @@ func (m *model) readyMark(seat lobby.SeatView) string {
 	if !seat.Ready {
 		return ""
 	}
-	return m.global.Theme.SuccessText.Render(" - Ready")
+	return m.global.Palette().SuccessText.Render(" - Ready")
 }
 
 // Close releases the lobby subscription when the router replaces this view or the

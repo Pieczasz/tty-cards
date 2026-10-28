@@ -130,7 +130,7 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 	}
 }
 
-func testTheme() styles.Theme {
+func testTheme() *styles.Theme {
 	return styles.NewTheme(true)
 }
 

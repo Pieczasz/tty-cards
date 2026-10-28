@@ -388,6 +388,20 @@ func TestSession_HandleLeaveKey(t *testing.T) {
 		}
 	})
 
+	t.Run("esc while waiting asks and does not leave", func(t *testing.T) {
+		t.Parallel()
+		manager, alice, s := seatedSession(t)
+		s.Base.Phase = game.Waiting
+
+		cmd, handled := s.HandleLeaveKey("esc")
+
+		assert.True(t, handled)
+		assert.Nil(t, cmd, "waiting is not a finished game; esc must not leave")
+		assert.NotNil(t, manager.FindLobbyByPlayer(alice))
+		_, showing := s.LeaveConfirmScreen()
+		assert.True(t, showing)
+	})
+
 	t.Run("once finished esc and enter leave at once", func(t *testing.T) {
 		t.Parallel()
 		for _, key := range []string{"esc", "enter"} {

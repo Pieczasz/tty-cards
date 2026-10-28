@@ -30,7 +30,7 @@ var chipDenoms = []struct {
 // renderChipStack draws amount as coloured chips, largest denomination first.
 // Change below the smallest chip is left out: the exact number is always printed
 // next to the stack anyway.
-func renderChipStack(t styles.Theme, amount uint) string {
+func renderChipStack(t *styles.Theme, amount uint) string {
 	parts := make([]string, 0, len(chipDenoms))
 	for i, d := range chipDenoms {
 		count := amount / d.Value
@@ -45,7 +45,7 @@ func renderChipStack(t styles.Theme, amount uint) string {
 
 // renderChipRack is the raise prompt's keypad: which key pushes which chip. It
 // doubles as the legend for the shapes drawn beside each seat.
-func renderChipRack(t styles.Theme) string {
+func renderChipRack(t *styles.Theme) string {
 	parts := make([]string, 0, len(chipDenoms))
 	for i, d := range chipDenoms {
 		parts = append(parts, fmt.Sprintf("%s %s",
@@ -56,7 +56,7 @@ func renderChipRack(t styles.Theme) string {
 	return strings.Join(parts, "  ")
 }
 
-func chipStyle(t styles.Theme, denomIndex int) lg.Style {
+func chipStyle(t *styles.Theme, denomIndex int) lg.Style {
 	return lg.NewStyle().Foreground(t.Chips[denomIndex])
 }
 

@@ -86,6 +86,7 @@ type model struct {
 
 // New builds the profile screen with one game filter per game on offer.
 func New(global router.GlobalContext) tea.Model {
+	global.EnsureTheme()
 	// The first is "All": no slug, so it matches every match.
 	gameFilters := append([]game.Module{{Name: filterAllGames}}, global.Games...)
 	return &model{
@@ -194,12 +195,12 @@ func (m *model) renderContent(contentHeight int) string {
 	stacked, rankItems, histItems := tableBudget(styles.InnerWidth(m.global.Width), contentHeight)
 
 	userInfo := "Profile for: " + m.userProfile.Username
-	filters := m.global.Theme.Muted.Render(fmt.Sprintf("Game: %s  Result: %s",
+	filters := m.global.Palette().Muted.Render(fmt.Sprintf("Game: %s  Result: %s",
 		styles.PadTruncate(m.gameFilters[m.gameFilterIdx].Name, colGame),
 		styles.PadTruncate(m.resultFilters[m.resultIdx], len(filterLosses)),
 	))
 	if m.notice != "" {
-		filters = m.global.Theme.ErrorText.Render(m.notice)
+		filters = m.global.Palette().ErrorText.Render(m.notice)
 	}
 
 	// At the declared 64x20 minimum the title and footer leave six lines, fewer than
@@ -272,7 +273,7 @@ func limitRows(n, maxItems int) (show int, more bool) {
 }
 
 func (m *model) rankingRows(maxItems int) []string {
-	rows := []string{rankingsTable.Header(m.global.Theme)}
+	rows := []string{rankingsTable.Header(m.global.Palette())}
 	if len(m.userProfile.Rankings) == 0 {
 		return append(rows, styles.PadTruncate("No games yet.", rankingsTable.Width()))
 	}
@@ -311,9 +312,9 @@ func (m *model) filteredHistory() []db.MatchParticipant {
 }
 
 func (m *model) historyRows(maxItems int) []string {
-	rows := []string{historyTable.Header(m.global.Theme)}
+	rows := []string{historyTable.Header(m.global.Palette())}
 	if m.historyErr != nil {
-		return append(rows, m.global.Theme.ErrorText.Render("Unable to load match history."))
+		return append(rows, m.global.Palette().ErrorText.Render("Unable to load match history."))
 	}
 	filtered := m.filteredHistory()
 	if len(filtered) == 0 {
@@ -441,7 +442,7 @@ func (m *model) renderConfirm() string {
 	anonymised := db.AnonymisedUsername(m.global.User.ID)
 	prompt := "> " + styles.PadTruncate(m.typed, deleteTypedMax)
 	lines := []string{
-		m.global.Theme.ErrorText.Render("Delete your account permanently?"),
+		m.global.Palette().ErrorText.Render("Delete your account permanently?"),
 		"",
 		"- SSH keys removed; a new login is a new account",
 		"- ratings removed from every leaderboard",
@@ -454,7 +455,7 @@ func (m *model) renderConfirm() string {
 		prompt,
 	}
 	if m.notice != "" {
-		lines = append(lines, m.global.Theme.ErrorText.Render(m.notice))
+		lines = append(lines, m.global.Palette().ErrorText.Render(m.notice))
 	}
 	return styles.JoinVertical(lg.Left, lines...)
 }
