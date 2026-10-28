@@ -15,7 +15,6 @@ import (
 
 const (
 	keyHintsPlay = components.HintMove + " | enter: play | " + components.HintLeave
-	//nolint:gosec // G101: "Pass" is the card pass, not a credential
 	keyHintsPass = components.HintMove + " | space: toggle | enter: pass 3 | " + components.HintLeave
 )
 
