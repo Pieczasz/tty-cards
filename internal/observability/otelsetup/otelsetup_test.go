@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	collogpb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	colmetricpb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -99,7 +98,7 @@ func startCollector(t *testing.T, stallTraces time.Duration) *collector {
 func emitOneOfEach(ctx context.Context) {
 	var record otellog.Record
 	record.SetBody(attribute.StringValue("hello from test"))
-	global.Logger("test-logger").Emit(ctx, record)
+	otel.Logger("test-logger").Emit(ctx, record)
 
 	_, span := otel.Tracer("test-tracer").Start(ctx, "test-span")
 	span.End()
@@ -129,7 +128,7 @@ func resourceAttrs(attrs []*commonpb.KeyValue) map[string]string {
 }
 
 // Setup installs process-global providers (otel.SetTracerProvider,
-// global.SetLoggerProvider), so this test cannot share the process with a parallel
+// otel.SetLoggerProvider), so this test cannot share the process with a parallel
 // one that also reads or writes them.
 //
 //nolint:paralleltest // mutates process-global OTel providers
