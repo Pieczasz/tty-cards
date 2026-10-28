@@ -3,6 +3,7 @@ package ssh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
@@ -90,6 +91,10 @@ func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 		{
 			name: "the caller's own key", cause: db.ErrKeyAlreadyRegistered,
 			want: db.ErrKeyAlreadyRegistered, wantText: "public key already registered",
+		},
+		{
+			name: "a name the repository refuses", cause: fmt.Errorf("%w: too long", db.ErrInvalidUsername),
+			want: db.ErrInvalidUsername, wantText: "too long",
 		},
 		{
 			name: "anything else", cause: errors.New("disk on fire"),

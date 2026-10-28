@@ -94,16 +94,23 @@ func LoadOrRegisterUser(
 		if refund != nil {
 			refund()
 		}
-		// A taken name or a key registered by a racing connection is the player's
-		// situation, not a server failure.
+		// A taken name, a rejected name or a key registered by a racing connection is the
+		// player's situation, not a server failure.
 		level := slog.LevelError
-		if errors.Is(err, db.ErrUsernameTaken) || errors.Is(err, db.ErrKeyAlreadyRegistered) {
+		if isPlayerRegisterError(err) {
 			level = slog.LevelInfo
 		}
 		slog.Log(ctx, level, "failed to register new user", "error", err)
 		return nil, mapRegisterError(err)
 	}
 	return user, nil
+}
+
+// isPlayerRegisterError is a registration failure that is the player's situation, not
+// the server's: the name or the key is the problem.
+func isPlayerRegisterError(err error) bool {
+	return errors.Is(err, db.ErrUsernameTaken) || errors.Is(err, db.ErrKeyAlreadyRegistered) ||
+		errors.Is(err, db.ErrInvalidUsername)
 }
 
 func mapRegisterError(err error) error {
@@ -113,6 +120,10 @@ func mapRegisterError(err error) error {
 	case errors.Is(err, db.ErrKeyAlreadyRegistered):
 		// Not an oracle: the key is the caller's own, so this tells them nothing they
 		// could not find out by connecting again.
+		return err
+	case errors.Is(err, db.ErrInvalidUsername):
+		// The repository checks the same rule as the pre-check above; if the two ever
+		// disagree the player still needs the reason, not "registration failed".
 		return err
 	default:
 		return errRegistrationFailed
