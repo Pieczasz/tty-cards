@@ -56,7 +56,7 @@ services:
         mv /tls/server.key.tmp /tls/server.key
 
   migrate:
-    image: migrate/migrate:v4.18.3@sha256:39b59b389634e43bb3f2d4e94bc1edef0775ec2a9a3540ce6a2cf330e5daae55
+    image: migrate/migrate:v4.20.1@sha256:76cc2074cb6642631f34a898ced71e6aeaa6b1a4d78c4daa743275a22e0c5be7
     <<: *defaults
     mem_limit: 128m
     cpus: 0.5
