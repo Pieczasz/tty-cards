@@ -1212,8 +1212,8 @@ func TestSettleAndAdvance_ClearsAnAllInLeaverBet(t *testing.T) {
 			}
 		}
 		require.NotEmpty(t, other)
-		cap := largestCallableBet(s, extra, actor)
-		assert.Equal(t, extra.Seats[other].Chips, cap,
+		callable := largestCallableBet(s, extra, actor)
+		assert.Equal(t, extra.Seats[other].Chips, callable,
 			"callable cap is the live opponent's stack, not a stale leaver bet")
 		assert.Equal(t, ActionCheck{}, (&Rules{}).TimeoutAction(s),
 			"a free check must not become a fold because of a leaver's stale bet")

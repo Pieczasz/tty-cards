@@ -337,7 +337,10 @@ func (q *UserRepository) UpdateUserActivity(
 		}
 		return nil
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("update user activity: %w", err)
+	}
+	return nil
 }
 
 // UserMatchHistory is the player's newest limit matches, newest first.

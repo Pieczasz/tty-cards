@@ -50,4 +50,3 @@ func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	}
 	assert.Equal(t, slugs, got, "the lobby menu keeps catalog order")
 }
-
