@@ -692,6 +692,20 @@ func TestRenderForm_StacksWhenTheColumnsDoNotFit(t *testing.T) {
 	assert.LessOrEqual(t, lg.Width(narrow), lg.Width(wide), "and never gets wider for it")
 }
 
+func TestLobbyView_IdleExemptWhileTheTableIsFilling(t *testing.T) {
+	t.Parallel()
+	alone, _ := leaderView(t)
+	t.Cleanup(alone.Close)
+	assert.False(t, alone.IdleExempt(), "a solo host still times out")
+
+	filling, l := leaderView(t)
+	t.Cleanup(filling.Close)
+	addGuest(t, filling, l, 2, "guest")
+	assert.True(t, filling.IdleExempt(), "watching a filling roster is not idle")
+
+	assert.False(t, (&model{}).IdleExempt(), "no lobby is a menu")
+}
+
 // The lobby is a full-screen view, so it has to fit every size the app claims to
 // support, with the roster full rather than the one-player case that always fits.
 func TestLobbyView_FitsTheTerminal(t *testing.T) {
