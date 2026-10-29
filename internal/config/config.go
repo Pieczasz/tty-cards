@@ -85,9 +85,6 @@ func Load() (*Config, error) {
 	}
 
 	r := &envReader{}
-	r.removed("RATE_LIMIT_WINDOW_MS", "renamed RATE_LIMIT_WINDOW, a duration such as 1s")
-	r.removed("ALLOW_INSECURE_DB", "removed: plaintext database connections are only accepted with ENV=development")
-	r.removed("OTEL_EXPORTER_OTLP_INSECURE", "removed: the endpoint URL's scheme decides, http:// is plaintext and https:// is TLS")
 	cfg := &Config{
 		Env:            environment,
 		ServerHost:     getEnv("SERVER_HOST", "0.0.0.0"),

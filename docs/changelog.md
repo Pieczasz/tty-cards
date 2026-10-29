@@ -60,12 +60,10 @@ unnoticed for so long.
 ### Changed - identity
 
 - **Account ids are UUIDv7.** Postgres 18 generates them with `uuidv7()`; the
-  Go side uses the stdlib `uuid` package. Recreate the Postgres volume: 16->18
-  is a major upgrade, and the rewritten `000001` will checksum-fail otherwise.
+  Go side uses the stdlib `uuid` package. Recreate the Postgres volume after a
+  schema rewrite: golang-migrate will checksum-fail otherwise.
 - **Usernames are unique regardless of case.** Once `Alice` exists, `alice` is
-  taken; your name keeps the case you chose. Migration `000006` refuses to run,
-  and names the accounts, if an existing database already holds two names that
-  differ only by case - pick which one keeps it and rename the other first.
+  taken; your name keeps the case you chose (`idx_users_username_lower`).
 - **Registration tells you why a name is invalid** (too long, a character that
   is not allowed) instead of a generic refusal, and checking it no longer spends
   one of your network's new-account slots. A *taken* name still gets the same
@@ -125,10 +123,9 @@ unnoticed for so long.
   match that was finishing while it was deleted, and not from a leaderboard read
   that started just before.
 - A game's identity in the database is now its slug, not its display name, so a
-  game can be renamed without orphaning every rating attached to it
-  (migration `000005`). Migration `000004` makes several columns `NOT NULL` that
-  could previously read back as a silent zero - an unrated player at 0 Elo, a
-  match attached to game 0.
+  game can be renamed without orphaning every rating attached to it. Scalar
+  columns that used to scan a SQL NULL into a silent Go zero (Elo 0, game 0)
+  are `NOT NULL`.
 
 ### Changed - sessions and security
 
@@ -196,15 +193,14 @@ unnoticed for so long.
   lower-case spelling of their own (`crazy eights`), so every game was split
   across two series. **Update any dashboard, recording rule or alert that
   matches on a `game_type` value.**
-- **`RATE_LIMIT_WINDOW_MS` is now `RATE_LIMIT_WINDOW`**, a Go duration (`1s`,
-  `500ms`; default `1s`) like `REGISTRATION_WINDOW`. The old name fails the boot
-  and says what to use instead, rather than being dropped for the default
-  without a word.
-- **Boolean variables are parsed strictly.** `PROXY_PROTOCOL`, `API_TRUST_PROXY`,
-  `ALLOW_INSECURE_DB` and `OTEL_EXPORTER_OTLP_INSECURE` take `true`/`false`,
-  `1`/`0` or `t`/`f`; anything else fails the boot. `PROXY_PROTOCOL=off` used to
-  be read as something, and `yes` meant false for some variables and true for
-  others: write `false`.
+- **`RATE_LIMIT_WINDOW`** is a Go duration (`1s`, `500ms`; default `1s`) like
+  `REGISTRATION_WINDOW`.
+- **Boolean variables are parsed strictly.** `PROXY_PROTOCOL` and
+  `API_TRUST_PROXY` take `true`/`false`, `1`/`0` or `t`/`f`; anything else fails
+  the boot. `PROXY_PROTOCOL=off` used to be read as something, and `yes` meant
+  false for some variables and true for others: write `false`. OTel plaintext is
+  decided by the endpoint URL scheme (`http://` vs `https://`); database
+  plaintext is accepted only with `ENV=development`.
 - **Every invalid variable is reported at once**, not just the first, and a boot
   failure is printed once instead of twice.
 - **The stats API refuses to start with a missing dependency** instead of
@@ -293,9 +289,9 @@ unnoticed for so long.
 - A bug in a game's rules on a player's own move now ends that one table as an
   unrated match, as it already did on the turn timer, rather than leaving it
   running on half-applied state.
-- Migration `000007` indexes the day's ranked matches, so the anti-farm check no
-  longer reads a veteran's whole history on every ranked result. Migration
-  `000005`'s down is marked lossy: take a backup before rolling back past it.
+- `idx_matches_ranked_created` indexes the day's ranked matches, so the
+  anti-farm check no longer reads a veteran's whole history on every ranked
+  result.
 - The `lobby.SessionAPI` interface is gone; views take the manager directly. It
   had one implementation and one consumer.
 - **Registering a game twice, or a half-declared one, panics at boot**

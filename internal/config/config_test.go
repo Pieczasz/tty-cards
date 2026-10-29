@@ -35,7 +35,6 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("DB_NAME", "")
 	t.Setenv("SSH_KEY_PATH", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "")
 	t.Setenv("SERVICE_VERSION", "")
 
 	cfg, err := config.Load()
@@ -280,35 +279,6 @@ func TestLoad_OTelEndpointIsAURL(t *testing.T) {
 	}
 }
 
-func TestLoad_OTelInsecureFailsTheBoot(t *testing.T) {
-	t.Setenv("ENV", "development")
-	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "true")
-
-	_, err := config.Load()
-	require.ErrorContains(t, err, "invalid OTEL_EXPORTER_OTLP_INSECURE")
-	require.ErrorContains(t, err, "http:// is plaintext")
-}
-
-// ALLOW_INSECURE_DB used to let a plaintext database through outside development.
-// It is gone, and a deployment still setting it has to hear so rather than quietly
-// switching to TLS, whatever the environment and whatever the value.
-func TestLoad_AllowInsecureDBFailsTheBoot(t *testing.T) {
-	for _, env := range []string{"development", "staging", "production"} {
-		for _, value := range []string{"true", "false"} {
-			t.Run(env+"="+value, func(t *testing.T) {
-				t.Setenv("ENV", env)
-				t.Setenv("DB_PASSWORD", "secret")
-				t.Setenv("DB_SSLMODE", "require")
-				t.Setenv("ALLOW_INSECURE_DB", value)
-
-				_, err := config.Load()
-				require.ErrorContains(t, err, "invalid ALLOW_INSECURE_DB")
-				require.ErrorContains(t, err, "only accepted with ENV=development")
-			})
-		}
-	}
-}
-
 // Every bad variable is reported at once, so a broken .env is fixed in one pass.
 func TestLoad_ReportsEveryInvalidVariable(t *testing.T) {
 	t.Setenv("ENV", "development")
@@ -441,7 +411,6 @@ func TestValidate_OnlyDevelopmentMayUsePlaintext(t *testing.T) {
 			require.ErrorContains(t, err, "DB_SSLMODE="+tt.mode)
 			require.ErrorContains(t, err, "ENV="+tt.env)
 			require.ErrorContains(t, err, "require, verify-ca or verify-full")
-			assert.NotContains(t, err.Error(), "ALLOW_INSECURE_DB", "the escape hatch is gone")
 		})
 	}
 }
@@ -487,9 +456,7 @@ func TestLoad_RegistrationBudget(t *testing.T) {
 	})
 }
 
-// RATE_LIMIT_WINDOW is a Go duration, like REGISTRATION_WINDOW, and replaced the
-// millisecond RATE_LIMIT_WINDOW_MS. The old name has to fail the boot: silently
-// ignored, an operator's tuned window would fall back to the default.
+// RATE_LIMIT_WINDOW is a Go duration, like REGISTRATION_WINDOW.
 func TestLoad_RateLimitWindow(t *testing.T) {
 	t.Run("a duration", func(t *testing.T) {
 		t.Setenv("ENV", "development")
@@ -505,13 +472,6 @@ func TestLoad_RateLimitWindow(t *testing.T) {
 
 		_, err := config.Load()
 		require.ErrorContains(t, err, "RATE_LIMIT_WINDOW")
-	})
-	t.Run("the old millisecond name fails the boot", func(t *testing.T) {
-		t.Setenv("ENV", "development")
-		t.Setenv("RATE_LIMIT_WINDOW_MS", "1000")
-
-		_, err := config.Load()
-		require.ErrorContains(t, err, "renamed RATE_LIMIT_WINDOW")
 	})
 }
 

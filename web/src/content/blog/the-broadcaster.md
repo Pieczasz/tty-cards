@@ -91,12 +91,13 @@ The caller has to look. The lobby view puts the error on screen
 (`internal/tui/views/lobby/lobby.go`), which is how you find out that the capacity is
 too low instead of wondering why the roster stopped updating.
 
-## Capacity is `len(players) + 8`
+## Capacity is `2*len(players) + 8`
 
-Engines size their broadcaster at the player count plus eight
-(`internal/game/engine.go`). The eight is for non-player subscribers - the lobby's
-watcher goroutine that waits for the game to end so it can write the ranked result -
-plus a little room for a reconnect that overlaps the old session's teardown.
+Engines size their broadcaster at two feeds per seat plus eight
+(`internal/game/engine.go`). One feed is the live seat; the second covers a reconnect
+that still overlaps the old session's teardown. The eight is for non-player
+subscribers - the lobby's watcher goroutine that waits for the game to end so it can
+write the ranked result - plus a little spare.
 
 Get that number wrong and a real player is the one who gets refused, which is the worst
 possible thing to run out of.

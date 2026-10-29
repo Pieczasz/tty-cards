@@ -177,7 +177,7 @@ func TestBoundEngine_SubscribeReportsCapacity(t *testing.T) {
 	t.Cleanup(engine.Close)
 	bound := Bind(engine, "1")
 
-	for range 2 + 8 {
+	for range 2*2 + 8 {
 		_, err := bound.Subscribe()
 		require.NoError(t, err)
 	}

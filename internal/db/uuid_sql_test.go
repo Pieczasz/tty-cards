@@ -39,7 +39,7 @@ func TestUUIDSerializer_NilPointerIsNull(t *testing.T) {
 }
 
 // Decision #30: nothing calls AutoMigrate, so a default: tag enforces nothing and reads
-// like it does. The users.id default lives in 000001; BeforeCreate is the Go side.
+// like it does. The users.id default lives in the SQL schema; BeforeCreate is the Go side.
 func TestModelsCarryNoDefaultTags(t *testing.T) {
 	t.Parallel()
 	for _, model := range []any{&User{}, &PublicSSHKey{}, &Game{}, &Ranking{}, &Match{}, &MatchParticipant{}} {

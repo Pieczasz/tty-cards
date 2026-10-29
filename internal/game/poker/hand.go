@@ -2,6 +2,7 @@ package poker
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -150,7 +151,9 @@ func firstToActPreflop(state *game.State, extra *State, headsUp bool) int {
 // recordBustouts stamps the hand each newly broke player went out on, so final
 // standings can order them by how long they lasted.
 func recordBustouts(state *game.State, extra *State) {
-	for _, p := range state.Players {
+	// LeftPlayers too: an all-in leaver who then loses still needs a bust hand for
+	// standings order among leavers.
+	for _, p := range slices.Concat(state.Players, state.LeftPlayers) {
 		if seat := extra.Seats[p.ID]; seat.Chips == 0 && seat.BustedAtHand == 0 {
 			seat.BustedAtHand = extra.HandNumber
 		}

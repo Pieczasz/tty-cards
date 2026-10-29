@@ -31,6 +31,13 @@ func (r *Rules) AfterPlayerRemoved(state *game.State, removedIndex int) game.Lea
 	extra := extraOf(state)
 	n := len(state.Players)
 	if n == 0 {
+		// All-in leavers still contest the pot; settle them before the engine
+		// abandons an empty table, or their chips stay in Pool forever.
+		if len(contenders(state, extra)) > 0 && !extra.HandComplete() {
+			if err := resolveAfterChange(state, extra, 0); err != nil {
+				panic(err)
+			}
+		}
 		return game.LeaveSettled
 	}
 	extra.DealerIndex = adjustSeatIndex(extra.DealerIndex, removedIndex, n)

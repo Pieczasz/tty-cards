@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -299,22 +301,44 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 // UpdateUserActivity stamps both last-seen fields; the caller decides whether a stale
 // timestamp matters. Updating by id, not the preloaded structs: those carry rankings
 // and the user association, and GORM's save hooks would rewrite every one of them.
+//
+// It takes the same seat advisory lock as DeleteAccount and skips the stamp once the
+// username is already anonymised, so a displacing login during erasure cannot
+// deadlock on users/public_keys order or restore last_seen_at after GDPR null-out.
 func (q *UserRepository) UpdateUserActivity(
 	ctx context.Context, userID uuid.UUID, keyID uint,
 ) (err error) {
 	ctx, span := tracer.Start(ctx, "db.UpdateUserActivity")
 	defer func() { recordSpanResult(span, err); span.End() }()
 
-	if err = q.db.WithContext(ctx).Model(&db.User{}).Where("id = ?", userID).
-		Update("LastSeenAt", time.Now()).Error; err != nil {
-		return fmt.Errorf("update last seen: %w", err)
-	}
-	if keyID == 0 {
+	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockSeat(tx, userID); err != nil {
+			return err
+		}
+		var user db.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "username").Where("id = ?", userID).Take(&user).Error; err != nil {
+			return fmt.Errorf("lock user for activity: %w", err)
+		}
+		if strings.HasPrefix(strings.ToLower(user.Username), db.AnonymisedPrefix) {
+			return nil
+		}
+		now := time.Now()
+		if err := tx.Model(&db.User{}).Where("id = ?", userID).
+			Update("LastSeenAt", now).Error; err != nil {
+			return fmt.Errorf("update last seen: %w", err)
+		}
+		if keyID == 0 {
+			return nil
+		}
+		if err := tx.Model(&db.PublicSSHKey{}).Where("id = ?", keyID).
+			Update("LastUsedAt", now).Error; err != nil {
+			return fmt.Errorf("update key last used: %w", err)
+		}
 		return nil
-	}
-	if err = q.db.WithContext(ctx).Model(&db.PublicSSHKey{}).Where("id = ?", keyID).
-		Update("LastUsedAt", time.Now()).Error; err != nil {
-		return fmt.Errorf("update key last used: %w", err)
+	})
+	if err != nil {
+		return fmt.Errorf("update user activity: %w", err)
 	}
 	return nil
 }
@@ -351,7 +375,7 @@ func (q *UserRepository) DeleteAccount(ctx context.Context, userID uuid.UUID) (e
 		trace.WithAttributes(attribute.String("user_id", userID.String())))
 	defer func() { recordSpanResult(span, err); span.End() }()
 
-	if err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err = transactRetrying(ctx, q.db, func(tx *gorm.DB) error {
 		return eraseUser(tx, userID)
 	}); err != nil {
 		// The sentinel is the contract callers compare against, so it is handed back
@@ -373,11 +397,19 @@ func (q *UserRepository) DeleteAccount(ctx context.Context, userID uuid.UUID) (e
 
 // eraseUser is DeleteAccount inside its transaction.
 func eraseUser(tx *gorm.DB, userID uuid.UUID) error {
-	// The seat lock a ranked finalize holds for this user: without it a finalize that
-	// read the name before this commit seeds a ranking for the erased account, and it
-	// is back on the leaderboard.
+	// The seat lock a ranked finalize (and UpdateUserActivity) holds for this user:
+	// without it a finalize that read the name before this commit seeds a ranking for
+	// the erased account, and it is back on the leaderboard. Lock the users row next
+	// so activity cannot UPDATE users while we still hold keys/rankings deletes.
 	if err := lockSeat(tx, userID); err != nil {
 		return err
+	}
+	if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("id = ?", userID).Take(&db.User{}).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return db.ErrUserNotFound
+		}
+		return fmt.Errorf("lock user for erase: %w", err)
 	}
 	// Unscoped, not a soft delete: the fingerprint column is unique, so a lingering
 	// key row would keep the returning player from ever registering again - and a

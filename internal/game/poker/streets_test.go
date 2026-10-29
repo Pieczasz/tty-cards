@@ -1177,3 +1177,94 @@ func placeOf(t *testing.T, state *game.State, id string) int {
 	t.Fatalf("%s is not ranked", id)
 	return 0
 }
+
+// An all-in leaver's street Bet used to survive settleAndAdvance and inflate
+// largestCallableBet on the next street, forcing covered pots into timeout folds.
+func TestSettleAndAdvance_ClearsAnAllInLeaverBet(t *testing.T) {
+	t.Parallel()
+	engine := startTable(t, 3)
+	t.Cleanup(engine.Close)
+
+	shover := engine.CurrentPlayerID()
+	engine.WithState(func(s *game.State) {
+		extra := gametest.Extra[*State](t, s)
+		extra.Seats[shover].Chips = 100
+		extra.handStartChips = chipsInPlay(extra)
+	})
+	require.NoError(t, engine.SubmitAction(shover, ActionAllIn{}))
+	for range 2 {
+		require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), ActionCall{}))
+	}
+	engine.RemovePlayer(shover)
+
+	engine.WithState(func(s *game.State) {
+		extra := gametest.Extra[*State](t, s)
+		require.False(t, extra.HandComplete())
+		require.Equal(t, PhaseFlop, extra.Phase)
+		assert.Zero(t, extra.Seats[shover].Bet, "leaver street bet must clear with the street")
+
+		actor := s.Players[s.CurrentTurn]
+		other := ""
+		for _, p := range s.Players {
+			if p.ID != actor.ID {
+				other = p.ID
+				break
+			}
+		}
+		require.NotEmpty(t, other)
+		callable := largestCallableBet(s, extra, actor)
+		assert.Equal(t, extra.Seats[other].Chips, callable,
+			"callable cap is the live opponent's stack, not a stale leaver bet")
+		assert.Equal(t, ActionCheck{}, (&Rules{}).TimeoutAction(s),
+			"a free check must not become a fold because of a leaver's stale bet")
+	})
+}
+
+// The last seated player leaving used to abandon the table before all-in leavers
+// were paid, leaving their chips in Pool.
+func TestLeave_LastSeatedPaysAllInLeavers(t *testing.T) {
+	t.Parallel()
+	engine := startHeadsUp(t)
+	t.Cleanup(engine.Close)
+
+	shover := engine.CurrentPlayerID()
+	engine.WithState(func(s *game.State) {
+		extra := gametest.Extra[*State](t, s)
+		extra.Seats[shover].Chips = 100
+		extra.handStartChips = chipsInPlay(extra)
+	})
+	require.NoError(t, engine.SubmitAction(shover, ActionAllIn{}))
+	engine.RemovePlayer(shover)
+
+	remaining := engine.CurrentPlayerID()
+	require.NotEmpty(t, remaining)
+	engine.RemovePlayer(remaining)
+
+	withExtra(t, engine, func(extra *State) {
+		assert.Zero(t, extra.Pool, "all-in leaver must be paid before the empty table ends")
+		assert.True(t, extra.HandComplete())
+		assert.NotZero(t, extra.Seats[shover].Chips+extra.Seats[remaining].Chips,
+			"somebody was paid the pot")
+	})
+}
+
+// recordBustouts must stamp leavers who went broke after disconnecting all-in.
+func TestRecordBustouts_StampsAllInLeavers(t *testing.T) {
+	t.Parallel()
+	state := game.NewState(&Rules{}, []*game.Player{{ID: "live"}, {ID: "left"}}, nil)
+	extra := &State{
+		HandNumber: 3,
+		Seats: map[string]*Seat{
+			"live": {Chips: 100},
+			"left": {Chips: 0, AllIn: true},
+		},
+	}
+	state.Extra = extra
+	state.LeftPlayers = []*game.Player{{ID: "left"}}
+	state.Players = []*game.Player{{ID: "live"}}
+
+	recordBustouts(state, extra)
+
+	assert.Equal(t, 3, extra.Seats["left"].BustedAtHand)
+	assert.Zero(t, extra.Seats["live"].BustedAtHand)
+}

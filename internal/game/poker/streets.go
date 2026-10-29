@@ -37,12 +37,11 @@ func firstToActPostflop(state *game.State, extra *State) int {
 }
 
 func settleAndAdvance(state *game.State, extra *State) error {
-	for _, p := range state.Players {
-		seat := extra.Seats[p.ID]
+	// Every seat in Extra, including all-in leavers still in contenders: leaving a
+	// street Bet on a leaver inflates largestCallableBet on the next street.
+	for _, seat := range extra.Seats {
 		seat.Bet = 0
 		seat.Acted = false
-	}
-	for _, seat := range extra.Seats {
 		seat.LastBetLevel = 0
 	}
 	extra.CurrentBet = 0

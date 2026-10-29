@@ -384,6 +384,15 @@ func (m *model) readyMark(seat lobby.SeatView) string {
 	return m.global.Palette().SuccessText.Render(" - Ready")
 }
 
+// IdleExempt keeps a filling table from dropping a silent host: watching the roster
+// is legitimate. Alone in an empty waiting room still times out so a walked-away
+// host frees the slot.
+func (m *model) IdleExempt() bool {
+	return m.currentLobby != nil && m.snap.Players() > 1
+}
+
+var _ router.IdleExempt = (*model)(nil)
+
 // Close releases the lobby subscription when the router replaces this view or the
 // session ends.
 func (m *model) Close() {

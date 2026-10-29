@@ -271,26 +271,20 @@ maintenance signal.)
 ## Database migrations
 
 Schema changes are SQL files in `internal/db/migrations/`, applied with
-[golang-migrate](https://github.com/golang-migrate/migrate). Seven pairs exist.
+[golang-migrate](https://github.com/golang-migrate/migrate). There is a single
+`000001_init` pair today: the project has never shipped, so upgrade migrations
+are deleted rather than kept as archaeology.
 
 - **Up *and* down, always.** `make migrate-create` writes both.
 - **No GORM AutoMigrate.** `testutil.SetupTestDB` replays these same files, up,
-  down and up again, with rows seeded before the down pass
-  (`seedRoundTripData`), so the tested schema cannot drift from the deployed one -
-  and a broken migration, or a down that breaks on real data, fails the suite
-  rather than production. Add a seed row when your down file rewrites data.
-- **Say so when a down loses data.** `000005_game_slug.down.sql` opens with
-  `-- LOSSY.` and what is lost.
-- **Refuse rather than guess** when existing rows break the new constraint and
-  fixing them is an operator's decision: `000006_username_ci.up.sql` names every
-  case collision and stops.
+  down and up again, so the tested schema cannot drift from the deployed one -
+  and a broken down fails the suite rather than production.
+- **Say so when a down loses data.** Mark it `-- LOSSY.` and say what is lost.
 - Compose runs them automatically before the backend starts.
-- Put the *reason* in the file as a SQL comment. `000004_not_null_scalars.up.sql`
-  and `000005_game_slug.up.sql` both do, and both are worth reading before you
-  write your first one.
-- Backfill before you constrain - but only where a resting value is honest. 000004
-  backfills `rankings.elo` to 1500 and deliberately does *not* invent a parent for
-  a row with no owner.
+- Put the *reason* in the file as a SQL comment.
+- Until there is a real deploy to keep alive, prefer rewriting `000001` over
+  stacking a new version (recreate the Postgres volume; a checksum change will
+  otherwise refuse to start).
 
 ## Commits and pull requests
 

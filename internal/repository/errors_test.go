@@ -71,7 +71,7 @@ func TestRepositoriesReportDatabaseFailures(t *testing.T) {
 		{
 			name: "stamping activity",
 			call: func() error { return users.UpdateUserActivity(ctx, user.ID, key.ID) },
-			want: "update last seen",
+			want: "update user activity",
 		},
 		{
 			name: "erasing an account",

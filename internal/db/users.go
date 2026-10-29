@@ -50,7 +50,7 @@ type PublicSSHKey struct {
 	User        User      `gorm:"foreignKey:UserID"`
 }
 
-// TableName keeps the table migration 000001 created; the Go name is not the schema.
+// TableName keeps the SQL table name; the Go type is not the schema.
 func (PublicSSHKey) TableName() string { return "public_keys" }
 
 // Ranking is one account's rating in one game.

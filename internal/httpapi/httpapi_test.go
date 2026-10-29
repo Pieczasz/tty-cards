@@ -305,6 +305,15 @@ func TestErrorsAreJSON(t *testing.T) {
 	}
 }
 
+func TestRateLimit_HealthzIsNotOnTheVisitorBudget(t *testing.T) {
+	t.Parallel()
+	h := handler(t, Deps{RequestsPerMinute: 1})
+	require.Equal(t, http.StatusOK, get(t, h, "/v1/stats").Code)
+	require.Equal(t, http.StatusTooManyRequests, get(t, h, "/v1/stats").Code)
+	assert.Equal(t, http.StatusOK, get(t, h, "/healthz").Code,
+		"a flooded visitor budget must not make probes look unhealthy")
+}
+
 func TestRateLimit_RefusalIsJSON(t *testing.T) {
 	t.Parallel()
 	h := handler(t, Deps{RequestsPerMinute: 1})

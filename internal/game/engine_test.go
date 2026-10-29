@@ -543,21 +543,21 @@ func TestEngine_GameEndedNamesTheWinner(t *testing.T) {
 	assert.Equal(t, EndReasonWin, ended[0].Reason, "and a real win has to be rateable")
 }
 
-// The subscriber cap is the player count plus headroom for the lobby's ranked-finalize
-// watcher and reconnect overlap.
+// The subscriber cap is 2n (seat + overlapping reconnect) plus headroom for the
+// lobby's ranked-finalize watcher.
 func TestEngine_SubscriberHeadroomAbovePlayerCount(t *testing.T) {
 	t.Parallel()
 	players := []*Player{{ID: "p1"}, {ID: "p2"}}
 	engine := NewEngine(setupMockRules(), players)
 	t.Cleanup(engine.Close)
 
-	for i := range len(players) + 8 {
+	for i := range 2*len(players) + 8 {
 		_, err := engine.Subscribe()
 		require.NoErrorf(t, err, "subscriber %d must fit", i)
 	}
 
 	_, err := engine.Subscribe()
-	require.ErrorIs(t, err, broadcaster.ErrAtCapacity, "the cap is players plus headroom, not unbounded")
+	require.ErrorIs(t, err, broadcaster.ErrAtCapacity, "the cap is 2n plus headroom, not unbounded")
 }
 
 // Close has to close the broadcaster, not just the clock: a subscriber that is never told
