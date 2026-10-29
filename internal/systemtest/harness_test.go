@@ -2,6 +2,7 @@ package systemtest
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/game/poker"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	"uuid"
 
@@ -164,4 +166,65 @@ func actOnce(engine *game.Engine) bool {
 		}
 	}
 	return false
+}
+
+func playerByID(t *testing.T, players []*game.Player, id string) *game.Player {
+	t.Helper()
+	for _, p := range players {
+		if p.ID == id {
+			return p
+		}
+	}
+	t.Fatalf("no seated player %s", id)
+	return nil
+}
+
+// playOutByClock drives any catalog game to the end with TimeoutAction alone -
+// the same path a silent seat takes. maxSteps must cover the longest auto-play
+// match for that game (gin/hearts need thousands; see gametest.clockOnlySteps).
+func playOutByClock(t *testing.T, engine *game.Engine, maxSteps int) {
+	t.Helper()
+	for step := range maxSteps {
+		if engine.IsFinished() {
+			return
+		}
+		id := engine.CurrentPlayerID()
+		require.NotEmpty(t, id, "step %d: finished tables have no actor, unfinished ones must", step)
+		var act game.Action
+		engine.WithState(func(s *game.State) {
+			act = s.Rules.TimeoutAction(s)
+		})
+		require.NotNil(t, act, "step %d: TimeoutAction returned nil", step)
+		require.NoError(t, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
+	}
+	require.True(t, engine.IsFinished(), "match did not end within %d auto-play steps", maxSteps)
+}
+
+// startFilledLobby creates a public table, seats n players (leader + guests),
+// readies everyone, and returns the live engine after GAME_STARTED.
+func startFilledLobby(
+	t *testing.T, manager *lobby.Manager, slug string, n int, ranked bool,
+) (*lobby.Lobby, *game.Engine, []*game.Player) {
+	t.Helper()
+	require.GreaterOrEqual(t, n, 2)
+	players := make([]*game.Player, n)
+	for i := range n {
+		players[i] = newPlayer(testutil.UID(i+1), fmt.Sprintf("p%d", i+1))
+	}
+	l, err := manager.CreateLobby(players[0],
+		lobby.WithCardGame(slug),
+		lobby.WithMaxPlayers(n),
+		lobby.WithRanked(ranked),
+	)
+	require.NoError(t, err)
+	for _, g := range players[1:] {
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
+	}
+	events, err := l.Subscribe(players[0].ID)
+	require.NoError(t, err)
+	t.Cleanup(func() { l.Unsubscribe(players[0].ID, events) })
+	for _, p := range players {
+		require.NoError(t, manager.ToggleReady(p))
+	}
+	return l, awaitGameStart(t, l, events), players
 }
