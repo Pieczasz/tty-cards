@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	unoSlug       = "uno"
-	unoGame       = "Uno"
-	unoClockSteps = 5000
+	unoSlug = "uno"
+	unoGame = "Uno"
 )
 
 // unoManager is a catalog-backed lobby manager. A nil repo is an untyped nil: a nil
@@ -56,7 +55,7 @@ func TestUno_CasualTablesFinish(t *testing.T) {
 			_, engine, players := startFilledLobby(t, m, unoSlug, n, false)
 			cards := unoCards(engine)
 			require.Positive(t, cards)
-			playOutByClock(t, engine, unoClockSteps)
+			playOutByClock(t, engine)
 			assertUnoMatch(t, engine, players, cards)
 		})
 	}
@@ -79,7 +78,7 @@ func TestUno_RankedLeaveFinalizesLeaver(t *testing.T) {
 	require.False(t, l.HasPlayer(leaver))
 	require.Equal(t, cards, unoCards(engine), "a leave returns the hand to the stock")
 
-	playOutByClock(t, engine, unoClockSteps)
+	playOutByClock(t, engine)
 	assertUnoMatch(t, engine, players, cards)
 	requireLeft(t, engine, leaver.ID)
 
@@ -133,7 +132,7 @@ func TestUno_IllegalActionsThenClock(t *testing.T) {
 	require.Equal(t, before, unoSnap(engine))
 	require.False(t, engine.IsFinished())
 
-	playOutByClock(t, engine, unoClockSteps)
+	playOutByClock(t, engine)
 	assertUnoMatch(t, engine, players, cards)
 }
 
@@ -196,7 +195,7 @@ func TestUno_ConcurrentWrongSeat(t *testing.T) {
 	wg.Wait()
 
 	if !engine.IsFinished() {
-		playOutByClock(t, engine, unoClockSteps)
+		playOutByClock(t, engine)
 	}
 	assertUnoMatch(t, engine, players, cards)
 }
@@ -218,7 +217,7 @@ func TestUno_RepeatedMatches(t *testing.T) {
 		}
 		cards := unoCards(engine)
 		require.Positive(t, cards)
-		playOutByClock(t, engine, unoClockSteps)
+		playOutByClock(t, engine)
 		assertUnoMatch(t, engine, players, cards)
 	}
 }
@@ -259,7 +258,7 @@ func leaveAfter(
 	require.Equal(t, want, engine.CurrentPlayerID(), "the turn follows the table direction")
 	require.Equal(t, cards, unoCards(engine))
 
-	playOutByClock(t, engine, unoClockSteps)
+	playOutByClock(t, engine)
 	assertUnoMatch(t, engine, players, cards)
 	requireLeft(t, engine, leaverID)
 }

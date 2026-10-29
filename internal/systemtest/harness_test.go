@@ -179,12 +179,15 @@ func playerByID(t *testing.T, players []*game.Player, id string) *game.Player {
 	return nil
 }
 
+// clockPlayOutSteps bounds TimeoutAction auto-play. Gin/hearts need thousands;
+// see gametest.clockOnlySteps.
+const clockPlayOutSteps = 5000
+
 // playOutByClock drives any catalog game to the end with TimeoutAction alone -
-// the same path a silent seat takes. maxSteps must cover the longest auto-play
-// match for that game (gin/hearts need thousands; see gametest.clockOnlySteps).
-func playOutByClock(t *testing.T, engine *game.Engine, maxSteps int) {
+// the same path a silent seat takes.
+func playOutByClock(t *testing.T, engine *game.Engine) {
 	t.Helper()
-	for step := range maxSteps {
+	for step := range clockPlayOutSteps {
 		if engine.IsFinished() {
 			return
 		}
@@ -197,7 +200,7 @@ func playOutByClock(t *testing.T, engine *game.Engine, maxSteps int) {
 		require.NotNil(t, act, "step %d: TimeoutAction returned nil", step)
 		require.NoError(t, engine.SubmitAction(id, act), "step %d: %s", step, act.Name())
 	}
-	require.True(t, engine.IsFinished(), "match did not end within %d auto-play steps", maxSteps)
+	require.True(t, engine.IsFinished(), "match did not end within %d auto-play steps", clockPlayOutSteps)
 }
 
 // startFilledLobby creates a public table, seats n players (leader + guests),

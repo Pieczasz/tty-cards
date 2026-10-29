@@ -18,11 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	crazyEightsSlug = "crazy_eights"
-	// A clock-only hand draws the stock down and then passes out: tens of moves.
-	crazyEightsSteps = 5000
-)
+const crazyEightsSlug = "crazy_eights"
 
 // crazyEightsSeatCap is the largest table this e2e fills. A game whose MaxPlayers
 // exceeds six is still only sat to six.
@@ -125,7 +121,7 @@ func assertStandingsCover(t *testing.T, engine *game.Engine, stayed []*game.Play
 
 func finishCrazyEights(t *testing.T, manager *lobby.Manager, engine *game.Engine, stayed []*game.Player) {
 	t.Helper()
-	playOutByClock(t, engine, crazyEightsSteps)
+	playOutByClock(t, engine)
 	require.True(t, engine.IsFinished())
 	require.Equal(t, game.EndReasonWin, engine.EndReason())
 	assertCrazyEightsDeck(t, engine)
@@ -161,7 +157,7 @@ func TestCrazyEights_RankedMidGameLeaveFinalizes(t *testing.T) {
 	assertCrazyEightsDeck(t, engine)
 	require.False(t, engine.IsFinished(), "the remaining seats still have a hand")
 
-	playOutByClock(t, engine, crazyEightsSteps)
+	playOutByClock(t, engine)
 	require.Equal(t, game.EndReasonWin, engine.EndReason())
 	assertCrazyEightsDeck(t, engine)
 
@@ -277,7 +273,7 @@ func TestCrazyEights_DisconnectAndLeaveConservesDeck(t *testing.T) {
 			stayed = append(stayed, p)
 		}
 	}
-	playOutByClock(t, engine, crazyEightsSteps)
+	playOutByClock(t, engine)
 	require.Equal(t, game.EndReasonWin, engine.EndReason())
 	assertCrazyEightsDeck(t, engine)
 	assertStandingsCover(t, engine, stayed)

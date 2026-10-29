@@ -106,7 +106,7 @@ func requireSettled(t *testing.T, engine *game.Engine, before uint, players []*g
 func finishBy(t *testing.T, engine *game.Engine, clock bool) {
 	t.Helper()
 	if clock {
-		playOutByClock(t, engine, 5000)
+		playOutByClock(t, engine)
 		return
 	}
 	playOutMatch(t, engine)

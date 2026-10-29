@@ -138,7 +138,7 @@ func TestGinRummyCasualHeadsUpPlaysOut(t *testing.T) {
 			l, engine, players := startFilledLobby(t, manager, ginSlug, 2, false)
 			releaseLobby(t, manager, l.Code())
 
-			playOutByClock(t, engine, ginClockSteps)
+			playOutByClock(t, engine)
 
 			require.Equal(t, game.EndReasonWin, engine.EndReason())
 			assertGinStandings(t, engine, players)
@@ -156,7 +156,7 @@ func TestGinRummyRankedHeadsUpFinalizesOnce(t *testing.T) {
 	l, engine, players := startFilledLobby(t, manager, ginSlug, 2, true)
 	releaseLobby(t, manager, l.Code())
 
-	playOutByClock(t, engine, ginClockSteps)
+	playOutByClock(t, engine)
 
 	require.Equal(t, game.EndReasonWin, engine.EndReason())
 	assertGinStandings(t, engine, players)
@@ -239,9 +239,7 @@ func TestGinRummyForeignActionAndWrongSeat(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	for range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					t.Errorf("wrong-seat spam panicked: %v", r)
@@ -252,7 +250,7 @@ func TestGinRummyForeignActionAndWrongSeat(t *testing.T) {
 					t.Errorf("wrong seat %s accepted", act.Name())
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

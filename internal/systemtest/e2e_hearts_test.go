@@ -159,7 +159,7 @@ func TestHearts_CasualClockMatches(t *testing.T) {
 			}
 			engine = awaitGameStart(t, l, events)
 		}
-		playOutByClock(t, engine, heartsClockSteps)
+		playOutByClock(t, engine)
 		assertClockWin(t, engine, players)
 
 		repo.awaitFinalize(t)
@@ -184,7 +184,7 @@ func TestHearts_RankedMatchFinalizesOnce(t *testing.T) {
 	keepLobby(t, manager, l)
 	require.True(t, l.Snapshot().Ranked)
 
-	playOutByClock(t, engine, heartsClockSteps)
+	playOutByClock(t, engine)
 	assertClockWin(t, engine, players)
 
 	repo.awaitFinalize(t)
@@ -563,9 +563,7 @@ func spamWrongSeats(t *testing.T, engine *game.Engine, players []*game.Player, c
 			if p.ID == current {
 				continue
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-start
 				defer func() {
 					if recovered := recover(); recovered != nil {
@@ -574,11 +572,14 @@ func spamWrongSeats(t *testing.T, engine *game.Engine, players []*game.Player, c
 				}()
 				for _, act := range acts {
 					err := engine.SubmitAction(p.ID, act)
-					if err == nil || !strings.Contains(err.Error(), "wait for your turn") {
-						errCh <- fmt.Errorf("wrong seat %s %s: %v", p.ID, act.Name(), err)
+					switch {
+					case err == nil:
+						errCh <- fmt.Errorf("wrong seat %s %s: accepted", p.ID, act.Name())
+					case !strings.Contains(err.Error(), "wait for your turn"):
+						errCh <- fmt.Errorf("wrong seat %s %s: %w", p.ID, act.Name(), err)
 					}
 				}
-			}()
+			})
 		}
 	}
 	close(start)
