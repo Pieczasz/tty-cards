@@ -261,7 +261,9 @@ func withRateLimit(
 	next http.Handler,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !limiter.Allow(ratelimit.NetKey(clientAddr(r))) {
+		// Probes must not share the visitor budget: a scraper or page poll would
+		// otherwise 429 /healthz and look like the process is down.
+		if r.URL.Path != "/healthz" && !limiter.Allow(ratelimit.NetKey(clientAddr(r))) {
 			observability.RateLimitReject(r.Context(), "http")
 			w.Header().Set("Retry-After", "60")
 			writeError(w, r, http.StatusTooManyRequests, "too many requests")
