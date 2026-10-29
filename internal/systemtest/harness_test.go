@@ -203,8 +203,9 @@ func playOutByClock(t *testing.T, engine *game.Engine) {
 	require.True(t, engine.IsFinished(), "match did not end within %d auto-play steps", clockPlayOutSteps)
 }
 
-// startFilledLobby creates a public table, seats n players (leader + guests),
-// readies everyone, and returns the live engine after GAME_STARTED.
+// startFilledLobby creates a table (lobby default privacy), seats n players
+// (leader + guests), readies everyone, and returns the live engine after
+// GAME_STARTED.
 func startFilledLobby(
 	t *testing.T, manager *lobby.Manager, slug string, n int, ranked bool,
 ) (*lobby.Lobby, *game.Engine, []*game.Player) {
