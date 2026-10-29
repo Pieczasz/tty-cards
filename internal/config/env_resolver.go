@@ -50,14 +50,6 @@ func (r *envReader) duration(key string, fallback time.Duration) time.Duration {
 	return v
 }
 
-// removed fails the boot on a variable that no longer exists: left alone, a setting an
-// operator relied on would be dropped without a word.
-func (r *envReader) removed(key, why string) {
-	if os.Getenv(key) != "" {
-		r.fail(key, errors.New(why))
-	}
-}
-
 func (r *envReader) bool(key string, fallback bool) bool {
 	raw := os.Getenv(key)
 	if raw == "" {

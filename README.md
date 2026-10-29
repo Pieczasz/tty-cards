@@ -210,7 +210,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `MAX_CONNECTIONS` | `1000` | concurrent sessions (one per account; compose sets 1250, the most measured to hold on its 3 cores); the listener's backstop is twice this. Each session costs memory (`docs/architecture.md` §3.2), so raise it only with `GOMEMLIMIT` and the backend's `mem_limit` |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
 | `SERVICE_VERSION` | the build's module version | stamped on `service.version` so dashboards can tell deploys apart |
-| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`); the old `RATE_LIMIT_WINDOW_MS` fails the boot |
+| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`) |
 | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network (IPv6 /64); raise for `make loadtest` |
 | `REGISTRATION_LIMIT_WIDE` | `20` | new accounts per IPv6 /48 per `REGISTRATION_WINDOW` (a free tunnel is one /48 of 65,536 /64s); IPv4 stays per address. Raise with `REGISTRATION_LIMIT` for `make loadtest` |
 | `REGISTRATION_GLOBAL_LIMIT` | `600` | new accounts across every network per `REGISTRATION_WINDOW`; returning players never spend it. Raise for `make loadtest` |
@@ -220,7 +220,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `API_ALLOW_ORIGIN` | `*` | the stats API's CORS origin |
 | `API_REQUESTS_PER_MINUTE` | `120` | per client network |
 | `API_TRUST_PROXY` | `false` | compose opts in; only safe behind a proxy that sets `X-Forwarded-For` itself |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` (`https://` in production) | logs, metrics, traces. A URL: `http://` exports in plaintext, `https://` over TLS; a bare `host:port` and the removed `OTEL_EXPORTER_OTLP_INSECURE` fail the boot |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` (`https://` in production) | logs, metrics, traces. A URL: `http://` exports in plaintext, `https://` over TLS; a bare `host:port` fails the boot |
 | `LOG_LEVEL` | `INFO` | stderr and OTLP both |
 
 Boolean variables (`PROXY_PROTOCOL`, `API_TRUST_PROXY`) take what Go's
@@ -364,7 +364,7 @@ Notes worth reading before you deploy:
   and the backend connects with `DB_SSLMODE=require`. Its `pg_hba.conf`
   (`internal/config/postgres/`) rejects plaintext TCP outright. For an external managed
   database prefer `verify-full` with its CA. Plaintext is accepted only with
-  `ENV=development`; the removed `ALLOW_INSECURE_DB` fails the boot if set.
+  `ENV=development`.
 - The `edge` network's subnets (`172.29.69.0/24`, `fd6b:1e37:9a52:6969::/64`) are
   what the backend's `PROXY_TRUSTED_CIDRS` trusts. If they collide with a network
   on your host, change both in `compose.yaml` together.
