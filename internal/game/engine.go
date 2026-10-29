@@ -100,8 +100,10 @@ func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 		}
 	}
 	e := &Engine{
-		state:       NewState(rules, seats, nil),
-		broadcaster: broadcaster.New[Event](len(players) + 8),
+		state: NewState(rules, seats, nil),
+		// 2n: one feed per seat plus one reconnect overlapping the old teardown,
+		// +8: lobby watcher and a little spare so a real player is never the one refused.
+		broadcaster: broadcaster.New[Event](2*len(players) + 8),
 		clock: turnClock{
 			defaultLength: DefaultTurnTimeout,
 			missed:        make(map[string]int, len(players)),
@@ -413,8 +415,14 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	// started a seat leaving is only a seat leaving.
 	h, hooked := e.state.Rules.(PlayerLeaveHandler)
 	hooked = hooked && e.state.Phase == Playing
+	var onLeavePanic any
 	if hooked {
-		h.OnPlayerLeave(e.state, playerID)
+		// Recover here so a panic still records the leaver below; otherwise history
+		// treats them as seated after endOnRulesPanicLocked.
+		func() {
+			defer func() { onLeavePanic = recover() }()
+			h.OnPlayerLeave(e.state, playerID)
+		}()
 	}
 
 	removedPlayer := e.state.Players[playerIndex]
@@ -429,6 +437,11 @@ func (e *Engine) removePlayerLocked(playerID string) {
 	// Before AfterPlayerRemoved, and it has to stay that way: the poker hook indexes
 	// Players by the clamped cursor and no longer guards the range itself.
 	e.clampTurnLocked()
+
+	if onLeavePanic != nil {
+		e.endOnRulesPanicLocked(onLeavePanic)
+		return
+	}
 
 	outcome := LeaveSettled
 	if hooked {

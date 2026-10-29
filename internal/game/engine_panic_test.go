@@ -1,6 +1,7 @@
 package game
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,6 +87,11 @@ func TestEngine_RemovePlayer_RulesPanicEndsTheTable(t *testing.T) {
 	assert.True(t, engine.IsFinished())
 	assert.True(t, engine.turnDeadline().IsZero(), "a finished table must not auto-play")
 	assert.Equal(t, EndReasonRulesError, endedEvent(t, drainEvents(events)).Reason)
+	engine.WithState(func(s *State) {
+		require.True(t, slices.ContainsFunc(s.LeftPlayers, func(p *Player) bool { return p.ID == "a" }),
+			"a leave-hook panic must still record the leaver")
+		assert.False(t, slices.ContainsFunc(s.Players, func(p *Player) bool { return p.ID == "a" }))
+	})
 }
 
 // RemoveLobby closes the engine while a leave may still be on its way into the rules.
