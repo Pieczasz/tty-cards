@@ -15,7 +15,7 @@ published port. Schema is `internal/db/migrations/`.
 
 | Table.column | What it is | Why it exists |
 |---|---|---|
-| `users.username` | chosen names are 1-16 chars, `[A-Za-z0-9_]`, unique case-insensitively (`idx_users_username_lower`, migration `000006`; the display case is kept), **publicly displayed** on the in-game leaderboard and on the website. After erasure it reads `deleted_` plus 32 hex digits of the UUID (`db.AnonymisedUsername`, 40 chars) | identity |
+| `users.username` | chosen names are 1-16 chars, `[A-Za-z0-9_]`, unique case-insensitively (`idx_users_username_lower`; the display case is kept), **publicly displayed** on the in-game leaderboard and on the website. After erasure it reads `deleted_` plus 32 hex digits of the UUID (`db.AnonymisedUsername`, 40 chars), pinned to that row's id by `username_valid` | identity |
 | `users.id` | UUIDv7 primary key (`uuidv7()`); **this is also the `player_id` that appears in logs** (`internal/lobby/player.go`). Time-ordered, not a sequence. | joins |
 | `users.last_seen_at` | last connection timestamp | activity |
 | `users.created_at` / `updated_at` / `deleted_at` | account lifecycle; `deleted_at` is a GORM **soft** delete | lifecycle |

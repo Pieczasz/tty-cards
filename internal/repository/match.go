@@ -396,7 +396,7 @@ func unerasedSeats(tx *gorm.DB, userIDs []uuid.UUID, places []int) ([]rating.Sea
 // does not make it legitimate either, so the window spans every game.
 //
 // The scan drives from the server's ranked matches inside the window
-// (idx_matches_ranked_created, migration 000007) and joins out to these seats, so it
+// (idx_matches_ranked_created) and joins out to these seats, so it
 // is bounded by the last day's ranked traffic, not by how long these players have been
 // playing. The pair counting happens in Go, which is cheap at these volumes. Callers
 // must hold lockPairing, or two concurrent finalizes sharing a seat both read an

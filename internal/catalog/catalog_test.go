@@ -1,9 +1,6 @@
 package catalog
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,31 +51,3 @@ func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
 	assert.Equal(t, slugs, got, "the lobby menu keeps catalog order")
 }
 
-// Migration 000005 backfills games.slug from the display names that existed when it
-// shipped. If a catalog slug ever disagrees with that table, a running server writes
-// ratings under one slug while the migration filed the old rows under another, and the
-// leaderboard for that game silently splits in two.
-func TestGames_SlugsMatchTheMigrationBackfill(t *testing.T) {
-	t.Parallel()
-	matches, err := filepath.Glob("../db/migrations/000005_*.up.sql")
-	require.NoError(t, err)
-	require.Len(t, matches, 1, "exactly one slug migration")
-	sql, err := os.ReadFile(matches[0])
-	require.NoError(t, err)
-
-	backfill := regexp.MustCompile(`WHEN '([^']+)'\s+THEN '([^']+)'`).FindAllStringSubmatch(string(sql), -1)
-	want := make(map[string]string, len(backfill))
-	for _, m := range backfill {
-		want[m[1]] = m[2]
-	}
-
-	gotByName := make(map[string]string, len(Games))
-	for _, e := range Games {
-		gotByName[e.Name] = e.Slug
-	}
-	for name, slug := range want {
-		if got, ok := gotByName[name]; ok {
-			assert.Equal(t, slug, got, "%q must still backfill to its catalog slug", name)
-		}
-	}
-}
