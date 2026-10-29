@@ -170,6 +170,26 @@ func TestUserRepository_UpdateUserActivity(t *testing.T) {
 		"last_used_at must move forward: got %v, seeded %v", updatedKey.LastUsedAt, stale)
 }
 
+// A displacing login during GDPR erase must not restore last_seen_at on the
+// anonymised row: the null is what "never seen" means after erasure.
+func TestUserRepository_UpdateUserActivitySkipsAnAnonymisedAccount(t *testing.T) {
+	t.Parallel()
+	database := testutil.SetupTestDB(t)
+	repo := repository.NewUserRepository(database)
+	ctx := t.Context()
+
+	user, key, err := repo.RegisterUserWithSSHKey(ctx, "erase_active", "erase_active_fp")
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteAccount(ctx, user.ID))
+
+	require.NoError(t, repo.UpdateUserActivity(ctx, user.ID, key.ID))
+
+	var row db.User
+	require.NoError(t, database.Unscoped().First(&row, "id = ?", user.ID.String()).Error)
+	assert.Equal(t, db.AnonymisedUsername(user.ID), row.Username)
+	assert.True(t, row.LastSeenAt.IsZero(), "activity after erase must not resurrect last_seen_at")
+}
+
 // Reproduction: soft-deleting a user leaves its public_keys row matching, and the
 // Preload"s deleted_at IS NULL only empties the association. The old code returned
 // &dbKey.User unconditionally, so the ssh auth path saw a non-nil user with ID 0 and
