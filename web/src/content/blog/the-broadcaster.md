@@ -12,22 +12,25 @@ to own outright.
 
 ## What it actually is
 
-`internal/broadcaster` is about 130 lines and generic over the message type:
+`internal/broadcaster/broadcaster.go` is about 140 lines and generic over the message
+type:
 
 ```go
+// internal/broadcaster/broadcaster.go
 type Broadcaster[T any] struct {
-	mu             sync.RWMutex
-	subscribers    map[int]*subscriber[T]
+	mu             sync.Mutex
+	subscribers    map[<-chan T]*subscriber[T]
 	nextID         int
 	closed         bool
 	maxSubscribers int
+	dropped        atomic.Int64
 }
 ```
 
 `Subscribe()` hands back a `<-chan T` with a 256-slot buffer. `Broadcast(msg)` walks
 the map and sends to each one. `Unsubscribe(ch)` finds it, deletes it, closes it. The
-lobby uses it for `Event`, the game engine uses it for `game.Event`. Same type, two
-instantiations.
+lobby uses it for `lobby.Event`, the game engine uses it for `game.Event`. Same type,
+two instantiations.
 
 That is the whole thing. No topics, no routing keys, no ack.
 
@@ -35,11 +38,12 @@ That is the whole thing. No topics, no routing keys, no ack.
 
 The interesting decision is what happens when a subscriber is not draining fast
 enough. The obvious options are block or drop, and blocking is out: `Broadcast` runs
-while the engine holds its mutexes, so one slow reader would stall the entire table.
+while the engine holds its mutex, so one slow reader would stall the entire table.
 
 So it drops. But the direction matters:
 
 ```go
+// internal/broadcaster/broadcaster.go
 select {
 case sub.ch <- msg:
 default:
@@ -49,10 +53,7 @@ default:
 	case <-sub.ch:
 	default:
 	}
-	select {
-	case sub.ch <- msg:
-	default:
-	}
+	sub.ch <- msg
 }
 ```
 
@@ -79,21 +80,23 @@ view handed one would sit there having silently received nothing, with no way to
 whether the game ended or it never got attached. So now:
 
 ```go
+// internal/broadcaster/broadcaster.go
 var (
 	ErrClosed     = errors.New("broadcaster is closed")
 	ErrAtCapacity = errors.New("broadcaster is at subscriber capacity")
 )
 ```
 
-The caller has to look. The lobby view puts the error on screen, which is how you find
-out that the capacity is too low instead of wondering why the roster stopped updating.
+The caller has to look. The lobby view puts the error on screen
+(`internal/tui/views/lobby/lobby.go`), which is how you find out that the capacity is
+too low instead of wondering why the roster stopped updating.
 
 ## Capacity is `len(players) + 8`
 
-Engines size their broadcaster at the player count plus eight. The eight is for
-non-player subscribers - the lobby's watcher goroutine that waits for the game to end
-so it can write the ranked result - plus a little room for a reconnect that overlaps
-the old session's teardown.
+Engines size their broadcaster at the player count plus eight
+(`internal/game/engine.go`). The eight is for non-player subscribers - the lobby's
+watcher goroutine that waits for the game to end so it can write the ranked result -
+plus a little room for a reconnect that overlaps the old session's teardown.
 
 Get that number wrong and a real player is the one who gets refused, which is the worst
 possible thing to run out of.
