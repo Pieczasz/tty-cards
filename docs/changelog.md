@@ -283,7 +283,9 @@ unnoticed for so long.
 - **A ranked match finished during a deploy's 30-second drain is rated.** The
   server used to mark itself as shutting down before that window, so a game that
   ended there by play was stored without Elo. Only the tables the drain tears down
-  at its end are recorded unrated now.
+  at its end are recorded unrated now. No new game starts inside the window: a
+  table that readies up there stays waiting, rather than starting a match the
+  drain would cut short.
 - **A taken `API_PORT` refuses the boot** (operators). The stats API used to bind
   in the background, so the server logged "starting stats api", opened SSH to
   players and only then failed. It now binds before the SSH listener opens.

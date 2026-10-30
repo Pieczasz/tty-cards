@@ -207,21 +207,33 @@ func (m *Manager) admitGame() bool {
 	return true
 }
 
+// StopNewGames refuses every game start from now on, and nothing else: the drain
+// calls it before its graceful window, so a table already in play can still finish
+// there, rated, while one readying up inside the window is never started only for
+// the teardown to cut it short.
+func (m *Manager) StopNewGames() {
+	if m == nil {
+		return
+	}
+	m.gateMu.Lock()
+	m.gateClosed = true
+	m.gateMu.Unlock()
+}
+
 // BeginShutdown marks the process as going away and stops new games, without
 // stopping the ones in play: a hand that ends while sessions are torn down still
 // belongs in the players' history, it just must not move anyone's rating.
 //
-// Seats still held for a reconnect are given up here. Their timers would fire long
-// after the drain, so the lobby would never be removed and its engine never closed -
-// the player is not coming back to a process that is exiting.
+// Seats still held for a reconnect are given up here, not in StopNewGames: their
+// timers would fire long after the drain, so the lobby would never be removed and
+// its engine never closed - but given up before the graceful window, the forfeit
+// would be rated against a player the closed listener keeps from coming back.
 func (m *Manager) BeginShutdown() {
 	if m == nil {
 		return
 	}
 	m.shuttingDown.Store(true)
-	m.gateMu.Lock()
-	m.gateClosed = true
-	m.gateMu.Unlock()
+	m.StopNewGames()
 	m.mu.Lock()
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()

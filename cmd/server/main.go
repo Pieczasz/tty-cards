@@ -153,11 +153,12 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	defer stopAPI()
 
 	return serve(ctx, serveDeps{
-		config:     cfg,
-		sshServer:  server,
-		apiErr:     apiErr,
-		signals:    signals,
-		onShutdown: lobbyManager.BeginShutdown,
+		config:       cfg,
+		sshServer:    server,
+		apiErr:       apiErr,
+		signals:      signals,
+		stopNewGames: lobbyManager.StopNewGames,
+		onShutdown:   lobbyManager.BeginShutdown,
 	})
 }
 
@@ -267,11 +268,13 @@ type sshServer interface {
 }
 
 type serveDeps struct {
-	config     *config.Config
-	sshServer  sshServer
-	apiErr     <-chan error
-	signals    <-chan os.Signal
-	onShutdown func()
+	config    *config.Config
+	sshServer sshServer
+	apiErr    <-chan error
+	signals   <-chan os.Signal
+	// stopNewGames runs before the drain window, onShutdown after it.
+	stopNewGames func()
+	onShutdown   func()
 }
 
 func serve(ctx context.Context, d serveDeps) error {
@@ -305,7 +308,7 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
-	defer drainServer(d.onShutdown, server)
+	defer drainServer(d.stopNewGames, d.onShutdown, server)
 	select {
 	case err := <-serveErr:
 		if err != nil {
@@ -348,8 +351,13 @@ func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error)
 // drainServer stops accepting, gives live tables the graceful window, then tears the
 // sessions down. Shutdown ends no session, so tables keep playing through that window
 // and a ranked match that finishes there by play is rated; onShutdown marks the lobby
-// only once the window is over, right before Close decides who is left.
-func drainServer(onShutdown func(), server sshServer) {
+// only once the window is over, right before Close decides who is left. No new game
+// may start in the window, though: stopNewGames runs first, because Close would cut
+// such a game short and it would be recorded unrated.
+func drainServer(stopNewGames, onShutdown func(), server sshServer) {
+	if stopNewGames != nil {
+		stopNewGames()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), sshDrainTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {

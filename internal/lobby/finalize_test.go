@@ -176,6 +176,37 @@ func TestToggleReady_NoGameStartsWhileTheServerDrains(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(time.Second), "the refused start kept its watcher counted")
 }
 
+// The drain closes the gate before its graceful window and marks the process as going
+// away only after it: a start inside the window is refused, but a ranked match already
+// in play that ends there by play is still rated.
+func TestStopNewGames_RefusesAStartButKeepsTheMatchInPlayRated(t *testing.T) {
+	t.Parallel()
+	repo := new(MockMatchRepo)
+	recorded := make(chan struct{}, 1)
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).
+		Return(nil)
+	m, _, engine := newFinishedGameLobby(t, repo)
+	host, guest := mockPlayer("host", testutil.UID(3)), mockPlayer("joiner", testutil.UID(4))
+	next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("mockgame"))
+	require.NoError(t, err)
+	require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+	require.NoError(t, m.ToggleReady(host))
+
+	m.StopNewGames()
+
+	require.ErrorIs(t, m.ToggleReady(guest), errServerRestarting)
+	assert.Nil(t, next.ActiveGame(), "a game started after new games stopped")
+	endHand(engine, stubWin)
+	select {
+	case <-recorded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the match in play was not rated after new games stopped")
+	}
+	require.True(t, m.WaitForFinalizers(2*time.Second))
+	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
+}
+
 // syncBuffer is a log sink two goroutines can touch: the finalizer writes to it while
 // the assertion polls it.
 type syncBuffer struct {

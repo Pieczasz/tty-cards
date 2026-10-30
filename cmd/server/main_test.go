@@ -18,9 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	charmssh "charm.land/ssh"
 	"github.com/stretchr/testify/assert"
@@ -36,12 +40,17 @@ type fakeServer struct {
 	closeOnce   sync.Once
 	// stops is the order the drain called Shutdown, Close and WaitSessions in.
 	stops []string
+	// duringShutdown runs inside Shutdown: what a live session does in the window.
+	duringShutdown func()
 }
 
 func (f *fakeServer) Serve(net.Listener) error { return <-f.serveErr }
 
 func (f *fakeServer) Shutdown(context.Context) error {
 	f.stops = append(f.stops, "shutdown")
+	if f.duringShutdown != nil {
+		f.duringShutdown()
+	}
 	return f.shutdownErr
 }
 
@@ -99,9 +108,10 @@ func TestServe_AcceptLoopFailureIsReturned(t *testing.T) {
 // Sessions outliving the drain window is what a card game does, so it must not stop
 // the shutdown: the listener and the connections have to be let go either way. Close
 // does not wait for the session handlers it ends, so the wait for their teardown -
-// which the finalizer drain after this depends on - comes after it, every time. The
-// lobby hears of the shutdown only after the graceful window: a ranked match that ends
-// by play inside it is still rated, and only what Close tears down is not.
+// which the finalizer drain after this depends on - comes after it, every time. New
+// games stop before the graceful window, but the lobby hears of the shutdown only
+// after it: a ranked match that ends by play inside it is still rated, and only what
+// Close tears down is not.
 func TestDrainServer_ClosesOnEveryPath(t *testing.T) {
 	t.Parallel()
 
@@ -119,12 +129,38 @@ func TestDrainServer_ClosesOnEveryPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			drainServer(func() { tt.server.stops = append(tt.server.stops, "lobby shutdown") }, tt.server)
+			drainServer(
+				func() { tt.server.stops = append(tt.server.stops, "stop new games") },
+				func() { tt.server.stops = append(tt.server.stops, "lobby shutdown") },
+				tt.server,
+			)
 
 			assert.True(t, tt.server.closed, "the server was never closed")
-			assert.Equal(t, []string{"shutdown", "lobby shutdown", "close", "wait sessions"}, tt.server.stops)
+			assert.Equal(t, []string{"stop new games", "shutdown", "lobby shutdown", "close", "wait sessions"}, tt.server.stops)
 		})
 	}
+}
+
+// The drain window lets tables already in play finish, but a table that readies up
+// inside it would only be torn down by Close and recorded unrated, so no new game
+// may start once the drain has begun.
+func TestDrainServer_NoGameStartsInTheWindow(t *testing.T) {
+	t.Parallel()
+	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+	leader := &game.Player{ID: "leader", UserID: testutil.UID(1)}
+	guest := &game.Player{ID: "guest", UserID: testutil.UID(2)}
+	table, err := manager.CreateLobby(leader, lobby.WithCardGame("gin_rummy"), lobby.WithMaxPlayers(2))
+	require.NoError(t, err)
+	t.Cleanup(func() { manager.RemoveLobby(table.Code()) })
+	_, err = manager.JoinLobbyByCode(table.Code(), guest)
+	require.NoError(t, err)
+	require.NoError(t, manager.ToggleReady(leader))
+
+	server := &fakeServer{duringShutdown: func() {
+		_ = manager.ToggleReady(guest)
+		assert.Nil(t, table.ActiveGame(), "a game started inside the drain window")
+	}}
+	drainServer(manager.StopNewGames, manager.BeginShutdown, server)
 }
 
 func TestServe_UnexpectedCleanStopIsReturned(t *testing.T) {
@@ -172,21 +208,23 @@ func TestServe_SignalDrainsAndReturnsCleanly(t *testing.T) {
 	signals <- syscall.SIGTERM
 
 	server := &fakeServer{serveErr: make(chan error)}
-	var shutdownCalled bool
+	var stopCalled, shutdownCalled bool
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- serve(t.Context(), serveDeps{
-			config:     testConfig(),
-			sshServer:  server,
-			signals:    signals,
-			onShutdown: func() { shutdownCalled = true },
+			config:       testConfig(),
+			sshServer:    server,
+			signals:      signals,
+			stopNewGames: func() { stopCalled = true },
+			onShutdown:   func() { shutdownCalled = true },
 		})
 	}()
 
 	select {
 	case err := <-errCh:
 		require.NoError(t, err, "a requested shutdown is not a failure")
+		assert.True(t, stopCalled, "new games were never stopped")
 		assert.True(t, shutdownCalled, "live matches were never told the server is going away")
 		assert.True(t, server.closed, "the ssh server was left running")
 	case <-time.After(5 * time.Second):
