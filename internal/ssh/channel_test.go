@@ -330,7 +330,8 @@ func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
 func TestNewServer_ClosesAConnectionWithNoSessionOpen(t *testing.T) {
 	t.Parallel()
 	reg := newSessionRegistry(cellBudget, extraCellBudget)
-	reg.sessionless = 200 * time.Millisecond
+	// Counted from accept, so it has to outlast a handshake on a loaded -race run.
+	reg.sessionless = time.Second
 	addr, _ := startServerWithRegistry(t, stubUserRepo{user: &db.User{ID: testutil.UID(96), Username: "idler"}}, reg)
 	closed := func(client *gossh.Client) <-chan struct{} {
 		done := make(chan struct{})
@@ -357,7 +358,7 @@ func TestNewServer_ClosesAConnectionWithNoSessionOpen(t *testing.T) {
 		select {
 		case <-gone:
 			t.Fatal("a connection with a session open was closed")
-		case <-time.After(5 * reg.sessionless):
+		case <-time.After(2 * reg.sessionless):
 		}
 		require.NoError(t, s.Close())
 		within(t, "closing the connection its last session left", func() { <-gone })
