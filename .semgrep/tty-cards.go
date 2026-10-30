@@ -194,6 +194,13 @@ func subscribers(engine *Engine) {
 	_, _ = ch, err
 }
 
+func sessionIdentity(g GlobalContext, user *User) {
+	// ruleid: session-player-mapped-twice
+	_ = g.LobbyManager.FindLobbyByPlayer(lobby.NewPlayer(user))
+	// ok: session-player-mapped-twice
+	_ = g.LobbyManager.FindLobbyByPlayer(g.Player)
+}
+
 func env() bool {
 	// ruleid: boolean-env-compared-as-string
 	if os.Getenv("PROXY_PROTOCOL") == "true" {

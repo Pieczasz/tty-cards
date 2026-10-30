@@ -272,6 +272,21 @@ rules:
       - pattern: $CH, _ = $X.Subscribe(...)
       - pattern: _, _ = $X.Subscribe(...)
 
+  - id: session-player-mapped-twice
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A session's db.User becomes its game.Player once, in ssh.sessionModel, and that
+      one pointer is what tui.Deps, GlobalContext and the teardown hold. Another
+      lobby.NewPlayer builds a second identity UpdatePlayer never refreshes, so its
+      ratings drift from the seat's after a ranked match. Read GlobalContext.Player.
+    paths:
+      exclude:
+        - /internal/ssh/server.go
+        - /internal/lobby/
+        - "*_test.go"
+    pattern: lobby.NewPlayer(...)
+
   - id: boolean-env-compared-as-string
     languages: [go]
     severity: ERROR

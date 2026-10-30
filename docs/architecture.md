@@ -82,3 +82,4 @@ spend `ratelimit.WideKey` (IPv6 /48).
 17. A seat keeps its deadline (10s floor) only while its turn carries on: `State.ContinueTurn` (gin's draw then discard), a refused auto-play, a leave elsewhere. Any other move starts a full clock, even for the same seat, and a miss is charged once per seat-turn.
 18. Every TUI feed message carries the channel that delivered it. A view drops one stamped with any other.
 19. The floor tier (120x40) times `MAX_CONNECTIONS`, plus `extraCellBudget`, has to fit `GOMEMLIMIT`, and `cellBudget` has to fit the cores. Raise one only with the others, after a load test.
+20. A session's `db.User` becomes its `game.Player` once, in `ssh.sessionModel`, and that one pointer is what `tui.Deps`, `GlobalContext` and the teardown hold. Views read the session's name and account id off `GlobalContext.Player`, so they cannot disagree with the seat after a ranked reseat. Semgrep's `session-player-mapped-twice` fails any other `lobby.NewPlayer`.
