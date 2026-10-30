@@ -315,3 +315,37 @@ rules:
       - metavariable-regex:
           metavariable: $V
           regex: (?i)^"(true|false|t|f|1|0|yes|no|y|n|on|off)"$
+
+  - id: shutdown-gate-rolled-by-hand
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Waiting for a WaitGroup on a goroutine that closes a channel is the drain gate
+      ssh and lobby share as drain.Gate. A hand-rolled copy needs its own mutex to
+      keep Add and the close atomic (a WaitGroup alone permits Add after Wait saw
+      zero), its own reused waiter and its own idempotent release; enter and wait on
+      a drain.Gate instead.
+    paths:
+      exclude:
+        - /internal/drain/
+        - "*_test.go"
+    patterns:
+      - pattern-either:
+          - pattern: |
+              go func() {
+                $WG.Wait()
+                close($CH)
+              }()
+          - pattern: |
+              go func() {
+                defer close($CH)
+                $WG.Wait()
+              }()
+      # WaitGroup.Wait returns nothing, so a discarded result is some other Wait,
+      # such as the load test's ssh session.
+      - pattern-not: |
+          go func() {
+            ...
+            _ = $X.Wait()
+            ...
+          }()

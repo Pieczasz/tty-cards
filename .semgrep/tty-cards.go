@@ -3,6 +3,7 @@
 package semgreptest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -260,4 +262,26 @@ func hiddenCards(m *model, state *game.State, snap game.StateSnapshot, self *gam
 		// ruleid: tui-reads-hidden-cards
 		_ = left.Cards
 	}
+}
+
+// Shutdown waits on work through drain.Gate, never a WaitGroup closed over by hand.
+func shutdownGate(ctx context.Context, wg *sync.WaitGroup, gate *drain.Gate, sess *Session) {
+	done := make(chan struct{})
+	// ruleid: shutdown-gate-rolled-by-hand
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	// ruleid: shutdown-gate-rolled-by-hand
+	go func() {
+		defer close(done)
+		wg.Wait()
+	}()
+	// ok: shutdown-gate-rolled-by-hand
+	_ = gate.Wait(ctx)
+	// ok: shutdown-gate-rolled-by-hand
+	go func() {
+		_ = sess.Wait()
+		close(done)
+	}()
 }
