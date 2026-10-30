@@ -276,7 +276,7 @@ func TestHandleEnter_ASecondEnterDoesNotDealAgain(t *testing.T) {
 	require.NoError(t, m.ActionErr, "the first enter deals")
 	_, _ = m.Update(tuitest.Key("enter"))
 
-	assert.NoError(t, m.ActionErr, "the second enter is a no-op in the new hand's draw phase")
+	require.NoError(t, m.ActionErr, "the second enter is a no-op in the new hand's draw phase")
 	assert.Equal(t, logic.PhaseAwaitingDraw, m.phase)
 	assert.Equal(t, 2, m.handNumber)
 }
