@@ -164,7 +164,7 @@ func TestRenderStrip_MarksStagedCardsApartFromTheCursor(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	hand := testHand(4)
-	out := tuitest.StripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0, 0))
 
 	assert.Contains(t, out, "*", "a staged card is starred")
 	assert.Contains(t, out, ">", "the cursor is an arrow")
@@ -172,7 +172,25 @@ func TestRenderStrip_MarksStagedCardsApartFromTheCursor(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(out, ">"))
 	assert.NotContains(t, out, "\n", "an unbounded width keeps the hand on one row")
 
-	assert.Empty(t, RenderStrip(theme, nil, nil, 0, 20), "no cards, nothing to draw")
+	assert.Empty(t, RenderStrip(theme, nil, nil, 0, 20, 0), "no cards, nothing to draw")
+}
+
+// A strip capped at maxRows scrolls to the cursor rather than growing into the pile
+// above it, and keeps the cursor's card in view wherever it is.
+func TestRenderStrip_ScrollsToTheCursorPastMaxRows(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	hand := testHand(10) // two cells a row at eight columns: five rows
+
+	for cursor := -1; cursor < len(hand); cursor++ {
+		out := tuitest.StripANSI(RenderStrip(theme, hand, nil, cursor, 8, 2))
+		assert.Len(t, strings.Split(out, "\n"), 2, "cursor %d: the strip outgrew its rows", cursor)
+		if cursor >= 0 {
+			assert.Contains(t, out, ">", "cursor %d scrolled out of view", cursor)
+		}
+	}
+	assert.Equal(t, tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 0)),
+		tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 5)), "a strip that fits is not cut")
 }
 
 // A budget narrower than a single cell must still put one card per row rather than
@@ -181,7 +199,7 @@ func TestRenderStrip_AlwaysFitsAtLeastOneCard(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	out := tuitest.StripANSI(RenderStrip(theme, testHand(3), nil, 0, 1))
+	out := tuitest.StripANSI(RenderStrip(theme, testHand(3), nil, 0, 1, 0))
 	assert.Len(t, strings.Split(out, "\n"), 3, "one card per row when nothing else fits")
 }
 

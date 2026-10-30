@@ -38,7 +38,7 @@ func TestRenderHand_StaysInsideItsBudget(t *testing.T) {
 	theme := styles.NewTheme(true)
 	for _, size := range []int{1, 5, 13, 27, 40} {
 		for _, width := range []int{20, HandWidth(styles.MinWidth), HandWidth(80), HandWidth(200)} {
-			for _, rows := range []int{HandRows(styles.MinHeight), HandRows(24), HandRows(50)} {
+			for _, rows := range []int{HandRows(styles.MinWidth, styles.MinHeight), HandRows(80, 24), HandRows(120, 50)} {
 				name := fmt.Sprintf("hand=%d_width=%d_rows=%d", size, width, rows)
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
@@ -50,9 +50,9 @@ func TestRenderHand_StaysInsideItsBudget(t *testing.T) {
 					assert.LessOrEqual(t, lg.Width(out), width)
 					assert.LessOrEqual(t, lg.Width(multi), width)
 
-					// maxRows bounds the fan; the strip wraps to what the hand needs
-					// rather than hiding cards the player has to choose between.
-					if rows > 0 && FansHand(size, width, rows) {
+					// maxRows bounds the fan and the strip alike: the strip scrolls
+					// rather than pushing the pile off the top of the screen.
+					if rows > 0 {
 						assert.LessOrEqual(t, lg.Height(out), rows)
 						assert.LessOrEqual(t, lg.Height(multi), rows)
 					}
@@ -79,7 +79,7 @@ func TestFansHand_AgreesWithWhatRenderHandDraws(t *testing.T) {
 	theme := styles.NewTheme(true)
 	for _, size := range []int{0, 1, 7, 20, 40} {
 		for _, width := range []int{12, 40, 78, 198} {
-			for _, rows := range []int{0, components.FanRows, components.FanRows + 1, stripHandRows} {
+			for _, rows := range []int{0, components.FanRows, components.FanRows + 1, 3} {
 				name := fmt.Sprintf("hand=%d_width=%d_rows=%d", size, width, rows)
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
@@ -88,7 +88,7 @@ func TestFansHand_AgreesWithWhatRenderHandDraws(t *testing.T) {
 					// Whether the renderer fanned is not a guess: it either drew the
 					// fan or fell back to the very strip components exposes.
 					drewTheStrip := RenderHand(theme, hand, 0, nil, width, rows) ==
-						components.RenderStrip(theme, hand, nil, 0, width)
+						components.RenderStrip(theme, hand, nil, 0, width, rows)
 					fanned := size > 0 && !drewTheStrip
 
 					assert.Equal(t, fanned, FansHand(size, width, rows),
@@ -106,27 +106,24 @@ func TestCompactBreakpoints_AnswerOnEitherDimension(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name                   string
-		width, height          int
-		compact, superCompact  bool
-		handRowsAreTheStripCap bool
+		name                  string
+		width, height         int
+		compact, superCompact bool
+		fans                  bool
 	}{
-		{name: "a roomy terminal", width: 120, height: 50},
-		{name: "short but wide", width: 200, height: 20, compact: true, superCompact: true, handRowsAreTheStripCap: true},
-		{name: "tall but narrow", width: 40, height: 60, compact: true, superCompact: true},
-		{name: "just inside the compact breakpoint", width: compactWidth, height: compactHeight},
-		{name: "one row under it", width: compactWidth, height: compactHeight - 1, compact: true},
+		{name: "a roomy terminal", width: 120, height: 50, fans: true},
+		{name: "short but wide", width: 200, height: 20, compact: true, superCompact: true},
+		{name: "tall but narrow", width: 40, height: 60, compact: true, superCompact: true, fans: true},
+		{name: "just inside the compact breakpoint", width: compactWidth, height: compactHeight, fans: true},
+		{name: "one row under it", width: compactWidth, height: compactHeight - 1, compact: true, fans: true},
+		// A fan there leaves the pile a row short, and the cut row is its border.
+		{name: "26 rows", width: 100, height: 26, compact: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.compact, IsCompact(tc.width, tc.height))
 			assert.Equal(t, tc.superCompact, isSuperCompact(tc.width, tc.height))
-
-			want := 0
-			if tc.handRowsAreTheStripCap {
-				want = stripHandRows
-			}
-			assert.Equal(t, want, HandRows(tc.height))
+			assert.Equal(t, tc.fans, fanFits(HandRows(tc.width, tc.height)))
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package gameview
 
 import (
+	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 
@@ -99,13 +100,34 @@ func HandWidth(width int) int {
 	return max(width-2, 0)
 }
 
-const stripHandRows = 3
+// What the hand shares a compact terminal with, in the tallest table (Uno's), once the
+// middle band's margins are clamped away.
+const (
+	// tableRows is nine rows of card, the stock count under it, then two indicators.
+	tableRows = 12
+	// statusRows is the turn line and its margins.
+	statusRows = 3
+	// aboveHandRows is Uno's colour row, drawn over a fanned hand only.
+	aboveHandRows = 1
+)
 
-// HandRows caps the hero's hand; zero means unbounded. A terminal too short to spare
-// ten rows for card art gets the compact strip instead.
-func HandRows(height int) int {
-	if height < superCompactHeight {
-		return stripHandRows
+// HandRows caps the hero's hand at the rows the other bands leave it; zero means
+// unbounded. Below a fan's worth it is the strip, scrolled to that many rows. A fixed
+// height breakpoint left the pile a row short at 26 rows, and more where the key line
+// wraps, and the middle band is clamped from the top: the cut rows were the pile's
+// border and its rank.
+func HandRows(width, height int) int {
+	if !IsCompact(width, height) {
+		return 0
 	}
-	return 0
+	top := 2 // the margin over the opponents' names, and the names
+	if isSuperCompact(width, height) {
+		top = 1
+	}
+	rows := height - top - tableRows - statusRows - lg.Height(styles.WrapActions(HandKeyHints, width))
+	if fan := rows - aboveHandRows; fan > components.FanRows {
+		return fan
+	}
+	// Fewer rows than a fan and its index row, so the hand is drawn as the strip.
+	return max(min(rows, components.FanRows), 1)
 }

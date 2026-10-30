@@ -3,6 +3,8 @@ package crazyeight
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +85,37 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The middle band is clamped from the top, so a hand that takes one row too many cuts
+// the pile's top border and rank, or the picker's frame: a fanned hand did it at 26
+// rows, and a long strip at 64x20.
+func TestView_KeepsThePileAndThePickerWhole(t *testing.T) {
+	t.Parallel()
+
+	for _, width := range []int{styles.MinWidth, 72, 80, 100, 120} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			t.Parallel()
+			for height := styles.MinHeight; height <= 50; height++ {
+				for _, cards := range []int{7, 10, 12, 46} {
+					at := fmt.Sprintf("%dx%d, %d cards", width, height, cards)
+					m := viewAt(width, height, "bob")
+					m.Base.Hand = handOf(cards)
+
+					for _, myTurn := range []bool{true, false} {
+						m.Base.MyTurn = myTurn
+						out := tuitest.StripANSI(m.View().Content)
+						assert.Containsf(t, out, "╭─────────╮   ╭─────────╮", "%s, on turn %v: the pile is cut", at, myTurn)
+					}
+
+					m.Base.MyTurn, m.Picker.Open = true, true
+					picker := tuitest.StripANSI(m.Picker.Render(m.Global.Palette()))
+					topBorder, _, _ := strings.Cut(picker, "\n")
+					assert.Containsf(t, tuitest.StripANSI(m.View().Content), topBorder, "%s: the picker is cut", at)
+				}
+			}
+		})
 	}
 }
 

@@ -73,7 +73,7 @@ func (m *model) renderScoreLine() string {
 func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Palette(), m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handView := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, m.Selected, nil,
-		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
+		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Width, m.Global.Height))
 
 	return gameview.RenderHeroBand(m.Global.Palette(), m.ActionErr, statusView, handView)
 }

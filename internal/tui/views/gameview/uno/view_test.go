@@ -3,6 +3,8 @@ package uno
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,7 +114,7 @@ func TestRenderHandColorRow_LinesUpWithTheHandBelowIt(t *testing.T) {
 					m.Base.Hand = handOf(handSize)
 					m.Selected = min(2, handSize-1)
 
-					handWidth, handRows := gameview.HandWidth(width), gameview.HandRows(height)
+					handWidth, handRows := gameview.HandWidth(width), gameview.HandRows(width, height)
 					row := m.renderHandColorRow(handWidth, handRows)
 					hand := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, m.Selected, nil, handWidth, handRows)
 
@@ -137,7 +139,7 @@ func TestRenderHandColorRow_DropsTheSelectionBehindThePicker(t *testing.T) {
 
 	m := viewAt(120, 50, "bob")
 	m.Selected = 4
-	handWidth, handRows := gameview.HandWidth(120), gameview.HandRows(50)
+	handWidth, handRows := gameview.HandWidth(120), gameview.HandRows(120, 50)
 
 	m.Picker.Open = true
 	withPicker := m.renderHandColorRow(handWidth, handRows)
@@ -222,6 +224,37 @@ func TestRenderColorPicker_OffersEveryColour(t *testing.T) {
 		assert.Contains(t, out, c.Label)
 	}
 	assert.Contains(t, out, "Pick a color")
+}
+
+// The middle band is clamped from the top, so a hand that takes one row too many cuts
+// the pile's top border and rank, or the picker's frame. A fanned hand at 26-28 rows
+// did it, and so did a strip of 46 cards wrapping to four rows at 64x20.
+func TestView_KeepsThePileAndThePickerWhole(t *testing.T) {
+	t.Parallel()
+
+	for _, width := range []int{styles.MinWidth, 72, 80, 100, 120} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			t.Parallel()
+			for height := styles.MinHeight; height <= 50; height++ {
+				for _, cards := range []int{7, 12, 46, 60} {
+					at := fmt.Sprintf("%dx%d, %d cards", width, height, cards)
+					m := viewAt(width, height, "bob")
+					m.Base.Hand = handOf(cards)
+
+					for _, myTurn := range []bool{true, false} {
+						m.Base.MyTurn = myTurn
+						out := tuitest.StripANSI(m.View().Content)
+						assert.Containsf(t, out, "╭─────────╮   ╭─────────╮", "%s, on turn %v: the pile is cut", at, myTurn)
+					}
+
+					m.Base.MyTurn, m.Picker.Open = true, true
+					picker := tuitest.StripANSI(m.Picker.Render(m.Global.Palette()))
+					topBorder, _, _ := strings.Cut(picker, "\n")
+					assert.Containsf(t, tuitest.StripANSI(m.View().Content), topBorder, "%s: the picker is cut", at)
+				}
+			}
+		})
+	}
 }
 
 func TestView_ShowsTheLastRejectedActionAndStillFits(t *testing.T) {

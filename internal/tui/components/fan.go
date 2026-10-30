@@ -113,7 +113,11 @@ const stripCellWidth = 4
 // RenderStrip is the hand as rank-and-suit cells wrapped to maxWidth, for when no fan
 // fits: thirteen cards of art run past a hundred columns. selected marks staged cards,
 // cursor the focused one; nil map means single selection.
-func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth int) string {
+//
+// Past maxRows the strip scrolls to keep the cursor's row in view. A strip that grew
+// instead pushed the pile above it out of the top of a 64x20 screen; a card scrolled
+// away is still a cursor key away. Zero maxRows is unbounded.
+func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth, maxRows int) string {
 	if len(cards) == 0 {
 		return ""
 	}
@@ -131,7 +135,12 @@ func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, 
 		}
 		row.WriteString(stripCell(t, card, i, selected, cursor))
 	}
-	return strings.Join(append(rows, row.String()), "\n")
+	rows = append(rows, row.String())
+	if maxRows > 0 && len(rows) > maxRows {
+		first := min(max(cursor/perRow-maxRows+1, 0), len(rows)-maxRows)
+		rows = rows[first : first+maxRows]
+	}
+	return strings.Join(rows, "\n")
 }
 
 func stripCell(t *styles.Theme, card deck.Card, i int, selected map[int]struct{}, cursor int) string {

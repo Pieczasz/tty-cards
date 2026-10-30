@@ -149,6 +149,6 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 func (t *ShedTable) renderHero(aboveHand string) string {
 	g := t.Global
 	status := RenderStatus(g.Palette(), t.Base.CurrentPlayerName, t.Base.MyTurn, t.Base.TurnRemaining)
-	hand := RenderHand(g.Palette(), t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Height))
+	hand := RenderHand(g.Palette(), t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Width, g.Height))
 	return RenderHeroBand(g.Palette(), t.ActionErr, status, aboveHand, hand)
 }
