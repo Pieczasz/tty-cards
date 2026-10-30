@@ -357,6 +357,28 @@ func TestJoin_TheCodePromptNoticeOffersNoFilterKeys(t *testing.T) {
 		"browsing offers the filters again")
 }
 
+// Opening the code prompt shortens the empty-list notice; the block is centred on
+// its widest line, so a shorter notice moved everything sideways. The row may still
+// shift: the modal footer is shorter, and the frame centres the content vertically.
+func TestJoin_TheCodePromptKeepsTheNoticeInPlace(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	column := func() int {
+		for line := range strings.SplitSeq(tuitest.StripANSI(view.View().Content), "\n") {
+			if c := strings.Index(line, "No tables match"); c >= 0 {
+				return c
+			}
+		}
+		t.Fatal("no empty-list notice on screen")
+		return 0
+	}
+
+	browsing := column()
+	pressJoin(t, view, "c")
+	assert.Equal(t, browsing, column(), "the notice moved sideways when the code prompt opened")
+}
+
 // framedLine is the line holding needle, inside the frame's side borders, with the
 // blank columns either side of its text counted.
 func framedLine(t *testing.T, out, needle string) (left, right int) {

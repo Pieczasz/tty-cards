@@ -339,12 +339,16 @@ func (m *joinModel) renderList(rows int) string {
 		// Wrapped, not padded, to the frame: wider than 54 columns it widened the
 		// whole layout, so the footer broke mid-action and the title went off centre.
 		// The code prompt takes g, m and o as letters, so it must not offer them.
-		text := "No tables match right now - press g, m or o to widen the filters."
-		if m.writingCode {
-			text = "No tables match right now."
+		muted := m.global.Palette().Muted
+		full := lg.Wrap(muted.Render("No tables match right now - press g, m or o to widen the filters."),
+			styles.InnerWidth(m.global.Width), "")
+		if !m.writingCode {
+			return full
 		}
-		notice := m.global.Palette().Muted.Render(text)
-		return lg.Wrap(notice, styles.InnerWidth(m.global.Width), "")
+		// The short notice keeps the full one's box: the layout centres on its widest
+		// line, so a narrower notice moved the whole screen when the prompt opened.
+		w, h := lg.Size(full)
+		return lg.NewStyle().Width(w).Height(h).Render(muted.Render("No tables match right now."))
 	}
 
 	start, end := m.visibleWindow(rows)
