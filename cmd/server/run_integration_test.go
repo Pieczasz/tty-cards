@@ -5,6 +5,7 @@ package main
 import (
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -17,7 +18,7 @@ import (
 )
 
 // The whole composition root against a real database: it has to come up healthy,
-// answer the container healthcheck, and drain cleanly on SIGTERM - and a boot that
+// answer the container healthcheck, and drain cleanly on each shutdown signal - and a boot that
 // cannot finish wiring has to release what it already opened.
 //
 //nolint:paralleltest // run installs the process-wide slog default and otel providers
@@ -35,28 +36,35 @@ func TestRun_AgainstPostgres(t *testing.T) {
 		t.Setenv("DB_SSLMODE", "disable")
 	}
 
-	t.Run("serves until signalled", func(t *testing.T) {
-		serverEnv(t, fakeCollector(t))
-		databaseEnv(t)
-		captureLogs(t)
+	// SIGHUP too: a process manager or a closed terminal sends it, and Go's default
+	// for it ended the process at once, with no drain and no match history.
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP} {
+		t.Run("serves until "+sig.String(), func(t *testing.T) {
+			serverEnv(t, fakeCollector(t))
+			databaseEnv(t)
+			captureLogs(t)
+			// Held for the whole subtest, so a signal run does not take fails below
+			// rather than ending the test binary.
+			held := make(chan os.Signal, 1)
+			signal.Notify(held, sig)
+			defer signal.Stop(held)
 
-		exited := make(chan error, 1)
-		go func() { exited <- run() }()
+			exited := make(chan error, 1)
+			go func() { exited <- run() }()
 
-		awaitHealthy(t, exited)
-		// The real signal, not a channel send: run has it registered by now, so the
-		// test binary is not what it terminates.
-		self, err := os.FindProcess(os.Getpid())
-		require.NoError(t, err)
-		require.NoError(t, self.Signal(syscall.SIGTERM))
+			awaitHealthy(t, exited)
+			self, err := os.FindProcess(os.Getpid())
+			require.NoError(t, err)
+			require.NoError(t, self.Signal(sig))
 
-		select {
-		case err := <-exited:
-			require.NoError(t, err, "a requested shutdown is not a failure")
-		case <-time.After(30 * time.Second):
-			t.Fatal("run ignored SIGTERM")
-		}
-	})
+			select {
+			case err := <-exited:
+				require.NoError(t, err, "a requested shutdown is not a failure")
+			case <-time.After(30 * time.Second):
+				t.Fatalf("run ignored %s", sig)
+			}
+		})
+	}
 
 	t.Run("an unwritable host key stops the boot", func(t *testing.T) {
 		serverEnv(t, fakeCollector(t))

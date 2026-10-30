@@ -83,10 +83,12 @@ func healthcheck() int {
 }
 
 // run keeps the signals registered until the drain is over, so a second SIGTERM
-// cannot kill a shutdown in progress.
+// cannot kill a shutdown in progress. SIGHUP drains too: a process manager or a
+// closed terminal sends it, and Go's default for it exits at once, dropping every
+// table in play with no history row. SIGQUIT stays Go's goroutine dump.
 func run() error {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
 
 	ctx, cancel := context.WithCancel(context.Background())

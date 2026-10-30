@@ -216,6 +216,9 @@ unnoticed for so long.
   nobody left to drain: games in progress were held for a reconnect, then
   recorded unrated, and players saw a blank screen with no notice. Sessions now
   play on through the drain and are closed with the restart notice at its end.
+- **SIGHUP drains like SIGTERM** (operators). It used to end the process at once:
+  no drain, frozen screens, and the games in play missing from history. SIGQUIT
+  is still Go's goroutine dump and exits without a drain.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 
