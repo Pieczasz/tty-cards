@@ -43,7 +43,9 @@ players at those tables still have a name to resolve.
 **Erasure: `db.Profiles.DeleteAccount(ctx, userID)`**, implemented by
 `eraseUser` in `internal/repository/user.go`, one transaction. Reached from the
 Profile screen with `x` and a typed `DELETE`; refused while the player is seated at a
-table, and the session ends afterwards.
+table, and the session ends afterwards. Once confirmed it runs detached from the
+session (`context.WithoutCancel`, bounded by the request timeout), so closing the
+terminal mid-request does not roll it back.
 
 | Row | What happens | Why |
 |---|---|---|

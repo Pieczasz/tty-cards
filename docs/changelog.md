@@ -16,7 +16,7 @@ unnoticed for so long.
   your ratings are erased outright; your username becomes `deleted_` plus the hex
   of your account id so the other players at your old tables keep a readable match
   history. Refused while you are seated at a table, and the session ends once it
-  is done.
+  is done. Closing the terminal after confirming does not cancel it.
 - **A separate limit on new accounts** - 5 per hour per client network by
   default, set with `REGISTRATION_LIMIT` and `REGISTRATION_WINDOW`. Playing on an
   existing account never touches that budget, and neither does a name that fails

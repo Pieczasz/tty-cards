@@ -356,11 +356,17 @@ var placementWords = [3]string{"1st place", "2nd place", "3rd place"}
 // is already anonymised and the session has nothing left to authenticate.
 type accountDeletedMsg struct{ err error }
 
+// deleteAccount detaches from the session: closing the terminal right after enter is
+// the natural last move, and a requested erasure must not roll back with it. The
+// failure is logged here because the result message may reach a program that has
+// already quit.
 func deleteAccount(ctx context.Context, profiles db.Profiles, userID uuid.UUID) tea.Cmd {
 	return func() tea.Msg {
-		reqCtx, cancel := context.WithTimeout(ctx, views.RequestTimeout)
+		reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), views.RequestTimeout)
 		defer cancel()
-		return accountDeletedMsg{err: profiles.DeleteAccount(reqCtx, userID)}
+		err := profiles.DeleteAccount(reqCtx, userID)
+		logFailure(reqCtx, "deleting account", err)
+		return accountDeletedMsg{err: err}
 	}
 }
 
@@ -423,7 +429,6 @@ func logFailure(ctx context.Context, doing string, err error) {
 
 func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		logFailure(m.global.RequestContext(), "deleting account", msg.err)
 		m.phase = deleteConfirming
 		m.typed = ""
 		m.notice = "Could not delete the account. Please try again."
