@@ -26,13 +26,6 @@ const (
 	finalizeTimeout     = 15 * time.Second
 	joinRateLimitCount  = 10
 	joinRateLimitWindow = time.Second
-	// maxLobbySubscribers is deliberately not maxPlayers: that setting is raised by
-	// SetMaxPlayers long after the broadcaster exists, and a reconnecting player
-	// briefly holds two subscriptions, so a table sized to its seats hands
-	// ErrAtCapacity - a lobby view that never updates - to a player who joined
-	// legitimately. This is the largest roster any game allows plus the same
-	// headroom the engine keeps, which no raise can outgrow.
-	maxLobbySubscribers = 10 + 8
 )
 
 var lobbyCodePattern = regexp.MustCompile(`^[A-Z0-9]{8}$`)
@@ -165,6 +158,12 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 		return nil, err
 	}
 
+	// The feed is sized from the game's MaxPlayers, not options.maxPlayers:
+	// SetMaxPlayers raises that long after the broadcaster exists, and no raise
+	// passes the game's own ceiling. A reconnecting player briefly holds two
+	// subscriptions, so this is the engine's own 2n+8: a feed sized to the seats
+	// would hand ErrAtCapacity - a lobby view that never updates - to a legitimate
+	// player.
 	lobby := &Lobby{
 		cacheDirty:  &m.cacheDirty,
 		game:        mod,
@@ -173,7 +172,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 		options:     options,
 		code:        code,
 		ready:       make(map[string]bool),
-		broadcaster: broadcaster.New[Event](maxLobbySubscribers),
+		broadcaster: broadcaster.New[Event](2*mod.MaxPlayers + 8),
 		playerSubs:  make(map[string][]<-chan Event),
 		createdAt:   time.Now(),
 	}

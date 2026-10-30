@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -1026,7 +1027,8 @@ func TestLobby_SubscribePastCapacityIsRefused(t *testing.T) {
 	t.Parallel()
 	_, l := newTestLobby(t, 2)
 	id := l.Snapshot().Leader.Player.ID
-	for range maxLobbySubscribers {
+	const capacity = 2*2 + 8 // the 2-seat game's 2n+8
+	for range capacity {
 		_, err := l.Subscribe(id)
 		require.NoError(t, err)
 	}
@@ -1036,7 +1038,25 @@ func TestLobby_SubscribePastCapacityIsRefused(t *testing.T) {
 	assert.Nil(t, ch)
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	assert.Len(t, l.playerSubs[id], maxLobbySubscribers)
+	assert.Len(t, l.playerSubs[id], capacity)
+}
+
+// A reconnecting seat briefly holds two subscriptions, so a full table of a game
+// larger than any shipped one still has room for every seat to do so at once.
+func TestLobby_EverySeatOfALargeGameCanHoldTwoSubscriptions(t *testing.T) {
+	t.Parallel()
+	const seats = 12
+	_, l := newTestLobby(t, seats)
+	for i := range seats {
+		id := fmt.Sprintf("p%d", i+1)
+		if i > 0 {
+			require.NoError(t, l.addGuest(mockPlayer(id, testutil.UID(i+1))))
+		}
+		for range 2 {
+			_, err := l.Subscribe(id)
+			require.NoError(t, err, "seat %d", i+1)
+		}
+	}
 }
 
 // JoinLobbyByCode turns a seated player away before reaching the table; this is the
