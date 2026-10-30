@@ -2,6 +2,8 @@ package components
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -191,6 +193,33 @@ func TestRenderStrip_ScrollsToTheCursorPastMaxRows(t *testing.T) {
 	}
 	assert.Equal(t, tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 0)),
 		tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 5)), "a strip that fits is not cut")
+}
+
+// A scrolled strip says how many cards it cut off above and below, in its own width:
+// a 45-card hand at 64x20 showed 30 cards and nothing to say the rest existed.
+func TestRenderStrip_CountsTheCardsItScrolledAway(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	hand := testHand(45)
+	const maxWidth, maxRows = 62, 2 // the hero's strip at 64x20
+	marker := regexp.MustCompile(`([↑↓])(\d+)`)
+
+	for cursor := range hand {
+		out := tuitest.StripANSI(RenderStrip(theme, hand, nil, cursor, maxWidth, maxRows))
+		hidden := map[string]int{}
+		for _, m := range marker.FindAllStringSubmatch(out, -1) {
+			hidden[m[1]], _ = strconv.Atoi(m[2])
+		}
+		shown := strings.Count(out, "♠") + strings.Count(out, "♥") + strings.Count(out, "♦") + strings.Count(out, "♣")
+
+		assert.Equal(t, len(hand), shown+hidden["↑"]+hidden["↓"], "cursor %d: %q", cursor, out)
+		assert.LessOrEqual(t, lg.Width(out), maxWidth, "cursor %d: the marker overran the strip", cursor)
+		assert.Contains(t, out, ">", "cursor %d scrolled out of view", cursor)
+	}
+	assert.Contains(t, tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, maxWidth, maxRows)), "↓",
+		"the start of a long hand says more follow")
+	assert.NotRegexp(t, marker, tuitest.StripANSI(RenderStrip(theme, testHand(30), nil, 0, maxWidth, maxRows)),
+		"a strip that fits has nothing to mark")
 }
 
 // A budget narrower than a single cell must still put one card per row rather than

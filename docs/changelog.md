@@ -471,6 +471,9 @@ unnoticed for so long.
   hand as the rank-and-suit strip. A strip too long for its rows (a 46-card Uno
   hand at 64x20) scrolls with the cursor instead of pushing the pile and the
   picker's frame off the screen.
+- A scrolled hand strip says how many cards it cut off: `↑N` at the end of its
+  first row for cards above, `↓N` at the end of its last row for cards below. A
+  45-card hand at 64x20 showed 28 cards and nothing to say the rest existed.
 - The profile history reads "4th place" for a fourth place, and so on past it.
   It used to read "4 place".
 - The leaderboard rows line up under their column titles again. Every row sat

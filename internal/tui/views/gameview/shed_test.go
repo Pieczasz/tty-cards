@@ -237,6 +237,23 @@ func TestShedTable_OpenPickerHintsOfferOnlyThePickersKeys(t *testing.T) {
 	}
 }
 
+// A 45-card hand at 64x20 scrolls to two strip rows; the hero has to be told the
+// other cards exist, and the count must not cost the pile a row.
+func TestShedTable_ScrolledHandCountsItsHiddenCards(t *testing.T) {
+	t.Parallel()
+	tbl := shedTableAt(styles.MinWidth, styles.MinHeight)
+	tbl.Base.Hand = nil
+	for i := range 45 {
+		tbl.Base.Hand = append(tbl.Base.Hand, deck.Card{Rank: deck.AllRanks[i%13], Suit: deck.Spades})
+	}
+
+	out := tuitest.StripANSI(tbl.RenderTable("PILE", "").Content)
+	assert.Contains(t, out, "↓17", "28 of 45 cards shown, and nothing said about the rest")
+	assert.Contains(t, out, "PILE")
+	assert.Equal(t, styles.MinHeight, lg.Height(out))
+	assert.Equal(t, styles.MinWidth, lg.Width(out))
+}
+
 // HandRows budgets the hand for HandKeyHints' wrapped height; a taller picker line
 // would take its extra row off the picker's frame.
 func TestPickerKeyHints_WrapNoTallerThanTheHandKeys(t *testing.T) {
