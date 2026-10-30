@@ -347,6 +347,14 @@ unnoticed for so long.
   for its turn. Space and enter in the Hearts pass, and draw, discard and knock
   in Gin, did nothing off-turn; the waiting seats now see only the cursor keys
   and esc.
+- A failed join no longer pushes the join browser past the edge of an 80x24 or
+  64x20 terminal: the error line is wrapped and the table list gives up a row
+  for it.
+- An empty leaderboard says no one has ranked yet instead of staying on
+  "Loading leaderboard." forever.
+- A player kicked, or whose table closed, in the moment between joining and the
+  table screen opening is sent home instead of being left on a roster they are
+  no longer in.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
