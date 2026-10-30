@@ -397,7 +397,7 @@ func eraseUser(tx *gorm.DB, userID uuid.UUID) error {
 		return err
 	}
 	if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("id = ?", userID).Take(&db.User{}).Error; err != nil {
+		Select("id").Where("id = ?", userID.String()).Take(&db.User{}).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return db.ErrUserNotFound
 		}

@@ -489,8 +489,11 @@ func likePrefix(prefix string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix) + "%"
 }
 
+// uuidStrings is ids as query arguments. Every id is bound as its text form, the
+// same as the stduuid serializer writes: a raw uuid.UUID is a [16]byte with no
+// Valuer, which only works where Postgres infers a uuid parameter from the column
+// and breaks in an untyped spot such as SELECT ? or a COALESCE.
 func uuidStrings(ids []uuid.UUID) []string {
-	// Stdlib uuid.UUID has no database/sql Valuer; pgx will not encode it as uuid.
 	out := make([]string, len(ids))
 	for i, id := range ids {
 		out[i] = id.String()
