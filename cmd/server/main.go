@@ -35,8 +35,9 @@ import (
 // compose's stop_grace_period (80s) has to outlast the whole sequential drain:
 // ssh, then the session teardowns its Close sets off, then the stats api, then two
 // finalizer windows, then otel, whose three providers get 2s each
-// (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. Two drain windows, no outbox.
-// a match write gets windows rather than an outbox.
+// (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. A match write gets a second
+// finalizer window rather than an outbox. TestDrainBudgetFitsStopGracePeriod pins
+// the sum.
 const (
 	sshDrainTimeout = 30 * time.Second
 	// sessionDrainTimeout bounds the wait for session handlers after Close. Their
