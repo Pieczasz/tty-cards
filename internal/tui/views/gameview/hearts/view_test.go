@@ -342,3 +342,18 @@ func TestView_AMatchCutShortByALeaveSaysSo(t *testing.T) {
 	assert.Contains(t, out, "MATCH ENDED EARLY - dave left the table")
 	assert.NotContains(t, out, "wins", "an interrupted match named a winner")
 }
+
+// A rules error ends the table mid-trick with no winner and no match-complete flag.
+// The scoreboard still has to show, saying the table failed, not "Winner: " and nothing.
+func TestView_ARulesErrorShowsTheScoreboard(t *testing.T) {
+	t.Parallel()
+	m := fourHanded(80, 24)
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonRulesError
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.NotContains(t, out, "Winner:")
+	assert.Contains(t, out, "table error")
+	assert.Contains(t, out, "40", "bob's total")
+	assert.Contains(t, out, gameview.LobbyHint)
+}

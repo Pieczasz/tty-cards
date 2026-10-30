@@ -48,6 +48,10 @@ func InterruptedTitle(leavers []string) string {
 	return "MATCH ENDED EARLY - " + strings.Join(leavers, ", ") + " left the table"
 }
 
+// rulesErrorTitle is the headline of a match a rules error ended. Nobody won it and
+// finalize records it without a rating change, so it must not read as complete.
+const rulesErrorTitle = "MATCH ENDED - table error"
+
 // ApplyMatchEnd sets the headline once the match is over. An interrupted match
 // wins over a winner: the seats that stayed are not a result. A hand still inside
 // the match keeps the title and hint the caller set.
@@ -55,6 +59,8 @@ func (h *HandOver) ApplyMatchEnd(reason game.EndReason, matchOver bool, phase ga
 	switch {
 	case reason == game.EndReasonInterrupted:
 		h.Title, h.Hint = InterruptedTitle(leavers), LobbyHint
+	case reason == game.EndReasonRulesError:
+		h.Title, h.Hint = rulesErrorTitle, LobbyHint
 	case matchOver || phase == game.Finished:
 		h.Title, h.Hint = MatchOverTitle(winner), LobbyHint
 	}

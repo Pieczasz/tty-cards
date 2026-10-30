@@ -337,6 +337,10 @@ unnoticed for so long.
   showing only the bottom of the card art. The cards are now drawn small there,
   and dropped before the headline when even that does not fit. Poker's leave
   warning is on its own line so 64 columns no longer cut it short.
+- **A table that ends on an error says so.** It used to read "MATCH COMPLETE"
+  over " wins" in Poker and Gin Rummy, and "Game Over! Winner: " with no name in
+  Hearts, as if somebody had won a match that is recorded unrated. It now reads
+  "MATCH ENDED - table error", and Hearts keeps its scoreboard on screen.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.

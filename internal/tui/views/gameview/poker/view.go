@@ -68,9 +68,12 @@ func (m *model) renderHandOver() string {
 		Rows:     make([]string, 0, len(m.seats)),
 		Hint:     m.handOverHint(),
 	}
+	// The headline names the match's winner, so the hand's winner goes; a rules error
+	// leaves no winner to name.
 	if m.matchComplete {
-		h.Title, h.Subtitle = gameview.MatchOverTitle(""), m.winnerName+" wins"
+		h.Subtitle = ""
 	}
+	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.winnerName, nil)
 
 	for _, s := range m.seats {
 		// Chip glyphs carry their own colour, so they are joined in rather than

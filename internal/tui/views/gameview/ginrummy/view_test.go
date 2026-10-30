@@ -313,6 +313,19 @@ func TestView_ForfeitShowsTheScoreboard(t *testing.T) {
 	assert.Contains(t, out, "40")
 }
 
+// A rules error ends the match unrated and without a winner, so it must not read as
+// a completed match.
+func TestView_ARulesErrorSaysTheTableFailed(t *testing.T) {
+	t.Parallel()
+	m := viewAt(80, 24)
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonRulesError
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "table error")
+	assert.NotContains(t, out, "MATCH COMPLETE")
+}
+
 // The hand-over screen is how a player learns who won the hand and why, so the
 // headline, the outcome and the hint have to survive on every terminal; only the
 // card art may give way.

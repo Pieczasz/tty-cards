@@ -376,7 +376,11 @@ func tickInterval(remaining time.Duration, onTurn bool) time.Duration {
 // after it ends.
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
 	content := "Waiting for game to start..."
-	if phase == game.Finished {
+	switch {
+	case phase == game.Finished && winner == "":
+		// A rules error ends the table with nobody named.
+		content = "Game Over!\n\nPress Esc to go back."
+	case phase == game.Finished:
 		content = fmt.Sprintf("Game Over! Winner: %s\n\nPress Esc to go back.", winner)
 	}
 	return renderGameNotice(g, content)

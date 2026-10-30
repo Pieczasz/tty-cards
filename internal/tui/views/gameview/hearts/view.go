@@ -24,7 +24,9 @@ func (m *model) View() tea.View {
 	if screen, ok := m.LeaveConfirmScreen(); ok {
 		return tea.NewView(screen)
 	}
-	if m.phase == logic.PhaseHandOver || m.matchComplete {
+	// Finished as well: a rules error ends the table mid-trick without MatchComplete,
+	// and the scores still belong on screen.
+	if m.phase == logic.PhaseHandOver || m.matchComplete || m.Base.Phase == game.Finished {
 		return tea.NewView(m.renderHandOver())
 	}
 	if m.Base.Phase != game.Playing {
