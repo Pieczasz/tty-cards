@@ -24,6 +24,10 @@ var (
 	errRulesPanicked = errors.New("the game hit an internal error and has ended")
 )
 
+// Engine runs one table. Every method takes one lock that covers the State, the turn
+// clock and the end of the match, so the rules run under it and a move, a timeout
+// and a leave can never interleave. Views reach it only through BoundEngine; the
+// event feed tells them when to read it again.
 type Engine struct {
 	mu          sync.Mutex
 	state       *State

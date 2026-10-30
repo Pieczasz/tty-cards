@@ -7,6 +7,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/deck"
 )
 
+// State is one table's game, handed to every rules hook under the engine lock and to
+// a view's Frame callback. It has no lock of its own: the engine's covers it.
 type State struct {
 	Players          []*Player
 	LeftPlayers      []*Player
