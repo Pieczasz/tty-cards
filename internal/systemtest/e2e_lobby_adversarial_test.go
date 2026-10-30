@@ -239,10 +239,8 @@ func TestE2E_JoinRaces(t *testing.T) {
 			var wg sync.WaitGroup
 			var mu sync.Mutex
 			var got []*lobby.Lobby
-			wg.Add(2)
 			for _, code := range []string{a.Code(), b.Code()} {
-				go func(code string) {
-					defer wg.Done()
+				wg.Go(func() {
 					joined, err := manager.JoinLobbyByCode(code, p)
 					if err != nil {
 						return
@@ -250,7 +248,7 @@ func TestE2E_JoinRaces(t *testing.T) {
 					mu.Lock()
 					got = append(got, joined)
 					mu.Unlock()
-				}(code)
+				})
 			}
 			waitOrFail(t, &wg, 5*time.Second)
 			require.Lenf(t, got, 1, "iter %d: a player sits at one table", i)
@@ -279,21 +277,17 @@ func TestE2E_SettingsFlipWhileJoining(t *testing.T) {
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for _, g := range roster[1:] {
-		wg.Add(1)
-		go func(p *game.Player) {
-			defer wg.Done()
+	for _, p := range roster[1:] {
+		wg.Go(func() {
 			<-start
 			_ = joinErr(manager.JoinLobbyByCode(code, p))
 			_ = joinErr(manager.JoinLobbyByCode(code, p))
 			_ = l.SetPrivate(p, true)
 			_ = l.SetRanked(p, true)
 			_ = l.SetMaxPlayers(p, 9)
-		}(g)
+		})
 	}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-start
 		for _, limit := range []int{2, 4, 6, 9, 3} {
 			_ = l.SetMaxPlayers(leader, limit)
@@ -302,16 +296,15 @@ func TestE2E_SettingsFlipWhileJoining(t *testing.T) {
 			_ = l.SetPrivate(leader, false)
 			_ = l.SetRanked(leader, false)
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		<-start
 		for range 40 {
 			_ = manager.BrowseLobbies(leader, lobby.BrowseFilter{Slug: "poker", Mode: lobby.BrowseCasual})
 			_ = manager.BrowseLobbies(leader, lobby.BrowseFilter{Mode: lobby.BrowseRanked, OnlyWithRoom: true})
 			_, _ = manager.Stats()
 		}
-	}()
+	})
 	close(start)
 	waitOrFail(t, &wg, 10*time.Second)
 
@@ -344,15 +337,8 @@ func TestE2E_LeaderLeavePromotesAndCodeDies(t *testing.T) {
 		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), ps[1])))
 		var wg sync.WaitGroup
 		var joined error
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.LeaveLobby(ps[0])
-		}()
-		go func() {
-			defer wg.Done()
-			joined = joinErr(manager.JoinLobbyByCode(l.Code(), ps[2]))
-		}()
+		wg.Go(func() { manager.LeaveLobby(ps[0]) })
+		wg.Go(func() { joined = joinErr(manager.JoinLobbyByCode(l.Code(), ps[2])) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.NoError(t, joined, "iter %d", i)
 
@@ -453,15 +439,13 @@ func TestE2E_BrowseFiltersWhileTablesStart(t *testing.T) {
 	require.NoError(t, manager.ToggleReady(ps[3]))
 
 	var browseWG sync.WaitGroup
-	browseWG.Add(1)
 	defer browseWG.Wait()
-	go func() {
-		defer browseWG.Done()
+	browseWG.Go(func() {
 		for range 100 {
 			_ = manager.BrowseLobbies(ps[3], lobby.BrowseFilter{})
 			_ = manager.GamesOnOffer()
 		}
-	}()
+	})
 
 	require.NoError(t, manager.ToggleReady(ps[4]))
 	_ = awaitGameStart(t, uno, events)
@@ -510,10 +494,8 @@ func TestE2E_ConcurrentLobbyTraffic(t *testing.T) {
 	t.Cleanup(func() { releaseTables(t, manager, codes...) })
 
 	var wg sync.WaitGroup
-	for g := range 8 {
-		wg.Add(1)
-		go func(seed int) {
-			defer wg.Done()
+	for seed := range 8 {
+		wg.Go(func() {
 			rng := rand.New(rand.NewPCG(uint64(seed+1), 0xC0FFEE))
 			for range 40 {
 				p := everyone[rng.IntN(len(everyone))]
@@ -534,7 +516,7 @@ func TestE2E_ConcurrentLobbyTraffic(t *testing.T) {
 					_ = manager.GamesOnOffer()
 				}
 			}
-		}(g)
+		})
 	}
 	waitOrFail(t, &wg, 20*time.Second)
 	assertSettled(t, manager, codes, everyone)
@@ -628,15 +610,8 @@ func TestE2E_ReconnectOverlap(t *testing.T) {
 	for range 25 {
 		manager.DisconnectPlayer(guest)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
+		wg.Go(func() { manager.ResumePlayer(guest) })
+		wg.Go(func() { manager.ResumePlayer(guest) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.Same(t, l, manager.FindLobbyByPlayer(guest))
 		require.True(t, l.HasPlayer(guest))
@@ -645,15 +620,8 @@ func TestE2E_ReconnectOverlap(t *testing.T) {
 
 	for range 25 {
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.DisconnectPlayer(guest)
-		}()
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
+		wg.Go(func() { manager.DisconnectPlayer(guest) })
+		wg.Go(func() { manager.ResumePlayer(guest) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.Same(t, l, manager.FindLobbyByPlayer(guest))
 		require.Equal(t, 2, l.Snapshot().Players())
@@ -774,9 +742,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 		codes := make([]string, 0, tables)
 		errs := make([]error, 0)
 		for _, p := range players {
-			wg.Add(1)
-			go func(p *game.Player) {
-				defer wg.Done()
+			wg.Go(func() {
 				created, err := manager.CreateLobby(p,
 					lobby.WithCardGame("crazy_eights"),
 					lobby.WithPrivate(false),
@@ -797,7 +763,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 					return
 				}
 				codes = append(codes, created.Code())
-			}(p)
+			})
 		}
 		waitOrFail(t, &wg, 15*time.Second)
 		require.Empty(t, errs)
@@ -810,12 +776,10 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 
 		wg = sync.WaitGroup{}
 		for _, p := range players {
-			wg.Add(1)
-			go func(p *game.Player) {
-				defer wg.Done()
+			wg.Go(func() {
 				manager.LeaveLobby(p)
 				manager.LeaveLobby(p)
-			}(p)
+			})
 		}
 		waitOrFail(t, &wg, 10*time.Second)
 
