@@ -81,8 +81,9 @@ type sessionState struct {
 	started  time.Time
 	// player is set only once the session owns its tracker slot, so a nil player is
 	// what tells the teardown there is no slot or seat to give up. It is the login's
-	// db.User mapped to a seat once, here at the auth boundary, and the same pointer
-	// the TUI is built from.
+	// db.User mapped to a seat once, here at the auth boundary, and the pointer the
+	// TUI is built from. A ranked match replaces the TUI's copy (UpdatePlayer) but not
+	// this one, so its Ratings go stale: the teardown reads only ID, UserID and Name.
 	player   *game.Player
 	model    router.Closer
 	gen      uint64
