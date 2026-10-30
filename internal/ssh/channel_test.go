@@ -33,6 +33,13 @@ func startServerWith(tb testing.TB, repo db.Authenticator) (string, *SessionTrac
 // startServerWithRegistry is startServerWith over a registry the test sized.
 func startServerWithRegistry(tb testing.TB, repo db.Authenticator, reg *sessionRegistry) (string, *SessionTracker) {
 	tb.Helper()
+	_, addr, tracker := startServer(tb, repo, reg)
+	return addr, tracker
+}
+
+// startServer is startServerWithRegistry for a test that drives the server itself.
+func startServer(tb testing.TB, repo db.Authenticator, reg *sessionRegistry) (*Server, string, *SessionTracker) {
+	tb.Helper()
 	deps := newSessionDeps(tb, repo)
 	deps.Config = &config.Config{
 		SSHKeyPath:      tb.TempDir() + "/id_ed25519",
@@ -54,7 +61,7 @@ func startServerWithRegistry(tb testing.TB, repo db.Authenticator, reg *sessionR
 		_ = server.Close()
 		<-served
 	})
-	return listener.Addr().String(), deps.Tracker
+	return server, listener.Addr().String(), deps.Tracker
 }
 
 func dialInProcess(tb testing.TB, addr, user string) *gossh.Client {

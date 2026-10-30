@@ -475,6 +475,10 @@ func sessionProgram(
 		// the filter, so it is granted here as well as there.
 		size, moved := st.size.start(&reg.sizes, termSize{pty.Window.Width, pty.Window.Height})
 		program := tea.NewProgram(model, append(bm.MakeOptions(s),
+			// bubbletea's own handler quits the program on the process's SIGINT or
+			// SIGTERM, which ended every session the instant the drain began.
+			// Shutdown is cmd/server's: it stops accepting, then closes sessions.
+			tea.WithoutSignalHandler(),
 			tea.WithInput(st.input),
 			tea.WithWindowSize(size.w, size.h),
 			tea.WithFPS(sessionFPS),

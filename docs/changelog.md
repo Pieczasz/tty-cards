@@ -211,6 +211,11 @@ unnoticed for so long.
   `Host` header.
 - A session turned away because the server is shutting down is now counted, as
   `outcome="rejected_draining"` on `ttycards.ssh.sessions` (operators).
+- **A deploy no longer drops every player the instant it starts.** Each session's
+  screen quit on the server's own SIGTERM or SIGINT, so the 30-second drain had
+  nobody left to drain: games in progress were held for a reconnect, then
+  recorded unrated, and players saw a blank screen with no notice. Sessions now
+  play on through the drain and are closed with the restart notice at its end.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 
