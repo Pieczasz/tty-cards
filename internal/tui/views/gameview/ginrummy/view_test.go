@@ -29,9 +29,10 @@ func TestView_ActionBarHints(t *testing.T) {
 			Height: 40,
 		},
 		Base: gameview.BaseState{
-			Phase: game.Playing,
-			Hand:  []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}},
-			Seats: aliceAndBob,
+			Phase:  game.Playing,
+			MyTurn: true,
+			Hand:   []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}},
+			Seats:  aliceAndBob,
 		},
 		phase:      logic.PhaseAwaitingDraw,
 		handNumber: 1,
@@ -250,6 +251,24 @@ func TestKeyHints_FollowTheHandPhase(t *testing.T) {
 			m.phase = tc.phase
 			assert.Contains(t, m.keyHints(), tc.want)
 		})
+	}
+}
+
+// Drawing, discarding and knocking all wait for the turn, so the seat that is not on
+// turn is offered only the cursor and leaving.
+func TestView_OffTurnHintsOfferNoPlayKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []logic.Phase{logic.PhaseAwaitingDraw, logic.PhaseAwaitingDiscard} {
+		m := viewAt(80, 40)
+		m.phase = phase
+		m.Base.MyTurn = false
+
+		out := tuitest.StripANSI(m.View().Content)
+		for _, key := range []string{"draw stock", "take discard", "enter: discard", "knock"} {
+			assert.NotContains(t, out, key, "phase %v", phase)
+		}
+		assert.Contains(t, out, "->/l: right", "phase %v: the cursor still moves", phase)
 	}
 }
 

@@ -39,6 +39,9 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) keyHints() string {
+	if !m.Base.MyTurn {
+		return gameview.WaitingKeyHints
+	}
 	switch m.phase {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"

@@ -343,6 +343,10 @@ unnoticed for so long.
   "MATCH ENDED - table error", and Hearts keeps its scoreboard on screen.
 - Your own turn clock starts counting the moment the turn reaches you. It used
   to sit on the full time for up to five seconds first.
+- Hearts and Gin Rummy no longer offer the play keys to a seat that is waiting
+  for its turn. Space and enter in the Hearts pass, and draw, discard and knock
+  in Gin, did nothing off-turn; the waiting seats now see only the cursor keys
+  and esc.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.

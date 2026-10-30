@@ -52,6 +52,10 @@ func (m *model) handOverHint() string {
 }
 
 func (m *model) keyHints() string {
+	// Seats pass and play one at a time: off-turn, space and enter do nothing.
+	if !m.Base.MyTurn {
+		return gameview.WaitingKeyHints
+	}
 	if m.phase == logic.PhasePassing {
 		return keyHintsPass
 	}
