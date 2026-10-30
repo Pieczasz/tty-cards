@@ -224,6 +224,14 @@ unnoticed for so long.
   nobody left to drain: games in progress were held for a reconnect, then
   recorded unrated, and players saw a blank screen with no notice. Sessions now
   play on through the drain and are closed with the restart notice at its end.
+- **Your terminal is left usable when a deploy or a second session ends yours.**
+  At the end of the drain the connection was simply cut: no restart notice, and
+  the terminal stayed in the alt screen with a hidden cursor and the kitty
+  keyboard mode on, so the shell's input came out garbled. A session displaced
+  by a second one on the same connection lost its restore the same way. Each one
+  now quits first, which puts the terminal back, and a drained one is then told
+  the server is restarting. A session that cannot be reached, its client no
+  longer reading, is still closed within two seconds.
 - **SIGHUP drains like SIGTERM** (operators). It used to end the process at once:
   no drain, frozen screens, and the games in play missing from history. SIGQUIT
   is still Go's goroutine dump and exits without a drain.

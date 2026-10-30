@@ -36,9 +36,11 @@ type fakeServer struct {
 	shutdownErr error
 	closeErr    error
 	waitErr     error
+	endErr      error
 	closed      bool
 	closeOnce   sync.Once
-	// stops is the order the drain called Shutdown, Close and WaitSessions in.
+	// stops is the order the drain called Shutdown, EndSessions, Close and
+	// WaitSessions in.
 	stops []string
 	// duringShutdown runs inside Shutdown: what a live session does in the window.
 	duringShutdown func()
@@ -61,6 +63,17 @@ func (f *fakeServer) Close() error {
 		f.closeOnce.Do(func() { close(f.serveErr) })
 	}
 	return f.closeErr
+}
+
+// EndSessions records an unbounded call apart: a wedged session would hold it, and
+// with it the whole drain, forever.
+func (f *fakeServer) EndSessions(ctx context.Context) error {
+	if _, ok := ctx.Deadline(); !ok {
+		f.stops = append(f.stops, "end sessions without a deadline")
+		return f.endErr
+	}
+	f.stops = append(f.stops, "end sessions")
+	return f.endErr
 }
 
 func (f *fakeServer) WaitSessions(context.Context) error {
@@ -106,7 +119,9 @@ func TestServe_AcceptLoopFailureIsReturned(t *testing.T) {
 }
 
 // Sessions outliving the drain window is what a card game does, so it must not stop
-// the shutdown: the listener and the connections have to be let go either way. Close
+// the shutdown: the listener and the connections have to be let go either way. The
+// sessions left are ended before Close, while their connections can still carry
+// the restart notice and the terminal restore, and a wedged one is not waited on. Close
 // does not wait for the session handlers it ends, so the wait for their teardown -
 // which the finalizer drain after this depends on - comes after it, every time. New
 // games stop before the graceful window, but the lobby hears of the shutdown only
@@ -124,6 +139,7 @@ func TestDrainServer_ClosesOnEveryPath(t *testing.T) {
 		{name: "already closed", server: &fakeServer{shutdownErr: context.DeadlineExceeded, closeErr: net.ErrClosed}},
 		{name: "close itself fails", server: &fakeServer{closeErr: errors.New("close failed")}},
 		{name: "teardowns outlast their window", server: &fakeServer{waitErr: context.DeadlineExceeded}},
+		{name: "a session will not quit", server: &fakeServer{endErr: context.DeadlineExceeded}},
 	}
 
 	for _, tt := range tests {
@@ -136,7 +152,9 @@ func TestDrainServer_ClosesOnEveryPath(t *testing.T) {
 			)
 
 			assert.True(t, tt.server.closed, "the server was never closed")
-			assert.Equal(t, []string{"stop new games", "shutdown", "lobby shutdown", "close", "wait sessions"}, tt.server.stops)
+			assert.Equal(t, []string{
+				"stop new games", "shutdown", "lobby shutdown", "end sessions", "close", "wait sessions",
+			}, tt.server.stops)
 		})
 	}
 }

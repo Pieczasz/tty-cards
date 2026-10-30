@@ -419,3 +419,20 @@ func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
 	assert.Eventually(t, func() bool { return live() == 1 }, 3*time.Second, 20*time.Millisecond,
 		"displaced sessions still running")
 }
+
+// A displaced session's program has to quit before its channel closes: bubbletea's
+// teardown is what leaves the alt screen and pops the keyboard mode, and it was
+// cancelled and hung up on in the same breath, so its restore never reached the
+// client.
+func TestNewServer_SameConnectionDisplacementRestoresTheOldTerminal(t *testing.T) {
+	t.Parallel()
+	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(97), Username: "restorer"})
+	client := dialInProcess(t, addr, "restorer")
+	first, out := shellRecording(t, client)
+	require.Eventually(t, func() bool { return tracker.Count() == 1 }, 3*time.Second, 10*time.Millisecond)
+
+	openShell(t, client)
+
+	within(t, "the displaced session's end", func() { _ = first.Wait() })
+	assertRestored(t, out.String())
+}

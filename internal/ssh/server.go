@@ -72,8 +72,11 @@ const (
 	// pool, so an unbounded client could exhaust the database from a single TCP
 	// connection. Two allows the reconnect overlap a real client produces.
 	maxSessionsPerConnection = 2
-	maxEnvRequests           = 32
-	maxEnvBytes              = 8 << 10
+	// displacedCloseAfter bounds how long a displaced session's channel waits for its
+	// program to quit. A quit takes milliseconds; only a wedged one runs this out.
+	displacedCloseAfter = 2 * time.Second
+	maxEnvRequests      = 32
+	maxEnvBytes         = 8 << 10
 )
 
 // sessionState is per-channel session state. It cannot live on the ssh.Context: that
@@ -130,6 +133,11 @@ type sessionRegistry struct {
 	// sessionless is how long a connection may go with no session channel open
 	// before it is closed: sessionlessTimeout, or less in a test.
 	sessionless time.Duration
+	// ending is closed by EndSessions: every program running, or started after it,
+	// quits and its session gets the restart notice. newSessionRegistry makes it; a
+	// nil one, in a test's bare registry, never fires.
+	ending  chan struct{}
+	endOnce sync.Once
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -155,13 +163,23 @@ type Server struct {
 }
 
 // WaitSessions refuses any session not yet started, then blocks until every running
-// session handler has finished its teardown or ctx ends. Close is what ends them, so
-// it is called after Close.
+// session handler has finished its teardown or ctx ends. EndSessions and Close are
+// what end them, so it is called after them.
 func (s *Server) WaitSessions(ctx context.Context) error {
 	if !s.sessions.live.Wait(ctx) {
 		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
 	}
 	return nil
+}
+
+// EndSessions is the end of the drain window for whoever is left: each program
+// quits while its connection is still up, so its teardown restores the client's
+// terminal, and the session is closed with the restart notice. It then waits like
+// WaitSessions. A program the quit cannot reach, its peer withholding ssh window, is
+// not waited for past ctx: Close hangs up on it as before.
+func (s *Server) EndSessions(ctx context.Context) error {
+	s.sessions.endOnce.Do(func() { close(s.sessions.ending) })
+	return s.WaitSessions(ctx)
 }
 
 // errNoTracker refuses a server with no session tracker. A default one used to be
@@ -424,10 +442,16 @@ func (f closerFunc) Close() error { return f() }
 // as the channel closes, so one connection looping shells would hold any number of
 // TUIs. Cancelling the run context first also covers a program not yet started,
 // whose Run then returns at once.
+//
+// The channel is not closed in the same breath: the program's teardown is what
+// restores the client's terminal, and the handler closes the channel once it has
+// run. The timer is for a program stuck on a peer withholding its window, which a
+// cancel does not reach; closing an already closed channel is harmless.
 func displaceable(s ssh.Session, endRun context.CancelFunc) io.Closer {
 	return closerFunc(func() error {
 		endRun()
-		return s.Close()
+		time.AfterFunc(displacedCloseAfter, func() { _ = s.Close() })
+		return nil
 	})
 }
 
@@ -516,10 +540,15 @@ func (reg *sessionRegistry) runProgram(newProgram bm.ProgramHandler) wish.Middle
 			}
 			_, resizes, _ := s.Pty()
 			ctx, cancel := context.WithCancel(s.Context())
+			// Quit is sent from here, never from the drain: a Send waits for the event
+			// loop, and a session whose peer withholds its window has one that is stuck.
 			go func() {
 				for {
 					select {
 					case <-ctx.Done():
+						program.Quit()
+						return
+					case <-reg.ending:
 						program.Quit()
 						return
 					case w := <-resizes:
@@ -532,6 +561,13 @@ func (reg *sessionRegistry) runProgram(newProgram bm.ProgramHandler) wish.Middle
 			}
 			// Restores the terminal if the program ended without doing so itself.
 			program.Kill()
+			select {
+			case <-reg.ending:
+				// After the restore, so the notice lands on the player's own screen, not
+				// on the alt screen the restore leaves.
+				wish.Fatalln(s, restartNotice)
+			default:
+			}
 			cancel()
 			next(s)
 		}
