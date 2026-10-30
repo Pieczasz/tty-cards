@@ -28,6 +28,22 @@ func TestBestMeldSplit_PureRun(t *testing.T) {
 	assert.True(t, isRun(melds[0]))
 }
 
+// A run is shown as scored, so it has to read in rank order however the knocker
+// happened to hold it: 4 A 2 3 in hand is the run A 2 3 4.
+func TestBestMeldSplit_RunReadsInRankOrder(t *testing.T) {
+	t.Parallel()
+	hand := []deck.Card{
+		c(deck.Four, deck.Hearts), c(deck.Ace, deck.Hearts), c(deck.Two, deck.Hearts),
+		c(deck.Three, deck.Hearts),
+	}
+	melds, _, _ := bestMeldSplit(hand)
+	require.Len(t, melds, 1)
+	assert.Equal(t, []deck.Card{
+		c(deck.Ace, deck.Hearts), c(deck.Two, deck.Hearts), c(deck.Three, deck.Hearts),
+		c(deck.Four, deck.Hearts),
+	}, melds[0])
+}
+
 func TestBestMeldSplit_PureSet(t *testing.T) {
 	t.Parallel()
 	for _, size := range []int{3, 4} {

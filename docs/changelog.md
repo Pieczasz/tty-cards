@@ -414,6 +414,8 @@ unnoticed for so long.
   to about 150 columns the knocker's melds, the opponent's deadwood and the
   layoffs vanished, leaving only the headline and the totals, while a smaller
   terminal showed them. They are drawn small wherever the full cards do not fit.
+- A Gin Rummy run on the hand result reads in rank order, A 2 3 4, instead of
+  the order the knocker happened to hold it in.
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.
