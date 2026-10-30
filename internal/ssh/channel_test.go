@@ -323,6 +323,47 @@ func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
 	within(t, "a second channel", func() { openAnotherChannel(client) })
 }
 
+// An authenticated connection that opens no session (`ssh -N`) held a listener slot
+// for the whole idle timeout, never counted and never logged. A connection with a
+// session open is not affected, and one whose sessions have all closed is held to
+// the same bound again.
+func TestNewServer_ClosesAConnectionWithNoSessionOpen(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	reg.sessionless = 200 * time.Millisecond
+	addr, _ := startServerWithRegistry(t, stubUserRepo{user: &db.User{ID: testutil.UID(96), Username: "idler"}}, reg)
+	closed := func(client *gossh.Client) <-chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			_ = client.Wait()
+			close(done)
+		}()
+		return done
+	}
+
+	t.Run("never opened one", func(t *testing.T) {
+		t.Parallel()
+		gone := closed(dialInProcess(t, addr, "idler"))
+		within(t, "closing the sessionless connection", func() { <-gone })
+	})
+
+	t.Run("with one open, then after it closes", func(t *testing.T) {
+		t.Parallel()
+		client := dialInProcess(t, addr, "idler")
+		gone := closed(client)
+		s, err := client.NewSession()
+		require.NoError(t, err)
+
+		select {
+		case <-gone:
+			t.Fatal("a connection with a session open was closed")
+		case <-time.After(5 * reg.sessionless):
+		}
+		require.NoError(t, s.Close())
+		within(t, "closing the connection its last session left", func() { <-gone })
+	})
+}
+
 // OpenSSH's ControlMaster runs a second `ssh` as a second session channel on the
 // connection the first one opened. Displacing the first session hung up that shared
 // connection, and with it the session that had just arrived.

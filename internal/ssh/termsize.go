@@ -80,7 +80,7 @@ type sizeBudget struct {
 }
 
 func newSessionRegistry(cells, extra int) *sessionRegistry {
-	reg := &sessionRegistry{sizes: sizeBudget{cells: cells, extra: extra}}
+	reg := &sessionRegistry{sizes: sizeBudget{cells: cells, extra: extra}, sessionless: sessionlessTimeout}
 	// An empty server is at the top, not climbing to it.
 	reg.sizes.tier.Store(int32(len(sizeTiers) - 1))
 	return reg

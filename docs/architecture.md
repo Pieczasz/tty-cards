@@ -50,6 +50,7 @@ internal and holds only Alloy and the docker socket proxy.
 | nginx (http) | 16 concurrent / network, 64 /48; 2 r/s + burst 10 on `/api/` | `nginx.conf` |
 | PROXY header | only from `PROXY_TRUSTED_CIDRS` | `proxyListener` |
 | listener | `2 x MAX_CONNECTIONS` | `netutil.LimitListener` |
+| connection with no session open | closed 30s after accept, or 30s after its last session closes | `ssh.closeSessionless` |
 | account slots | `MAX_CONNECTIONS`; a second connect displaces the first | `ssh.SessionTracker` |
 | auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` per network, 16x that per IPv6 /48 | `ssh.rateLimitAuth` |
 | registration | per window: 5 /64, 20 /48, 600 global; refunded if no account is created | `ssh.allowRegistration` |

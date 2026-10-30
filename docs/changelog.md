@@ -219,6 +219,10 @@ unnoticed for so long.
 - **SIGHUP drains like SIGTERM** (operators). It used to end the process at once:
   no drain, frozen screens, and the games in play missing from history. SIGQUIT
   is still Go's goroutine dump and exits without a drain.
+- **A connection that opens no session is closed after 30 seconds** (operators).
+  `ssh -N`, or a connection kept after its last session closed, used to hold a
+  listener slot for the whole 30-minute idle timeout without being counted or
+  logged. Its close is logged at info.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 

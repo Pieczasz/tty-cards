@@ -45,7 +45,7 @@ type ctxKey int
 // per TCP connection to every channel opened on it (and to its auth callbacks).
 // Everything a session needs lives in sessionState, keyed by the session itself.
 const (
-	ctxKeyChannelCount ctxKey = iota
+	ctxKeyConnSessions ctxKey = iota
 	// ctxKeyAuthRefused marks a connection already counted as refused at auth.
 	ctxKeyAuthRefused
 )
@@ -53,6 +53,11 @@ const (
 const (
 	handshakeTimeout = 20 * time.Second
 	connIdleTimeout  = 30 * time.Minute
+	// sessionlessTimeout bounds a connection, from accept, with no session channel
+	// open: past the handshake's own bound, and long enough after it for any real
+	// client, which opens its session the moment it is authenticated. Without it an
+	// `ssh -N` held a listener slot for connIdleTimeout, uncounted and unlogged.
+	sessionlessTimeout = handshakeTimeout + 10*time.Second
 	// sessionFPS caps each session's renderer ticks. bubbletea's default is 60, and
 	// every tick compares the whole frame with the last one even when nothing
 	// changed, so an idle session costs in proportion to fps x terminal cells. A card
@@ -122,6 +127,9 @@ type sessionRegistry struct {
 	// that neither its Shutdown nor its Close waits for, so without this the drain
 	// would move on while teardowns are still giving up seats.
 	live drain.Gate
+	// sessionless is how long a connection may go with no session channel open
+	// before it is closed: sessionlessTimeout, or less in a test.
+	sessionless time.Duration
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -215,6 +223,7 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 		return nil, fmt.Errorf("create wish server: %w", err)
 	}
 	server.HandshakeTimeout = handshakeTimeout
+	server.ConnCallback = closeSessionless(reg.sessionless)
 	server.ChannelHandlers = map[string]ssh.ChannelHandler{
 		"session": limitSessionChannels(ssh.DefaultSessionHandler),
 	}
@@ -525,23 +534,46 @@ func (reg *sessionRegistry) retier() {
 	})
 }
 
+// connSessions is a connection's open session channels, and the timer that closes
+// the connection once it has had none for a while. It lives on the
+// connection-scoped Context, set before any channel can open.
+type connSessions struct {
+	open    atomic.Int32
+	idle    *time.Timer
+	timeout time.Duration
+}
+
+// closeSessionless arms each new connection's connSessions, so one that is
+// authenticated and never opens a session, or keeps the socket after its last one
+// closed, gives its listener slot back.
+func closeSessionless(timeout time.Duration) ssh.ConnCallback {
+	return func(ctx ssh.Context, conn net.Conn) net.Conn {
+		cs := &connSessions{timeout: timeout}
+		cs.idle = time.AfterFunc(timeout, func() {
+			// A connection already gone can still get here: its last channel's
+			// teardown re-arms the timer after the connection's own end stopped it.
+			if ctx.Err() != nil || cs.open.Load() > 0 {
+				return
+			}
+			slog.InfoContext(ctx, "closing ssh connection with no session open",
+				"client_net", clientNet(conn.RemoteAddr()), "timeout", timeout)
+			_ = conn.Close()
+		})
+		context.AfterFunc(ctx, func() { cs.idle.Stop() })
+		ctx.SetValue(ctxKeyConnSessions, cs)
+		return conn
+	}
+}
+
 // limitSessionChannels enforces the per-connection channel cap where the channel is
 // opened, before Accept. Counted in the middleware it bound nothing: a channel that
 // never asks for a shell never reaches it, yet holds its request goroutine and
-// buffers for as long as the client likes. The counter lives on the connection-scoped
-// Context, whose own lock makes the first-writer race harmless.
+// buffers for as long as the client likes.
 func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 	return func(srv *ssh.Server, conn *gossh.ServerConn, newChan gossh.NewChannel, ctx ssh.Context) {
-		ctx.Lock()
-		counter, ok := ctx.Value(ctxKeyChannelCount).(*atomic.Int32)
-		if !ok {
-			counter = new(atomic.Int32)
-			ctx.SetValue(ctxKeyChannelCount, counter)
-		}
-		ctx.Unlock()
-
-		if counter.Add(1) > maxSessionsPerConnection {
-			counter.Add(-1)
+		cs, _ := ctx.Value(ctxKeyConnSessions).(*connSessions) // closeSessionless set it
+		if cs.open.Add(1) > maxSessionsPerConnection {
+			cs.open.Add(-1)
 			observability.SSHSession(ctx, "rejected_channel_limit")
 			slog.WarnContext(ctx, "too many session channels on one connection",
 				"remote_addr", conn.RemoteAddr().String(), "limit", maxSessionsPerConnection)
@@ -550,7 +582,11 @@ func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 		}
 		// The session handler returns once the channel's request stream closes, which
 		// is the channel going away.
-		defer counter.Add(-1)
+		defer func() {
+			if cs.open.Add(-1) == 0 {
+				cs.idle.Reset(cs.timeout)
+			}
+		}()
 		next(srv, conn, envCappedChannel{NewChannel: newChan}, ctx)
 	}
 }
