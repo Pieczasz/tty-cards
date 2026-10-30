@@ -1,6 +1,9 @@
 // Package observability owns the app's own metric instruments, each behind a small
-// function so callers cannot attach an unbounded attribute. The OTLP providers they
-// record into are installed by otelsetup.
+// function that fixes its attribute keys. The values are plain strings, so a bounded
+// series count rests on the callers: every value must be a literal from a small fixed
+// set (an outcome, a reason, a game slug, a stream name), never an error text, a lobby
+// code, a user or an address. The OTLP providers they record into are installed by
+// otelsetup.
 package observability
 
 import (
