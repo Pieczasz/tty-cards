@@ -234,10 +234,18 @@ func startStatsAPI(
 		return nil, nil, fmt.Errorf("setup stats api: %w", err)
 	}
 
+	// Bind here, not on the goroutine, so a taken port refuses the boot before the
+	// ssh listener opens to players.
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stats api listen: %w", err)
+	}
+	slog.InfoContext(ctx, "starting stats api", "address", addr)
+
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.InfoContext(ctx, "starting stats api", "address", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- fmt.Errorf("stats api stopped: %w", err)
 		}
 	}()

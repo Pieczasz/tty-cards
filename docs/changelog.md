@@ -284,6 +284,9 @@ unnoticed for so long.
   server used to mark itself as shutting down before that window, so a game that
   ended there by play was stored without Elo. Only the tables the drain tears down
   at its end are recorded unrated now.
+- **A taken `API_PORT` refuses the boot** (operators). The stats API used to bind
+  in the background, so the server logged "starting stats api", opened SSH to
+  players and only then failed. It now binds before the SSH listener opens.
 - Closing a table no longer unseats a player who had already moved to another
   one.
 - **A new turn gets the whole clock, even when it comes straight back to you.**

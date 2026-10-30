@@ -397,23 +397,18 @@ func TestStartStatsAPI_ServesAndStops(t *testing.T) {
 	}
 }
 
-// Binding happens on the api's own goroutine, so a port already in use has to come
-// back on the error channel that stops the server, not only as a log line.
-func TestStartStatsAPI_BindFailureIsReported(t *testing.T) {
+// A port already in use must refuse the boot before the ssh listener opens, not come
+// back later on the error channel after players could already connect.
+func TestStartStatsAPI_BindFailureIsReturned(t *testing.T) {
 	t.Parallel()
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = taken.Close() })
 
 	cfg := &config.Config{ServerHost: "127.0.0.1", APIPort: taken.Addr().(*net.TCPAddr).Port, APIRequestsPerMinute: 1}
-	stop, serveErr, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
-	require.NoError(t, err)
-	t.Cleanup(stop)
-
-	select {
-	case err := <-serveErr:
-		require.ErrorContains(t, err, "stats api stopped")
-	case <-time.After(5 * time.Second):
-		t.Fatal("a bind failure never reached the error channel")
+	stop, _, err := startStatsAPI(t.Context(), cfg, onlineCount(0), lobbyCounts{}, emptyUsers{}, func(context.Context) error { return nil })
+	if stop != nil {
+		t.Cleanup(stop)
 	}
+	require.ErrorContains(t, err, "stats api listen")
 }
