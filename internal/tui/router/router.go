@@ -122,6 +122,26 @@ func (g *GlobalContext) Palette() *styles.Theme {
 	return styles.Or(g.Theme)
 }
 
+// Apply writes a session-wide message - a resize, a terminal theme switch, a reseated
+// player - into g and reports whether msg was one. The router and every view hold
+// their own copy and both call it, so a new session-wide field is one more case here.
+func (g *GlobalContext) Apply(msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		g.Width = msg.Width
+		g.Height = msg.Height
+	case tea.BackgroundColorMsg:
+		// Arrives on start and again whenever the user switches terminal theme
+		// mid-session.
+		g.Theme = styles.NewTheme(msg.IsDark())
+	case PlayerUpdatedMsg:
+		g.Player = msg.Player
+	default:
+		return false
+	}
+	return true
+}
+
 // RequestContext returns the session context, or Background if unset.
 func (g *GlobalContext) RequestContext() context.Context {
 	if g.SessionCtx != nil {
@@ -257,21 +277,13 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, tea.Quit
 		}
 		routerCmd = tick()
-	case tea.WindowSizeMsg:
-		r.Global.Width = msg.Width
-		r.Global.Height = msg.Height
-	case tea.BackgroundColorMsg:
-		// Arrives on start and again whenever the user switches terminal theme
-		// mid-session. Views hold their own copy of GlobalContext, so the message
-		// falls through to the active view too (see views.HandleCommonMsg).
-		r.Global.Theme = styles.NewTheme(msg.IsDark())
-	case PlayerUpdatedMsg:
-		// Falls through to the active view as the theme does.
-		r.Global.Player = msg.Player
 	case ChangeViewMsg:
 		cmd := r.Goto(msg.ViewName, msg.Payload)
 		return r, cmd
 	}
+	// The router's copy is for the views it builds next. The active view holds its
+	// own, so a session-wide message still falls through to it (views.HandleCommonMsg).
+	r.Global.Apply(msg)
 
 	if r.active == nil {
 		return r, routerCmd

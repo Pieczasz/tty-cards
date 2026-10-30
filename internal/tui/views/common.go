@@ -144,23 +144,13 @@ func SeatedFooter(t *styles.Theme, localActions []string) string {
 // switch, a reseated session player and ctrl+c - and reports whether msg was one of
 // them.
 func HandleCommonMsg(msg tea.Msg, global *router.GlobalContext) (bool, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		global.Width = msg.Width
-		global.Height = msg.Height
+	// The router updates its own copy for views built later; this one is on screen
+	// now, so a resize or a theme switch lands without navigating away.
+	if global.Apply(msg) {
 		return true, nil
-	case tea.BackgroundColorMsg:
-		// The router updates its own copy for views built later; this one is on screen
-		// now, so a mid-session theme switch lands without navigating away.
-		global.Theme = styles.NewTheme(msg.IsDark())
-		return true, nil
-	case router.PlayerUpdatedMsg:
-		global.Player = msg.Player
-		return true, nil
-	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
-			return true, tea.Quit
-		}
+	}
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+c" {
+		return true, tea.Quit
 	}
 	return false, nil
 }
