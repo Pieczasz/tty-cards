@@ -35,7 +35,7 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
-	if err := shed.Deal(state, initialDeck(), dealCount); err != nil {
+	if err := state.Deal(initialDeck(), dealCount); err != nil {
 		return fmt.Errorf("deal uno: %w", err)
 	}
 	return openTable(state)

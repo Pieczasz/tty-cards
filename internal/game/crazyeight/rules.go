@@ -40,7 +40,7 @@ func (r *Rules) TimeoutAction(_ *game.State) game.Action {
 }
 
 func (r *Rules) OnGameStart(state *game.State) error {
-	if err := shed.Deal(state, deck.Standard(), dealCount); err != nil {
+	if err := state.Deal(deck.Standard(), dealCount); err != nil {
 		return fmt.Errorf("deal crazy eights: %w", err)
 	}
 	return openTable(state)

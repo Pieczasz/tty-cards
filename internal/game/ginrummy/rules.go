@@ -80,14 +80,8 @@ func beginHand(state *game.State, extra *State) error {
 	extra.TakenUpcard = nil
 	extra.TurnsThisHand = 0
 
-	state.Deck = deck.New(deck.Standard())
-	state.Deck.Shuffle()
-	for _, p := range state.Players {
-		cards, ok := state.Deck.DrawN(dealCount)
-		if !ok {
-			return errors.New("not enough cards to deal")
-		}
-		p.Cards = cards
+	if err := state.Deal(deck.Standard(), dealCount); err != nil {
+		return fmt.Errorf("deal gin rummy: %w", err)
 	}
 	upCard, ok := state.Deck.Draw()
 	if !ok {

@@ -105,9 +105,10 @@ charges only the leavers.
 If a lone remaining seat still has a hand to play out (poker's all-in leaver still
 contests the pot), return `game.LeaveKeepsHandOpen`, or the engine hands that seat a
 forfeit win; otherwise `game.LeaveSettled`.
-A shedding game should reuse package `internal/game/shed` (embed `shed.State`, and
-call `shed.Deal`, `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
-`shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.
+Deal the opening hands with `State.Deal`. A shedding game should reuse package
+`internal/game/shed` (embed `shed.State`, and call `shed.ValidatePlay`,
+`shed.DrawInto`, `shed.OpenDiscard`, `shed.HandEmptyOrAllPassed`, `shed.Leave`,
+`shed.Standings`) rather than copy it.
 Name who acts next with `State.SetTurn` / `State.OverrideTurn`, never by writing
 `CurrentTurn` and `OverrideNextTurn` by hand, and keep a seat on turn for the rest
 of the same turn (gin's draw before its discard) with `State.ContinueTurn`, the one

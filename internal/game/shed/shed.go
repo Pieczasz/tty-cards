@@ -103,21 +103,6 @@ func Leave(state *game.State, s *State, playerID string) {
 	returnHandToStock(state, playerID)
 }
 
-// Deal is a shedding game's opening deal: a fresh stock of cards, shuffled, and n to
-// every seat.
-func Deal(state *game.State, cards []deck.Card, n int) error {
-	state.Deck = deck.New(cards)
-	state.Deck.Shuffle()
-	for _, p := range state.Players {
-		hand, ok := state.Deck.DrawN(n)
-		if !ok {
-			return errors.New("not enough cards to deal")
-		}
-		p.Cards = hand
-	}
-	return nil
-}
-
 // OpenDiscard starts the discard pile on the first card the game may legally open on,
 // setting the rest aside and shuffling them back into the stock: uno cannot open on a
 // Wild and crazy eights cannot open on an Eight, because neither card names the suit
