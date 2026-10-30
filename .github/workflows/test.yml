@@ -182,6 +182,10 @@ jobs:
         # Every image pinned by digest (backend is built, so it has none).
         unpinned=$(jq -r '.services | to_entries[] | select(.value.image != null and (.value.image | test("@sha256:[0-9a-f]{64}$") | not)) | .key' <<<"$cfg")
         [ -z "$unpinned" ] || fail "images not pinned by digest: $unpinned"
+        # Integration tests run the database compose deploys, digest and all: a bump of
+        # one without the other fails here.
+        grep -qF "const postgresImage = \"$(jq -r .services.db.image <<<"$cfg")\"" internal/testutil/db.go \
+          || fail "internal/testutil/db.go postgresImage must equal compose's db image"
 
         # No service may gain privileges; the proxy keeps only what nginx needs.
         missing=$(jq -r '.services | to_entries[] | select((.value.security_opt // []) | index("no-new-privileges:true") | not) | .key' <<<"$cfg")
