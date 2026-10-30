@@ -408,22 +408,18 @@ func repeatedPairCountLast24h(tx *gorm.DB, userIDs []uuid.UUID) (int, error) {
 		return 0, nil
 	}
 
+	// Only the seats sitting at this table matter: a past match's other players are
+	// not part of any pair being capped now.
 	var rows []db.MatchParticipant
-	if err := tx.Where("match_id IN ?", matchIDs).Find(&rows).Error; err != nil {
+	if err := tx.Select("match_id", "user_id").
+		Where("match_id IN ? AND user_id IN ?", matchIDs, uuidStrings(userIDs)).
+		Find(&rows).Error; err != nil {
 		return 0, fmt.Errorf("query pairing participants: %w", err)
 	}
 
-	here := make(map[uuid.UUID]struct{}, len(userIDs))
-	for _, id := range userIDs {
-		here[id] = struct{}{}
-	}
-	// Only the seats sitting at this table matter: a past match's other players are
-	// not part of any pair being capped now.
 	seats := make(map[uint][]uuid.UUID, len(matchIDs))
 	for _, row := range rows {
-		if _, ours := here[row.UserID]; ours {
-			seats[row.MatchID] = append(seats[row.MatchID], row.UserID)
-		}
+		seats[row.MatchID] = append(seats[row.MatchID], row.UserID)
 	}
 	return rating.WorstPairCount(slices.Collect(maps.Values(seats))), nil
 }
