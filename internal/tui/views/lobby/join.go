@@ -361,6 +361,15 @@ func (m *joinModel) renderContent(contentHeight int) string {
 		codeInputStr = "Entering private lobby code (press ESC to cancel):"
 	}
 
+	// The error is wrapped and measured before the list takes its rows: appended after
+	// a list that had spent the whole budget, it pushed the frame past the terminal.
+	var errLine string
+	if m.err != nil {
+		errLine = m.global.Palette().ErrorText.Width(styles.InnerWidth(m.global.Width)).
+			Render("Error: " + m.err.Error())
+		contentHeight -= lg.Height(errLine)
+	}
+
 	rows, compact := listLayout(contentHeight)
 	parts := []string{m.filterLine(), "", m.renderList(rows), "",
 		m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
@@ -368,12 +377,10 @@ func (m *joinModel) renderContent(contentHeight int) string {
 		parts = []string{m.filterLine(), m.renderList(rows),
 			m.global.Palette().Muted.Render(codeInputStr), m.textInput.View()}
 	}
-	content := styles.JoinVertical(lg.Left, parts...)
-
-	if m.err != nil {
-		content += m.global.Palette().ErrorText.Render(fmt.Sprintf("\nError: %v", m.err))
+	if errLine != "" {
+		parts = append(parts, errLine)
 	}
-	return content
+	return styles.JoinVertical(lg.Left, parts...)
 }
 
 // renderKey is every input View reads, cheap enough to build per frame. The entry
