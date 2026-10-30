@@ -292,7 +292,7 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 		// The between-hands prompt is a decision, not a play, and it needs longer
 		// than a turn. Every other phase returns zero, which means "engine default"
 		// rather than "no clock".
-		return handOverTurnDuration
+		return game.NextHandTurnDuration
 	case PhaseTrickPlay:
 	}
 	return 0

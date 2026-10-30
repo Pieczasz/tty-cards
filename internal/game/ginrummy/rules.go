@@ -438,5 +438,5 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 	if !extraOf(state).HandComplete() {
 		return 0
 	}
-	return handOverTurnDuration
+	return game.NextHandTurnDuration
 }

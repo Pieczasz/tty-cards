@@ -44,8 +44,7 @@ const (
 	penaltyPointsTotal  = cardsPerHand + queenOfSpadesPoints
 	queenOfSpadesPoints = 13
 
-	passTurnDuration     = 45 * time.Second
-	handOverTurnDuration = time.Minute
+	passTurnDuration = 45 * time.Second
 )
 
 var (

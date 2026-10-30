@@ -864,7 +864,7 @@ func TestRules_TurnTimeout_DealGetsALongerClock(t *testing.T) {
 		{
 			name:   "between hands the dealer gets a minute",
 			mutate: func(e *State) { e.Phase = PhaseShowdown },
-			want:   dealTurnDuration,
+			want:   game.NextHandTurnDuration,
 		},
 		{
 			name:   "a finished match needs no deal clock",

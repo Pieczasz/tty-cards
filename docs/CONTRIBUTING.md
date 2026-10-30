@@ -115,7 +115,8 @@ way a turn keeps its clock; refuse a foreign action with
 `game.ErrUnknownAction` - from `ValidateAction` and, through a `default:` arm, from
 `ApplyAction` too, so a move added to one switch and forgotten in the other is not a
 silent no-op - and a move between hands with `game.ErrHandOver`, and gate
-the between-hands deal with `game.ValidateNextHand`. `internal/game` imports from an
+the between-hands deal with `game.ValidateNextHand` and clock it with
+`game.NextHandTurnDuration`. `internal/game` imports from an
 allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 `internal/game/...`, `uuid`), so a rules package that needs anything else is a
 decision to discuss first.

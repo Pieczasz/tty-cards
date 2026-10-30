@@ -1,6 +1,9 @@
 package game
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // SetTurn puts seat on turn now and keeps it there once the action settles. It is the
 // one way a rules set names who acts next from inside ApplyAction.
@@ -49,6 +52,12 @@ var (
 	errHandInPlay = errors.New("the hand is still being played")
 	errMatchOver  = errors.New("the match is over")
 )
+
+// NextHandTurnDuration is the between-hands prompt's clock in every multi-hand game.
+// Dealing on is a decision about whether to keep playing, not a move made under
+// pressure, so it gets longer than a turn; it stays bounded because the seat that
+// deals is the one an absent player can freeze the match from.
+const NextHandTurnDuration = time.Minute
 
 // ValidateNextHand is the check every multi-hand game runs on a request to deal the
 // next hand, so the three of them refuse it in the same words.

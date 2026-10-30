@@ -2,7 +2,6 @@ package ginrummy
 
 import (
 	"slices"
-	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -30,8 +29,7 @@ const (
 	// maxHands bounds the match. Two players who never knock never score, so the
 	// target alone is not a termination condition: a table that walls every hand
 	// redeals forever. At the cap the standings settle on the totals as they are.
-	maxHands             = 50
-	handOverTurnDuration = time.Minute
+	maxHands = 50
 
 	// A meld is three or four of a rank, or a run of three or more in one suit.
 	minMeldSize = 3
