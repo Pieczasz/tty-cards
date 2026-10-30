@@ -92,12 +92,12 @@ func TestView_InterruptedMatchDoesNotNameAWinner(t *testing.T) {
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: 80, Height: 24},
 		Base: gameview.BaseState{
 			Phase: game.Finished, EndReason: game.EndReasonInterrupted, WinnerName: "alice",
-			Seats: aliceAndBob,
+			Seats: aliceAndBob[:1], // the engine takes a leaver out of the seats
 		},
 		phase:            logic.PhaseHandOver,
 		handNumber:       2,
 		matchComplete:    true,
-		leavers:          []string{"bob"},
+		leavers:          []leaver{{id: "2", name: "bob"}},
 		cumulativeScores: map[string]int{"1": 0, "2": 0},
 	}
 
@@ -154,6 +154,13 @@ func TestView_FitsTheTerminal(t *testing.T) {
 			m.Base.Phase = game.Finished
 			m.Base.WinnerName = "alice"
 			m.lastHandResult = knockResult()
+		},
+		"a forfeit": func(m *model) {
+			m.Base.Phase = game.Finished
+			m.Base.EndReason = game.EndReasonForfeit
+			m.Base.WinnerName = "alice"
+			m.Base.Seats = m.Base.Seats[:1]
+			m.leavers = []leaver{{id: "2", name: "bob"}}
 		},
 	}
 

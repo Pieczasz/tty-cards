@@ -86,13 +86,31 @@ func (m *model) renderHandOver() string {
 		Header:   fmt.Sprintf("%-12s  %9s", "player", "total"),
 		Hint:     m.handOverHint(),
 	}
-	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, m.leavers)
+	names := make([]string, 0, len(m.leavers))
+	for _, l := range m.leavers {
+		names = append(names, l.name)
+	}
+	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, names)
+	// The title names the seat that stayed as the winner; without this the screen
+	// never said the match was won by the other player leaving.
+	if m.Base.EndReason == game.EndReasonForfeit {
+		h.Subtitle = m.Global.Palette().WarningText.Render(strings.Join(names, ", ") + " left the table")
+	}
 
+	// The leavers' rows too: a forfeit takes the leaver out of the seats, and a
+	// scoreboard without them read as a win against nobody.
 	for _, seat := range m.Base.Seats {
-		h.Rows = append(h.Rows, m.Global.Palette().Muted.Render(fmt.Sprintf("%-12s  %9d",
-			styles.PadTruncate(seat.Name, 12), m.cumulativeScores[seat.ID])))
+		h.Rows = append(h.Rows, m.scoreRow(seat.ID, seat.Name))
+	}
+	for _, l := range m.leavers {
+		h.Rows = append(h.Rows, m.scoreRow(l.id, l.name))
 	}
 	return gameview.RenderHandOver(m.Global, h)
+}
+
+func (m *model) scoreRow(id, name string) string {
+	return m.Global.Palette().Muted.Render(fmt.Sprintf("%-12s  %9d",
+		styles.PadTruncate(name, 12), m.cumulativeScores[id]))
 }
 
 // handOverHint offers enter only to the seat that deals. Everyone else is waiting.

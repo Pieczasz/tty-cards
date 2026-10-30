@@ -395,6 +395,9 @@ unnoticed for so long.
 - Pressing enter twice to deal the next Gin Rummy hand no longer leaves "the hand
   is still being played" under your turn for the whole first turn. The second
   enter is ignored.
+- **A Gin Rummy forfeit keeps both players on the scoreboard** and says who left
+  the table. The player who left used to vanish from it, so a match they led 8-0
+  read as a 0-point win against nobody.
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.

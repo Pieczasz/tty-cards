@@ -281,6 +281,31 @@ func TestHandleEnter_ASecondEnterDoesNotDealAgain(t *testing.T) {
 	assert.Equal(t, 2, m.handNumber)
 }
 
+// A forfeit ends a two-seat match on the seat that stayed, and the engine drops the
+// leaver from the seats. The scoreboard used to be drawn from the seats alone, so a
+// player who led 8-0 and left vanished and the result read as a 0-point win against
+// nobody.
+func TestView_AForfeitKeepsTheLeaverOnTheScoreboard(t *testing.T) {
+	t.Parallel()
+	engine, m := startedTable(t)
+	bob := testutil.SeatID(2)
+	engine.WithState(func(state *game.State) {
+		s, ok := state.Extra.(*logic.State)
+		require.True(t, ok)
+		s.CumulativeScores[bob] = 8
+	})
+	engine.RemovePlayer(bob)
+	m.syncState()
+	require.Equal(t, game.Finished, m.Base.Phase)
+	require.Equal(t, game.EndReasonForfeit, m.Base.EndReason)
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "MATCH COMPLETE - alice wins")
+	assert.Contains(t, out, "bob left the table", "the screen says why the match ended")
+	assert.Regexp(t, `alice\s+0`, out)
+	assert.Regexp(t, `bob\s+8`, out, "the leaver keeps their row and their total")
+}
+
 func TestUpdate_IgnoresWhatIsNotAKey(t *testing.T) {
 	t.Parallel()
 	_, m := startedTable(t)
