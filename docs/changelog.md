@@ -29,7 +29,9 @@ unnoticed for so long.
   the proxy sits on: a PROXY header is honored only from them and any other
   connection is refused, and the stats API believes `X-Forwarded-For` only from
   them. Compose sets it to the new `edge` network's subnets. Empty keeps the old
-  behaviour. One malformed entry fails the boot.
+  behaviour. One malformed entry fails the boot, and so does an IPv4-mapped
+  one (`::ffff:0.0.0.0/96` read as the whole IPv4 internet on the ssh listener
+  and as nothing on the stats API): write the IPv4 network.
 - **IPv6 players get their own rate-limit bucket** (operators). nginx and the
   backend sit on an IPv6-enabled `edge` network and nginx listens on both
   families; before, every IPv6 player arrived from the Docker gateway and shared

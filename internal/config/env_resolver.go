@@ -84,6 +84,12 @@ func (r *envReader) prefixes(key string) []netip.Prefix {
 			continue
 		}
 		prefix, err := netip.ParsePrefix(field)
+		// The PROXY listener matches with net.ParseCIDR, which reads ::ffff:0.0.0.0/96
+		// as 0.0.0.0/0; the stats API matches with netip, which never puts an IPv4
+		// peer in it. Refusing the form keeps both consumers trusting the same peers.
+		if err == nil && prefix.Addr().Is4In6() {
+			err = fmt.Errorf("%s is IPv4-mapped; write the IPv4 network instead", field)
+		}
 		if err != nil {
 			r.fail(key, err)
 			return nil
