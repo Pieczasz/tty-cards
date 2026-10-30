@@ -11,7 +11,7 @@ import (
 )
 
 // NewPlayer is the only place a db.User becomes a game.Player, and it sits on the
-// SSH login path, views.SessionPlayer and releaseSession. Everything the lobby shows
+// SSH login path, in tui.New and releaseSession. Everything the lobby shows
 // or sorts by rating reads the map it builds here, so the flattening is worth
 // pinning directly rather than through a caller that can hand Ratings in ready-made.
 func TestNewPlayer(t *testing.T) {

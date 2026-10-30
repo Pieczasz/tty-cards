@@ -312,7 +312,7 @@ func (s *Session) LeaveConfirmScreen() (string, bool) {
 // Leave navigates away from the table: back to the lobby once the game has finished,
 // otherwise out of the lobby entirely, since leaving mid-game forfeits the seat.
 func (s *Session) Leave() tea.Cmd {
-	p := views.SessionPlayer(s.Global)
+	p := s.Global.Player
 	finished := s.Base.Phase == game.Finished
 
 	if p != nil && !finished {

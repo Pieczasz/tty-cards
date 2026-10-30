@@ -118,7 +118,7 @@ func loadProfile(ctx context.Context, profiles db.Profiles, userID uuid.UUID) te
 }
 
 func (m *model) Init() tea.Cmd {
-	p := views.SessionPlayer(m.global)
+	p := m.global.Player
 	if p == nil {
 		return nil
 	}
@@ -371,7 +371,7 @@ func deleteAccount(ctx context.Context, profiles db.Profiles, userID uuid.UUID) 
 }
 
 func (m *model) openConfirm() (tea.Model, tea.Cmd) {
-	p := views.SessionPlayer(m.global)
+	p := m.global.Player
 	if p == nil {
 		return m, nil
 	}
@@ -399,7 +399,7 @@ func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.phase = deleteRunning
-		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, views.SessionPlayer(m.global).UserID)
+		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, m.global.Player.UserID)
 	case "backspace":
 		if runes := []rune(m.typed); len(runes) > 0 {
 			m.typed = string(runes[:len(runes)-1])
@@ -445,7 +445,7 @@ func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 // the declared 64x20 minimum as it is (TestView_FitsTheTerminal), and an erasure
 // warning is the last screen worth trimming to save a row.
 func (m *model) renderConfirm() string {
-	anonymised := db.AnonymisedUsername(views.SessionPlayer(m.global).UserID)
+	anonymised := db.AnonymisedUsername(m.global.Player.UserID)
 	prompt := "> " + styles.PadTruncate(m.typed, deleteTypedMax)
 	lines := []string{
 		m.global.Palette().ErrorText.Render("Delete your account permanently?"),

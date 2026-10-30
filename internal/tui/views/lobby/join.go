@@ -104,7 +104,7 @@ func (m *joinModel) Init() tea.Cmd {
 // disappear underneath it as other players start games, so the cursor is clamped
 // every time rather than only when the list shrinks to empty.
 func (m *joinModel) refresh() {
-	m.entries = m.global.LobbyManager.BrowseLobbies(views.SessionPlayer(m.global), m.filter)
+	m.entries = m.global.LobbyManager.BrowseLobbies(m.global.Player, m.filter)
 	m.games = m.global.LobbyManager.GamesOnOffer()
 	m.cursor = components.StepCursor(m.cursor, 0, len(m.entries)-1)
 }
@@ -236,7 +236,7 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	if code == "" {
 		return m, nil
 	}
-	joined, err := m.global.LobbyManager.JoinLobbyByCode(m.global.RequestContext(), code, views.SessionPlayer(m.global))
+	joined, err := m.global.LobbyManager.JoinLobbyByCode(m.global.RequestContext(), code, m.global.Player)
 	if err != nil {
 		m.err = views.PlayerError(m.global.RequestContext(), err)
 		// The table may have filled or started while the list was on screen, so show

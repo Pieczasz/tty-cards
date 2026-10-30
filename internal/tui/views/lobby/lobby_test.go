@@ -357,11 +357,11 @@ func TestInit_APlayerNoLongerSeatedGoesHome(t *testing.T) {
 	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
 }
 
-// viewAs builds this screen for user, seated as p, on the leader view's manager.
-func viewAs(t *testing.T, leaderV *model, l *lobby.Lobby, user *db.User, p *game.Player) *model {
+// viewAs builds this screen for the session seated as p, on the leader view's manager.
+func viewAs(t *testing.T, leaderV *model, l *lobby.Lobby, p *game.Player) *model {
 	t.Helper()
 	g := leaderV.global
-	g.User, g.Player = user, p
+	g.Player = p
 	m, ok := New(g, l).(*model)
 	require.True(t, ok)
 	t.Cleanup(m.Close)
@@ -392,7 +392,7 @@ func TestInit_AClosedTableGoesHome(t *testing.T) {
 	require.NoError(t, err)
 	leaderV.global.LobbyManager.RemoveLobby(l.Code())
 
-	assertInitGoesHome(t, viewAs(t, leaderV, l, bobUser, bob))
+	assertInitGoesHome(t, viewAs(t, leaderV, l, bob))
 }
 
 // A sole leader whose grace ran out closes the table on the way out; a reconnect that
@@ -404,7 +404,7 @@ func TestInit_ASoleLeadersClosedTableGoesHome(t *testing.T) {
 	leader := l.Snapshot().Leader.Player
 	leaderV.global.LobbyManager.LeaveLobby(leader)
 
-	assertInitGoesHome(t, viewAs(t, leaderV, l, leaderV.global.User, leader))
+	assertInitGoesHome(t, viewAs(t, leaderV, l, leader))
 }
 
 // A kick that lands after the view took its snapshot is not in it, and its broadcast
@@ -417,7 +417,7 @@ func TestInit_AKickAfterTheViewWasBuiltGoesHome(t *testing.T) {
 	bob := lobby.NewPlayer(bobUser)
 	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
-	m := viewAs(t, leaderV, l, bobUser, bob)
+	m := viewAs(t, leaderV, l, bob)
 	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
 
 	assertInitGoesHome(t, m)
@@ -434,7 +434,7 @@ func TestFeedEnd_AKickedGuestGoesHome(t *testing.T) {
 	bob := lobby.NewPlayer(bobUser)
 	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
-	m := viewAs(t, leaderV, l, bobUser, bob)
+	m := viewAs(t, leaderV, l, bob)
 	require.NotNil(t, m.Init())
 	listen := listenToLobbyBroadcaster(m.lobbyChan)
 

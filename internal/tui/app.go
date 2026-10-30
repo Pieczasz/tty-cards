@@ -51,7 +51,7 @@ func New(deps Deps) *router.Router {
 	// until the idle timer took the seat.
 	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
 		return func(g router.GlobalContext, _ router.Payload) tea.Model {
-			if l := g.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(g)); l != nil {
+			if l := g.LobbyManager.FindLobbyByPlayer(g.Player); l != nil {
 				return lobby.New(g, l)
 			}
 			return fallback(g)
@@ -84,7 +84,7 @@ func New(deps Deps) *router.Router {
 // separate from New because the ssh layer may only call it once the session owns its
 // tracker slot, and must run before the router's Init.
 func ResumeSeat(r *router.Router) {
-	r.Global.LobbyManager.ResumePlayer(r.Global.RequestContext(), views.SessionPlayer(r.Global))
+	r.Global.LobbyManager.ResumePlayer(r.Global.RequestContext(), r.Global.Player)
 }
 
 // registerGameViews is where a seat reaches a view, so it is where the handle is held

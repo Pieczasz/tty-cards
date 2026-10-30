@@ -14,7 +14,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
-	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"uuid"
 
@@ -720,7 +719,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
-	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.Games[0].Slug))
+	_, err := manager.CreateLobby(m.global.Player, lobby.WithCardGame(catalog.Games[0].Slug))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 

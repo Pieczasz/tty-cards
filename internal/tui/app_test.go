@@ -80,7 +80,6 @@ func TestNew_BuildsTheSessionPlayerOnce(t *testing.T) {
 
 	require.NotNil(t, r.Global.Player)
 	assert.Equal(t, testutil.UID(1), r.Global.Player.UserID)
-	assert.Same(t, r.Global.Player, views.SessionPlayer(r.Global))
 }
 
 // Every route the views navigate to has to be registered, or Goto is a silent no-op
