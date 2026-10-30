@@ -330,6 +330,43 @@ func TestUpdate_DropsAnEventFromAnotherViewsFeed(t *testing.T) {
 	assert.Nil(t, cmd, "a stale event must not arm a second listener")
 }
 
+// A kick that lands between the join and the router building this view was broadcast
+// before the view subscribed, so no event will ever tell it. Init has to check the seat
+// itself, or the player sits on a roster they are not in until something else happens.
+func TestInit_APlayerNoLongerSeatedGoesHome(t *testing.T) {
+	t.Parallel()
+	leaderV, l := leaderView(t)
+	t.Cleanup(leaderV.Close)
+	bobUser := testUser(2, "bob")
+	bob := lobby.NewPlayer(bobUser)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	require.NoError(t, err)
+	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
+
+	g := leaderV.global
+	g.User, g.Player = bobUser, bob
+	m, ok := New(g, l).(*model)
+	require.True(t, ok)
+	t.Cleanup(m.Close)
+
+	cmd := m.Init()
+
+	assert.Nil(t, m.lobbyChan, "the feed of a lobby the player is not in is released")
+	// Checked before running cmd: on failure it is the listener, which blocks.
+	require.True(t, m.leaving, "Init asked to leave")
+	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
+}
+
+// A nil lobby has nothing to wait in, so Init takes the player home rather than waiting
+// for the first message to arrive.
+func TestInit_WithoutALobbyGoesHome(t *testing.T) {
+	t.Parallel()
+	m, ok := New(router.GlobalContext{}, nil).(*model)
+	require.True(t, ok)
+
+	assert.Equal(t, router.RouteHome, routeOf(t, m.Init()))
+}
+
 // A reconnecting player whose seat survived the disconnect grace belongs back at the
 // table, not on a roster screen for a game that is already running.
 func TestInit_ReconnectIntoAnActiveGameRoutesToTheTable(t *testing.T) {

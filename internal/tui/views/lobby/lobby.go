@@ -81,11 +81,18 @@ func (m *model) Init() tea.Cmd {
 	// A reconnecting player's lobby may already be mid-game: route straight back to
 	// the table if their seat survived the disconnect grace. A seat the engine took
 	// (idle removal) stays here and sees the roster instead.
-	if m.currentLobby != nil {
-		if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
-			m.unsubscribe()
-			return router.NavigateToGame(m.snap.Slug, table)
-		}
+	if m.currentLobby == nil {
+		return m.goHome()
+	}
+	if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
+		m.unsubscribe()
+		return router.NavigateToGame(m.snap.Slug, table)
+	}
+	// A kick or removal between the join and this view subscribing was broadcast
+	// before it listened, so no event will say so: the snapshot taken in New does.
+	if _, seated := m.snap.SeatOf(views.SessionPlayer(m.global)); !seated {
+		m.unsubscribe()
+		return m.goHome()
 	}
 	return tea.Batch(listenToLobbyBroadcaster(m.lobbyChan), m.syncPlayer())
 }
