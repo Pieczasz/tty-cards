@@ -196,6 +196,8 @@ unnoticed for so long.
   had a fresh sign-in budget of its own.
 - Stats-API metrics no longer take their server label from the client's own
   `Host` header.
+- A session turned away because the server is shutting down is now counted, as
+  `outcome="rejected_draining"` on `ttycards.ssh.sessions` (operators).
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 

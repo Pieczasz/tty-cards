@@ -106,6 +106,8 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			// A handler charm ssh started just before Close can get here after the
 			// drain stopped counting; it refuses itself rather than run untracked.
 			if !reg.admit() {
+				// Before any span: this session is never started, only counted.
+				observability.SSHSession(s.Context(), "rejected_draining")
 				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
 				return
 			}

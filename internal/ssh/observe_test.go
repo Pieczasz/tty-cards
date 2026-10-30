@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"charm.land/ssh"
+	"charm.land/wish/v2/testsession"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -192,4 +193,19 @@ func TestFinishSession_RecordsHowTheSessionEnded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A session refused because the server is draining returned before the session span
+// and the counters, so a shutdown that turned players away left no count of them.
+//
+//nolint:paralleltest // reads process-global metrics
+func TestSessionLifecycle_ARefusalWhileDrainingIsCounted(t *testing.T) {
+	before := metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_draining")
+	reg := &sessionRegistry{}
+	require.NoError(t, (&Server{sessions: reg}).WaitSessions(t.Context()))
+
+	srv := &ssh.Server{Handler: sessionLifecycle(Deps{}, reg)(func(ssh.Session) {})}
+	_, _ = testsession.New(t, srv, nil).CombinedOutput("")
+
+	assert.Equal(t, int64(1), metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_draining")-before)
 }
