@@ -55,7 +55,7 @@ func New(deps Deps) *router.Router {
 	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
 		return func(g router.GlobalContext, _ router.Payload) tea.Model {
 			if l := g.LobbyManager.FindLobbyByPlayer(g.Player); l != nil {
-				return lobby.New(g, l)
+				return lobbyview.New(g, l)
 			}
 			return fallback(g)
 		}
@@ -64,14 +64,14 @@ func New(deps Deps) *router.Router {
 	r.Register(router.RouteHome, seatedOr(home.New))
 	r.Register(router.RouteProfile, seatedOr(profile.New))
 	r.Register(router.RouteLeaderboard, seatedOr(leaderboard.New))
-	r.Register(router.RouteLobbyCreate, seatedOr(lobby.NewCreate))
-	r.Register(router.RouteLobbyJoin, seatedOr(lobby.NewJoin))
+	r.Register(router.RouteLobbyCreate, seatedOr(lobbyview.NewCreate))
+	r.Register(router.RouteLobbyJoin, seatedOr(lobbyview.NewJoin))
 
 	r.Register(router.RouteLobby, func(g router.GlobalContext, p router.Payload) tea.Model {
 		if p.Lobby == nil {
 			return home.New(g)
 		}
-		return lobby.New(g, p.Lobby)
+		return lobbyview.New(g, p.Lobby)
 	})
 
 	registerGameViews(r, deps.Games)

@@ -1,6 +1,6 @@
-// Package lobby holds the three lobby screens: creating a table, finding one to join,
+// Package lobbyview holds the three lobby screens: creating a table, finding one to join,
 // and the waiting room that hands its players over to the game view.
-package lobby
+package lobbyview
 
 import (
 	"errors"

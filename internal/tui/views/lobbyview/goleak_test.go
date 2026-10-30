@@ -1,4 +1,4 @@
-package lobby
+package lobbyview
 
 import (
 	"testing"
