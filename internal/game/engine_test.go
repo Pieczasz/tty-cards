@@ -134,6 +134,18 @@ func TestEngine_Start_Failures(t *testing.T) {
 		assert.Empty(t, players[0].Cards, "a deal never reaches the caller's seats")
 		require.Error(t, engine.SubmitAction("p1", MockAction{name: "move"}), "nothing is playable")
 	})
+
+	// A nil seat is a caller's bug. The table refuses to open on it, and nothing that
+	// reads the seats before Start trips over it.
+	t.Run("a nil seat is refused", func(t *testing.T) {
+		t.Parallel()
+		engine := NewEngine(new(MockRules), []*Player{{ID: "p1"}, nil, {ID: "p2"}})
+		t.Cleanup(engine.Close)
+
+		require.NotPanics(t, func() { _ = engine.Snapshot() })
+		require.ErrorContains(t, engine.Start(), "seat 1 is nil")
+		assert.Equal(t, Waiting, engine.Snapshot().Phase)
+	})
 }
 
 type MockAction struct {
