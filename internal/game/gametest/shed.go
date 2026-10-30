@@ -27,9 +27,6 @@ type ShedRules interface {
 // Shed describes one shedding game to the shared suite.
 type Shed struct {
 	Rules ShedRules
-	// MinPlayers and MaxPlayers are the game's seat range, as its catalog Module
-	// declares it.
-	MinPlayers, MaxPlayers int
 	// Deck is the game's full deck, which Table deals from.
 	Deck func() []deck.Card
 	// NewExtra is the rules' Extra for a table whose card in play is top.
