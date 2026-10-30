@@ -8,14 +8,13 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/leaderboard"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/profile"
-
-	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -28,7 +27,7 @@ type Deps struct {
 	Player       *game.Player
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
-	LobbyManager *internallobby.Manager
+	LobbyManager *lobby.Manager
 	// Games is the catalog the menus list and the game routes render, the same entries
 	// the lobby manager's registry was built from.
 	Games []catalog.Entry
