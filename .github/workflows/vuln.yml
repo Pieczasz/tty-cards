@@ -1,0 +1,25 @@
+name: Vuln
+# test.yml runs govulncheck only when something is pushed. An advisory published
+# against an unchanged go.sum during a quiet week needs this weekly run on main to
+# be seen. Only the scan, not the whole test pipeline.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    - name: Set up Go
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      with:
+        go-version: '1.27.3'
+
+    - name: govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

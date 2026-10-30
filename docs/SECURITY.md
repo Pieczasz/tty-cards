@@ -94,8 +94,8 @@ closed as "working as intended":
   compromised client machine** - if the attacker already has the player's SSH
   key, the game is over by definition.
 - **The reported version of a dependency** with no reachable call path.
-  `govulncheck` runs in CI and is reachability-based; if you have a reachable
-  path it missed, that *is* in scope - show the path.
+  `govulncheck` runs in CI and weekly on main, and is reachability-based; if you
+  have a reachable path it missed, that *is* in scope - show the path.
 
 ## Hardening the deployment you run
 
@@ -153,7 +153,7 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
   `no-new-privileges`; the backend is `FROM scratch`, `read_only` and
   `cap_drop: [ALL]`; nginx keeps only the four capabilities its master process
   needs. Images are pinned by digest and CI actions by commit SHA, with the CI
-  token read-only and Dependabot moving the pins.
+  token read-only and Dependabot moving the pins and the Go modules.
 - **Protect your backups, and keep one off the host.** `scripts/backup.sh` writes
   each archive `0600` and keeps the newest `BACKUP_KEEP` (14); `backups/` never
   enters the image build context. An archive is the whole user base, fingerprints
