@@ -376,6 +376,29 @@ func TestJoin_AnEmptyListKeepsTheLayoutAtTheMinimumSize(t *testing.T) {
 	assert.InDelta(t, left, right, 1, "the title is off centre:\n%s", out)
 }
 
+// A join error used to be padded to the frame's full width, so the block it joined
+// was as wide as the frame and the filter line, list and prompt jumped to its left edge.
+func TestJoin_AnErrorKeepsTheScreenCentred(t *testing.T) {
+	t.Parallel()
+	for _, size := range []tuitest.Size{{Name: "80x24", Width: 80, Height: 24}, {Name: "100x30", Width: 100, Height: 30}} {
+		t.Run(size.Name, func(t *testing.T) {
+			t.Parallel()
+			view := newJoinModel(t, newManager(t))
+			view.global.Theme = styles.NewTheme(true)
+			view.global.Width, view.global.Height = size.Width, size.Height
+			view.entries = manyTables(3)
+			before, _ := framedLine(t, tuitest.StripANSI(view.View().Content), "game: any")
+
+			view.err = errors.New("invalid lobby code")
+			out := tuitest.StripANSI(view.View().Content)
+
+			after, _ := framedLine(t, out, "game: any")
+			assert.Equal(t, before, after, "the filter line moved:\n%s", out)
+			assert.Contains(t, out, "Error: invalid lobby code")
+		})
+	}
+}
+
 func manyTables(n int) []lobby.BrowseEntry {
 	out := make([]lobby.BrowseEntry, 0, n)
 	for i := range n {

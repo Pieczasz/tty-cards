@@ -469,6 +469,8 @@ unnoticed for so long.
   `crazy_eights`.
 - At 64 columns an empty join list no longer breaks the footer inside
   "o - Seats" or pushes the title off centre.
+- A join error no longer shoves the join screen against the frame's left edge;
+  the list and the code prompt stay centred with the error under them.
 
 ### Fixed - internals worth knowing about
 

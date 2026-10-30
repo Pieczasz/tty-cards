@@ -373,10 +373,12 @@ func (m *joinModel) renderContent(contentHeight int) string {
 
 	// The error is wrapped and measured before the list takes its rows: appended after
 	// a list that had spent the whole budget, it pushed the frame past the terminal.
+	// Wrapped rather than given a Width, which pads it to the frame and leaves the
+	// block nothing to centre.
 	var errLine string
 	if m.err != nil {
-		errLine = m.global.Palette().ErrorText.Width(styles.InnerWidth(m.global.Width)).
-			Render("Error: " + m.err.Error())
+		errLine = lg.Wrap(m.global.Palette().ErrorText.Render("Error: "+m.err.Error()),
+			styles.InnerWidth(m.global.Width), "")
 		contentHeight -= lg.Height(errLine)
 	}
 
