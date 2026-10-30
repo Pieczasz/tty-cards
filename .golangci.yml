@@ -144,6 +144,12 @@ linters:
             - $gostd
             - github.com/Pieczasz/tty-cards/internal/elo
             - uuid
+        # The shutdown gate is shared by ssh and lobby, so it must not import either.
+        drain-is-a-leaf:
+          list-mode: strict
+          files: ["**/internal/drain/**", "!$test"]
+          allow:
+            - $gostd
     dupl:
       threshold: 120
     gocritic:
