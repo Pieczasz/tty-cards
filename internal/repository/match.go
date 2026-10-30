@@ -41,9 +41,9 @@ func recordSpanResult(span trace.Span, err error) {
 const (
 	pgSerializationFailureCode = "40001"
 	pgDeadlockDetectedCode     = "40P01"
-	// finalizeAttempts bounds how often an aborted finalize is run again. The lock
+	// txAttempts bounds how often an aborted write is run again. The lock
 	// order makes an abort rare, so a third in a row means something is wrong.
-	finalizeAttempts = 3
+	txAttempts = 3
 )
 
 // isRetryableAbort is a transaction Postgres rolled back to break a conflict. Both
@@ -55,16 +55,17 @@ func isRetryableAbort(err error) bool {
 		(pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
 }
 
-// transactRetrying runs fn as one transaction, again when Postgres aborted it. Without
-// it an abort loses a finished match from history and Elo; fn must keep no state
-// across attempts it does not reset itself.
+// transactRetrying runs fn as one transaction, again when Postgres rolled it back to
+// break a conflict. Finalizes, casual results and erasures all run through it: without
+// it an abort loses a finished match, or an erasure the player already confirmed. fn
+// must keep no state across attempts it does not reset itself.
 func transactRetrying(ctx context.Context, conn *gorm.DB, fn func(tx *gorm.DB) error) error {
 	for attempt := 1; ; attempt++ {
 		err := conn.WithContext(ctx).Transaction(fn)
-		if attempt == finalizeAttempts || !isRetryableAbort(err) {
+		if attempt == txAttempts || !isRetryableAbort(err) {
 			return err //nolint:wrapcheck // the caller names the write
 		}
-		slog.WarnContext(ctx, "finalize aborted by postgres; retrying", "error", err, "attempt", attempt)
+		slog.WarnContext(ctx, "transaction aborted by postgres; retrying", "error", err, "attempt", attempt)
 	}
 }
 
