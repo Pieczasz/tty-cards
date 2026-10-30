@@ -398,6 +398,10 @@ unnoticed for so long.
 - **A Gin Rummy forfeit keeps both players on the scoreboard** and says who left
   the table. The player who left used to vanish from it, so a match they led 8-0
   read as a 0-point win against nobody.
+- **Gin Rummy's hand result keeps its cards on a bigger terminal.** From 80x40
+  to about 150 columns the knocker's melds, the opponent's deadwood and the
+  layoffs vanished, leaving only the headline and the totals, while a smaller
+  terminal showed them. They are drawn small wherever the full cards do not fit.
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.

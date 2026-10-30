@@ -82,7 +82,6 @@ func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
 		Title:    fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Subtitle: m.renderOutcome(),
-		Body:     m.renderHandResult(),
 		Header:   fmt.Sprintf("%-12s  %9s", "player", "total"),
 		Hint:     m.handOverHint(),
 	}
@@ -105,6 +104,24 @@ func (m *model) renderHandOver() string {
 	for _, l := range m.leavers {
 		h.Rows = append(h.Rows, m.scoreRow(l.id, l.name))
 	}
+	return m.renderWithResult(h)
+}
+
+// renderWithResult draws h with the hand's cards as its body: full faces where they
+// fit, mini cards otherwise. RenderHandOver sheds a body too big for the screen
+// whole, so faces that overflowed 80x40 to 120x40 used to cost the player every card
+// while a smaller terminal still showed them small.
+func (m *model) renderWithResult(h gameview.HandOver) string {
+	if !gameview.IsCompact(m.Global.Width, m.Global.Height) {
+		withFaces := h
+		withFaces.Body = m.renderHandResult(true)
+		out := gameview.RenderHandOver(m.Global, withFaces)
+		// A shed body renders exactly as no body does.
+		if withFaces.Body == "" || out != gameview.RenderHandOver(m.Global, h) {
+			return out
+		}
+	}
+	h.Body = m.renderHandResult(false)
 	return gameview.RenderHandOver(m.Global, h)
 }
 
@@ -147,33 +164,41 @@ func (m *model) renderOutcome() string {
 }
 
 // renderHandResult is the cards behind the outcome: the knocker's melds, what the
-// opponent was left holding and what they laid off. A wall has none.
-func (m *model) renderHandResult() string {
+// opponent was left holding and what they laid off, as nine-row faces or, with faces
+// false, four-column mini cards. A wall has none.
+func (m *model) renderHandResult(faces bool) string {
 	r := m.lastHandResult
 	if r == nil || r.Outcome == logic.OutcomeWall {
 		return ""
 	}
 
-	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds)
-	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false)
+	art := m.miniCard
+	if faces {
+		art = m.faceCard
+	}
+	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds, art)
+	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false, art)
 	laidOff := ""
 	if len(r.LaidOffCards) > 0 {
-		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true)
+		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true, art)
 	}
 
 	return styles.JoinVertical(lg.Center, knockerMelds, oppDead, laidOff)
 }
 
-// renderCard draws a result card as a face, or in four columns on a terminal that
-// cannot hold three rows of nine-row faces next to the standings.
-func (m *model) renderCard(card deck.Card, highlight bool) string {
-	if gameview.IsCompact(m.Global.Width, m.Global.Height) {
-		return components.RenderMiniCard(m.Global.Palette(), card)
-	}
+// cardArt draws one result card, highlighted or not.
+type cardArt func(card deck.Card, highlight bool) string
+
+func (m *model) faceCard(card deck.Card, highlight bool) string {
 	return components.RenderCard(m.Global.Palette(), card, highlight)
 }
 
-func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
+// miniCard has no highlight: four columns leave no room to mark a card.
+func (m *model) miniCard(card deck.Card, _ bool) string {
+	return components.RenderMiniCard(m.Global.Palette(), card)
+}
+
+func (m *model) renderMeldGroups(label string, melds [][]deck.Card, art cardArt) string {
 	if len(melds) == 0 {
 		return m.Global.Palette().Dim.Render(label + ": -")
 	}
@@ -185,7 +210,7 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 		}
 		cards := make([]string, 0, len(meld))
 		for _, card := range meld {
-			cards = append(cards, m.renderCard(card, false))
+			cards = append(cards, art(card, false))
 		}
 		box := styles.JoinHorizontal(lg.Top, cards...)
 		groups = append(groups, m.Global.Palette().MeldBox.Render(
@@ -197,13 +222,13 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 	)
 }
 
-func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool) string {
+func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool, art cardArt) string {
 	if len(cards) == 0 {
 		return m.Global.Palette().Dim.Render(label + ": -")
 	}
 	parts := make([]string, 0, len(cards))
 	for _, card := range cards {
-		parts = append(parts, m.renderCard(card, highlight))
+		parts = append(parts, art(card, highlight))
 	}
 	return styles.JoinVertical(lg.Left,
 		m.Global.Palette().Muted.Render(label),
