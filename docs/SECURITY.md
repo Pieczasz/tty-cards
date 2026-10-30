@@ -152,8 +152,11 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
 - **Keep the container restrictions.** Every service runs with
   `no-new-privileges`; the backend is `FROM scratch`, `read_only` and
   `cap_drop: [ALL]`; nginx keeps only the four capabilities its master process
-  needs. Images are pinned by digest and CI actions by commit SHA, with the CI
-  token read-only and Dependabot moving the pins and the Go modules.
+  needs, Alloy only `DAC_OVERRIDE` for its data directory, and the other sidecars
+  none, so none of them can spoof `db` on the default network with raw packets
+  (CI asserts `cap_drop: [ALL]` on every restarting service but `db` and the
+  one-shot `migrate`). Images are pinned by digest and CI actions by commit SHA,
+  with the CI token read-only and Dependabot moving the pins and the Go modules.
 - **Protect your backups, and keep one off the host.** `scripts/backup.sh` writes
   each archive `0600` and keeps the newest `BACKUP_KEEP` (14); `backups/` never
   enters the image build context. An archive is the whole user base, fingerprints
