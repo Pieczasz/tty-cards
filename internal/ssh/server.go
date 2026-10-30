@@ -91,9 +91,11 @@ type sessionState struct {
 	program atomic.Pointer[tea.Program]
 	// run is the program's context and endRun ends it. charm ssh hands every session
 	// on a connection that connection's context, so a session displaced by a newer
-	// one on the same connection has nothing else that stops its program. Both are
-	// set just before Connect; endRun is safe from any goroutine, and finishSession
-	// calls it so run leaves its parent.
+	// one on the same connection has nothing else that stops its program. run is
+	// not derived from that context: a closing connection already quits the program
+	// through wish, cleanly, where a cancelled run kills it and wish logs an ERROR.
+	// Both are set just before Connect; endRun is safe from any goroutine, and
+	// finishSession calls it to release run.
 	run    context.Context
 	endRun context.CancelFunc
 }
@@ -371,7 +373,7 @@ func sessionModel(
 		// any other channel on it up until the peer notices. The session is for a
 		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		st.run, st.endRun = context.WithCancel(s.Context())
+		st.run, st.endRun = context.WithCancel(context.Background())
 		gen, err := deps.Tracker.Connect(user.ID, conn, displaceable(s, st.endRun))
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()

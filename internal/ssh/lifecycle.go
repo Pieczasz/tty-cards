@@ -196,8 +196,7 @@ func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
 
 func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
 	defer reg.delete(s)
-	// The connection's context outlives this session when others share it, and
-	// would otherwise hold run until the connection closes.
+	// Nothing else cancels run once the session is over.
 	if st.endRun != nil {
 		defer st.endRun()
 	}
