@@ -1,4 +1,4 @@
-.PHONY: build test test-short test-integration lint fmt fix deadcode semgrep cover clean ci loadtest backup restore restore-drill
+.PHONY: build test test-short test-integration lint fmt fix deadcode semgrep cover clean ci loadtest backup restore restore-drill install-tools migrate-create migrate-up migrate-down
 
 ci: fmt fix lint deadcode semgrep cover build
 
@@ -92,5 +92,8 @@ migrate-create:
 migrate-up:
 	migrate -path internal/db/migrations -database "$$DB_DSN" up
 
+# One step, and only after a typed yes: DB_DSN stays exported for migrate-up, and
+# with a single init migration one step down is every table.
 migrate-down:
-	migrate -path internal/db/migrations -database "$$DB_DSN" down -all
+	@read -p "Roll back the newest migration on \$$DB_DSN? Type yes: " ok; [ "$$ok" = yes ]
+	migrate -path internal/db/migrations -database "$$DB_DSN" down 1
