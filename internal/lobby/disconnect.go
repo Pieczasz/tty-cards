@@ -129,6 +129,11 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		// The session is gone, so its event channels must close now - but the seat
 		// stays, and the engine's turn clock plays for it until they return.
 		l.unsubscribePlayerLocked(p.ID)
+	} else {
+		// The leave below runs after both locks are released. A ready flag left
+		// standing in that gap lets the last ready-up start the game with this seat
+		// in it, and the leave would then forfeit it mid-game with no grace.
+		delete(l.ready, p.ID)
 	}
 	l.mu.Unlock()
 	if !playing {

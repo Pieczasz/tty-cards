@@ -290,6 +290,9 @@ unnoticed for so long.
   is removed after three. Only Gin's draw then discard is one turn on one clock.
   This supersedes the earlier note that an Uno skip or a Hearts trick winner
   kept the clock.
+- A player who readied and then dropped from a waiting table is un-readied before
+  they leave, so the last ready-up in that moment can no longer start the game
+  with them in it and forfeit their seat without the 90-second hold.
 
 ### Changed - terminal UI
 

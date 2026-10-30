@@ -571,3 +571,38 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	assert.Len(t, m.BrowseLobbies(nil, BrowseFilter{Limit: MaxBrowseLimit}), tables,
 		"a table created while a browse was scanning stayed hidden for the cache TTL")
 }
+
+// A drop in a waiting lobby gives the seat up at once, but DisconnectPlayer decides
+// that under the locks and leaves after releasing them. A ready flag left standing in
+// that gap let the last ready-up start the game with the dropped seat in it, which
+// the leave then forfeited mid-game with no grace. Either the game starts first and
+// the seat is held, or the seat goes first and no game starts.
+func TestConcurrent_WaitingDropCannotBeStartedInto(t *testing.T) {
+	t.Parallel()
+
+	const iterations = 3000
+	runWithTimeout(t, 60*time.Second, func() {
+		for i := range iterations {
+			m, l := newTestLobby(t, 2)
+			leader := l.Snapshot().Leader.Player
+			guest := mockPlayer("p2", testutil.UID(2))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+			require.NoError(t, m.ToggleReady(guest))
+
+			var (
+				wg   sync.WaitGroup
+				gate = make(chan struct{})
+			)
+			wg.Go(func() { <-gate; m.DisconnectPlayer(guest) })
+			wg.Go(func() { <-gate; _ = m.ToggleReady(leader) })
+			close(gate)
+			wg.Wait()
+
+			if l.ActiveGame() != nil {
+				assert.True(t, l.HasPlayer(guest) && pendingGrace(m, guest.ID),
+					"iter %d: the game started into a dropped seat and forfeited it without grace", i)
+			}
+			m.RemoveLobby(l.Code())
+		}
+	})
+}
