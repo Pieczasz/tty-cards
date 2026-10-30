@@ -147,13 +147,9 @@ func startProgram(t *testing.T, model tea.Model) (*tea.Program, *screen, io.Writ
 
 func waitForText(t *testing.T, scr *screen, want string, msgAndArgs ...any) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for screenText(scr) != want {
-		if time.Now().After(deadline) {
-			require.Equal(t, want, screenText(scr), msgAndArgs...)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.Equal(c, want, screenText(scr))
+	}, 5*time.Second, 5*time.Millisecond, msgAndArgs...)
 }
 
 func plain(frame string) string {
