@@ -206,7 +206,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD`. Process environment only: `.env` is read after `ENV`, so an `ENV` line there fails the boot |
 | `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969`; an IPv6 literal host (`::`) binds |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
-| `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |
+| `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer in development only; with `PROXY_PROTOCOL` or `API_TRUST_PROXY` on, any other `ENV` refuses to boot |
 | `MAX_CONNECTIONS` | `1000` | concurrent sessions (one per account; compose sets 1250, the most measured to hold on its 3 cores); the listener's backstop is twice this. Each session costs memory (`docs/architecture.md` §3.2), so raise it only with `GOMEMLIMIT` and the backend's `mem_limit` |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
 | `SERVICE_VERSION` | the build's module version | stamped on `service.version` so dashboards can tell deploys apart |
