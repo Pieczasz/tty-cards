@@ -229,7 +229,9 @@ func cachedFigure(text, font string) figureBanner {
 }
 
 func renderFigure(text, font string) figureBanner {
-	art := strings.TrimRight(figure.NewFigure(text, font, true).String(), "\r\n")
+	// Not strict: strict mode log.Fatals on a non-ASCII rune and would take every
+	// session down with it; non-strict draws '?' instead.
+	art := strings.TrimRight(figure.NewFigure(text, font, false).String(), "\r\n")
 	return figureBanner{art: art, width: lg.Width(art), height: lg.Height(art)}
 }
 
