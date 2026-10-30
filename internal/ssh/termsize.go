@@ -16,7 +16,8 @@ func (s termSize) cells() int { return s.w * s.h }
 // sizeTiers are the terminal sizes the server grants, smallest first. Each nests in
 // the next, so the largest tier a session was ever granted bounds every buffer its
 // renderer has allocated. The floor is granted to everyone, however full the server:
-// MAX_CONNECTIONS at 120x40 is what decision #60 measured. It clears every layout
+// MAX_CONNECTIONS at 120x40 is what the load test below measured, and what
+// invariant 19 in docs/architecture.md holds to GOMEMLIMIT. It clears every layout
 // breakpoint (the full table needs 80x40), so the tiers above only add room.
 var sizeTiers = [...]termSize{{120, 40}, {160, 50}, {200, 60}, {250, 80}}
 
@@ -25,10 +26,11 @@ var sizeTiers = [...]termSize{{120, 40}, {160, 50}, {200, 60}, {250, 80}}
 // session costs in both memory and CPU. The server therefore shares them out.
 const (
 	// cellBudget is how many cells the live sessions may be drawing at once: a tier is
-	// active while sessions x its cells fit. Decision #60: 850 browsing at 120x40 plus
-	// 400 playing at 80x24 is 4.85M cells, and held on 3 cores; 1500 sessions at
-	// similar sizes (~6.0M) saturated them. So 5M: 250 sessions at 250x80, 416 at
-	// 200x60, 625 at 160x50, and past that everyone gets the floor.
+	// active while sessions x its cells fit. Measured with cmd/loadtest, and raised
+	// only after another run (invariant 19 in docs/architecture.md): 850 browsing at
+	// 120x40 plus 400 playing at 80x24 is 4.85M cells, and held on 3 cores; 1500
+	// sessions at similar sizes (~6.0M) saturated them. So 5M: 250 sessions at
+	// 250x80, 416 at 200x60, 625 at 160x50, and past that everyone gets the floor.
 	cellBudget = 5_000_000
 	// extraCellBudget bounds the cells held above the floor. It is separate because
 	// bubbletea never gives renderer memory back: a smaller WindowSizeMsg reslices
