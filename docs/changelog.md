@@ -357,6 +357,9 @@ unnoticed for so long.
 - A player kicked, or whose table closed, in the moment between joining and the
   table screen opening is sent home instead of being left on a roster they are
   no longer in.
+- **A kicked guest is sent home at once.** The kick used to leave them on a
+  frozen roster that still listed them, every key answering "player not in
+  lobby", until they pressed x then y.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.

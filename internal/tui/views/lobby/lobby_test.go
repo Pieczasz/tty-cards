@@ -357,6 +357,110 @@ func TestInit_APlayerNoLongerSeatedGoesHome(t *testing.T) {
 	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
 }
 
+// viewAs builds this screen for user, seated as p, on the leader view's manager.
+func viewAs(t *testing.T, leaderV *model, l *lobby.Lobby, user *db.User, p *game.Player) *model {
+	t.Helper()
+	g := leaderV.global
+	g.User, g.Player = user, p
+	m, ok := New(g, l).(*model)
+	require.True(t, ok)
+	t.Cleanup(m.Close)
+	return m
+}
+
+// assertInitGoesHome runs Init and checks it took the player home, once, with the
+// feed released.
+func assertInitGoesHome(t *testing.T, m *model) {
+	t.Helper()
+	cmd := m.Init()
+	assert.Nil(t, m.lobbyChan, "the feed of a lobby the player is not in is released")
+	// Checked before running cmd: on failure it is the listener, which blocks.
+	require.True(t, m.leaving, "Init asked to leave")
+	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
+}
+
+// A closed table unmaps its seats but keeps its roster, so the snapshot still lists
+// the player while the feed refuses them: the live seat index is what says they are
+// gone, not the roster.
+func TestInit_AClosedTableGoesHome(t *testing.T) {
+	t.Parallel()
+	leaderV, l := leaderView(t)
+	t.Cleanup(leaderV.Close)
+	bobUser := testUser(2, "bob")
+	bob := lobby.NewPlayer(bobUser)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	require.NoError(t, err)
+	leaderV.global.LobbyManager.RemoveLobby(l.Code())
+
+	assertInitGoesHome(t, viewAs(t, leaderV, l, bobUser, bob))
+}
+
+// A sole leader whose grace ran out closes the table on the way out; a reconnect that
+// was handed that table just before must not sit on its dead roster.
+func TestInit_ASoleLeadersClosedTableGoesHome(t *testing.T) {
+	t.Parallel()
+	leaderV, l := leaderView(t)
+	leaderV.Close()
+	leader := l.Snapshot().Leader.Player
+	leaderV.global.LobbyManager.LeaveLobby(leader)
+
+	assertInitGoesHome(t, viewAs(t, leaderV, l, leaderV.global.User, leader))
+}
+
+// A kick that lands after the view took its snapshot is not in it, and its broadcast
+// never reaches the kicked player's feed, which the kick closes.
+func TestInit_AKickAfterTheViewWasBuiltGoesHome(t *testing.T) {
+	t.Parallel()
+	leaderV, l := leaderView(t)
+	t.Cleanup(leaderV.Close)
+	bobUser := testUser(2, "bob")
+	bob := lobby.NewPlayer(bobUser)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	require.NoError(t, err)
+	m := viewAs(t, leaderV, l, bobUser, bob)
+	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
+
+	assertInitGoesHome(t, m)
+}
+
+// The kick closes the kicked player's feed before its roster event goes out, so that
+// event never arrives: the feed ending is what has to take them home, or they sit on
+// a roster that still lists them, every key answering "player not in lobby".
+func TestFeedEnd_AKickedGuestGoesHome(t *testing.T) {
+	t.Parallel()
+	leaderV, l := leaderView(t)
+	t.Cleanup(leaderV.Close)
+	bobUser := testUser(2, "bob")
+	bob := lobby.NewPlayer(bobUser)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	require.NoError(t, err)
+	m := viewAs(t, leaderV, l, bobUser, bob)
+	require.NotNil(t, m.Init())
+	listen := listenToLobbyBroadcaster(m.lobbyChan)
+
+	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
+
+	_, cmd := m.Update(listen())
+	assert.Equal(t, router.RouteHome, routeOf(t, cmd))
+	assert.Nil(t, m.lobbyChan)
+}
+
+// A feed that ends while the player is still seated leaves a roster that will not
+// move again, and the player is told so rather than left watching it.
+func TestFeedEnd_StillSeatedSaysTheRosterStoppedUpdating(t *testing.T) {
+	t.Parallel()
+	m, _ := leaderView(t)
+	t.Cleanup(m.Close)
+
+	_, cmd := m.Update(lobbyMsg{src: m.lobbyChan, ended: true})
+
+	assert.Nil(t, cmd)
+	assert.False(t, m.leaving)
+	assert.Nil(t, m.lobbyChan)
+	require.ErrorIs(t, m.actionErr, errFeedLost)
+	assert.Contains(t, m.View().Content, "rejoin the lobby")
+}
+
 // A nil lobby has nothing to wait in, so Init takes the player home rather than waiting
 // for the first message to arrive.
 func TestInit_WithoutALobbyGoesHome(t *testing.T) {
@@ -453,9 +557,9 @@ func TestHandleLobbyEvent_RefreshesSettingsAndClampsTheCursor(t *testing.T) {
 	}
 }
 
-// A kicked player's view still holds a live feed, so the roster event is the only thing
-// that tells it to go. Without the once-guard it would re-issue the navigation for every
-// later event and the router would rebuild the home view each time.
+// A roster event that no longer lists the player takes them home. Without the
+// once-guard it would re-issue the navigation for every later event and the router
+// would rebuild the home view each time.
 func TestHandleLobbyEvent_PlayerNoLongerInTheRosterGoesHomeOnce(t *testing.T) {
 	t.Parallel()
 	m, l := leaderView(t)

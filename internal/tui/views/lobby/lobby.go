@@ -3,6 +3,7 @@
 package lobby
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -24,7 +25,14 @@ import (
 type lobbyMsg struct {
 	lobby.Event
 	src <-chan lobby.Event
+	// ended is set when src closed instead of delivering. The lobby closes a player's
+	// feed when it lets them go - a kick, the table closing - and a kick closes it
+	// before the roster event that would say so goes out.
+	ended bool
 }
+
+// errFeedLost is shown when the lobby closes the feed of a player it still seats.
+var errFeedLost = errors.New("live updates unavailable, rejoin the lobby")
 
 type model struct {
 	global       router.GlobalContext
@@ -45,8 +53,16 @@ type model struct {
 	actionErr        error
 }
 
+// listenToLobbyBroadcaster is views.ListenOn, except that the feed closing is a
+// message too: it is often the only word a kicked player gets.
 func listenToLobbyBroadcaster(ch <-chan lobby.Event) tea.Cmd {
-	return views.ListenOn(ch, func(ev lobby.Event) tea.Msg { return lobbyMsg{Event: ev, src: ch} })
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ev, ok := <-ch
+		return lobbyMsg{Event: ev, src: ch, ended: !ok}
+	}
 }
 
 // New is the waiting room for activeLobby, subscribed to its feed. A nil lobby is a
@@ -57,9 +73,10 @@ func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
 	if activeLobby == nil {
 		return m
 	}
-	m.refresh()
 	playerID := views.SessionPlayerID(global)
 	ch, err := activeLobby.Subscribe(playerID)
+	// Taken after subscribing, so a change is either in the snapshot or on the feed.
+	m.refresh()
 	if err != nil {
 		// Without the feed this screen would never see another player join or the
 		// game start, so the player is told instead of being left staring at a
@@ -67,7 +84,7 @@ func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
 		ctx := global.RequestContext()
 		slog.ErrorContext(ctx, "lobby view could not subscribe to events", "error", err, "player_id", playerID)
 		observability.SubscribeFailure(ctx, "lobby_view")
-		m.actionErr = fmt.Errorf("live updates unavailable, rejoin the lobby: %w", err)
+		m.actionErr = fmt.Errorf("%w: %w", errFeedLost, err)
 	}
 	m.lobbyChan = ch
 	return m
@@ -84,17 +101,40 @@ func (m *model) Init() tea.Cmd {
 	if m.currentLobby == nil {
 		return m.goHome()
 	}
-	if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
-		m.unsubscribe()
-		return router.NavigateToGame(m.snap.Slug, table)
-	}
-	// A kick or removal between the join and this view subscribing was broadcast
-	// before it listened, so no event will say so: the snapshot taken in New does.
-	if _, seated := m.snap.SeatOf(views.SessionPlayer(m.global)); !seated {
-		m.unsubscribe()
-		return m.goHome()
+	if cmd, moved := m.followSeat(); moved {
+		return cmd
 	}
 	return tea.Batch(listenToLobbyBroadcaster(m.lobbyChan), m.syncPlayer())
+}
+
+// followSeat sends the player to the table if their seat is in a running game, or
+// home if the manager no longer seats them here. It asks the live seat index, not the
+// snapshot: a closed table keeps its roster, so the snapshot still lists the player,
+// and a kick that landed before New subscribed was broadcast to nobody this view
+// could hear.
+func (m *model) followSeat() (tea.Cmd, bool) {
+	if table := m.currentLobby.Seat(views.SessionPlayerID(m.global)); table != nil {
+		m.unsubscribe()
+		return router.NavigateToGame(m.snap.Slug, table), true
+	}
+	if m.global.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(m.global)) != m.currentLobby {
+		m.unsubscribe()
+		return m.goHome(), true
+	}
+	return nil, false
+}
+
+// handleFeedEnd is the lobby closing this view's feed. Anyone it let go goes where
+// the seat index says; a player it still seats is told the roster has stopped
+// updating, as New tells them when it cannot subscribe.
+func (m *model) handleFeedEnd() (tea.Model, tea.Cmd) {
+	m.lobbyChan = nil
+	m.refresh()
+	if cmd, moved := m.followSeat(); moved {
+		return m, cmd
+	}
+	m.actionErr = errFeedLost
+	return m, nil
 }
 
 // syncPlayer keeps the session's player the one its seat holds. A ranked match
@@ -146,6 +186,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lobbyMsg:
 		if msg.src != m.lobbyChan {
 			return m, nil
+		}
+		if msg.ended {
+			return m.handleFeedEnd()
 		}
 		return m.handleLobbyEvent(msg.Event)
 	}
