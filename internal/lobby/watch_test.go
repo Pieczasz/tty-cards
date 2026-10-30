@@ -209,7 +209,7 @@ func TestWatchGame_PanicDoesNotEscape(t *testing.T) {
 func TestExpireLeave_NilPlayerDoesNotPanic(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.NotPanics(t, func() { m.expireLeave(nil) })
+	require.NotPanics(t, func() { m.expireLeaveGen(nil, 0) })
 }
 
 func TestExpireLeave_StaleGenerationDoesNotDropTheNewGrace(t *testing.T) {

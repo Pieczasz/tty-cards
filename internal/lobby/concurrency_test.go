@@ -365,7 +365,7 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				m.expireLeave(guest)
+				m.expireLeaveGen(guest, 0)
 			}()
 			go func() {
 				defer wg.Done()

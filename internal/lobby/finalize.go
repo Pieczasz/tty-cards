@@ -223,8 +223,8 @@ func (m *Manager) BeginShutdown() {
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
 	// LeaveLobby stops the timer under m.mu before touching the roster.
-	for _, p := range held {
-		m.LeaveLobby(p)
+	for id := range held {
+		m.LeaveLobby(&game.Player{ID: id})
 	}
 }
 

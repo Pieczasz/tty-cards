@@ -293,6 +293,9 @@ unnoticed for so long.
 - A player who readied and then dropped from a waiting table is un-readied before
   they leave, so the last ready-up in that moment can no longer start the game
   with them in it and forfeit their seat without the 90-second hold.
+- The release of held seats at hand end only gives up the holds it found. A
+  player who reconnected, started the next game and dropped again in that moment
+  keeps their new 90-second hold instead of being forfeited at once.
 
 ### Changed - terminal UI
 

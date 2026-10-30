@@ -352,14 +352,42 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	m, l, _, guest := startedGame(t)
 
 	m.DisconnectPlayer(guest)
-	m.expireLeave(guest)
+	m.expireLeaveGen(guest, 0)
 
 	assert.False(t, l.HasPlayer(guest), "the expired seat is given up")
 	m.ResumePlayer(guest)
 	assert.Nil(t, m.FindLobbyByPlayer(guest), "nothing to resume after expiry")
 }
 
-// expireLeave claims the grace before LeaveLobby runs. A resume in that gap must
+// releaseHeldSeats collects the holds under m.mu and expires them after releasing it.
+// A hold armed in that gap for a newer game is not the one it saw, and must survive
+// the stale release (invariant 4).
+func TestReleaseHeldSeats_StaleReleaseKeepsANewerHold(t *testing.T) {
+	t.Parallel()
+
+	m, l, leader, guest := startedGame(t)
+	m.DisconnectPlayer(guest)
+	m.mu.Lock()
+	held := m.heldSeatsLocked(l)
+	m.mu.Unlock()
+	require.Len(t, held, 1)
+
+	m.ResumePlayer(guest)
+	endHand(l.ActiveGame(), stubWin)
+	require.Eventually(t, func() bool { return l.ActiveGame() == nil }, 2*time.Second, time.Millisecond)
+	require.NoError(t, m.ToggleReady(leader))
+	require.NoError(t, m.ToggleReady(guest))
+	require.NotNil(t, l.ActiveGame(), "the second game did not start")
+	m.DisconnectPlayer(guest)
+
+	for id, gen := range held {
+		m.expireLeaveGen(&game.Player{ID: id}, gen)
+	}
+	assert.True(t, pendingGrace(m, guest.ID), "a stale release expired the newer hold")
+	assert.True(t, l.HasPlayer(guest), "a stale release forfeited the newer game's seat")
+}
+
+// expireLeaveGen claims the grace before LeaveLobby runs. A resume in that gap must
 // not return — and so must not sit the player back down — until the leave finishes.
 func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
 	t.Parallel()
@@ -651,7 +679,7 @@ func TestFeedEnd_ReleasesHeldSeatsWhenFinished(t *testing.T) {
 	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
 	engine.Close()
 
-	// Both in one condition: expireLeave drops the pending grace under m.mu and only
+	// Both in one condition: expireLeaveGen drops the pending grace under m.mu and only
 	// then takes the seat, so "grace gone" alone can be observed a moment early.
 	require.Eventually(t, func() bool { return !pendingGrace(m, guest.ID) && !l.HasPlayer(guest) },
 		2*time.Second, 10*time.Millisecond,

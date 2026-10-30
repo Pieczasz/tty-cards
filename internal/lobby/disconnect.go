@@ -67,7 +67,7 @@ func (d *graceTimers) arm(id string, wait time.Duration, fire func(gen uint64)) 
 }
 
 // claimExpire moves a pending leave of gen into the expiring set. gen 0 claims
-// whatever is pending (the test and release paths). A callback from an older arm
+// whatever is pending (tests only). A callback or release that saw an older arm
 // does not match and must not drop the hold a later drop armed.
 func (d *graceTimers) claimExpire(id string, gen uint64) *graceHold {
 	h, ok := d.pending[id]
@@ -147,12 +147,6 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
-// expireLeave is the grace timer's body for the hold that is pending now. Tests
-// and releaseHeldSeats drive it without waiting out the window.
-func (m *Manager) expireLeave(p *game.Player) {
-	m.expireLeaveGen(p, 0)
-}
-
 // expireLeaveGen gives up the seat if gen is still the pending hold. A stale
 // timer (gen from an earlier arm) returns without touching the newer one.
 func (m *Manager) expireLeaveGen(p *game.Player, gen uint64) {
@@ -201,20 +195,22 @@ func (m *Manager) releaseHeldSeats(l *Lobby) {
 	m.mu.Lock()
 	held := m.heldSeatsLocked(l)
 	m.mu.Unlock()
-	// expireLeave, not LeaveLobby: it claims the grace the way the timer would, so a
-	// ResumePlayer racing it is refused rather than resuming a seat already gone.
-	for _, p := range held {
-		m.expireLeave(p)
+	// expireLeaveGen, not LeaveLobby: it claims the grace the way the timer would, so
+	// a ResumePlayer racing it is refused rather than resuming a seat already gone.
+	// The generation seen under m.mu, not 0: a hold armed after the lock was released
+	// belongs to a newer game and is not this release's to expire.
+	for id, gen := range held {
+		m.expireLeaveGen(&game.Player{ID: id}, gen)
 	}
 }
 
-// heldSeatsLocked is every seat held for a reconnect at l, or anywhere when l is nil.
-// Caller holds m.mu.
-func (m *Manager) heldSeatsLocked(l *Lobby) []*game.Player {
-	held := make([]*game.Player, 0, len(m.grace.pending))
-	for id := range m.grace.pending {
+// heldSeatsLocked maps every seat held for a reconnect at l, or anywhere when l is
+// nil, to the generation of its hold. Caller holds m.mu.
+func (m *Manager) heldSeatsLocked(l *Lobby) map[string]uint64 {
+	held := make(map[string]uint64, len(m.grace.pending))
+	for id, h := range m.grace.pending {
 		if l == nil || m.playerLobby[id] == l {
-			held = append(held, &game.Player{ID: id})
+			held[id] = h.gen
 		}
 	}
 	return held
