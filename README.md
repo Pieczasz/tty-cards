@@ -321,9 +321,10 @@ service's image, no network) and fails unless the dump restores cleanly,
 `schema_migrations` is clean and no newer than the checkout, `users` has rows
 (`DRILL_MIN_USERS`) and the archive holds the host key, whose fingerprint it
 prints. `scripts/restore.sh` is the real thing, on a fresh host or a running one:
-it stops the backend, drops and recreates the database, restores the dump, puts
-the key back and starts the stack, whose `migrate` then applies any newer
-migrations. On a new host, clone the repo, write `.env`, copy the archive over and
+it stops the backend, restores the dump into a new database beside the live one
+and swaps it in only once that succeeds (a dump that fails to restore leaves the
+live database as it was), puts the key back and starts the stack, whose `migrate`
+then applies any newer migrations. On a new host, clone the repo, write `.env`, copy the archive over and
 run `scripts/restore.sh` before the first `up`.
 
 Schedule both, from the repo root as the user that runs Docker. cron:

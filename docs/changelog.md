@@ -235,6 +235,9 @@ unnoticed for so long.
   production (warnings and slow queries).
 - A failed interrupted-match finalize now logs as `finalize interrupted match`,
   once, instead of `finalize ranked match: finalize ranked match: ...`.
+- **`scripts/restore.sh` no longer drops the live database first.** It restores
+  into `<DB_NAME>_restore` and swaps that in only once `pg_restore` succeeds; a
+  truncated or corrupt archive used to leave an empty database behind.
 
 ### Changed - tables and lobbies
 
