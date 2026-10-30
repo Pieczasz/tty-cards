@@ -145,8 +145,12 @@ func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *joinModel) handleCodeEntry(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
+		// Cancel drops the code and its error: kept, the next c appended to a code
+		// the player had abandoned, under an error about it.
 		m.writingCode = false
 		m.textInput.Blur()
+		m.textInput.Reset()
+		m.err = nil
 		return m, nil
 	case "enter":
 		return m.joinByCode(strings.ToUpper(m.textInput.Value()))

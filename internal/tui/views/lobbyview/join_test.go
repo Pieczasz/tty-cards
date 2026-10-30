@@ -593,6 +593,26 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 		assert.NoError(t, view.err, "cancelling is not a failed join")
 	})
 
+	// Esc used to leave "> ABC" and its error on screen, and the next c appended to it.
+	t.Run("escape clears the code and its error", func(t *testing.T) {
+		t.Parallel()
+		view := newJoinModel(t, newManager(t))
+		pressJoin(t, view, "c")
+		for _, key := range []string{"a", "b", "c", "enter"} {
+			pressJoin(t, view, key)
+		}
+		require.Error(t, view.err, "an unknown code has to fail for this to mean anything")
+
+		pressJoin(t, view, "esc")
+		assert.Empty(t, view.textInput.Value(), "a cancelled code is gone")
+		require.NoError(t, view.err, "and so is the error it left")
+		assert.NotContains(t, tuitest.StripANSI(view.View().Content), "Error:")
+
+		pressJoin(t, view, "c")
+		pressJoin(t, view, "d")
+		assert.Equal(t, "D", view.textInput.Value(), "the next code starts empty")
+	})
+
 	t.Run("backspace corrects a typo", func(t *testing.T) {
 		t.Parallel()
 		view := newJoinModel(t, newManager(t))

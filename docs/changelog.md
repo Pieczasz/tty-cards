@@ -496,6 +496,8 @@ unnoticed for so long.
   the list and the code prompt stay centred with the error under them.
 - With no table to list, the join screen's code entry no longer says "press g,
   m or o to widen the filters"; those keys type into the code there.
+- Esc out of the join screen's code entry clears the code and its error. The next
+  `c` used to carry on from the abandoned code under the old "invalid lobby code".
 
 ### Fixed - internals worth knowing about
 
