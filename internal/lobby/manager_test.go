@@ -409,6 +409,32 @@ func TestManager_BrowseLobbiesReuseTheScanUntilSomethingChanges(t *testing.T) {
 	m.mu.RUnlock()
 }
 
+// The cache holds only which tables are on offer; seat counts, the ranked flag and
+// the limit are read live. A change that leaves the offered set as it was - a
+// private table starting, a public table's settings - must not cost a rescan.
+func TestManager_BrowseLobbiesKeepTheScanWhenTheOfferedSetIsUnchanged(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	host := mockPlayer("pub", testutil.UID(9))
+	pub := openTable(t, m, "pub", testutil.UID(9), "mockgame", 0)
+	leader := mockPlayer("p1", testutil.UID(1))
+	priv, err := m.CreateLobby(leader, WithCardGame("mockgame"))
+	require.NoError(t, err)
+	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
+	before := m.browseEpoch.Load()
+
+	require.NoError(t, m.ToggleReady(leader))
+	require.NotNil(t, priv.ActiveGame())
+	require.NoError(t, pub.SetRanked(host, true))
+	require.NoError(t, pub.SetMaxPlayers(host, 3))
+
+	entries := m.BrowseLobbies(nil, BrowseFilter{})
+	require.Len(t, entries, 1)
+	assert.True(t, entries[0].Ranked, "settings are read live")
+	assert.Equal(t, 3, entries[0].MaxPlayers)
+	assert.Equal(t, before, m.browseEpoch.Load(), "an unchanged offered set rescanned")
+}
+
 // A table appearing or closing has to show up on the next browse.
 func TestManager_BrowseLobbiesSeeChangesImmediately(t *testing.T) {
 	t.Parallel()
