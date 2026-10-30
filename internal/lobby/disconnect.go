@@ -195,6 +195,9 @@ func (m *Manager) releaseHeldSeats(l *Lobby) {
 	m.mu.Lock()
 	held := m.heldSeatsLocked(l)
 	m.mu.Unlock()
+	if m.heldSeatsCollected != nil {
+		m.heldSeatsCollected()
+	}
 	// expireLeaveGen, not LeaveLobby: it claims the grace the way the timer would, so
 	// a ResumePlayer racing it is refused rather than resuming a seat already gone.
 	// The generation seen under m.mu, not 0: a hold armed after the lock was released

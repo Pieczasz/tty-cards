@@ -391,31 +391,27 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 }
 
 // releaseHeldSeats collects the holds under m.mu and expires them after releasing it.
-// A hold armed in that gap for a newer game is not the one it saw, and must survive
-// the stale release (invariant 4).
+// A hold armed in that gap is not the one it saw, and must survive the stale release
+// (invariant 4): expiring whatever is pending, or re-reading the generation after the
+// lock, would take the player's newer seat.
 func TestReleaseHeldSeats_StaleReleaseKeepsANewerHold(t *testing.T) {
 	t.Parallel()
 
-	m, l, leader, guest := startedGame(t)
+	m, l, _, guest := startedGame(t)
 	m.DisconnectPlayer(guest)
-	m.mu.Lock()
-	held := m.heldSeatsLocked(l)
-	m.mu.Unlock()
-	require.Len(t, held, 1)
-
-	m.ResumePlayer(guest)
-	endHand(l.ActiveGame(), stubWin)
-	require.Eventually(t, func() bool { return l.ActiveGame() == nil }, 2*time.Second, time.Millisecond)
-	require.NoError(t, m.ToggleReady(leader))
-	require.NoError(t, m.ToggleReady(guest))
-	require.NotNil(t, l.ActiveGame(), "the second game did not start")
-	m.DisconnectPlayer(guest)
-
-	for id, gen := range held {
-		m.expireLeaveGen(&game.Player{ID: id}, gen)
+	var once sync.Once
+	m.heldSeatsCollected = func() {
+		once.Do(func() {
+			// The player comes back and drops again: a newer hold on the same seat.
+			m.ResumePlayer(guest)
+			m.DisconnectPlayer(guest)
+		})
 	}
+
+	m.releaseHeldSeats(l)
+
 	assert.True(t, pendingGrace(m, guest.ID), "a stale release expired the newer hold")
-	assert.True(t, l.HasPlayer(guest), "a stale release forfeited the newer game's seat")
+	assert.True(t, l.HasPlayer(guest), "a stale release forfeited the newer hold's seat")
 }
 
 // Closing a table unmaps every seat at it, so a hold left armed there would later

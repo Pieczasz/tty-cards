@@ -79,6 +79,9 @@ type Manager struct {
 	// engineOpts is appended to every engine a start builds. Production leaves it
 	// empty; tests set it to force a feed the watcher cannot subscribe to.
 	engineOpts []game.EngineOption
+	// heldSeatsCollected runs in releaseHeldSeats between collecting the holds and
+	// expiring them. Production leaves it nil; tests arm a newer hold in that gap.
+	heldSeatsCollected func()
 }
 
 // disconnectGrace is how long a mid-game seat survives its session. The engine's
