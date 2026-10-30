@@ -44,8 +44,14 @@ func beginHandOrFinish(state *game.State, extra *State, dealer int) error {
 // beginHand deals the next hand of the match: fresh shuffled deck, hole cards for
 // everyone still holding chips, button and blinds moved on. A busted player is
 // marked folded for the rest of the match so the turn cursor skips their seat.
+// A player who left is folded for every hand after the one they left: the reset
+// clears their seat too, and an unfolded leaver would be shown at the next
+// showdown with the cards of a hand they never finished.
 func beginHand(state *game.State, extra *State, dealer int) error {
 	resetForHand(extra)
+	for _, p := range state.LeftPlayers {
+		extra.Seats[p.ID].Folded = true
+	}
 	extra.HandNumber++
 	extra.handStartChips = chipsInPlay(extra)
 

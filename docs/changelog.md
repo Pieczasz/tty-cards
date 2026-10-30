@@ -122,6 +122,9 @@ unnoticed for so long.
   players still seated. A pot won face-down, or a leaver's hand, no longer splits
   a draw by cards nobody showed, and a final pot won face-down stays face-down on
   the result screen.
+- **A poker player who left stays folded for the rest of the match.** They used
+  to come back unfolded each hand and appear at every later showdown as an extra
+  seat, showing the cards of the hand they walked out of.
 - **An erased account can never reappear on the leaderboard**, not even from a
   match that was finishing while it was deleted, and not from a leaderboard read
   that started just before.
