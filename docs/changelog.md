@@ -409,6 +409,9 @@ unnoticed for so long.
 - **Poker no longer offers an all-in the table refuses.** After a short all-in
   that does not reopen the betting, the bar shows only fold and call; `a:
   all-in` used to stay up and was refused with "betting is not reopened".
+- **A poker stack short of the bet is quoted what it can actually call.** With 15
+  chips facing a 50 big blind the bar reads `c: call 15 (all-in)` and the bet
+  line "to call 15"; both used to quote the full 50.
 
 ### Fixed - internals worth knowing about
 

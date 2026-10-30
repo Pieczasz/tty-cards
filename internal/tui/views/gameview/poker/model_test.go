@@ -262,3 +262,17 @@ func TestActionBar_HidesAllInWhenTheBettingIsNotReopened(t *testing.T) {
 	assert.Contains(t, bar, "c: call 325")
 	assert.NotContains(t, bar, "a: all-in", "the bar offers only what the engine accepts")
 }
+
+// PT-02: a 15-chip stack facing the 50 big blind can only put in its 15. The bar and
+// the bet line used to quote the whole 50, which is not what pressing c commits.
+func TestToCall_IsCappedAtTheHeroStack(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t, 3)
+	heroID := m.HeroID()
+	engine.WithState(func(state *game.State) { extra(t, state).Seats[heroID].Chips = 15 })
+	m.syncState()
+
+	bar := tuitest.StripANSI(m.renderActionBar())
+	assert.Contains(t, bar, "c: call 15 (all-in)")
+	assert.Contains(t, tuitest.StripANSI(m.renderCenter(true)), "to call 15")
+}

@@ -100,6 +100,11 @@ func readTable(state *game.State, heroID string) table {
 	t.raiseMin, t.raiseMax, t.raiseOK = logic.RaiseBounds(state, heroID)
 	t.allInOK = logic.AllInOK(state, heroID)
 	t.toCall = e.ToCall(heroID)
+	// A stack short of the bet calls all-in for what it has, so that is what c
+	// commits and what the table quotes.
+	if hero := e.Seats[heroID]; hero != nil {
+		t.toCall = min(t.toCall, hero.Chips)
+	}
 	t.handComplete = e.HandComplete() || finished
 	t.matchComplete = e.MatchComplete || finished
 	t.handNumber = e.HandNumber

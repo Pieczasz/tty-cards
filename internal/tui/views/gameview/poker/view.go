@@ -304,7 +304,11 @@ func (m *model) renderActionBar() string {
 		opts = append(opts, "c: check")
 	}
 	if m.canCall() {
-		opts = append(opts, fmt.Sprintf("c: call %d", m.toCall))
+		call := fmt.Sprintf("c: call %d", m.toCall)
+		if hero := m.heroSeat(); hero != nil && m.toCall >= hero.Chips {
+			call += " (all-in)"
+		}
+		opts = append(opts, call)
 	}
 	if m.canRaise() {
 		opts = append(opts, "r: raise")
