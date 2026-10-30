@@ -140,6 +140,14 @@ unnoticed for so long.
   disconnect timer on the seat your new session is playing; and a reconnect
   refused because the server is full no longer cancels the timer holding your
   seat.
+- **A terminal resize can no longer wedge a connection.** Two resizes sent before
+  the shell started, after the session ended, or while the session's screen was
+  stuck stopped the server reading that connection for good: closing it ended
+  nothing, its listener slot (and, for a live session, its account slot) never
+  came back, and enough of them shut everyone out until a restart. A resize
+  before the shell is now refused (the pty request already carries the size), and
+  later ones never wait for the screen; a session that falls behind gets the
+  latest size.
 - **The displaced session's whole connection is closed**, not just its channel,
   and a connection can no longer open more session channels than the cap (or
   flood the environment) before being counted.

@@ -11,10 +11,60 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
+	bm "charm.land/wish/v2/bubbletea"
 	"charm.land/wish/v2/testsession"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gossh "golang.org/x/crypto/ssh"
 )
+
+// blockedModel's event loop stops at its first message until release closes, as a
+// session's does when its peer stops taking output: the renderer holds its lock
+// across a write the ssh window will not take, and the next render waits on it.
+type blockedModel struct {
+	// entered is told once the loop is stopped, which is after the session's every
+	// read of its pty: charm ssh writes the size a resize carries without a lock.
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (blockedModel) Init() tea.Cmd { return nil }
+
+func (m blockedModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+	select {
+	case m.entered <- struct{}{}:
+	default:
+	}
+	<-m.release
+	return m, nil
+}
+
+func (blockedModel) View() tea.View { return tea.NewView("") }
+
+// wish hands window changes to the program from the one channel charm ssh fills
+// with a blocking send, so a program that stopped taking messages stopped charm ssh
+// reading the session's requests. The connection behind it then wedged as in
+// TestNewServer_WindowChangeBeforeShellDoesNotWedge, and closing it no longer ended
+// the session, which kept its tracker slot until a restart.
+func TestSessionLifecycle_AResizeNeverWaitsOnTheProgram(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	srv := &ssh.Server{Handler: sessionLifecycle(Deps{}, &sessionRegistry{})(
+		bm.MiddlewareWithProgramHandler(func(s ssh.Session) *tea.Program {
+			return tea.NewProgram(blockedModel{entered: entered, release: release}, bm.MakeOptions(s)...)
+		})(func(ssh.Session) {}))}
+	session := testsession.New(t, srv, nil)
+	t.Cleanup(func() { close(release) }) // runs before testsession's own cleanup
+	require.NoError(t, session.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+	require.NoError(t, session.Shell())
+	<-entered
+
+	for i := range 40 {
+		within(t, "a resize", func() {
+			_, _ = session.SendRequest("window-change", true, windowChangePayload(uint32(81+i), 40))
+		})
+	}
+}
 
 func TestFilterSessionMsg(t *testing.T) {
 	t.Parallel()

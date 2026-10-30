@@ -497,6 +497,16 @@ func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 // every accepted one for the session's life, so an unbounded stream is unbounded
 // memory. A small budget rather than none: bubbletea reads TERM and colour hints
 // from the environment.
+//
+// It also refuses a window-change before the shell or exec. charm ssh puts each one
+// on a one-slot channel with a blocking send from the goroutine reading this stream,
+// the pty-req already filled that slot, and nothing reads it before the session
+// handler runs: a second resize stopped the stream for good, the connection's
+// request mux backed up behind it, and the connection was never read again - no
+// idle timeout, no teardown, and its listener slot gone until a restart. The pty-req
+// carries the size, so nothing is lost. From the handler on, sessionLifecycle drains
+// the slot. A subsystem does not count as a start: none is registered, so charm ssh
+// refuses it and no handler ever drains.
 type envCappedChannel struct {
 	gossh.NewChannel
 }
@@ -509,15 +519,23 @@ func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error)
 	out := make(chan *gossh.Request)
 	go func() {
 		defer close(out)
-		count, size := 0, 0
+		count, size, started := 0, 0, false
 		for req := range reqs {
-			if req.Type == "env" {
+			switch req.Type {
+			case "env":
 				count++
 				size += len(req.Payload)
 				if count > maxEnvRequests || size > maxEnvBytes {
 					_ = req.Reply(false, nil)
 					continue
 				}
+			case "window-change":
+				if !started {
+					_ = req.Reply(false, nil)
+					continue
+				}
+			case "shell", "exec":
+				started = true
 			}
 			out <- req
 		}

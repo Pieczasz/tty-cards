@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -203,4 +204,113 @@ func TestEnvCappedChannel_AcceptFailureIsReturned(t *testing.T) {
 	require.ErrorIs(t, err, errUnopenable)
 	assert.Nil(t, ch)
 	assert.Nil(t, reqs)
+}
+
+func ptyReqPayload(w, h uint32) []byte {
+	return gossh.Marshal(struct {
+		Term                    string
+		Columns, Rows, PxW, PxH uint32
+		Modes                   string
+	}{"xterm", w, h, 0, 0, "\x00"})
+}
+
+func windowChangePayload(w, h uint32) []byte {
+	return gossh.Marshal(struct{ Columns, Rows, PxW, PxH uint32 }{w, h, 0, 0})
+}
+
+// openRawSession opens a session channel with a pty and nothing else, so the test
+// sends every request that follows itself.
+func openRawSession(t *testing.T, client *gossh.Client) gossh.Channel {
+	t.Helper()
+	ch, reqs, err := client.OpenChannel("session", nil)
+	require.NoError(t, err)
+	go gossh.DiscardRequests(reqs)
+	t.Cleanup(func() { _ = ch.Close() })
+	ok, err := ch.SendRequest("pty-req", true, ptyReqPayload(80, 40))
+	require.NoError(t, err)
+	require.True(t, ok)
+	return ch
+}
+
+func sendWindowChanges(ch gossh.Channel, n int) {
+	for i := range n {
+		_, _ = ch.SendRequest("window-change", false, windowChangePayload(uint32(81+i), 40))
+	}
+}
+
+// within fails the test unless fn returns inside two seconds.
+func within(t *testing.T, what string, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s hung: the connection is wedged", what)
+	}
+}
+
+// openAnotherChannel is the probe for a wedged connection: the request mux that
+// would answer it is the one a blocked request stream backs up.
+func openAnotherChannel(client *gossh.Client) {
+	ch, reqs, err := client.OpenChannel("session", nil)
+	if err == nil {
+		go gossh.DiscardRequests(reqs)
+		_ = ch.Close()
+	}
+}
+
+// charm ssh hands each window-change to a one-slot channel with a blocking send from
+// the goroutine reading the channel's requests, and the pty-req already filled the
+// slot. Before the shell nothing reads it, so a second resize stopped that goroutine
+// for good, the connection's request mux backed up behind it, and the connection was
+// never read again: no idle timeout, no teardown, and a listener slot gone for good.
+func TestNewServer_WindowChangeBeforeShellDoesNotWedge(t *testing.T) {
+	t.Parallel()
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(91), Username: "wedge"})
+	client := dialInProcess(t, addr, "wedge")
+	ch := openRawSession(t, client)
+
+	sendWindowChanges(ch, 40)
+
+	within(t, "the shell reply", func() { _, _ = ch.SendRequest("shell", true, nil) })
+	within(t, "a second channel", func() { openAnotherChannel(client) })
+}
+
+// heldRepo refuses every lookup, but only once the test lets it: until then the
+// session handler is parked inside sessionModel, past every read of the pty.
+type heldRepo struct {
+	stubUserRepo
+	entered, release chan struct{}
+}
+
+func (r heldRepo) LoadUserByFingerprint(ctx context.Context, fp string) (*db.User, *db.PublicSSHKey, error) {
+	close(r.entered)
+	<-r.release
+	return r.stubUserRepo.LoadUserByFingerprint(ctx, fp)
+}
+
+// A refused session's handler returns while its request stream is still open, and
+// nothing read the window changes it got on the way to the refusal.
+func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
+	t.Parallel()
+	repo := heldRepo{
+		err:     errors.New("db down"),
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	addr, _ := startServerWith(t, repo)
+	client := dialInProcess(t, addr, "refused")
+	ch := openRawSession(t, client)
+
+	ok, err := ch.SendRequest("shell", true, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	<-repo.entered
+	sendWindowChanges(ch, 40)
+	close(repo.release)
+
+	within(t, "a second channel", func() { openAnotherChannel(client) })
 }

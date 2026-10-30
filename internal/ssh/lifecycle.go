@@ -100,6 +100,9 @@ func notifySessionPanic(s ssh.Session) {
 func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
+			// First, before anything can refuse the session: from here to the end of
+			// the channel's request stream, a resize must never wait.
+			s = takeWindowChanges(s)
 			// A handler charm ssh started just before Close can get here after the
 			// drain stopped counting; it refuses itself rather than run untracked.
 			if !reg.admit() {
@@ -119,6 +122,50 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			sh(s)
 		}
 	}
+}
+
+// resizingSession is a session whose window changes come from takeWindowChanges.
+type resizingSession struct {
+	ssh.Session
+	winch <-chan ssh.Window
+}
+
+func (s *resizingSession) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
+	pty, _, ok := s.Session.Pty()
+	return pty, s.winch, ok
+}
+
+// takeWindowChanges takes the session's window changes off charm ssh as they arrive
+// and keeps only the latest for whoever reads them. charm ssh hands each one over
+// with a blocking send on a one-slot channel, from the goroutine reading the
+// channel's requests. Its only reader, wish's bubbletea middleware, reads only while
+// a program runs, and only as fast as that program's event loop takes messages - and
+// the loop stops when the peer stops taking output. A refused session, one whose
+// program ended, or one whose loop is stuck then stops its request stream at the
+// second resize, the connection's request mux backs up behind it, and the connection
+// is never read again: closing it ends nothing, so the session keeps its tracker
+// slot and its listener slot until a restart.
+//
+// The goroutine ends when charm ssh closes the channel, which it does when the
+// request stream ends. The latest-size channel is never closed: wish reads it in a
+// loop, and a closed one would hand it zero sizes forever.
+func takeWindowChanges(s ssh.Session) ssh.Session {
+	_, in, _ := s.Pty()
+	if in == nil { // no pty-req, so charm ssh refuses every resize itself
+		return s
+	}
+	latest := make(chan ssh.Window, 1)
+	go func() {
+		for w := range in {
+			// The only sender, so once the stale size is gone there is room.
+			select {
+			case <-latest:
+			default:
+			}
+			latest <- w
+		}
+	}()
+	return &resizingSession{Session: s, winch: latest}
 }
 
 func (reg *sessionRegistry) startSession(s ssh.Session) *sessionState {
