@@ -421,11 +421,17 @@ func (l handLedger) observe(extra *State) {
 // table total cannot see: a pot paid to the wrong seats still balances. Nobody loses
 // chips nobody matched - a player can only be beaten out of what an opponent put up
 // against them - so the drop across a hand is bounded by the sum over the other
-// contributors of min(their contribution, this player's).
+// contributors of min(their contribution, this player's). A player who folded, which
+// a leave does too, forfeits exactly what they put in, matched or not.
 func (l handLedger) checkNoUnmatchedLoss(t gametest.TB, extra *State) {
 	t.Helper()
 	for id, before := range l {
-		after := extra.Seats[id].Chips
+		seat := extra.Seats[id]
+		after := seat.Chips
+		if seat.Folded {
+			require.Equal(t, before-seat.Contributed, after, "%s folded and forfeits what they put in", id)
+			continue
+		}
 		if after >= before {
 			continue
 		}
@@ -926,11 +932,10 @@ func TestStandings_DrawsShareAPlace(t *testing.T) {
 	})
 }
 
-// A player who bets past what anyone at the table can call, and then disconnects, has
-// to get the unmatched part of that bet back. It was never money the pot could pay
-// out: folding it into the last live layer handed one player's uncalled chips to the
-// two opponents who never covered them.
-func TestRunShowdown_UncalledBetComesBackToADepartedOverBettor(t *testing.T) {
+// A player who bets past what anyone at the table can call, and then leaves, has
+// folded, and a fold forfeits everything put in: the unmatched part is dead money
+// that rides with the last live layer, not a refund to a seat that gave up the hand.
+func TestRunShowdown_ADepartedOverBettorForfeitsTheUncalledBet(t *testing.T) {
 	t.Parallel()
 	// a and d are all-in for 100 each; b bet 1100 over the top and left; c folded.
 	shortStacks := []*game.Player{
@@ -958,11 +963,11 @@ func TestRunShowdown_UncalledBetComesBackToADepartedOverBettor(t *testing.T) {
 
 	require.NoError(t, runShowdown(state, extra))
 
-	assert.Equal(t, uint(1000), extra.Seats["b"].Chips, "the 1000 nobody could call comes back")
-	assert.Equal(t, uint(300), extra.Seats["a"].Chips, "aces take the only contested pot")
+	assert.Zero(t, extra.Seats["b"].Chips, "the leaver gets none of the 1000 nobody called")
+	assert.Equal(t, uint(1300), extra.Seats["a"].Chips, "aces take the pot, dead money included")
 	assert.Zero(t, extra.Seats["d"].Chips)
 	assert.Zero(t, extra.Pool, "every chip left the pool")
-	assert.Equal(t, uint(300), potTotal(extra.Pots), "only the matched chips form a pot")
+	assert.Equal(t, uint(1300), potTotal(extra.Pots), "the dead money rides with the live pot")
 }
 
 // MaxPlayers keeps a real deck from running dry, so only an injected one reaches this.
@@ -1328,4 +1333,48 @@ func TestRunShowdown_OddChipGoesToTheFirstWinnerLeftOfTheButton(t *testing.T) {
 			assert.Zero(t, extra.Pool)
 		})
 	}
+}
+
+// PT-03: a hand given up by leaving is a fold, and a fold forfeits everything put in.
+// The leaver used to be the top contributor refundUncalled paid back, so the seat
+// left in the hand was shorted by the leaver's own unmatched chips.
+func TestLeave_ForfeitsTheLeaversUncalledChips(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the big blind leaves facing the small blind", func(t *testing.T) {
+		t.Parallel()
+		engine := startHeadsUp(t)
+		sb := engine.CurrentPlayerID()
+		bb := headsUpOpponent(sb)
+
+		engine.RemovePlayer(bb)
+
+		withExtra(t, engine, func(extra *State) {
+			assert.Equal(t, DefaultStack+DefaultBigBlind, extra.Seats[sb].Chips, "the whole blind is won")
+			assert.Equal(t, DefaultStack-DefaultBigBlind, extra.Seats[bb].Chips, "the leaver keeps nothing of it")
+		})
+	})
+
+	t.Run("the raiser leaves before the big blind acts", func(t *testing.T) {
+		t.Parallel()
+		engine := startHeadsUp(t)
+		sb := engine.CurrentPlayerID()
+		bb := headsUpOpponent(sb)
+		require.NoError(t, engine.SubmitAction(sb, ActionRaiseTo{Amount: 500}))
+
+		engine.RemovePlayer(sb)
+
+		withExtra(t, engine, func(extra *State) {
+			assert.Equal(t, DefaultStack+500, extra.Seats[bb].Chips, "the raise is won, not refunded")
+			assert.Equal(t, DefaultStack-500, extra.Seats[sb].Chips)
+		})
+	})
+}
+
+// headsUpOpponent is the other seat at startHeadsUp's table.
+func headsUpOpponent(id string) string {
+	if id == "p1" {
+		return "p2"
+	}
+	return "p1"
 }

@@ -355,17 +355,26 @@ func TestBuildSidePots_DeadMoney(t *testing.T) {
 }
 
 // The part of a bet nobody could match never belonged in the pot, so it goes back to
-// the player who bet it before any layer is cut - whether or not they are still in the
-// hand. Folding that money into the live pot would pay it to their opponents.
+// the player who bet it before any layer is cut, while they are still in the hand.
+// Folding that money into the live pot would pay it to their opponents. A player who
+// folded it, which only a leave does, forfeits it like everything else they put in.
 func TestRefundUncalled(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
 		contributed map[string]uint
+		folded      []string
 		wantRefund  map[string]uint // only the entries that change
 		wantAfter   map[string]uint
 	}{
+		{
+			name:        "a folded over-bettor forfeits it",
+			contributed: map[string]uint{"a": 100, "b": 100, "over": 1100},
+			folded:      []string{"over"},
+			wantRefund:  map[string]uint{},
+			wantAfter:   map[string]uint{"a": 100, "b": 100, "over": 1100},
+		},
 		{
 			name:        "the lone over-bettor gets the unmatched part back",
 			contributed: map[string]uint{"a": 100, "b": 100, "over": 1100},
@@ -395,7 +404,7 @@ func TestRefundUncalled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, extra := sidePotState(t, tt.contributed)
+			_, extra := sidePotState(t, tt.contributed, tt.folded...)
 			poolBefore := extra.Pool
 
 			refundUncalled(extra)

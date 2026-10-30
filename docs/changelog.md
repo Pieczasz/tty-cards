@@ -113,6 +113,10 @@ unnoticed for so long.
   only the one slice nobody matched goes back; the rest, folders' chips included,
   goes to the winner. A player who called and then folded used to get part of it
   back.
+- **Leaving a poker hand forfeits everything you put in.** Leaving folds, and the
+  uncalled part of your bet now goes to the pot's winner instead of back to your
+  departed stack: a big blind who walks out before the small blind acts loses
+  the whole 50, and a raise left on the table is won by the seat that stayed.
 - **Short all-ins that add up to a full raise reopen the betting**, as the
   standard (TDA) rule has it. A player who had already acted can raise again.
 - **Poker raises you can actually make.** A deep stack can put a short one
