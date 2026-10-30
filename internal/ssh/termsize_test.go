@@ -4,6 +4,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -348,4 +349,51 @@ func TestRenderer_KeepsItsBuffersAfterAShrink(t *testing.T) {
 	t.Logf("250x80 %.2f MiB, shrunk to 120x40 %.2f MiB, started at 120x40 %.2f MiB", atTop, shrunk, atFloor)
 	require.Greater(t, atTop-atFloor, 1.0, "the measurement cannot tell the two sizes apart")
 	assert.Greater(t, shrunk, atFloor+(atTop-atFloor)/2, "a shrink gave the buffers back")
+}
+
+// staleState is a session granted the top tier on a server now at the floor.
+func staleState(reg *sessionRegistry, p *tea.Program) *sessionState {
+	st := &sessionState{}
+	st.size.budget = &reg.sizes
+	top := sizeTiers[len(sizeTiers)-1]
+	st.size.wanted.Store(&top)
+	st.size.granted.Store(&top)
+	st.program.Store(p)
+	return st
+}
+
+// A session whose event loop is stuck - its peer stopped taking output - does not
+// take a nudge. The sweep used to wait on each session in turn, so every session it
+// reached after a stuck one kept a size the tier no longer grants, and every later
+// sweep stopped at the same place.
+func TestRetier_AStuckSessionDoesNotHoldUpTheOthers(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	reg.sizes.tier.Store(0)
+	for i := range 4 {
+		// Never run, so a Send waits until the test ends.
+		stuck := tea.NewProgram(fillModel{}, tea.WithContext(t.Context()), tea.WithInput(nil), tea.WithOutput(io.Discard))
+		reg.states.Store(-1-i, staleState(reg, stuck))
+	}
+	var nudged atomic.Int32
+	const live = 8
+	for i := range live {
+		p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutSignals(),
+			tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+				if _, ok := msg.(retierMsg); ok {
+					nudged.Add(1)
+					return nil
+				}
+				return msg
+			}))
+		done := make(chan struct{})
+		go func() { defer close(done); _, _ = p.Run() }()
+		t.Cleanup(func() { p.Quit(); <-done })
+		reg.states.Store(i, staleState(reg, p))
+	}
+
+	reg.retier()
+
+	assert.Eventually(t, func() bool { return nudged.Load() == live }, 2*time.Second, 10*time.Millisecond,
+		"the sweep stalled behind a stuck session")
 }

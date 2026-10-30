@@ -138,6 +138,9 @@ type sessionSize struct {
 	// echo is the size the program started at until bubbletea's first WindowSizeMsg,
 	// which repeats it rather than anything the client asked for.
 	echo *termSize
+	// nudging is set while a retierMsg is on its way, so a stuck event loop has one
+	// nudge waiting on it rather than one per sweep.
+	nudging atomic.Bool
 }
 
 // start joins the budget and returns the size the program starts at, and whether
@@ -179,6 +182,8 @@ func (sz *sessionSize) filter(msg tea.Msg) tea.Msg {
 		size := sz.regrant()
 		return tea.WindowSizeMsg{Width: size.w, Height: size.h}
 	case retierMsg:
+		// Cleared before the regrant, so a tier move that lands during it nudges again.
+		sz.nudging.Store(false)
 		before := *sz.granted.Load()
 		if size := sz.regrant(); size != before {
 			return tea.WindowSizeMsg{Width: size.w, Height: size.h}

@@ -260,7 +260,7 @@ func (reg *sessionRegistry) leaveSizes(s ssh.Session) {
 		return
 	}
 	if st.size.budget.leave(st.size.held) {
-		go reg.retier()
+		reg.retier()
 	}
 }
 

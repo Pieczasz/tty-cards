@@ -426,7 +426,7 @@ func sessionProgram(
 			tea.WithFilter(st.filter))...)
 		st.program.Store(program)
 		if moved {
-			go reg.retier()
+			reg.retier()
 		}
 		return program
 	}
@@ -444,10 +444,13 @@ func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
 }
 
 // retier nudges every session the tier now sizes differently to take its new size.
-// It runs on a goroutine of its own, once per tier change: each Send waits for that
-// session's event loop, and a session's start or end must not wait for all of them.
-// Overlapping sweeps are harmless, as each nudge is granted against the tier as it
-// is when the session reads it.
+// Each nudge is a Send on a goroutine of its own, because a Send waits for that
+// session's event loop, and one whose peer stopped taking output is stuck: waited
+// on in turn, it held up every session after it, sweep after sweep. A session has
+// at most one nudge in flight (sessionSize.nudging), so a stuck one parks one
+// goroutine, not one per sweep, until its program ends. Overlapping sweeps are
+// harmless, as each nudge is granted against the tier as it is when the session
+// reads it.
 func (reg *sessionRegistry) retier() {
 	tier := sizeTiers[reg.sizes.tier.Load()]
 	slog.Info("terminal size tier changed", "tier_width", tier.w, "tier_height", tier.h)
@@ -456,8 +459,8 @@ func (reg *sessionRegistry) retier() {
 		// A program is stored only once its size has started. Send returns when the
 		// program ends: wish runs every program activeterm lets through, and a run
 		// cancels the program's context however it ends.
-		if p := st.program.Load(); p != nil && st.size.stale() {
-			p.Send(retierMsg{})
+		if p := st.program.Load(); p != nil && st.size.stale() && st.size.nudging.CompareAndSwap(false, true) {
+			go p.Send(retierMsg{})
 		}
 		return true
 	})

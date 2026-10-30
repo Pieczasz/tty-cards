@@ -307,6 +307,11 @@ unnoticed for so long.
   missing route or a nil factory when somebody started a table.
 - Unreachable guards removed across the engine, poker and the game packages, each
   with a comment saying why it could not fire.
+- **One stuck session no longer stops the others resizing.** When the server's
+  size tier moved, the sweep that tells each session its new size waited on each
+  in turn, so a session whose screen was stuck held every later one at a size the
+  tier no longer grants. Each session now gets its nudge on its own, at most one at
+  a time.
 
 ### Testing
 
