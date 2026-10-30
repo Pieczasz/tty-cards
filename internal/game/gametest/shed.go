@@ -247,8 +247,7 @@ func drawNeedsNoDiscard(t *testing.T, s Shed) {
 // Drawing is the only move ValidateAction accepts unconditionally, and on a dead board
 // it degrades into the forced pass the turn loop already handles.
 func timeoutDraws(t *testing.T, s Shed) {
-	assert.Equal(t, s.Draw, s.Rules.TimeoutAction(nil))
-
 	state := s.Table(t, 3, 3)
+	assert.Equal(t, s.Draw, s.Rules.TimeoutAction(state))
 	assert.NoError(t, s.Rules.ValidateAction(state, s.Rules.TimeoutAction(state)))
 }
