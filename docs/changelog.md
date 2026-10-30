@@ -238,6 +238,8 @@ unnoticed for so long.
 - **`scripts/restore.sh` no longer drops the live database first.** It restores
   into `<DB_NAME>_restore` and swaps that in only once `pg_restore` succeeds; a
   truncated or corrupt archive used to leave an empty database behind.
+- **`make migrate-down` asks first and rolls back one migration** (developers).
+  It ran `down -all` with no prompt against whatever `DB_DSN` named.
 
 ### Changed - tables and lobbies
 
