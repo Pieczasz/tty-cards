@@ -26,20 +26,14 @@ func (uuidSerializer) Scan(ctx context.Context, field *schema.Field, dst reflect
 	return nil
 }
 
+// Value takes only uuid.UUID. Scan always sets a uuid.UUID, so a *uuid.UUID field
+// is refused on its first write instead of panicking on its first read.
 func (uuidSerializer) Value(_ context.Context, _ *schema.Field, _ reflect.Value, fieldValue any) (any, error) {
-	switch v := fieldValue.(type) {
-	case uuid.UUID:
-		return v.String(), nil
-	case *uuid.UUID:
-		// An absent id is NULL. The nil UUID's string would satisfy NOT NULL and read
-		// back as a real-looking id.
-		if v == nil {
-			return nil, nil //nolint:nilnil // a nil driver value is SQL NULL, not a missing result
-		}
-		return v.String(), nil
-	default:
+	v, ok := fieldValue.(uuid.UUID)
+	if !ok {
 		return nil, fmt.Errorf("unsupported uuid value type %T", fieldValue)
 	}
+	return v.String(), nil
 }
 
 // pgx's database/sql driver hands a uuid column over as its text form, never as bytes.
