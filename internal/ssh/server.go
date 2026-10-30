@@ -337,10 +337,11 @@ func sessionModel(
 			LobbyManager: deps.LobbyManager,
 			Games:        deps.Games,
 		})
-		// The connection, not the session: closing a channel leaves the socket and any
-		// other channel on it up until the peer notices.
+		// The connection, not just the session: closing a channel leaves the socket and
+		// any other channel on it up until the peer notices. The session is for a
+		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		gen, err := deps.Tracker.Connect(user.ID, conn)
+		gen, err := deps.Tracker.Connect(user.ID, conn, s)
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,

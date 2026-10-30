@@ -462,7 +462,7 @@ func testPublicKey(t *testing.T) ssh.PublicKey {
 func fullTracker(t *testing.T) *SessionTracker {
 	t.Helper()
 	tracker := NewSessionTracker(1)
-	_, err := tracker.Connect(testutil.UID(999), nil)
+	_, err := tracker.Connect(testutil.UID(999), nil, nil)
 	require.NoError(t, err)
 	return tracker
 }

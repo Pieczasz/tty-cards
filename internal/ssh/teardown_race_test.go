@@ -43,7 +43,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		table := startedTable(t, manager, host, player)
 
 		tracker := NewSessionTracker(0)
-		oldGen, err := tracker.Connect(user.ID, nil)
+		oldGen, err := tracker.Connect(user.ID, nil, nil)
 		require.NoError(t, err)
 		reg := &sessionRegistry{}
 		old := &stubSession{addr: stubAddr{"10.0.0.1:1"}}

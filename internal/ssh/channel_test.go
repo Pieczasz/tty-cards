@@ -314,3 +314,31 @@ func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
 
 	within(t, "a second channel", func() { openAnotherChannel(client) })
 }
+
+// OpenSSH's ControlMaster runs a second `ssh` as a second session channel on the
+// connection the first one opened. Displacing the first session hung up that shared
+// connection, and with it the session that had just arrived.
+func TestNewServer_SecondChannelOnTheSameConnectionDisplacesOnlyTheFirst(t *testing.T) {
+	t.Parallel()
+	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(94), Username: "muxer"})
+	client := dialInProcess(t, addr, "muxer")
+	connGone := make(chan error, 1)
+	go func() { connGone <- client.Wait() }()
+
+	first, err := client.NewSession()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = first.Close() })
+	require.NoError(t, first.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+	require.NoError(t, first.Shell())
+	require.Eventually(t, func() bool { return tracker.Count() == 1 }, 3*time.Second, 10*time.Millisecond)
+
+	openShell(t, client)
+
+	within(t, "the displaced session's end", func() { _ = first.Wait() })
+	select {
+	case err := <-connGone:
+		t.Fatalf("the shared connection closed with the displaced session: %v", err)
+	case <-time.After(time.Second):
+	}
+	assert.Equal(t, 1, tracker.Count())
+}
