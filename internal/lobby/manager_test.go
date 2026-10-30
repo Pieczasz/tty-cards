@@ -116,7 +116,7 @@ func TestManager_GenerateLobbyCode(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
 
-	// Exhausting a 36^8 code space to force a collision is not practical, so this only
+	// Exhausting a 32^8 code space to force a collision is not practical, so this only
 	// pins the shape of what generateLobbyCodeLocked hands out.
 	m.mu.Lock()
 	code, err := m.generateLobbyCodeLocked()

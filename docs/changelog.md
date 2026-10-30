@@ -305,6 +305,9 @@ unnoticed for so long.
 - The release of held seats at hand end only gives up the holds it found. A
   player who reconnected, started the next game and dropped again in that moment
   keeps their new 90-second hold instead of being forfeited at once.
+- **Lobby codes no longer contain 0, 1, 8 or 9.** They are eight characters of
+  A-Z and 2-7, so an O or an I in a code is always the letter. Typing a code
+  works as before.
 
 ### Changed - terminal UI
 

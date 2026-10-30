@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/big"
 	"regexp"
 	"slices"
 	"sync"
@@ -113,20 +112,13 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.R
 	}
 }
 
-const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-var charsetLen = big.NewInt(int64(len(charset)))
-
 // generateLobbyCodeLocked is a fresh code no open lobby holds. Caller holds m.mu.
+// rand.Text is base32 (A-Z, 2-7), a subset of what lobbyCodePattern accepts, and
+// it has no 0 or 1, so an O or I in a code is always the letter. Eight characters
+// are 40 bits, which the join rate limiter makes unguessable.
 func (m *Manager) generateLobbyCodeLocked() (string, error) {
-	raw := make([]byte, lobbyCodeLength)
 	for range lobbyCodeAttempts {
-		for i := range raw {
-			// crypto/rand cannot fail on Go 1.24+: a broken source crashes the process.
-			n, _ := rand.Int(rand.Reader, charsetLen)
-			raw[i] = charset[n.Int64()]
-		}
-		if code := string(raw); m.lobbies[code] == nil {
+		if code := rand.Text()[:lobbyCodeLength]; m.lobbies[code] == nil {
 			return code, nil
 		}
 	}
