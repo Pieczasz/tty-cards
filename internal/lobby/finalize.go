@@ -218,8 +218,11 @@ func (m *Manager) BeginShutdown() {
 	if m == nil {
 		return
 	}
-	m.shuttingDown.Store(true)
+	// Gate first: ToggleReady asks only the gate, so once shuttingDown is visible no
+	// game may still be admitted. A game ending between the two began before
+	// shutdown, so rating it is right.
 	m.StopNewGames()
+	m.shuttingDown.Store(true)
 	m.mu.Lock()
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
@@ -240,6 +243,8 @@ func (m *Manager) WaitForFinalizers(timeout time.Duration) bool {
 	if m == nil {
 		return true
 	}
+	// Wait closes the gate too, but too late: the flag must not be visible first.
+	m.watchers.Close()
 	m.shuttingDown.Store(true)
 	ctx := context.Background()
 	if timeout > 0 {

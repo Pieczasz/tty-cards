@@ -58,8 +58,9 @@ type Manager struct {
 	// the end of its finalize. Closing it (StopNewGames) is what stops new games.
 	watchers drain.Gate
 	// shuttingDown is the one record that shutdown began, for DisconnectPlayer and
-	// persistFinishedMatch. It is set before sessions are torn down: a match ending
-	// during the drain must still be recorded, just not rated.
+	// persistFinishedMatch. It is set after watchers is closed, so no game starts once
+	// it is visible, and before sessions are torn down: a match ending during the
+	// drain must still be recorded, just not rated.
 	shuttingDown atomic.Bool
 	// grace holds mid-game seats after a dropped session (see disconnect.go).
 	grace graceTimers

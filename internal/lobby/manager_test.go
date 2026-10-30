@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -271,17 +272,46 @@ func TestManager_WaitForFinalizers_StopsNewGames(t *testing.T) {
 		drained <- m.WaitForFinalizers(time.Second)
 	}()
 
-	// shuttingDown is set just before the gate closes, so poll the gate itself. An
-	// entry let in before it closed is given straight back.
-	assert.Eventually(t, func() bool {
-		late, ok := m.watchers.Enter()
-		late()
-		return !ok
-	}, time.Second, time.Millisecond, "a game cannot start after the drain begins")
-	assert.True(t, m.shuttingDown.Load(), "the drain began without marking shutdown")
+	// The gate closes before shuttingDown is set, so once the flag is visible no
+	// game can be admitted.
+	require.Eventually(t, m.shuttingDown.Load, time.Second, time.Millisecond,
+		"the drain began without marking shutdown")
+	late, ok := m.watchers.Enter()
+	late()
+	assert.False(t, ok, "a game cannot start after the drain begins")
 
 	release()
 	assert.True(t, <-drained, "the drain waits for the game already in play")
+}
+
+// ToggleReady asks only the gate, so the gate must be closed before shuttingDown is
+// visible, or a game starts while the manager already reports shutdown. The window
+// is a few instructions wide, so each case retries it and spins rather than sleeps.
+func TestManager_Shutdown_ClosesGateBeforeFlag(t *testing.T) {
+	t.Parallel()
+	for name, begin := range map[string]func(*Manager){
+		"BeginShutdown":     (*Manager).BeginShutdown,
+		"WaitForFinalizers": func(m *Manager) { m.WaitForFinalizers(time.Second) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for range 500 {
+				m := newTestManager(t, nil)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					begin(m)
+				}()
+				for !m.shuttingDown.Load() {
+					runtime.Gosched()
+				}
+				release, ok := m.watchers.Enter()
+				release()
+				<-done
+				require.False(t, ok, "a game was admitted after shuttingDown was set")
+			}
+		})
+	}
 }
 
 // enterGame counts a game's watcher the way ToggleReady does and returns its release.
