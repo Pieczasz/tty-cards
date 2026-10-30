@@ -140,6 +140,10 @@ unnoticed for so long.
   game can be renamed without orphaning every rating attached to it. Scalar
   columns that used to scan a SQL NULL into a silent Go zero (Elo 0, game 0)
   are `NOT NULL`.
+- **A forfeit's rating change shows at once.** A player who left a ranked match
+  saw their old rating in every lobby they joined, and was matched by it, until
+  they logged in again. The next table they sit at, and the join list, now use
+  the rating the match wrote.
 
 ### Changed - sessions and security
 

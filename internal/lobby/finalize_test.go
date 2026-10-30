@@ -1043,6 +1043,52 @@ func TestRefreshRatings_FollowsEachPlayerToTheirCurrentTable(t *testing.T) {
 	assert.Nil(t, m.FindLobbyByPlayer(gone))
 }
 
+// A forfeiter has left the table before the write commits, so no seat carries the new
+// rating and their session still holds the login's. The next table they sit at has to
+// seat them with the rating that was written, and matchmaking has to rank by it: both
+// used to show the old one until a fresh login.
+func TestRefreshRatings_ASeatlessPlayerSitsDownWithTheWrittenRating(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	forfeiter, joiner, host := seated(3), seated(4), seated(5)
+	m.refreshRatings("mockgame", map[uuid.UUID]uint32{forfeiter.UserID: 1486, joiner.UserID: 1456})
+
+	own, err := m.CreateLobby(forfeiter, WithCardGame("mockgame"))
+	require.NoError(t, err)
+	leader := own.Snapshot().Leader
+	assert.Equal(t, uint32(1486), leader.Elo, "the new table seated the login's rating")
+	assert.Equal(t, uint32(1700), leader.Player.Ratings["other"], "another game's rating was lost")
+	assert.True(t, leader.Player.Equal(forfeiter))
+	assert.Equal(t, map[string]uint32{"other": 1700}, forfeiter.Ratings, "the session's map changed under it")
+
+	open, err := m.CreateLobby(host, WithCardGame("mockgame"), WithPrivate(false))
+	require.NoError(t, err)
+	browse := m.BrowseLobbies(joiner, BrowseFilter{})
+	require.NotEmpty(t, browse)
+	assert.Equal(t, 1500-1456, browse[0].EloDelta, "matchmaking ranked by the login's rating")
+
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), open.Code(), joiner)))
+	assert.Equal(t, uint32(1456), open.Snapshot().Guests[0].Elo, "the joined table seated the login's rating")
+}
+
+// A session that ends takes its stale copy with it - the next login reads the stored
+// rating - so the manager has nothing left to correct for that player.
+func TestDisconnectPlayer_ForgetsTheWrittenRatingsOfASeatlessPlayer(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t, nil)
+	p := seated(3)
+	m.refreshRatings("mockgame", map[uuid.UUID]uint32{p.UserID: 1486})
+	m.mu.RLock()
+	require.NotEmpty(t, m.written, "the write was not kept for the seatless player")
+	m.mu.RUnlock()
+
+	m.DisconnectPlayer(t.Context(), p)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	assert.Empty(t, m.written)
+}
+
 // Snapshots hand out the seated *game.Player, and its readers hold no lock: a
 // refresh must replace it, never write its Ratings map, or this races.
 func TestRefreshRatings_DoesNotRaceReadersOfTheOldSeat(t *testing.T) {

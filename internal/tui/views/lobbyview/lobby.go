@@ -139,8 +139,9 @@ func (m *model) handleFeedEnd() (tea.Model, tea.Cmd) {
 // syncPlayer keeps the session's player the one its seat holds. A ranked match
 // written while the player sits here reseats them with the new ratings, and every
 // screen built after this one - the join list's matchmaking among them - reads the
-// session's copy, not the seat. A player seated nowhere when the write commits keeps
-// the login's ratings until they reconnect.
+// session's copy, not the seat. A player seated nowhere when the write commits (a
+// forfeiter) is seated with the new ratings at their next table, and this is where
+// the session takes them.
 func (m *model) syncPlayer() tea.Cmd {
 	seat, ok := m.snap.SeatOf(m.global.Player)
 	if !ok || seat.Player == m.global.Player {

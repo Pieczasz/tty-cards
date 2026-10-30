@@ -112,6 +112,8 @@ func (m *Manager) DisconnectPlayer(ctx context.Context, p *game.Player) {
 	}
 
 	m.mu.Lock()
+	// The session's stale copy goes with it; the next login reads the stored ratings.
+	delete(m.written, p.ID)
 	// Read under m.mu, not before it: BeginShutdown sets the flag and then takes this
 	// lock to drain the pending graces, so a disconnect that saw "not shutting down"
 	// outside the lock could arm its timer after the drain had already walked the map
