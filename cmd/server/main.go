@@ -337,19 +337,19 @@ func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error)
 	return listener, nil
 }
 
+// drainServer stops accepting, gives live tables the graceful window, then tears the
+// sessions down. Shutdown ends no session, so tables keep playing through that window
+// and a ranked match that finishes there by play is rated; onShutdown marks the lobby
+// only once the window is over, right before Close decides who is left.
 func drainServer(onShutdown func(), server sshServer) {
-	if onShutdown != nil {
-		onShutdown()
-	}
-	stopServer(server)
-}
-
-func stopServer(server sshServer) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), sshDrainTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.WarnContext(shutdownCtx, "sessions outlasted the drain window; closing them",
 			"error", err, "timeout", sshDrainTimeout)
+	}
+	if onShutdown != nil {
+		onShutdown()
 	}
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)

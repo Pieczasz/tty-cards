@@ -99,8 +99,10 @@ func TestServe_AcceptLoopFailureIsReturned(t *testing.T) {
 // Sessions outliving the drain window is what a card game does, so it must not stop
 // the shutdown: the listener and the connections have to be let go either way. Close
 // does not wait for the session handlers it ends, so the wait for their teardown -
-// which the finalizer drain after this depends on - comes after it, every time.
-func TestStopServer_ClosesOnEveryPath(t *testing.T) {
+// which the finalizer drain after this depends on - comes after it, every time. The
+// lobby hears of the shutdown only after the graceful window: a ranked match that ends
+// by play inside it is still rated, and only what Close tears down is not.
+func TestDrainServer_ClosesOnEveryPath(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -117,10 +119,10 @@ func TestStopServer_ClosesOnEveryPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stopServer(tt.server)
+			drainServer(func() { tt.server.stops = append(tt.server.stops, "lobby shutdown") }, tt.server)
 
 			assert.True(t, tt.server.closed, "the server was never closed")
-			assert.Equal(t, []string{"shutdown", "close", "wait sessions"}, tt.server.stops)
+			assert.Equal(t, []string{"shutdown", "lobby shutdown", "close", "wait sessions"}, tt.server.stops)
 		})
 	}
 }

@@ -280,6 +280,10 @@ unnoticed for so long.
   started.
 - A match that ends just as the server begins shutting down is no longer dropped
   while the table reopens.
+- **A ranked match finished during a deploy's 30-second drain is rated.** The
+  server used to mark itself as shutting down before that window, so a game that
+  ended there by play was stored without Elo. Only the tables the drain tears down
+  at its end are recorded unrated now.
 - Closing a table no longer unseats a player who had already moved to another
   one.
 - **A new turn gets the whole clock, even when it comes straight back to you.**
