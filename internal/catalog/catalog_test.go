@@ -30,6 +30,20 @@ func TestGames_EntriesComplete(t *testing.T) {
 	}
 }
 
+// A slug is the games row a game's ratings and history hang off: finalize creates the
+// row by slug, so a rename quietly starts a fresh ladder. Adding a game extends this
+// list; changing an entry needs a data migration first.
+func TestGames_SlugsArePersisted(t *testing.T) {
+	t.Parallel()
+
+	slugs := make([]string, 0, len(Games))
+	for _, e := range Games {
+		slugs = append(slugs, e.Slug)
+	}
+	assert.ElementsMatch(t, []string{"crazy_eights", "poker", "uno", "hearts", "gin_rummy"}, slugs,
+		"slugs are persisted (architecture invariant 11): a rename needs a data migration")
+}
+
 // NewRegistry is the seam between the catalog and the engine: a game missing from it
 // is a game nobody can start, and the catalog is the only place it is declared.
 func TestNewRegistry_HasEveryCatalogGame(t *testing.T) {
