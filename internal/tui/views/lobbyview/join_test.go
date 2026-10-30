@@ -581,10 +581,24 @@ func TestJoin_FilterLineNamesEveryFilter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			view := newJoinModel(t, newManager(t))
+			// Games on offer are always catalog games, so the catalog holds poker too.
 			view.games = []game.Module{{Name: "Poker", Slug: "poker"}}
+			view.global.Games = view.games
 			view.filter = tt.filter
 
 			assert.Equal(t, tt.want, tuitest.StripANSI(view.filterLine()))
 		})
 	}
+}
+
+// The filter stays pinned to a game whose last table went private or started, so the
+// label must not depend on that game still having a table: it used to fall back to
+// the internal slug ("crazy_eights").
+func TestJoin_FilterLineNamesAGameWithNoTablesLeft(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+	view.games = nil
+	view.filter = lobby.BrowseFilter{Slug: testGameSlug}
+
+	assert.Equal(t, "game: "+testGameName+"   mode: any   showing: all tables", tuitest.StripANSI(view.filterLine()))
 }

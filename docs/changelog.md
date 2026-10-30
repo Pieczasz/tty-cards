@@ -464,6 +464,9 @@ unnoticed for so long.
   confirmation, the join screen's code entry and the lobby's leave confirmation
   the footer used to keep offering the screen's shortcuts, which the prompt typed
   into its field (`> nft`) or ignored.
+- The join screen's game filter keeps the game's name ("Crazy Eights") when its
+  last open table goes private or starts. It used to show the internal
+  `crazy_eights`.
 
 ### Fixed - internals worth knowing about
 

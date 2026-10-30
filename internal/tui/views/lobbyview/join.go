@@ -265,9 +265,11 @@ func (m *joinModel) gameIndex(slug string) int {
 }
 
 func (m *joinModel) filterLine() string {
+	// The name comes from the whole catalog, not m.games: a pinned game whose last
+	// table just went private or started is still the filter, and still has a name.
 	label := "any"
-	if i := m.gameIndex(m.filter.Slug); i >= 0 {
-		label = m.games[i].Name
+	if i := slices.IndexFunc(m.global.Games, func(g game.Module) bool { return g.Slug == m.filter.Slug }); i >= 0 {
+		label = m.global.Games[i].Name
 	} else if m.filter.Slug != "" {
 		label = m.filter.Slug
 	}
