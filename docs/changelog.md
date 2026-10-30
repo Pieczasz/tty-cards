@@ -240,6 +240,15 @@ unnoticed for so long.
   truncated or corrupt archive used to leave an empty database behind.
 - **`make migrate-down` asks first and rolls back one migration** (developers).
   It ran `down -all` with no prompt against whatever `DB_DSN` named.
+- **The observability sidecars drop every Linux capability** (`cap_drop: [ALL]`
+  on alloy, loki, tempo, prometheus, alertmanager and grafana); alloy keeps only
+  `DAC_OVERRIDE` for its data directory. CI fails any long-running service
+  without it.
+- **The image build context is an allowlist** (`go.mod`, `go.sum`, `cmd/`,
+  `internal/`), so `.env`, secrets, backups and anything else in the checkout
+  can no longer reach the Docker daemon.
+- govulncheck also runs weekly on `main`, and Dependabot now updates the Go
+  modules.
 
 ### Changed - tables and lobbies
 
@@ -298,6 +307,10 @@ unnoticed for so long.
 - **Keys do nothing while the "Terminal too small" notice is up**, except ctrl+c.
   They used to reach the hidden screen, so an enter while resizing could play a
   card you could not see.
+- **Enter on a poker table never leaves it while the game is still running.** A
+  match result that reached the screen before the table closed made enter leave
+  without the forfeit confirmation. Esc still asks first, and enter leaves once
+  the table has finished.
 - The welcome banner no longer renders your username as ASCII art (it also
   stopped being a way to fill a shared render cache).
 
