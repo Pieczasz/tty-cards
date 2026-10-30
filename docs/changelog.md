@@ -295,6 +295,9 @@ unnoticed for so long.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
+- **Keys do nothing while the "Terminal too small" notice is up**, except ctrl+c.
+  They used to reach the hidden screen, so an enter while resizing could play a
+  card you could not see.
 - The welcome banner no longer renders your username as ASCII art (it also
   stopped being a way to fill a shared render cache).
 
