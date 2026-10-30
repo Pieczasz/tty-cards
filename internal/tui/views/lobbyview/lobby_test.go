@@ -1021,3 +1021,46 @@ func TestView_TheSelectedGuestIsAlwaysDrawn(t *testing.T) {
 		assert.LessOrEqual(t, lg.Height(out), styles.MinHeight, "taller than the terminal")
 	}
 }
+
+// placeOf is the row and the column needle starts at in out.
+func placeOf(t *testing.T, out, needle string) (row, col int) {
+	t.Helper()
+	for i, line := range strings.Split(out, "\n") {
+		if before, _, ok := strings.Cut(line, needle); ok {
+			return i, lg.Width(before)
+		}
+	}
+	require.Failf(t, "not on screen", "%q is missing from:\n%s", needle, out)
+	return 0, 0
+}
+
+// The form is centred on its widest row, and a ready mark used to widen the roster:
+// each time a guest pressed r the settings and the roster jumped four columns.
+func TestView_AReadyToggleDoesNotMoveTheForm(t *testing.T) {
+	t.Parallel()
+	sizes := append([]tuitest.Size{{Name: "100x30", Width: 100, Height: 30}}, tuitest.FitSizes...)
+	for _, size := range sizes {
+		t.Run(size.Name, func(t *testing.T) {
+			t.Parallel()
+			m, l := leaderView(t)
+			t.Cleanup(m.Close)
+			addGuest(t, m, l, 2, "bob")
+			guest := addGuest(t, m, l, 3, "a-much-longer-name")
+			m.global.Theme = styles.NewTheme(true)
+			m.global.Width, m.global.Height = size.Width, size.Height
+			before := tuitest.StripANSI(m.View().Content)
+
+			require.NoError(t, m.global.LobbyManager.ToggleReady(guest))
+			rosterChanged(m)
+			after := tuitest.StripANSI(m.View().Content)
+			require.Contains(t, after, "- Ready", "the guest has to be ready for this to mean anything")
+
+			for _, heading := range []string{"Settings", "Players"} {
+				wasRow, wasCol := placeOf(t, before, heading)
+				row, col := placeOf(t, after, heading)
+				assert.Equal(t, wasRow, row, "%s moved rows:\n%s\n%s", heading, before, after)
+				assert.Equal(t, wasCol, col, "%s moved sideways:\n%s\n%s", heading, before, after)
+			}
+		})
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
@@ -450,11 +451,14 @@ func (m *model) renderPlayerList(isLeader bool) []string {
 	return rows
 }
 
+// readyMark is blank, not empty, on a seat that is not ready. The form is centred on
+// its widest row, so a mark that added columns moved the whole form on every r.
 func (m *model) readyMark(seat lobby.SeatView) string {
+	const mark = " - Ready"
 	if !seat.Ready {
-		return ""
+		return strings.Repeat(" ", len(mark))
 	}
-	return m.global.Palette().SuccessText.Render(" - Ready")
+	return m.global.Palette().SuccessText.Render(mark)
 }
 
 // IdleExempt keeps a filling table from dropping a silent host: watching the roster

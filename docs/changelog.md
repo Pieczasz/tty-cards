@@ -498,6 +498,8 @@ unnoticed for so long.
   m or o to widen the filters"; those keys type into the code there.
 - Esc out of the join screen's code entry clears the code and its error. The next
   `c` used to carry on from the abandoned code under the old "invalid lobby code".
+- The lobby's settings and player list stay put when a player readies up or
+  stands down. The whole form used to jump four columns sideways each time.
 
 ### Fixed - internals worth knowing about
 
