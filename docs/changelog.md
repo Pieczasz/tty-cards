@@ -494,6 +494,8 @@ unnoticed for so long.
   "o - Seats" or pushes the title off centre.
 - A join error no longer shoves the join screen against the frame's left edge;
   the list and the code prompt stay centred with the error under them.
+- With no table to list, the join screen's code entry no longer says "press g,
+  m or o to widen the filters"; those keys type into the code there.
 
 ### Fixed - internals worth knowing about
 

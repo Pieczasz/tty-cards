@@ -340,6 +340,23 @@ func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	assert.Contains(t, rendered, "No tables match")
 }
 
+// The code field takes g, m and o as letters, so the empty-list notice must not
+// offer them while it is open: pressing g typed a G into the code instead.
+func TestJoin_TheCodePromptNoticeOffersNoFilterKeys(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	pressJoin(t, view, "c")
+	out := tuitest.StripANSI(view.View().Content)
+
+	assert.Contains(t, out, "No tables match", "the empty list still says why it is empty")
+	assert.NotContains(t, out, "press g, m or o", "the code field takes these keys as text")
+
+	pressJoin(t, view, "esc")
+	assert.Contains(t, tuitest.StripANSI(view.View().Content), "press g, m or o",
+		"browsing offers the filters again")
+}
+
 // framedLine is the line holding needle, inside the frame's side borders, with the
 // blank columns either side of its text counted.
 func framedLine(t *testing.T, out, needle string) (left, right int) {
