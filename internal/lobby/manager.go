@@ -14,6 +14,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/drain"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
@@ -53,20 +54,12 @@ type Manager struct {
 	// which outlive any session. A session's own lines log under its ctx instead.
 	appCtx      context.Context
 	joinLimiter *ratelimit.SlidingWindow
-	// gateMu makes counting a new game's watcher and closing the gate on new games
-	// atomic with respect to shutdown. WaitGroup alone permits Add after Wait
-	// observes zero.
-	gateMu     sync.Mutex
-	gateClosed bool
 	// watchers counts every game's watcher goroutine, from the start of its game to
-	// the end of its finalize.
-	watchers sync.WaitGroup
-	// drained is closed by the one waiter goroutine WaitForFinalizers ever starts.
-	// Created lazily and reused, so a timed-out drain does not strand a waiter per
-	// call the way a fresh goroutine per invocation did.
-	drained chan struct{}
-	// shuttingDown is set before sessions are torn down: a match ending during the
-	// drain must still be recorded, just not rated. See persistFinishedMatch.
+	// the end of its finalize. Closing it (StopNewGames) is what stops new games.
+	watchers drain.Gate
+	// shuttingDown is the one record that shutdown began, for DisconnectPlayer and
+	// persistFinishedMatch. It is set before sessions are torn down: a match ending
+	// during the drain must still be recorded, just not rated.
 	shuttingDown atomic.Bool
 	// grace holds mid-game seats after a dropped session (see disconnect.go).
 	grace graceTimers
@@ -195,7 +188,7 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 	// The watcher is counted before the game can start, so a drain that begins at any
 	// point after the start waits for it. release is idempotent: the nil-engine
 	// path and a watcher that also returns must not both Done.
-	canStart, release := m.reserveWatcher()
+	release, canStart := m.watchers.Enter()
 	opts := make([]game.EngineOption, 0, len(m.engineOpts)+1)
 	opts = append(opts, m.engineOpts...)
 	opts = append(opts, m.seatHook(l))
@@ -297,16 +290,6 @@ func (m *Manager) seatHook(l *Lobby) game.EngineOption {
 // who left in that gap and sat down elsewhere must keep the new seat.
 func (m *Manager) dropSeat(l *Lobby, playerID string) {
 	m.leave(&game.Player{ID: playerID}, l)
-}
-
-// reserveWatcher counts a watcher ToggleReady may start. release is safe to call
-// twice and when the gate was already closed: a nil engine and the watcher goroutine
-// must not both Done the same count.
-func (m *Manager) reserveWatcher() (canStart bool, release func()) {
-	if !m.admitGame() {
-		return false, func() {}
-	}
-	return true, sync.OnceFunc(m.watchers.Done)
 }
 
 // heldLocks is the manager lock and, once lockLobby runs, that lobby's lock.

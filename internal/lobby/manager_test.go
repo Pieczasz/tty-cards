@@ -250,36 +250,46 @@ func TestManager_WaitForFinalizers(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(time.Second), "nothing in flight drains immediately")
 
 	m = newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 	// Guarded: a timeout that is not honored blocks here forever, and a suite that
 	// hangs says far less than one that fails.
 	runWithTimeout(t, 5*time.Second, func() {
 		assert.False(t, m.WaitForFinalizers(50*time.Millisecond), "a game in play blocks the drain")
 	})
 
-	m.watchers.Done()
+	release()
 	assert.True(t, m.WaitForFinalizers(time.Second), "drains once its watcher is done")
 }
 
 func TestManager_WaitForFinalizers_StopsNewGames(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 
 	drained := make(chan bool, 1)
 	go func() {
 		drained <- m.WaitForFinalizers(time.Second)
 	}()
 
+	// shuttingDown is set just before the gate closes, so poll the gate itself. An
+	// entry let in before it closed is given straight back.
 	assert.Eventually(t, func() bool {
-		m.gateMu.Lock()
-		defer m.gateMu.Unlock()
-		return m.gateClosed
-	}, time.Second, time.Millisecond)
-	assert.False(t, m.admitGame(), "a game cannot start after the drain begins")
+		late, ok := m.watchers.Enter()
+		late()
+		return !ok
+	}, time.Second, time.Millisecond, "a game cannot start after the drain begins")
+	assert.True(t, m.shuttingDown.Load(), "the drain began without marking shutdown")
 
-	m.watchers.Done()
+	release()
 	assert.True(t, <-drained, "the drain waits for the game already in play")
+}
+
+// enterGame counts a game's watcher the way ToggleReady does and returns its release.
+func enterGame(t *testing.T, m *Manager) func() {
+	t.Helper()
+	release, ok := m.watchers.Enter()
+	require.True(t, ok, "the gate refused a game before shutdown")
+	return release
 }
 
 // Shutdown may run before a manager was ever built.
@@ -358,7 +368,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 
 	drained := make(chan bool, 1)
 	go func() {
@@ -371,7 +381,7 @@ func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	m.watchers.Done()
+	release()
 	select {
 	case ok := <-drained:
 		assert.True(t, ok)
