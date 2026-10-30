@@ -73,7 +73,9 @@ func New(global router.GlobalContext) tea.Model {
 	for _, mod := range global.Games {
 		filters = append(filters, boardFilter{label: mod.Name, slug: mod.Slug})
 	}
-	return &model{global: global, filters: filters}
+	// Init always loads, so the board starts loading rather than reading an unset
+	// slice as "not loaded": a repository may answer an empty board with nil.
+	return &model{global: global, filters: filters, loading: true}
 }
 
 // loadedMsg carries the filter it was fetched for as well as the page. Pressing the
@@ -234,7 +236,7 @@ func (m *model) View() tea.View {
 		switch {
 		case m.err != nil:
 			return m.renderError()
-		case m.rankings == nil || m.loading && len(m.rankings) == 0:
+		case m.loading && len(m.rankings) == 0:
 			return m.renderLoading()
 		case len(m.rankings) == 0:
 			return m.renderEmpty()

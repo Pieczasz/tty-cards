@@ -284,6 +284,23 @@ func TestInit_AsksForAFullPageOfEveryGame(t *testing.T) {
 	assert.NoError(t, msg.err)
 }
 
+// An empty board is "no rows", whatever slice the repository returns for it. A nil
+// slice used to read as "not loaded yet", so an empty answer spun on the loading line.
+func TestUpdate_ANilEmptyAnswerIsAnEmptyBoard(t *testing.T) {
+	t.Parallel()
+
+	m := New(router.GlobalContext{Width: 80, Height: 24, Leaderboard: fakeUsers{
+		best: func(context.Context, int, string) ([]db.Ranking, error) { return nil, nil },
+	}})
+	require.Contains(t, tuitest.StripANSI(m.View().Content), "Loading leaderboard", "before the answer lands")
+
+	m, _ = m.Update(m.Init()())
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.NotContains(t, out, "Loading leaderboard")
+	assert.Contains(t, out, "No players have ranked yet.")
+}
+
 // Pressing the filter key twice issues two queries, and the first one can be the
 // slower. Without the gameName on the response, the stale rows would be painted
 // under the newer filter's heading - a Poker board labelled Uno.
