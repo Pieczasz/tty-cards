@@ -353,29 +353,44 @@ const stackedGap = 2
 func (m *model) renderForm(isLeader bool, innerWidth, maxHeight int) string {
 	settingsStack := m.renderSettings(isLeader)
 	rows := m.renderPlayerList(isLeader)
+	focus := m.rosterFocus(isLeader)
 
 	if lg.Width(settingsStack)+columnGap+lg.Width(styles.JoinVertical(lg.Left, rows...)) > innerWidth {
-		// Stacked: the settings take their rows first and the roster gets the rest.
-		gap := stackedGap
-		if maxHeight-settingsRows-gap < 2 {
-			gap = 0
-		}
-		players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight-settingsRows-gap)...)
+		// Stacked: the settings take their rows first and the roster gets the rest,
+		// gap included: a blank row is worth less than a seat it would hide.
+		gap := min(max(maxHeight-settingsRows-len(rows), 0), stackedGap)
+		players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight-settingsRows-gap, focus)...)
 		settingsCol := lg.NewStyle().Align(lg.Left).Render(settingsStack)
 		playersCol := lg.NewStyle().Align(lg.Left).MarginTop(gap).Render(players)
 		return styles.JoinVertical(lg.Left, settingsCol, playersCol)
 	}
 	// Side by side, so the roster has the whole height to itself.
-	players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight)...)
+	players := styles.JoinVertical(lg.Left, capRoster(rows, maxHeight, focus)...)
 	settingsCol := lg.NewStyle().Align(lg.Left).MarginRight(columnGap).Render(settingsStack)
 	playersCol := lg.NewStyle().Align(lg.Left).Render(players)
 	return lg.NewStyle().Align(lg.Center).Render(styles.JoinHorizontal(lg.Top, settingsCol, playersCol))
 }
 
+// rosterFocus is the renderPlayerList row the leader's cursor is on, or -1 when it is
+// on the settings or the viewer is a guest.
+func (m *model) rosterFocus(isLeader bool) int {
+	if !isLeader || m.cursor < cursorFirstGuest {
+		return -1
+	}
+	return rosterGuestRow + m.cursor - cursorFirstGuest
+}
+
+// rosterGuestRow is the first guest's row in renderPlayerList: after the heading and
+// the leader.
+const rosterGuestRow = 2
+
 // capRoster trims the player list to the rows it was given and says how many seats it
 // hid. Rendering past the frame instead hands the overflow to the terminal to wrap,
 // which shifts every row above it - including the lobby code friends join by.
-func capRoster(rows []string, maxRows int) []string {
+//
+// The focus row (the guest enter would kick) replaces the last kept row when it would
+// be hidden: the leader must see who they are about to kick.
+func capRoster(rows []string, maxRows, focus int) []string {
 	switch {
 	case maxRows >= len(rows):
 		return rows
@@ -383,7 +398,11 @@ func capRoster(rows []string, maxRows int) []string {
 		return nil
 	}
 	keep := maxRows - 1
-	return append(rows[:keep:keep], fmt.Sprintf("  ... and %d more", len(rows)-keep))
+	more := fmt.Sprintf("  ... and %d more", len(rows)-keep)
+	if focus < keep || keep == 0 {
+		return append(rows[:keep:keep], more)
+	}
+	return append(rows[:keep-1:keep-1], rows[focus], more)
 }
 
 func (m *model) renderSettings(isLeader bool) string {

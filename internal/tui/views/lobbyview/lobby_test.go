@@ -883,21 +883,25 @@ func TestCapRoster_TrimsToItsBudgetAndSaysHowManyItHid(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		maxRows int
+		focus   int
 		want    []string
 	}{
-		{name: "everything fits", maxRows: 5, want: rows},
-		{name: "more room than rows", maxRows: 9, want: rows},
-		{name: "one row short", maxRows: 4, want: []string{"heading", "leader", "guest1", "  ... and 2 more"}},
-		{name: "only the heading fits", maxRows: 1, want: []string{"  ... and 5 more"}},
-		{name: "no room at all", maxRows: 0},
-		{name: "a negative budget", maxRows: -3},
+		{name: "everything fits", maxRows: 5, focus: -1, want: rows},
+		{name: "more room than rows", maxRows: 9, focus: 4, want: rows},
+		{name: "one row short", maxRows: 4, focus: -1, want: []string{"heading", "leader", "guest1", "  ... and 2 more"}},
+		{name: "a visible focus", maxRows: 4, focus: 2, want: []string{"heading", "leader", "guest1", "  ... and 2 more"}},
+		{name: "a hidden focus is drawn", maxRows: 4, focus: 4, want: []string{"heading", "leader", "guest3", "  ... and 2 more"}},
+		{name: "a hidden focus in a tight budget", maxRows: 2, focus: 3, want: []string{"guest2", "  ... and 4 more"}},
+		{name: "only the heading fits", maxRows: 1, focus: 3, want: []string{"  ... and 5 more"}},
+		{name: "no room at all", maxRows: 0, focus: -1},
+		{name: "a negative budget", maxRows: -3, focus: -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			// A fresh copy each time: capRoster reslices in place, and a shared backing
 			// array would let one case rewrite another's rows.
-			got := capRoster(slices.Clone(rows), tc.maxRows)
+			got := capRoster(slices.Clone(rows), tc.maxRows, tc.focus)
 
 			assert.Equal(t, tc.want, got)
 			assert.LessOrEqual(t, len(got), max(tc.maxRows, 0), "never more rows than it was given")
@@ -953,4 +957,50 @@ func TestLobbyEvent_ReseatedPlayerUpdatesTheSession(t *testing.T) {
 	assert.Same(t, seat, m.global.Player, "the view acts as the reseated player at once")
 
 	assert.Nil(t, m.syncPlayer(), "an unchanged seat was announced again")
+}
+
+// minimumLobby is the leader's view at the declared minimum size with guests seated.
+func minimumLobby(t *testing.T, guests ...string) *model {
+	t.Helper()
+	m, l := leaderView(t)
+	t.Cleanup(m.Close)
+	require.NoError(t, l.SetMaxPlayers(l.Snapshot().Leader.Player, 6))
+	for i, name := range guests {
+		addGuest(t, m, l, uint64(i+2), name)
+	}
+	m.global.Theme = styles.NewTheme(true)
+	m.global.Width, m.global.Height = styles.MinWidth, styles.MinHeight
+	return m
+}
+
+// The roster is the point of the waiting room. At 64x20 the stacked gap above it used
+// to be kept while every seat hid behind "... and N more", with blank rows to spare.
+func TestView_TheRosterShowsItsPlayersAtTheMinimumSize(t *testing.T) {
+	t.Parallel()
+	m := minimumLobby(t, "bob")
+
+	out := tuitest.StripANSI(m.View().Content)
+
+	assert.Contains(t, out, "alice", "the leader is hidden:\n%s", out)
+	assert.Contains(t, out, "bob", "the guest is hidden:\n%s", out)
+	assert.NotContains(t, out, "more", out)
+	assert.LessOrEqual(t, lg.Height(out), styles.MinHeight, "taller than the terminal")
+}
+
+// Enter kicks the guest under the cursor, so that guest's row has to be on screen: at
+// 64x20 the cursor used to walk onto a seat hidden behind "... and N more".
+func TestView_TheSelectedGuestIsAlwaysDrawn(t *testing.T) {
+	t.Parallel()
+	guests := []string{"bob", "carol", "dave", "erin", "frank"}
+	m := minimumLobby(t, guests...)
+
+	for i, name := range guests {
+		m.cursor = cursorFirstGuest + i
+		out := tuitest.StripANSI(m.View().Content)
+		lines := strings.Split(out, "\n")
+		line := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, name) })
+		require.GreaterOrEqual(t, line, 0, "the cursor is on %s, whose row is not drawn:\n%s", name, out)
+		assert.Contains(t, lines[line], "> ", "%s's row carries the cursor", name)
+		assert.LessOrEqual(t, lg.Height(out), styles.MinHeight, "taller than the terminal")
+	}
 }

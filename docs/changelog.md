@@ -455,6 +455,11 @@ unnoticed for so long.
   It used to read "4 place".
 - The leaderboard rows line up under their column titles again. Every row sat
   one column right of the header.
+- **The lobby lists its players at 64x20.** The blank rows above the roster are
+  given up before a seat is hidden; every name used to hide behind "... and N
+  more" while two blank rows stayed on screen. When seats still have to be
+  hidden, the guest under the leader's cursor is always drawn, so enter never
+  kicks a player the leader cannot see.
 
 ### Fixed - internals worth knowing about
 
