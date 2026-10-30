@@ -50,9 +50,8 @@ const (
 // codes are raised before commit, so nothing was written and running it again is
 // safe; a dropped connection is not on the list, because it may have committed.
 func isRetryableAbort(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) &&
-		(pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
 }
 
 // transactRetrying runs fn as one transaction, again when Postgres rolled it back to

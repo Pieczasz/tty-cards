@@ -31,8 +31,8 @@ const (
 )
 
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolationCode
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == pgUniqueViolationCode
 }
 
 type bestPlayersCacheEntry struct {
