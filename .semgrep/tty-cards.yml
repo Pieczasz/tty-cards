@@ -77,6 +77,35 @@ rules:
       # skipped so the rule can still be explained where it applies.
       - pattern-regex: (?m)^(?!\s*//).*?\bgame\.(Engine|NewEngine|Bind)\b
 
+  - id: tui-reads-hidden-cards
+    languages: [go]
+    severity: ERROR
+    message: >-
+      BoundEngine.Frame and Session.Sync hand a view the live, unredacted *game.State:
+      every seat's cards, the stock and hearts' pending passes. A view reads its own
+      hand from the frame and anything about other seats through a redacting helper in
+      the rules package (poker's SeatsFor) or a scalar off Extra. Reading
+      State.Players, State.Deck, Player.Cards or PendingPasses here can draw one
+      player's hidden cards on every screen. Tests are exempt: they set up the table.
+    paths:
+      include:
+        - /internal/tui/
+      exclude:
+        - "*_test.go"
+    pattern-either:
+      # Typed, so the redacted StateSnapshot.Players and a lobby entry's Players stay
+      # allowed: only the live engine types are the leak.
+      - pattern: "($S : *game.State).Players"
+      - pattern: "($S : *game.State).Deck"
+      - pattern: "($P : *game.Player).Cards"
+      # semgrep infers no type for a range variable, so a seat taken off LeftPlayers
+      # is matched by where it came from.
+      - patterns:
+          - pattern-inside: |
+              for $K, $P := range ($S : *game.State).$F { ... }
+          - pattern: $P.Cards
+      - pattern: $X.PendingPasses
+
   - id: rules-package-reaches-the-engine
     languages: [go]
     severity: ERROR

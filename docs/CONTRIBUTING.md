@@ -45,7 +45,8 @@ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 - **`make semgrep`** - the `CLAUDE.md` invariants a linter cannot express, in
   `.semgrep/tty-cards.yml`: the turn cursor moves only through `SetTurn` /
   `OverrideTurn`; TUI code never calls `Engine.WithState`, `SubmitAction` or the
-  two-argument `Frame`; rules code never names, builds, binds or drives an
+  two-argument `Frame`, nor reads `State.Players`, `State.Deck`, `Player.Cards` or
+  `PendingPasses` off the live state; rules code never names, builds, binds or drives an
   `Engine`, and game code logs through `State.Logger()`, never bare `slog`; recover helpers are deferred directly; no client address
   on a span or metric, and none in an info/debug log; the DSN and DB password
   never reach a log, print or error; a `Subscribe` error is never dropped; boolean
@@ -157,7 +158,9 @@ Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`), in one pu
 `readTable(state, ...)` that returns a value you assign once `Sync` returns, as
 poker, hearts and gin rummy do. The
 `*State` you get is live and unredacted - filtering what the player may see is
-your job, and it should be a named function so a reviewer can find it. Where
+your job, and it should be a named function so a reviewer can find it (semgrep's
+`tui-reads-hidden-cards` fails a view that reads the seats, the stock or anyone's
+cards off it directly). Where
 what a seat may see is a rule of the game, that function lives in the rules
 package (`poker.SeatsFor`), not the view.
 

@@ -228,3 +228,29 @@ func frames(a, b string) {
 	// ok: tui-uses-lipgloss-join
 	_ = styles.JoinHorizontal(lg.Top, a, b)
 }
+
+// A view is handed the live *game.State; only redacted reads of it may reach a screen.
+func hiddenCards(m *model, state *game.State, snap game.StateSnapshot, self *game.Player, extra *Extra, i int) {
+	m.Sync(func(state *game.State) {
+		// ruleid: tui-reads-hidden-cards
+		_ = len(state.Players[i].Cards)
+	})
+	// ruleid: tui-reads-hidden-cards
+	_ = state.Deck.Len()
+	// ruleid: tui-reads-hidden-cards
+	_ = self.Cards
+	// ruleid: tui-reads-hidden-cards
+	_ = extra.PendingPasses
+	// ok: tui-reads-hidden-cards
+	_ = snap.Players
+	// ok: tui-reads-hidden-cards
+	_ = logic.SeatsFor(state, self.ID)
+	// ok: tui-reads-hidden-cards
+	_ = logic.ActionPassCards{Cards: nil}
+	for _, left := range state.LeftPlayers {
+		// ok: tui-reads-hidden-cards
+		_ = left.Name
+		// ruleid: tui-reads-hidden-cards
+		_ = left.Cards
+	}
+}
