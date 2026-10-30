@@ -3,7 +3,7 @@
 The policies below are the ones a later change has to keep. The invariant list
 is in [`architecture.md`](architecture.md).
 
-1. **One mutex per engine.** It covers the clock and `State` for the whole of `Start`, `SubmitAction` and `RemovePlayer`. Rules run under it, never call back into the engine, and end a match only through `CheckWinCondition` or an `ApplyAction` error; `State.Phase` and the seats are the engine's.
+1. **One mutex per engine.** It covers the clock and `State` for the whole of `Start`, `SubmitAction` and `RemovePlayer`. Rules run under it, never call back into the engine, and end a match only through `CheckWinCondition`, an `ApplyAction` error, or a recovered rules panic from a hook that cannot return an error (#3); `State.Phase` and the seats are the engine's.
 2. **A failed watch does not open the table.** `Subscribe` returns an error. If the lobby's watcher cannot subscribe, the game is not marked in play and `EventGameStarted` is not sent.
 3. **A panic ends one table, or one goroutine.** Rules panics in `Start`, `SubmitAction`, `RemovePlayer` and the turn timer end that table as a rules error and do not ask for standings. The idle-removal hook, the game watcher and the disconnect-grace timer recover so one of them cannot take the process down.
 4. **Views hold `BoundEngine`.** They submit as one player and read that player's hand. There is no escape hatch back to `*game.Engine`.

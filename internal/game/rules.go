@@ -26,8 +26,10 @@ type Action interface {
 // held and receives only *State, so it can never call back into the Engine. It may
 // change the cards, Deck, Discard and Extra, and names who acts next through SetTurn,
 // OverrideTurn or ContinueTurn. Phase, Players, LeftPlayers and Rules are the
-// engine's: a match ends only through CheckWinCondition or an ApplyAction error,
-// because a Phase written by hand skips the end protocol (no winner, no
+// engine's: a match ends only through CheckWinCondition, an ApplyAction error, or a
+// panic from a hook that cannot return one (such as
+// PlayerLeaveHandler.AfterPlayerRemoved), which the engine recovers as a rules
+// error, because a Phase written by hand skips the end protocol (no winner, no
 // EventGameEnded, a match never finalized).
 //
 // OnGameStart sets a table up, the deal included: the engine hands it the seats and
