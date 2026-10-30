@@ -313,6 +313,6 @@ func (m *model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) s
 		styles.PadTruncate(strconv.Itoa(index+1), colRank),
 		userStr,
 		styles.PadTruncate(r.Game.Name, colGame),
-		strconv.FormatUint(uint64(r.Elo), 10),
+		styles.PadTruncate(strconv.FormatUint(uint64(r.Elo), 10), colElo),
 	)
 }

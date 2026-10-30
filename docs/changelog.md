@@ -453,6 +453,8 @@ unnoticed for so long.
   picker's frame off the screen.
 - The profile history reads "4th place" for a fourth place, and so on past it.
   It used to read "4 place".
+- The leaderboard rows line up under their column titles again. Every row sat
+  one column right of the header.
 
 ### Fixed - internals worth knowing about
 
