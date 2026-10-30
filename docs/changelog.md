@@ -228,6 +228,10 @@ unnoticed for so long.
   `ERROR app exit with error` line that bypassed the JSON log and OTLP. The
   flood's own WARN is now the only record of it, and any other error a session's
   screen ends with is logged as JSON at ERROR.
+- **`/healthz` no longer reports an outage when the prober hangs up early**
+  (operators). A probe that half-closed its side, as `nc` does, got a 503 and
+  left an ERROR `health check failed` line on a healthy server, as often as anyone
+  asked. The database check now runs to its own 2-second bound regardless.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 

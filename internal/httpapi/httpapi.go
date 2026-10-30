@@ -275,7 +275,10 @@ func withRateLimit(
 
 func healthHandler(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+		// Not cancelled with the request: net/http cancels it as soon as a client
+		// half-closes, as `nc` and some probes do, and the ping then failed a
+		// healthy server with a 503 and an ERROR line. healthTimeout still bounds it.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), healthTimeout)
 		defer cancel()
 		if err := deps.Health(ctx); err != nil {
 			slog.ErrorContext(ctx, "health check failed", "error", err)

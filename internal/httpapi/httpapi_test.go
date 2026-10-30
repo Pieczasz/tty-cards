@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -452,6 +453,35 @@ func TestTrustedProxy_BlankForwardedHeaderFallsBackToTheSocket(t *testing.T) {
 				"a second socket must have its own budget, not share one empty bucket")
 		})
 	}
+}
+
+// A probe that half-closes its side (`nc`, some checkers) has its request context
+// cancelled by net/http at once. The database ping ran on that context, so a healthy
+// server answered 503 and logged an ERROR, as often as anyone cared to ask:
+// /healthz is off the visitor budget.
+//
+//nolint:paralleltest // swaps the slog default
+func TestHealthz_AProbeThatWentAwayIsNotAnOutage(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	// What a pgx dial reports when the context it was given is cancelled.
+	ping := func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("hostname resolving error: %w", err)
+		}
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	handler(t, Deps{Health: ping}).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, logs.String(), "health check failed")
 }
 
 // /healthz backs the container healthcheck, so both of its answers are load-bearing:
