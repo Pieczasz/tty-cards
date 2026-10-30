@@ -33,7 +33,9 @@ RUN --mount=type=cache,target=/go/pkg/mod/cache \
     GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
     go build -trimpath -o bin/backend ./cmd/server
 
-FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS certs
+# certs, zoneinfo, /etc/passwd and /data are the same on every architecture, so this
+# stage runs on the build host too: a cross-build then needs no emulator for its RUN.
+FROM --platform=$BUILDPLATFORM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS certs
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 65532 -H -s /sbin/nologin nonroot \
     && mkdir -p /data/ssh \
