@@ -52,6 +52,9 @@ const (
 	WildDrawFour
 )
 
+// AllRanks is every Rank in ascending order: Ace..King, the Joker, then the Uno block.
+// Tests in several packages walk it to cover every rank a card can carry, so it is
+// shared and must be treated as read-only; nothing in production reads it.
 var AllRanks = []Rank{
 	Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King, Joker,
 	Zero, One, Skip, Reverse, DrawTwo, Wild, WildDrawFour,
