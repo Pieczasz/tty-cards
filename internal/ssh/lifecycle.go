@@ -253,13 +253,15 @@ func (reg *sessionRegistry) recordSessionPanic(s ssh.Session, r any) {
 }
 
 // leaveSizes gives the session's cells back. It runs after the program has ended, so
-// held is no longer the event loop's.
+// held is no longer the event loop's. A session that held extra cells sweeps even
+// when the tier stays put: another may be held below the tier for want of them, and
+// would otherwise keep its smaller screen until it resized.
 func (reg *sessionRegistry) leaveSizes(s ssh.Session) {
 	st, ok := reg.load(s)
 	if !ok || st.program.Load() == nil {
 		return
 	}
-	if st.size.budget.leave(st.size.held) {
+	if st.size.budget.leave(st.size.held) || st.size.held > 0 {
 		reg.retier()
 	}
 }

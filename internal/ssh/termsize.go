@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -98,7 +99,11 @@ func (b *sizeBudget) recount(delta int) bool {
 	cur := int(b.tier.Load())
 	next := nextTier(cur, b.live, b.cells)
 	b.tier.Store(int32(next)) //nolint:gosec // a tier index, at most len(sizeTiers)
-	return next != cur
+	if next == cur {
+		return false
+	}
+	slog.Info("terminal size tier changed", "tier_width", sizeTiers[next].w, "tier_height", sizeTiers[next].h)
+	return true
 }
 
 // grant is the size a session asking for want is told, and the tier it then holds.

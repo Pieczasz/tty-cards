@@ -467,7 +467,8 @@ func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
 	return msg
 }
 
-// retier nudges every session the tier now sizes differently to take its new size.
+// retier nudges every session the budget now sizes differently to take its new
+// size: after a tier move, or after a leave freed extra cells.
 // Each nudge is a Send on a goroutine of its own, because a Send waits for that
 // session's event loop, and one whose peer stopped taking output is stuck: waited
 // on in turn, it held up every session after it, sweep after sweep. A session has
@@ -476,8 +477,6 @@ func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
 // harmless, as each nudge is granted against the tier as it is when the session
 // reads it.
 func (reg *sessionRegistry) retier() {
-	tier := sizeTiers[reg.sizes.tier.Load()]
-	slog.Info("terminal size tier changed", "tier_width", tier.w, "tier_height", tier.h)
 	reg.states.Range(func(_, v any) bool {
 		st, _ := v.(*sessionState)
 		// A program is stored only once its size has started. Send returns when the

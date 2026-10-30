@@ -397,3 +397,24 @@ func TestRetier_AStuckSessionDoesNotHoldUpTheOthers(t *testing.T) {
 	assert.Eventually(t, func() bool { return nudged.Load() == live }, 2*time.Second, 10*time.Millisecond,
 		"the sweep stalled behind a stuck session")
 }
+
+// An extra budget of one step to the top: the second big terminal is held at the
+// floor for want of extra cells. When the first leaves without moving the tier, the
+// cells it frees have to reach the one held back, not wait for it to resize.
+func TestSession_FreedExtraCellsReachASessionHeldBack(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, sizeTiers[3].cells()-sizeTiers[0].cells())
+	addr, tracker := startServerWithRegistry(t, &usersByKey{users: map[string]*db.User{}}, reg)
+	first, second := termSize{300, 100}, termSize{260, 90}
+
+	firstClient, _ := openSession(t, addr, first.w, first.h)
+	require.Eventually(t, func() bool { return grantedSizes(reg)[first] == termSize{250, 80} },
+		5*time.Second, 10*time.Millisecond)
+	openSession(t, addr, second.w, second.h)
+	require.Eventually(t, func() bool { return tracker.Count() == 2 && grantedSizes(reg)[second] == sizeTiers[0] },
+		5*time.Second, 10*time.Millisecond, "the second session should be held at the floor")
+
+	_ = firstClient.Close()
+	require.Eventually(t, func() bool { return grantedSizes(reg)[second] == termSize{250, 80} },
+		5*time.Second, 10*time.Millisecond, "the cells the first session freed never reached the second")
+}

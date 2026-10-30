@@ -317,6 +317,9 @@ unnoticed for so long.
   in turn, so a session whose screen was stuck held every later one at a size the
   tier no longer grants. Each session now gets its nudge on its own, at most one at
   a time.
+- **A big terminal held back for want of room gets it when room frees up.** A
+  session that left without moving the size tier gave back its extra cells, but
+  nobody was told, so a session held at a smaller size kept it until it resized.
 
 ### Testing
 
