@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -29,7 +30,7 @@ func BenchmarkProfileView_Render(b *testing.B) {
 	// each for its filter line, so a literal without them panics where the real
 	// view, built by New, never can.
 	m := &model{
-		global:        router.GlobalContext{User: user, Width: 120, Height: 40, Theme: styles.NewTheme(true)},
+		global:        router.GlobalContext{Player: lobby.NewPlayer(user), Width: 120, Height: 40, Theme: styles.NewTheme(true)},
 		userProfile:   user,
 		history:       history,
 		gameFilters:   []game.Module{{Name: filterAllGames}, {Name: "Poker", Slug: "poker"}},

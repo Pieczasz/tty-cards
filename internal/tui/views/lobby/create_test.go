@@ -31,7 +31,7 @@ func bothGames() []game.Module {
 func newCreateModel(t *testing.T) *createModel {
 	t.Helper()
 	global := router.GlobalContext{
-		User:   testUser(1, "alice"),
+		Player: lobby.NewPlayer(testUser(1, "alice")),
 		Games:  bothGames(),
 		Width:  120,
 		Height: 40,
@@ -74,7 +74,7 @@ func TestCreate_SwitchingGameClampsMaxPlayers(t *testing.T) {
 func TestCreate_StepDownStopsAtTheGamesMinimum(t *testing.T) {
 	t.Parallel()
 	heartsOnly := []game.Module{{Name: "Hearts", Slug: "hearts", MinPlayers: hearts.MinPlayers, MaxPlayers: hearts.MaxPlayers}}
-	m, ok := NewCreate(router.GlobalContext{User: testUser(1, "alice"), Games: heartsOnly}).(*createModel)
+	m, ok := NewCreate(router.GlobalContext{Player: lobby.NewPlayer(testUser(1, "alice")), Games: heartsOnly}).(*createModel)
 	require.True(t, ok)
 	m.cursor = createCursorPlayers
 
@@ -112,7 +112,7 @@ func TestCreate_OffersOnlyWhatTheSessionHas(t *testing.T) {
 	t.Parallel()
 
 	global := router.GlobalContext{
-		User:   testUser(1, "alice"),
+		Player: lobby.NewPlayer(testUser(1, "alice")),
 		Width:  120,
 		Height: 40,
 	}
@@ -323,7 +323,7 @@ func TestCreate_SubmitShowsTheManagersRefusal(t *testing.T) {
 	manager := newManager(t)
 	m := newCreateModel(t)
 	m.global.LobbyManager = manager
-	_, err := manager.CreateLobby(lobby.NewPlayer(m.global.User), lobby.WithCardGame(m.selectedGame().Slug))
+	_, err := manager.CreateLobby(m.global.Player, lobby.WithCardGame(m.selectedGame().Slug))
 	require.NoError(t, err)
 
 	m.cursor = createCursorSubmit

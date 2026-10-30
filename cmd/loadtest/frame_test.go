@@ -32,7 +32,7 @@ import (
 func seatGlobal(t *testing.T, mgr *lobby.Manager, n int) router.GlobalContext {
 	t.Helper()
 	return router.GlobalContext{
-		User:         &db.User{ID: testutil.UID(n), Username: fmt.Sprintf("load_%04d", n)},
+		Player:       lobby.NewPlayer(&db.User{ID: testutil.UID(n), Username: fmt.Sprintf("load_%04d", n)}),
 		LobbyManager: mgr, Games: catalog.Modules(catalog.Games),
 		Theme: styles.NewTheme(true), Width: termWidth, Height: termHeight,
 	}

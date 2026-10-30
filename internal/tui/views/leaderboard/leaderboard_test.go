@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -555,7 +556,7 @@ func TestView_FitsTheTerminalInEveryContentState(t *testing.T) {
 func TestRenderPlayerRow_HighlightsTheViewer(t *testing.T) {
 	t.Parallel()
 	m := board(t, 3)
-	m.global.User = &db.User{ID: testutil.UID(2)}
+	m.global.Player = lobby.NewPlayer(&db.User{ID: testutil.UID(2)})
 	tbl := m.table(80, 3)
 
 	mine := m.renderPlayerRow(tbl, 1, m.rankings[1])

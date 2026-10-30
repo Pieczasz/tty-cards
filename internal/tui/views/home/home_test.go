@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -92,8 +93,8 @@ func TestHome_View_FitsTheTerminal(t *testing.T) {
 		t.Run(size.Name, func(t *testing.T) {
 			t.Parallel()
 			m := New(router.GlobalContext{
-				User:  &db.User{ID: testutil.UID(1), Username: "alice"},
-				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
+				Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"}),
+				Theme:  styles.NewTheme(true), Width: size.Width, Height: size.Height,
 			})
 
 			out := m.View().Content
@@ -136,7 +137,7 @@ func bannerRows(banner string) []string {
 
 func homeScreen(t *testing.T, user *db.User, width, height int) []string {
 	t.Helper()
-	m := New(router.GlobalContext{User: user, Theme: styles.NewTheme(true), Width: width, Height: height})
+	m := New(router.GlobalContext{Player: lobby.NewPlayer(user), Theme: styles.NewTheme(true), Width: width, Height: height})
 	return strings.Split(tuitest.StripANSI(m.View().Content), "\n")
 }
 

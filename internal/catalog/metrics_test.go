@@ -42,7 +42,7 @@ func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 			seat := l.Seat(players[0].ID)
 			require.NotNil(t, seat, "the game did not start")
 
-			global := router.GlobalContext{User: &db.User{ID: players[0].UserID, Username: players[0].Name}}
+			global := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: players[0].UserID, Username: players[0].Name})}
 			view := entry.View(global, seat, entry.Slug)
 			t.Cleanup(view.(router.Closer).Close)
 			submitter, ok := view.(interface{ Submit(game.Action) error })

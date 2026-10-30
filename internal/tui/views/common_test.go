@@ -10,6 +10,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -111,10 +112,10 @@ func TestSessionPlayer(t *testing.T) {
 
 	t.Run("a signed-in user", func(t *testing.T) {
 		t.Parallel()
-		g := router.GlobalContext{User: &db.User{ID: testutil.UID(7),
+		g := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(7),
 			Username: "alice",
 			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Slug: "poker", Name: "Poker"}}},
-		}}
+		})}
 
 		p := views.SessionPlayer(g)
 		require.NotNil(t, p)
@@ -209,7 +210,7 @@ func TestHandleCommonMsg(t *testing.T) {
 	// as SessionPlayer: a reseat it did not take would act with the login's ratings.
 	t.Run("a reseated player replaces the session's", func(t *testing.T) {
 		t.Parallel()
-		g := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
+		g := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})}
 		p := &game.Player{ID: testutil.UID(1).String(), UserID: testutil.UID(1), Name: "alice"}
 
 		handled, cmd := views.HandleCommonMsg(router.UpdatePlayer(p)(), &g)

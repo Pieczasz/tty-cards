@@ -65,7 +65,7 @@ func leaderView(t *testing.T) (*model, *lobby.Lobby) {
 	require.NoError(t, err)
 
 	global := router.GlobalContext{
-		User:         leaderUser,
+		Player:       leader,
 		LobbyManager: manager,
 		Games:        testGames(),
 		Width:        120,
@@ -344,7 +344,7 @@ func TestInit_APlayerNoLongerSeatedGoesHome(t *testing.T) {
 	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
 
 	g := leaderV.global
-	g.User, g.Player = bobUser, bob
+	g.Player = bob
 	m, ok := New(g, l).(*model)
 	require.True(t, ok)
 	t.Cleanup(m.Close)
@@ -566,7 +566,7 @@ func TestHandleLobbyEvent_PlayerNoLongerInTheRosterGoesHomeOnce(t *testing.T) {
 	guest := addGuest(t, m, l, 2, "bob")
 
 	global := m.global
-	global.User = testUser(2, "bob")
+	global.Player = lobby.NewPlayer(testUser(2, "bob"))
 	guestModel, ok := New(global, l).(*model)
 	require.True(t, ok)
 
@@ -591,7 +591,7 @@ func TestHandleKey_GuestCannotDriveTheForm(t *testing.T) {
 	addGuest(t, m, l, 2, "bob")
 
 	global := m.global
-	global.User = testUser(2, "bob")
+	global.Player = lobby.NewPlayer(testUser(2, "bob"))
 	guestModel, ok := New(global, l).(*model)
 	require.True(t, ok)
 	t.Cleanup(guestModel.Close)
@@ -671,7 +671,7 @@ func TestHandleKey_ReadyTogglesAndReportsFailure(t *testing.T) {
 		t.Cleanup(m.Close)
 
 		global := m.global
-		global.User = testUser(3, "carol") // never joined
+		global.Player = lobby.NewPlayer(testUser(3, "carol")) // never joined
 		outsider, ok := New(global, l).(*model)
 		require.True(t, ok)
 		t.Cleanup(outsider.Close)
@@ -939,7 +939,7 @@ func TestLobbyEvent_ReseatedPlayerUpdatesTheSession(t *testing.T) {
 	m, l := leaderView(t)
 	t.Cleanup(m.Close)
 	seat := l.Snapshot().Leader.Player
-	m.global.Player = lobby.NewPlayer(m.global.User) // the session's copy, before the reseat
+	m.global.Player = lobby.NewPlayer(testUser(1, "alice")) // the session's copy, before the reseat
 	require.NotSame(t, seat, m.global.Player)
 
 	_, cmd := m.Update(lobbyMsg{Type: lobby.EventPlayersUpdated, src: m.lobbyChan})

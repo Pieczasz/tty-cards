@@ -15,7 +15,7 @@ import (
 
 func benchGlobal(m *lobby.Manager) router.GlobalContext {
 	return router.GlobalContext{
-		User: testUser(99, "browser"), LobbyManager: m,
+		Player: lobby.NewPlayer(testUser(99, "browser")), LobbyManager: m,
 		Games: testGames(), Width: 120, Height: 40,
 		Theme: styles.NewTheme(true),
 	}
@@ -52,7 +52,7 @@ func BenchmarkLobbyView_Render(b *testing.B) {
 	}
 
 	global := benchGlobal(manager)
-	global.User = testUser(1, "alice")
+	global.Player = lobby.NewPlayer(testUser(1, "alice"))
 	view, ok := New(global, l).(*model)
 	require.True(b, ok)
 	b.Cleanup(view.Close)

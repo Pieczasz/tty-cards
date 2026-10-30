@@ -8,6 +8,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
@@ -24,7 +25,7 @@ func benchTable(b *testing.B, n int) *model {
 	require.NoError(b, engine.Start())
 	b.Cleanup(engine.Close)
 
-	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
+	global := router.GlobalContext{Player: lobby.NewPlayer(testUser("p1")), Width: 120, Height: 40}
 	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	require.True(b, ok)
 	b.Cleanup(m.Close)
@@ -78,7 +79,7 @@ func TestCapacity_FrameBytesAndSessionMemory(t *testing.T) {
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
-	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
+	global := router.GlobalContext{Player: lobby.NewPlayer(testUser("p1")), Width: 120, Height: 40}
 	first, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	require.True(t, ok)
 	t.Cleanup(first.Close)
@@ -152,7 +153,7 @@ func benchParallelTable(b *testing.B, n int) (*game.Engine, *model) {
 	if err := engine.Start(); err != nil {
 		b.Error(err)
 	}
-	global := router.GlobalContext{User: testUser("p1"), Width: 120, Height: 40}
+	global := router.GlobalContext{Player: lobby.NewPlayer(testUser("p1")), Width: 120, Height: 40}
 	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	if !ok {
 		b.Error("unexpected model type")

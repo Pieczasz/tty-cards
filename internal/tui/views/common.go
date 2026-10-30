@@ -22,13 +22,9 @@ import (
 const RequestTimeout = 5 * time.Second
 
 // SessionPlayer is the session user as a seat, or nil before the user is known. It
-// is GlobalContext.Player, which tui.New builds once and UpdatePlayer keeps current; a
-// context built without one - as tests do - seats User as it is.
+// is GlobalContext.Player, which tui.New builds once and UpdatePlayer keeps current.
 func SessionPlayer(g router.GlobalContext) *game.Player {
-	if g.Player != nil {
-		return g.Player
-	}
-	return lobby.NewPlayer(g.User)
+	return g.Player
 }
 
 // errSomethingWentWrong is what the player reads for a failure that was not theirs:

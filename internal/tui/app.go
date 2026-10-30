@@ -36,7 +36,6 @@ type Deps struct {
 // value would hide the one method that releases the active view's subscription.
 func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
-		User:         &deps.User,
 		Player:       internallobby.NewPlayer(&deps.User),
 		Profiles:     deps.Profiles,
 		Leaderboard:  deps.Leaderboard,
