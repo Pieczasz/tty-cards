@@ -392,6 +392,9 @@ unnoticed for so long.
   full; it now reads "WALL - turn limit".
 - Gin Rummy's discard key line fits one row at 64 columns. It used to break
   inside "esc: leave".
+- Pressing enter twice to deal the next Gin Rummy hand no longer leaves "the hand
+  is still being played" under your turn for the whole first turn. The second
+  enter is ignored.
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.

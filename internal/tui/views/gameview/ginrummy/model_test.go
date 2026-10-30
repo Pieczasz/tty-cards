@@ -203,7 +203,7 @@ func TestInit_ArmsBothTheFeedAndTheClock(t *testing.T) {
 }
 
 // tableOnTurn seats the view as whichever player the engine put on turn.
-func tableOnTurn(t *testing.T) *model {
+func tableOnTurn(t *testing.T) (*game.Engine, *model) {
 	t.Helper()
 	engine, _ := startedTable(t)
 
@@ -218,14 +218,14 @@ func tableOnTurn(t *testing.T) *model {
 	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "gin_rummy").(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
-	return m
+	return engine, m
 }
 
 // A turn is a draw and then a discard: enter throws the card under the cursor, and
 // the turn passes on with the hand back at ten.
 func TestHandleEnter_DiscardsTheCardUnderTheCursor(t *testing.T) {
 	t.Parallel()
-	m := tableOnTurn(t)
+	_, m := tableOnTurn(t)
 
 	_, _ = m.Update(tuitest.Key("s"))
 	m.syncState()
@@ -247,13 +247,38 @@ func TestHandleEnter_DiscardsTheCardUnderTheCursor(t *testing.T) {
 
 func TestHandleEnter_TheSeatOnTurnDealsTheNextHand(t *testing.T) {
 	t.Parallel()
-	m := tableOnTurn(t)
+	_, m := tableOnTurn(t)
 	m.phase = logic.PhaseHandOver
 
 	_, _ = m.Update(tuitest.Key("enter"))
 
 	// The engine's hand is still in play, so the deal is refused - but it was asked for.
 	assert.Error(t, m.ActionErr)
+}
+
+// Enter twice on the between-hands screen used to send a second deal: the view only
+// learned the hand had been dealt when the engine's event came round, so the stale
+// hand-over phase sent the second press too, and the refusal sat under YOUR TURN for
+// the whole of the new hand's first turn.
+func TestHandleEnter_ASecondEnterDoesNotDealAgain(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t)
+	engine.WithState(func(state *game.State) {
+		s, ok := state.Extra.(*logic.State)
+		require.True(t, ok)
+		s.Phase = logic.PhaseHandOver
+		s.FirstActor = state.CurrentTurn
+	})
+	m.syncState()
+	require.Equal(t, logic.PhaseHandOver, m.phase)
+
+	_, _ = m.Update(tuitest.Key("enter"))
+	require.NoError(t, m.ActionErr, "the first enter deals")
+	_, _ = m.Update(tuitest.Key("enter"))
+
+	assert.NoError(t, m.ActionErr, "the second enter is a no-op in the new hand's draw phase")
+	assert.Equal(t, logic.PhaseAwaitingDraw, m.phase)
+	assert.Equal(t, 2, m.handNumber)
 }
 
 func TestUpdate_IgnoresWhatIsNotAKey(t *testing.T) {
