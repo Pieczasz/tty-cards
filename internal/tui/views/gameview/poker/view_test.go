@@ -310,13 +310,6 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		assert.NotContains(t, bar, "a: all-in")
 	})
 
-	t.Run("the hand is over", func(t *testing.T) {
-		t.Parallel()
-		m := tableOf(120, 50, 3)
-		m.Base.MyTurn = false
-		m.handComplete = true
-		assert.Contains(t, m.renderActionBar(), "esc -> lobby")
-	})
 }
 
 // The prompt has to show the running total, the bounds it moves between and the keys
@@ -437,7 +430,13 @@ func TestConfirm_LeavesOnlyAFinishedMatch(t *testing.T) {
 	_, cmd := m.Update(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "between hands enter deals rather than leaving")
 
+	// The session's leave key is the one way out: a match result the engine has not
+	// yet finished on is still a seat, and leaving it unasked would be a forfeit.
 	m.matchComplete = true
+	_, cmd = m.Update(tuitest.Key("enter"))
+	assert.Nil(t, cmd, "enter forfeits nothing while the table is still playing")
+
+	m.Base.Phase = game.Finished
 	_, cmd = m.Update(tuitest.Key("enter"))
 	assert.NotNil(t, cmd, "once the match is over enter is the way out")
 }
