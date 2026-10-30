@@ -104,7 +104,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 		go func(g *guestRef) {
 			defer wg.Done()
 			<-start // release all goroutines together to maximise contention
-			err := joinErr(m.JoinLobbyByCode(l.Code(), g.p))
+			err := joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g.p))
 			switch {
 			case err == nil:
 				g.joined = true
@@ -161,7 +161,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("testgame"))
 	require.NoError(t, err)
 	for _, g := range all[1:] {
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 	require.Equal(t, players, l.Snapshot().Players())
 
@@ -228,7 +228,7 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				_, joinErr = m.JoinLobbyByCode(code, joiner)
+				_, joinErr = m.JoinLobbyByCode(t.Context(), code, joiner)
 			}()
 			go func() {
 				defer wg.Done()
@@ -280,7 +280,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("neverstarts"))
 	require.NoError(t, err)
 	for _, g := range roster[1:] {
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 
 	var (
@@ -355,7 +355,7 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, _, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
@@ -370,7 +370,7 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				m.ResumePlayer(guest)
+				m.ResumePlayer(t.Context(), guest)
 			}()
 			close(gate)
 			wg.Wait()
@@ -390,7 +390,7 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, _, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
@@ -399,7 +399,7 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 			for range 2 {
 				wg.Go(func() {
 					<-gate
-					m.ResumePlayer(guest)
+					m.ResumePlayer(t.Context(), guest)
 				})
 			}
 			close(gate)
@@ -421,7 +421,7 @@ func TestConcurrent_MatchEndsDuringTheGraceWindow(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, leader, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
@@ -436,7 +436,7 @@ func TestConcurrent_MatchEndsDuringTheGraceWindow(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				m.ResumePlayer(guest)
+				m.ResumePlayer(t.Context(), guest)
 			}()
 			close(gate)
 			wg.Wait()
@@ -472,7 +472,7 @@ func TestConcurrent_DisconnectDuringShutdown(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				m.DisconnectPlayer(guest)
+				m.DisconnectPlayer(t.Context(), guest)
 			}()
 			go func() {
 				defer wg.Done()
@@ -506,7 +506,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			require.NoError(t, err)
 			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
-			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), table.Code(), target)))
 
 			var (
 				wg   sync.WaitGroup
@@ -515,7 +515,7 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			wg.Add(3)
 			go func() { defer wg.Done(); <-gate; _ = m.Kick(host, target) }()
 			go func() { defer wg.Done(); <-gate; m.LeaveLobby(target) }()
-			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(elsewhere.Code(), target)) }()
+			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(t.Context(), elsewhere.Code(), target)) }()
 			close(gate)
 			wg.Wait()
 
@@ -586,14 +586,14 @@ func TestConcurrent_WaitingDropCannotBeStartedInto(t *testing.T) {
 			m, l := newTestLobby(t, 2)
 			leader := l.Snapshot().Leader.Player
 			guest := mockPlayer("p2", testutil.UID(2))
-			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 			require.NoError(t, m.ToggleReady(guest))
 
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Go(func() { <-gate; m.DisconnectPlayer(guest) })
+			wg.Go(func() { <-gate; m.DisconnectPlayer(t.Context(), guest) })
 			wg.Go(func() { <-gate; _ = m.ToggleReady(leader) })
 			close(gate)
 			wg.Wait()

@@ -19,7 +19,7 @@ func startedTable(t *testing.T, manager *lobby.Manager, host, guest *game.Player
 	t.Helper()
 	table, err := manager.CreateLobby(host, lobby.WithCardGame(catalog.Games[0].Slug), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
-	_, err = manager.JoinLobbyByCode(table.Code(), guest)
+	_, err = manager.JoinLobbyByCode(t.Context(), table.Code(), guest)
 	require.NoError(t, err)
 	require.NoError(t, manager.ToggleReady(host))
 	require.NoError(t, manager.ToggleReady(guest))
@@ -86,7 +86,7 @@ func TestSessionModel_ARefusedReconnectLeavesTheGraceTimerArmed(t *testing.T) {
 	player := lobby.NewPlayer(user)
 	host := lobby.NewPlayer(&db.User{ID: testutil.UID(10), Username: "host"})
 	table := startedTable(t, manager, host, player)
-	manager.DisconnectPlayer(player)
+	manager.DisconnectPlayer(t.Context(), player)
 
 	deps := newSessionDeps(t, stubUserRepo{user: user})
 	deps.LobbyManager = manager

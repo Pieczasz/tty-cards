@@ -56,7 +56,7 @@ func TestLobby_SeatIsNilWithoutALiveSeat(t *testing.T) {
 		m, l := newTestLobby(t, 3)
 		guests := []*game.Player{mockPlayer("p2", testutil.UID(2)), mockPlayer("p3", testutil.UID(3))}
 		for _, g := range guests {
-			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g)))
 		}
 		require.NoError(t, m.ToggleReady(l.Snapshot().Leader.Player))
 		for _, g := range guests {
@@ -88,7 +88,7 @@ func TestEvent_SeatBindsTheGameThatStarted(t *testing.T) {
 	t.Parallel()
 	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	ch, err := l.Subscribe(guest.ID)
 	require.NoError(t, err)
 

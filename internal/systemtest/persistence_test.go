@@ -45,7 +45,7 @@ func TestSystemRankedResultReachesLeaderboardAndProfile(t *testing.T) {
 	)
 	require.NoError(t, err)
 	for _, g := range players[1:] {
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 
 	events, subErr := l.Subscribe(leader.ID)
@@ -112,7 +112,7 @@ func TestSystemCasualGameRecordsHistoryWithoutElo(t *testing.T) {
 		lobby.WithRanked(false),
 	)
 	require.NoError(t, err)
-	require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), players[1])))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), players[1])))
 
 	events, subErr := l.Subscribe(players[0].ID)
 	require.NoError(t, subErr)

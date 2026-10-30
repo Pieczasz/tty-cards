@@ -75,7 +75,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 
 	table, err := manager.CreateLobby(lobby.NewPlayer(host), lobby.WithCardGame(catalog.Games[0].Slug))
 	require.NoError(t, err)
-	_, err = manager.JoinLobbyByCode(table.Code(), guestPlayer)
+	_, err = manager.JoinLobbyByCode(t.Context(), table.Code(), guestPlayer)
 	require.NoError(t, err)
 
 	tracker := NewSessionTracker(0)
@@ -96,7 +96,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 			return
 		}
 		close(displaced)
-		manager.ResumePlayer(guestPlayer)
+		manager.ResumePlayer(t.Context(), guestPlayer)
 		if resumed := manager.FindLobbyByPlayer(guestPlayer); resumed != table {
 			t.Errorf("takeover did not resume the waiting seat: got %v", resumed)
 		}

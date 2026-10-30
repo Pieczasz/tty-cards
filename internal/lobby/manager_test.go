@@ -50,18 +50,18 @@ func TestManager_JoinLobbyByCode(t *testing.T) {
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("testgame"))
 	require.NoError(t, err)
 
-	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest1))
 	require.NoError(t, err)
 	assert.True(t, l.HasPlayer(guest1))
 	assert.Equal(t, 2, l.Snapshot().Players())
 
-	err = joinErr(m.JoinLobbyByCode(l.Code(), guest2))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest2))
 	require.ErrorIs(t, err, errLobbyFull)
 
-	err = joinErr(m.JoinLobbyByCode("FAKE12XX", guest2))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), "FAKE12XX", guest2))
 	require.ErrorIs(t, err, errLobbyNotFound)
 
-	err = joinErr(m.JoinLobbyByCode(l.Code(), guest1))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest1))
 	require.ErrorIs(t, err, errAlreadyInLobby)
 }
 
@@ -73,8 +73,8 @@ func TestManager_LeaveLobby(t *testing.T) {
 	guest2 := mockPlayer("g2", testutil.UID(3))
 
 	l, _ := m.CreateLobby(leader, WithMaxPlayers(3), WithCardGame("testgame"))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest1)))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest2)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest1)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest2)))
 
 	m.LeaveLobby(guest1)
 	assert.False(t, l.HasPlayer(guest1))
@@ -153,13 +153,13 @@ func TestManager_RejectMidGameJoin(t *testing.T) {
 	cardGame := "mockgame"
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame(cardGame))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	require.NoError(t, m.ToggleReady(leader))
 	require.NoError(t, m.ToggleReady(guest))
 	assert.Equal(t, inGame, l.state)
 
-	err = joinErr(m.JoinLobbyByCode(l.Code(), late))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), late))
 	require.ErrorIs(t, err, errNotAccepting)
 }
 
@@ -173,8 +173,8 @@ func TestManager_Kick(t *testing.T) {
 
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("testgame"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest2)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest2)))
 
 	require.ErrorIs(t, m.Kick(guest, leader), errNotLeader)
 	require.ErrorIs(t, m.Kick(intruder, guest), errHostNotInLobby)
@@ -197,7 +197,7 @@ func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("testgame"))
 	require.NoError(t, err)
 
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), joiner)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), joiner)))
 	m.LeaveLobby(joiner)
 
 	other := mockPlayer("other", testutil.UID(3))
@@ -205,9 +205,9 @@ func TestManager_JoinLobbyByCode_RateLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second attempt still under limit.
-	require.ErrorIs(t, joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner)), errLobbyNotFound)
+	require.ErrorIs(t, joinErr(m.JoinLobbyByCode(t.Context(), "ZZZZZZZZ", joiner)), errLobbyNotFound)
 	// Third attempt exceeds limit.
-	err = joinErr(m.JoinLobbyByCode("ZZZZZZZZ", joiner))
+	err = joinErr(m.JoinLobbyByCode(t.Context(), "ZZZZZZZZ", joiner))
 	require.ErrorIs(t, err, errJoinRateLimited)
 }
 
@@ -306,7 +306,7 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 		require.NoError(t, err)
 
 		joiner := &game.Player{ID: "joiner", UserID: testutil.UID(2)}
-		err = joinErr(m.JoinLobbyByCode(code, joiner))
+		err = joinErr(m.JoinLobbyByCode(t.Context(), code, joiner))
 
 		if code == l.Code() {
 			require.NoError(t, err, "the real code must work")
@@ -317,15 +317,6 @@ func FuzzJoinLobbyByCode(f *testing.F) {
 		assert.False(t, l.HasPlayer(joiner), "a rejected code must not add the player")
 		assert.Nil(t, m.FindLobbyByPlayer(joiner), "a rejected join leaves no membership")
 	})
-}
-
-func TestManager_NilContextStillYieldsAUsableOne(t *testing.T) {
-	t.Parallel()
-	var missing context.Context
-	m := NewManager(missing, nil, testGames)
-
-	require.NotNil(t, m.appCtx)
-	assert.NoError(t, m.appCtx.Err(), "and it must not arrive already cancelled")
 }
 
 // A manager with no games could open no table, and every create would fail at the
@@ -462,7 +453,7 @@ func TestManager_BrowseLobbiesDropTablesThatStartPlaying(t *testing.T) {
 
 	l, err := m.CreateLobby(leader, WithPrivate(false), WithMaxPlayers(2), WithCardGame("mock"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	require.Len(t, m.BrowseLobbies(nil, BrowseFilter{}), 1)
 
 	require.NoError(t, m.ToggleReady(leader))
@@ -481,7 +472,7 @@ func TestManager_RemoveLobbyClosesSubscribers(t *testing.T) {
 
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("testgame"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	ch, err := l.Subscribe(leader.ID)
 	require.NoError(t, err)
@@ -555,7 +546,7 @@ func TestLobby_IsLeader(t *testing.T) {
 	m, l := newTestLobby(t, 3)
 	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	assert.True(t, l.Snapshot().IsLeader(leader))
 	assert.False(t, l.Snapshot().IsLeader(guest))
@@ -572,8 +563,8 @@ func TestManager_NilPlayerIsANoOp(t *testing.T) {
 	m := newTestManager(t, nil)
 	assert.NotPanics(t, func() {
 		m.LeaveLobby(nil)
-		m.DisconnectPlayer(nil)
-		m.ResumePlayer(nil)
+		m.DisconnectPlayer(t.Context(), nil)
+		m.ResumePlayer(t.Context(), nil)
 	})
 
 	var none *Manager

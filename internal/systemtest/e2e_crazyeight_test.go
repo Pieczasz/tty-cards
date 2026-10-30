@@ -252,7 +252,7 @@ func TestCrazyEights_DisconnectAndLeaveConservesDeck(t *testing.T) {
 		advanceByTimeout(t, engine, 2)
 		p := players[idx]
 		if point%2 == 0 {
-			manager.DisconnectPlayer(p)
+			manager.DisconnectPlayer(t.Context(), p)
 			require.Truef(t, l.HasPlayer(p), "point %d: a dropped session keeps the seat", point)
 			assertCrazyEightsDeck(t, engine)
 			advanceByTimeout(t, engine, 1)

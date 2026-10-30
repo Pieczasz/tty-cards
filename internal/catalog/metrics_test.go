@@ -33,7 +33,7 @@ func TestGames_LobbyAndViewShareOneGameTypeLabel(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { m.RemoveLobby(l.Code()) })
 			for _, p := range players[1:] {
-				_, err := m.JoinLobbyByCode(l.Code(), p)
+				_, err := m.JoinLobbyByCode(t.Context(), l.Code(), p)
 				require.NoError(t, err)
 			}
 			for _, p := range players {

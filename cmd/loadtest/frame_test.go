@@ -303,7 +303,7 @@ func TestLobbyScreen_CodeAndGuests(t *testing.T) {
 			l, err := mgr.CreateLobby(views.SessionPlayer(g), lobby.WithCardGame("crazy_eights"), lobby.WithMaxPlayers(6))
 			require.NoError(t, err)
 			for n := range guests {
-				_, err := mgr.JoinLobbyByCode(l.Code(), views.SessionPlayer(seatGlobal(t, mgr, n+2)))
+				_, err := mgr.JoinLobbyByCode(t.Context(), l.Code(), views.SessionPlayer(seatGlobal(t, mgr, n+2)))
 				require.NoError(t, err)
 			}
 			m := lobbyview.New(g, l)

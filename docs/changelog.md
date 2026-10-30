@@ -245,6 +245,11 @@ unnoticed for so long.
   production (warnings and slow queries).
 - A failed interrupted-match finalize now logs as `finalize interrupted match`,
   once, instead of `finalize ranked match: finalize ranked match: ...`.
+- **A player's drop and reconnect lines carry their session's trace.**
+  `session dropped mid-game, holding the seat` and `player reconnected inside
+  the grace window` were logged under the process context, so filtering Loki by
+  the session's trace_id never found them. Join-outcome metrics are recorded
+  under the session too.
 - **`scripts/restore.sh` no longer drops the live database first.** It restores
   into `<DB_NAME>_restore` and swaps that in only once `pg_restore` succeeds; a
   truncated or corrupt archive used to leave an empty database behind.

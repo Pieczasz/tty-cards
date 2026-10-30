@@ -271,7 +271,7 @@ func TestUpdate_WithoutALobbyNavigatesHomeOnce(t *testing.T) {
 func addGuest(t *testing.T, m *model, l *lobby.Lobby, id uint64, name string) *game.Player {
 	t.Helper()
 	g := lobby.NewPlayer(testUser(id, name))
-	_, err := m.global.LobbyManager.JoinLobbyByCode(l.Code(), g)
+	_, err := m.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), g)
 	require.NoError(t, err)
 	rosterChanged(m)
 	return g
@@ -339,7 +339,7 @@ func TestInit_APlayerNoLongerSeatedGoesHome(t *testing.T) {
 	t.Cleanup(leaderV.Close)
 	bobUser := testUser(2, "bob")
 	bob := lobby.NewPlayer(bobUser)
-	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
 	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
 
@@ -388,7 +388,7 @@ func TestInit_AClosedTableGoesHome(t *testing.T) {
 	t.Cleanup(leaderV.Close)
 	bobUser := testUser(2, "bob")
 	bob := lobby.NewPlayer(bobUser)
-	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
 	leaderV.global.LobbyManager.RemoveLobby(l.Code())
 
@@ -415,7 +415,7 @@ func TestInit_AKickAfterTheViewWasBuiltGoesHome(t *testing.T) {
 	t.Cleanup(leaderV.Close)
 	bobUser := testUser(2, "bob")
 	bob := lobby.NewPlayer(bobUser)
-	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
 	m := viewAs(t, leaderV, l, bobUser, bob)
 	require.NoError(t, leaderV.global.LobbyManager.Kick(l.Snapshot().Leader.Player, bob))
@@ -432,7 +432,7 @@ func TestFeedEnd_AKickedGuestGoesHome(t *testing.T) {
 	t.Cleanup(leaderV.Close)
 	bobUser := testUser(2, "bob")
 	bob := lobby.NewPlayer(bobUser)
-	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(l.Code(), bob)
+	_, err := leaderV.global.LobbyManager.JoinLobbyByCode(t.Context(), l.Code(), bob)
 	require.NoError(t, err)
 	m := viewAs(t, leaderV, l, bobUser, bob)
 	require.NotNil(t, m.Init())

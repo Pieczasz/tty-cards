@@ -47,8 +47,10 @@ type Manager struct {
 	// marking itself in-game included. It is atomic rather than guarded by m.mu
 	// because each lobby shares it (Lobby.cacheDirty) and sets it under its own lock,
 	// where taking the manager lock would invert the manager-then-lobby order.
-	cacheDirty  atomic.Bool
-	matchRepo   db.MatchRepository
+	cacheDirty atomic.Bool
+	matchRepo  db.MatchRepository
+	// appCtx is the process lifetime: the parent of timers, watchers and finalize,
+	// which outlive any session. A session's own lines log under its ctx instead.
 	appCtx      context.Context
 	joinLimiter *ratelimit.SlidingWindow
 	// gateMu makes counting a new game's watcher and closing the gate on new games
@@ -90,9 +92,6 @@ const disconnectGrace = 90 * time.Second
 func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.Registry) *Manager {
 	if games == nil {
 		panic("lobby.NewManager: nil game registry")
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	return &Manager{
 		lobbies:     make(map[string]*Lobby),
@@ -213,9 +212,9 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 }
 
 // JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
-// does not look the code up a second time - by when the table may be gone.
-func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
-	ctx := m.appCtx
+// does not look the code up a second time - by when the table may be gone. ctx is
+// the session's, and carries only the outcome metric to its trace.
+func (m *Manager) JoinLobbyByCode(ctx context.Context, code string, p *game.Player) (*Lobby, error) {
 	if !validCode(code) {
 		observability.LobbyJoin(ctx, "invalid_code")
 		return nil, errInvalidCode

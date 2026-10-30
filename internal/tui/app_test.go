@@ -198,14 +198,14 @@ func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 		t.Cleanup(func() { manager.RemoveLobby(l.Code()) })
 
 		guest := &game.Player{ID: testutil.SeatID(2), UserID: testutil.UID(2), Name: "bob"}
-		_, err = manager.JoinLobbyByCode(l.Code(), guest)
+		_, err = manager.JoinLobbyByCode(t.Context(), l.Code(), guest)
 		require.NoError(t, err)
 		require.NoError(t, manager.ToggleReady(host))
 		require.NoError(t, manager.ToggleReady(guest))
 		require.NotNil(t, l.Seat(host.ID), "the match has to be under way for the seat to survive")
 
 		// The grace window is what keeps the seat; without it the drop is a forfeit.
-		manager.DisconnectPlayer(host)
+		manager.DisconnectPlayer(t.Context(), host)
 
 		r := New(Deps{
 			SessionCtx:   t.Context(),

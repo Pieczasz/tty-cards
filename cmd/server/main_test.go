@@ -152,7 +152,7 @@ func TestDrainServer_NoGameStartsInTheWindow(t *testing.T) {
 	table, err := manager.CreateLobby(leader, lobby.WithCardGame("gin_rummy"), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
 	t.Cleanup(func() { manager.RemoveLobby(table.Code()) })
-	_, err = manager.JoinLobbyByCode(table.Code(), guest)
+	_, err = manager.JoinLobbyByCode(t.Context(), table.Code(), guest)
 	require.NoError(t, err)
 	require.NoError(t, manager.ToggleReady(leader))
 

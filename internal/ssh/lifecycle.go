@@ -291,6 +291,6 @@ func (reg *sessionRegistry) releaseSession(s ssh.Session, deps Deps) {
 	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
 	// for the grace window, so a reconnect resumes the match instead of forfeiting.
 	deps.Tracker.ReleaseWith(st.user.ID, st.gen, func() {
-		deps.LobbyManager.DisconnectPlayer(lobby.NewPlayer(st.user))
+		deps.LobbyManager.DisconnectPlayer(st.traceCtx, lobby.NewPlayer(st.user))
 	})
 }
