@@ -208,6 +208,7 @@ func TestRenderBands_WrapsTheKeyLineBetweenPairs(t *testing.T) {
 	for _, hints := range []string{
 		HandKeyHints,
 		WaitingKeyHints,
+		PickerKeyHints,
 		"<-/h: left | ->/l: right | space: toggle | enter: pass 3 | esc: leave",
 	} {
 		pairs := strings.Split(hints, " | ")

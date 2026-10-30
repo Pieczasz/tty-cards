@@ -460,6 +460,10 @@ unnoticed for so long.
 - Crazy Eights and Uno no longer offer `enter: play/confirm` and `d: draw` to a
   seat waiting for its turn, where both did nothing; like Hearts and Gin Rummy,
   the waiting seats see only the cursor keys and esc.
+- The suit and colour picker's key line names its own keys: up/down to reach
+  its second row, `enter: pick` and `esc: back`. It used to keep offering
+  `d: draw`, which does nothing while the picker is open, and never mentioned
+  up/down.
 - **The pile and the colour or suit picker are never cut off at the top.** A
   card-art hand at 26 to 28 rows, or a row or two taller where the key line wraps
   onto a second row, cost the stock and discard their top border and rank; those

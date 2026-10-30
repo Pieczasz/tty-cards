@@ -22,8 +22,9 @@ const (
 	viewGameOver
 )
 
-// gameKeys opens the table's key line on and off turn alike. "d: draw" is offered
-// only on turn, and a waiting seat read as no screen at all never settled its move.
+// gameKeys opens the table's key line on and off turn alike, and under the suit
+// picker. "d: draw" is offered only on turn, and a waiting seat read as no screen at
+// all never settled its move; the picker drops it too, since d does nothing there.
 const gameKeys = "<-/h: left | ->/l: right"
 
 // classify names the screen. The order matters: the footer of every menu repeats

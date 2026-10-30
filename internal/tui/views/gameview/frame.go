@@ -95,6 +95,12 @@ const HandKeyHints = "<-/h: left | ->/l: right | enter: play/confirm | d: draw |
 // key that does nothing reads as a broken key.
 const WaitingKeyHints = "<-/h: left | ->/l: right | esc: leave"
 
+// PickerKeyHints is the key line while a suit or colour picker owns the keyboard: d
+// does nothing under it, and up/down are how its second row is reached. No longer
+// than HandKeyHints, whose wrapped height HandRows budgets for, so opening the picker
+// never pushes its frame off the top.
+const PickerKeyHints = "<-/h: left | ->/l: right | up/k: up | down/j: down | enter: pick | esc: back"
+
 // HandWidth leaves a column at each edge so a full-width fan is not flush against it.
 func HandWidth(width int) int {
 	return max(width-2, 0)

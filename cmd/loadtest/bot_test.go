@@ -137,7 +137,7 @@ func TestBot_TimesThePickerConfirmFromTheKeypress(t *testing.T) {
 		scr: newScreen(termWidth, termHeight), keys: io.Discard, stats: &recorder{},
 		stop: make(chan struct{}), pace: pace{menu: 100 * time.Millisecond},
 	}
-	frame := []string{"Pick a suit:", "> YOUR TURN <", gameKeys + " | enter: play/confirm"}
+	frame := []string{"Pick a suit:", "> YOUR TURN <", gameKeys + " | up/k: up | down/j: down | enter: pick | esc: back"}
 
 	before := time.Now()
 	_, err := b.step(frame)

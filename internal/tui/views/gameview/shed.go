@@ -134,9 +134,13 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 		center = t.Picker.Render(g.Palette())
 	}
 
-	// enter and d wait for the turn, so a waiting seat is offered only what still works.
+	// enter and d wait for the turn, so a waiting seat is offered only what still works,
+	// and the open picker takes the keys the hand would.
 	hints := HandKeyHints
-	if !t.Base.MyTurn {
+	switch {
+	case t.Picker.Open:
+		hints = PickerKeyHints
+	case !t.Base.MyTurn:
 		hints = WaitingKeyHints
 	}
 

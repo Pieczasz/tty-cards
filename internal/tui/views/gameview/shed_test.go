@@ -10,6 +10,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	tea "charm.land/bubbletea/v2"
+	lg "charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -217,6 +218,33 @@ func TestShedTable_OffTurnHintsOfferNoPlayKeys(t *testing.T) {
 	assert.Contains(t, out, WaitingKeyHints)
 	assert.NotContains(t, out, "d: draw")
 	assert.NotContains(t, out, "enter:")
+}
+
+// The open picker owns the keyboard: d does nothing under it and up/down move between
+// its rows, so the key line names the picker's keys and nothing the hand would take.
+func TestShedTable_OpenPickerHintsOfferOnlyThePickersKeys(t *testing.T) {
+	t.Parallel()
+	for _, size := range [][2]int{{64, 20}, {100, 30}} {
+		tbl := shedTableAt(size[0], size[1])
+		tbl.Picker.Show()
+
+		out := tuitest.StripANSI(tbl.RenderTable("", "").Content)
+		assert.NotContains(t, out, "d: draw", "%dx%d", size[0], size[1])
+		assert.Contains(t, out, "up/k: up", "%dx%d", size[0], size[1])
+		assert.Contains(t, out, "down/j: down", "%dx%d", size[0], size[1])
+		assert.Contains(t, out, "enter: pick", "%dx%d", size[0], size[1])
+		assert.Contains(t, out, "esc: back", "%dx%d", size[0], size[1])
+	}
+}
+
+// HandRows budgets the hand for HandKeyHints' wrapped height; a taller picker line
+// would take its extra row off the picker's frame.
+func TestPickerKeyHints_WrapNoTallerThanTheHandKeys(t *testing.T) {
+	t.Parallel()
+	for width := styles.MinWidth; width <= 120; width++ {
+		assert.LessOrEqual(t, lg.Height(styles.WrapActions(PickerKeyHints, width)),
+			lg.Height(styles.WrapActions(HandKeyHints, width)), "width %d", width)
+	}
 }
 
 // The frame's messages are the frame's: a resize reaches the table without touching
