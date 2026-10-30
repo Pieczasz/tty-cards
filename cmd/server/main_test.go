@@ -456,7 +456,8 @@ func TestStartStatsAPI_BindFailureIsReturned(t *testing.T) {
 // under compose's SIGKILL for the db close and the last log writes.
 func TestDrainBudgetFitsStopGracePeriod(t *testing.T) {
 	t.Parallel()
-	// stopGracePeriod mirrors the backend's stop_grace_period in compose.yaml.
+	// stopGracePeriod mirrors the backend's stop_grace_period in compose.yaml; CI's
+	// compose job fails when the two differ.
 	const stopGracePeriod = 80 * time.Second
 	const headroom = 3 * time.Second
 	drain := sshDrainTimeout + sessionDrainTimeout + apiDrainTimeout + 2*finalizeDrainTimeout + otelDrainTimeout
