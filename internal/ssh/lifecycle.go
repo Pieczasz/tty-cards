@@ -17,42 +17,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// admit counts a session handler in, unless the server is draining.
-func (reg *sessionRegistry) admit() bool {
-	reg.liveMu.Lock()
-	defer reg.liveMu.Unlock()
-	if reg.draining {
-		return false
-	}
-	reg.live.Add(1)
-	return true
-}
-
-// waitSessions stops admitting session handlers, then blocks until every admitted
-// one has returned or ctx ends. The waiter is started once and reused, so a caller
-// that times out and calls again does not strand one per attempt.
-func (reg *sessionRegistry) waitSessions(ctx context.Context) error {
-	reg.liveMu.Lock()
-	reg.draining = true
-	if reg.drained == nil {
-		ch := make(chan struct{})
-		reg.drained = ch
-		go func() {
-			reg.live.Wait()
-			close(ch)
-		}()
-	}
-	drained := reg.drained
-	reg.liveMu.Unlock()
-
-	select {
-	case <-drained:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
-	}
-}
-
 func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
 	st, ok := reg.states.Load(s)
 	if !ok {
@@ -104,7 +68,8 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			s = takeWindowChanges(s)
 			// A handler charm ssh started just before Close can get here after the
 			// drain stopped counting; it refuses itself rather than run untracked.
-			if !reg.admit() {
+			release, ok := reg.live.Enter()
+			if !ok {
 				// Before any span: this session is never started, only counted.
 				observability.SSHSession(s.Context(), "rejected_draining")
 				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
@@ -112,7 +77,7 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			}
 			// Registered first, so it runs last: the drain is over only once the
 			// whole teardown below has run.
-			defer reg.live.Done()
+			defer release()
 			st := reg.startSession(s)
 			defer reg.finishSession(s, st)
 			defer reg.recoverSession(s)

@@ -19,6 +19,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/drain"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -118,14 +119,8 @@ type sessionRegistry struct {
 	sizes  sizeBudget
 	// live counts session handlers still running. charm ssh runs each on a goroutine
 	// that neither its Shutdown nor its Close waits for, so without this the drain
-	// would move on while teardowns are still giving up seats. liveMu makes admitting
-	// a handler and starting to drain atomic: a WaitGroup alone permits Add after
-	// Wait has seen zero.
-	liveMu   sync.Mutex
-	draining bool
-	live     sync.WaitGroup
-	// drained is closed by the one waiter goroutine waitSessions ever starts.
-	drained chan struct{}
+	// would move on while teardowns are still giving up seats.
+	live drain.Gate
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -154,7 +149,10 @@ type Server struct {
 // session handler has finished its teardown or ctx ends. Close is what ends them, so
 // it is called after Close.
 func (s *Server) WaitSessions(ctx context.Context) error {
-	return s.sessions.waitSessions(ctx)
+	if !s.sessions.live.Wait(ctx) {
+		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
+	}
+	return nil
 }
 
 // errNoTracker refuses a server with no session tracker. A default one used to be

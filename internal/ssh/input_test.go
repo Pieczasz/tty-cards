@@ -50,8 +50,8 @@ func guardOver(in *scriptedInput) (*inputGuard, *int) {
 	return g, &trips
 }
 
-// drain reads until the guard or the script stops, returning what got through.
-func drain(g *inputGuard) (string, error) {
+// drainGuard reads until the guard or the script stops, returning what got through.
+func drainGuard(g *inputGuard) (string, error) {
 	var got bytes.Buffer
 	buf := make([]byte, 4096)
 	for {
@@ -129,7 +129,7 @@ func TestInputGuard(t *testing.T) {
 			g, trips := guardOver(in)
 			g.pasting.Store(tt.pasting)
 
-			got, err := drain(g)
+			got, err := drainGuard(g)
 
 			if !tt.wantTrip {
 				require.ErrorIs(t, err, io.EOF)
