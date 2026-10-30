@@ -409,7 +409,9 @@ unnoticed for so long.
   enter is ignored.
 - **A Gin Rummy forfeit keeps both players on the scoreboard** and says who left
   the table. The player who left used to vanish from it, so a match they led 8-0
-  read as a 0-point win against nobody.
+  read as a 0-point win against nobody. A forfeit on the between-hands screen
+  also drops the last hand's cards, which stayed on screen with nothing saying
+  whose melds they were once the leave line replaced the knock headline.
 - **Gin Rummy's hand result keeps its cards on a bigger terminal.** From 80x40
   to about 150 columns the knocker's melds, the opponent's deadwood and the
   layoffs vanished, leaving only the headline and the totals, while a smaller

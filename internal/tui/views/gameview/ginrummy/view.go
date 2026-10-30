@@ -104,6 +104,11 @@ func (m *model) renderHandOver() string {
 	for _, l := range m.leavers {
 		h.Rows = append(h.Rows, m.scoreRow(l.id, l.name))
 	}
+	// The leave line took the knock headline's place, so the last hand's cards would
+	// be left with nothing saying whose they are. That hand is in the totals already.
+	if m.Base.EndReason == game.EndReasonForfeit {
+		return gameview.RenderHandOver(m.Global, h)
+	}
 	return m.renderWithResult(h)
 }
 

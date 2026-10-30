@@ -357,6 +357,36 @@ func TestView_ForfeitShowsTheScoreboard(t *testing.T) {
 	assert.Contains(t, out, "40")
 }
 
+// A forfeit on the hand-over screen replaces the knock headline with who left, so
+// the last hand's cards would sit there with nothing saying whose they were. The
+// scoreboard is what the end of the match is read from, and it has to stay.
+func TestView_ForfeitAfterAHandDropsTheHandsCards(t *testing.T) {
+	t.Parallel()
+	for _, size := range []struct{ w, h int }{{80, 24}, {80, 40}, {160, 50}} {
+		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
+			t.Parallel()
+			m := viewAt(size.w, size.h)
+			m.phase = logic.PhaseHandOver
+			m.lastHandResult = knockResult()
+			m.Base.Phase = game.Finished
+			m.Base.EndReason = game.EndReasonForfeit
+			m.Base.WinnerName = "alice"
+			m.Base.Seats = m.Base.Seats[:1]
+			m.leavers = []leaver{{id: "2", name: "bob"}}
+
+			out := tuitest.StripANSI(m.View().Content)
+			assert.Contains(t, out, "bob left the table")
+			for _, label := range []string{"knocker melds", "opponent deadwood", "laid off"} {
+				assert.NotContains(t, out, label)
+			}
+			assert.Contains(t, out, "alice")
+			assert.Contains(t, out, "40")
+			assert.Contains(t, out, "bob")
+			assert.Contains(t, out, "22")
+		})
+	}
+}
+
 // A rules error ends the match unrated and without a winner, so it must not read as
 // a completed match.
 func TestView_ARulesErrorSaysTheTableFailed(t *testing.T) {
