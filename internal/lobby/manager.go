@@ -316,8 +316,7 @@ func (m *Manager) reserveWatcher() (canStart bool, release func()) {
 	if !m.admitGame() {
 		return false, func() {}
 	}
-	var once sync.Once
-	return true, func() { once.Do(m.watchers.Done) }
+	return true, sync.OnceFunc(m.watchers.Done)
 }
 
 // heldLocks is the manager lock and, once lockLobby runs, that lobby's lock.
