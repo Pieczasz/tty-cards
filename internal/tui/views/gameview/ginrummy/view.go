@@ -113,7 +113,7 @@ func (m *model) renderOutcome() string {
 	var banner string
 	switch r.Outcome {
 	case logic.OutcomeWall:
-		return m.Global.Palette().WarningText.Render("WALL - stock exhausted, no score")
+		return m.Global.Palette().WarningText.Render("WALL - " + r.WallCause + ", no score")
 	case logic.OutcomeGin:
 		banner = m.Global.Palette().SuccessText.Render("GIN!")
 	case logic.OutcomeUndercut:

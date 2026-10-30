@@ -68,6 +68,24 @@ func TestView_HandOverWallBanner(t *testing.T) {
 	assert.Contains(t, out, "WALL")
 }
 
+// A wall names its cause: a hand traded on the upcard for a hundred turns walls with
+// the stock still full, and "stock exhausted" there is simply false.
+func TestView_HandOverWallNamesItsCause(t *testing.T) {
+	t.Parallel()
+
+	for _, cause := range []string{"stock exhausted", "turn limit"} {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			m := viewAt(80, 24)
+			m.phase = logic.PhaseHandOver
+			m.lastHandResult = &logic.HandResult{Outcome: logic.OutcomeWall, WallCause: cause}
+
+			out := tuitest.StripANSI(m.View().Content)
+			assert.Contains(t, out, "WALL - "+cause+", no score")
+		})
+	}
+}
+
 func TestView_InterruptedMatchDoesNotNameAWinner(t *testing.T) {
 	t.Parallel()
 	m := &model{

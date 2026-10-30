@@ -348,7 +348,7 @@ func settleWall(state *game.State, extra *State, cause string) {
 		"turns", extra.TurnsThisHand,
 		"stock", state.Deck.Size())
 
-	closeHand(state, extra, &HandResult{Outcome: OutcomeWall})
+	closeHand(state, extra, &HandResult{Outcome: OutcomeWall, WallCause: cause})
 }
 
 func (r *Rules) CheckWinCondition(state *game.State) bool {
