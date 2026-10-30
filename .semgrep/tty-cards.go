@@ -35,6 +35,23 @@ func turnCursor(state *State, extra *Extra) {
 	}
 }
 
+func engineOwnedState(state *State, extra *Extra) {
+	// ruleid: rules-write-engine-owned-state
+	state.Phase = game.Finished
+	// ruleid: rules-write-engine-owned-state
+	state.Players = state.Players[1:]
+	// ruleid: rules-write-engine-owned-state
+	state.LeftPlayers = nil
+	// ruleid: rules-write-engine-owned-state
+	state.Rules = nil
+	// ok: rules-write-engine-owned-state
+	extra.Phase = PhaseHandOver
+	// ok: rules-write-engine-owned-state
+	if state.Phase == game.Playing {
+		return
+	}
+}
+
 func view(engine *Engine, bound *BoundEngine, id string, act Action) {
 	// ruleid: tui-uses-server-engine-api, rules-package-reaches-the-engine
 	engine.WithState(func(*State) {})

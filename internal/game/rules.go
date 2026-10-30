@@ -23,8 +23,12 @@ type Action interface {
 }
 
 // Rules is one card game, driven by the Engine. Every method runs with the engine lock
-// held and receives only *State, so it may mutate the state freely and can never call
-// back into the Engine.
+// held and receives only *State, so it can never call back into the Engine. It may
+// change the cards, Deck, Discard and Extra, and names who acts next through SetTurn,
+// OverrideTurn or ContinueTurn. Phase, Players, LeftPlayers and Rules are the
+// engine's: a match ends only through CheckWinCondition or an ApplyAction error,
+// because a Phase written by hand skips the end protocol (no winner, no
+// EventGameEnded, a match never finalized).
 //
 // OnGameStart sets a table up, the deal included: the engine hands it the seats and
 // the first seat on turn, and nothing else.

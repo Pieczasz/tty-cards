@@ -26,6 +26,32 @@ rules:
           - pattern: $S.CurrentTurn--
           - pattern: $S.OverrideNextTurn = $X
 
+  - id: rules-write-engine-owned-state
+    languages: [go]
+    severity: ERROR
+    message: >-
+      State.Phase, Players, LeftPlayers and Rules are the engine's (the Rules
+      contract). A rules set ends a match through CheckWinCondition or an ApplyAction
+      error: a Phase written by hand skips endGameLocked, so there is no winner, no
+      EventGameEnded and the match is never finalized. The seats move only through
+      Engine.RemovePlayer. Tests and gametest are exempt: they rig tables.
+    paths:
+      include:
+        - /internal/game/*/
+      exclude:
+        - /internal/game/gametest/
+        - "*_test.go"
+    pattern-either:
+      # Qualified, because each multi-hand game's Extra has a Phase of its own.
+      - patterns:
+          - pattern: $S.Phase = game.$P
+          - metavariable-regex:
+              metavariable: $P
+              regex: ^(Waiting|Playing|Finished)$
+      - pattern: $S.Players = $X
+      - pattern: $S.LeftPlayers = $X
+      - pattern: $S.Rules = $X
+
   - id: tui-uses-server-engine-api
     languages: [go]
     severity: ERROR

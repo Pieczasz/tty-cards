@@ -8,7 +8,8 @@ import (
 )
 
 // State is one table's game, handed to every rules hook under the engine lock and to
-// a view's Frame callback. It has no lock of its own: the engine's covers it.
+// a view's Frame callback. It has no lock of its own: the engine's covers it. Which
+// fields a rules set may write is the Rules contract's to say.
 type State struct {
 	Players          []*Player
 	LeftPlayers      []*Player
