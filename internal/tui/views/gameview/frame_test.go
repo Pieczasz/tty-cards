@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
@@ -104,6 +105,54 @@ func TestHandleFrame_DoesNotStartASecondClock(t *testing.T) {
 	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced}, func() {})
 	require.True(t, handled)
 	assert.False(t, hasClockTick(cmd), "the running chain is not doubled")
+}
+
+// A seat watching somebody else's clock ticks every five seconds. When the turn
+// passes to it, waiting out that tick froze the hero's own countdown for up to five
+// seconds, so the clock is re-armed at the hero's rate.
+func TestHandleFrame_ReArmsTheClockWhenTheTurnPassesToTheHero(t *testing.T) {
+	t.Parallel()
+
+	s := &Session{Base: BaseState{Phase: game.Playing, MyTurn: false}}
+	sync := func() { s.Base.MyTurn, s.Base.TurnRemaining = true, 30*time.Second }
+
+	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced}, sync)
+	require.True(t, handled)
+	assert.True(t, hasClockTick(cmd), "the hero's countdown has to start at once")
+}
+
+// A re-arm replaces the running chain rather than adding a second one: the tick the
+// old chain still has in flight is dropped when it lands, and re-arms nothing.
+func TestHandleFrame_DropsATickFromAReplacedChain(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		before BaseState
+		sync   func(*BaseState)
+	}{
+		"the table starts playing": {
+			before: BaseState{Phase: game.Waiting},
+			sync:   func(b *BaseState) { b.Phase = game.Playing },
+		},
+		"the turn passes to the hero": {
+			before: BaseState{Phase: game.Playing},
+			sync:   func(b *BaseState) { b.MyTurn = true },
+		},
+	} {
+		t.Run(strings.ReplaceAll(name, " ", "_"), func(t *testing.T) {
+			t.Parallel()
+			s := &Session{Base: tc.before}
+			sync := func() { tc.sync(&s.Base) }
+			stale := ClockTickMsg{Source: s.events, Gen: s.clockGen}
+
+			cmd, _ := s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced}, sync)
+			require.True(t, hasClockTick(cmd), "the event re-arms the clock")
+
+			cmd, handled := s.HandleFrame(stale, sync)
+			require.True(t, handled)
+			assert.Nil(t, cmd, "the replaced chain's tick re-armed a second chain")
+		})
+	}
 }
 
 // A phase that is not Playing ends the chain, which is what stops a finished table

@@ -122,7 +122,7 @@ func TestClockTickFor_RateFollowsTheReading(t *testing.T) {
 			// to wait on, so the time a tick takes is exactly its interval.
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				msg := clockTickFrom(nil, tt.remaining, tt.onTurn)()
+				msg := clockTickFrom(nil, 0, tt.remaining, tt.onTurn)()
 				assert.IsType(t, ClockTickMsg{}, msg)
 				assert.Equal(t, tt.want, time.Since(start))
 			})

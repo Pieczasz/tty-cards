@@ -54,6 +54,9 @@ type Session struct {
 
 	// confirmLeave is the armed forfeit prompt (HandleLeaveKey).
 	confirmLeave bool
+
+	// clockGen is the live tick chain; a tick stamped with any other is dropped.
+	clockGen uint64
 }
 
 // NewSession subscribes to table, the session player's seat, which the lobby bound
@@ -95,7 +98,7 @@ func (s *Session) Listen() tea.Cmd {
 // clockTick starts this session's countdown before any deadline is known, which is
 // what a view's Init has to work with.
 func (s *Session) clockTick() tea.Cmd {
-	return clockTickFrom(s.events, 0, false)
+	return clockTickFrom(s.events, s.clockGen, 0, false)
 }
 
 // HeroID is the seat this session plays, or "" for a view with no table bound.
@@ -143,7 +146,7 @@ func (s *Session) HandleFrame(msg tea.Msg, sync func()) (tea.Cmd, bool) {
 		}
 		return s.handleEvent(msg.Event, sync), true
 	case ClockTickMsg:
-		if msg.Source != s.events {
+		if msg.Source != s.events || msg.Gen != s.clockGen {
 			return nil, true
 		}
 		return s.handleClockTick(sync), true
@@ -159,15 +162,18 @@ func (s *Session) handleEvent(ev game.Event, sync func()) tea.Cmd {
 		return tea.Quit
 	}
 
-	wasPlaying := s.Base.Phase == game.Playing
+	wasPlaying, wasMyTurn := s.Base.Phase == game.Playing, s.Base.MyTurn
 	sync()
 
 	cmds := []tea.Cmd{s.Listen()}
 	// A view built while the lobby was still waiting stops its tick chain on the first
 	// tick, so the clock has to be re-armed once the table starts playing or it never
-	// runs again for that player.
-	if !wasPlaying && s.Base.Phase == game.Playing {
-		cmds = append(cmds, clockTickFrom(s.events, s.Base.TurnRemaining, s.Base.MyTurn))
+	// runs again for that player. It is re-armed too when the turn passes to the hero:
+	// a seat watching somebody else's clock ticks every coarseClockStep, and waiting
+	// that out froze the hero's own countdown for up to five seconds.
+	if s.Base.Phase == game.Playing && (!wasPlaying || (!wasMyTurn && s.Base.MyTurn)) {
+		s.clockGen++
+		cmds = append(cmds, s.nextClockTick())
 	}
 	return tea.Batch(cmds...)
 }
@@ -177,7 +183,12 @@ func (s *Session) handleClockTick(sync func()) tea.Cmd {
 	if s.Base.Phase != game.Playing {
 		return nil
 	}
-	return clockTickFrom(s.events, s.Base.TurnRemaining, s.Base.MyTurn)
+	return s.nextClockTick()
+}
+
+// nextClockTick continues the live chain at the rate the cached turn calls for.
+func (s *Session) nextClockTick() tea.Cmd {
+	return clockTickFrom(s.events, s.clockGen, s.Base.TurnRemaining, s.Base.MyTurn)
 }
 
 var errNotSeated = errors.New("you are not seated at this table")

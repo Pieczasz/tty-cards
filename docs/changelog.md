@@ -341,6 +341,8 @@ unnoticed for so long.
   over " wins" in Poker and Gin Rummy, and "Game Over! Winner: " with no name in
   Hearts, as if somebody had won a match that is recorded unrated. It now reads
   "MATCH ENDED - table error", and Hearts keeps its scoreboard on screen.
+- Your own turn clock starts counting the moment the turn reaches you. It used
+  to sit on the full time for up to five seconds first.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
