@@ -223,9 +223,6 @@ func checkChipConservation(state *game.State, extra *State) error {
 		)
 		return errChipsInPot
 	}
-	if extra.handStartChips == 0 {
-		return nil // a hand-shaped State assembled by hand, not dealt by beginHand
-	}
 	total := chipsInPlay(extra)
 	if total == extra.handStartChips {
 		return nil

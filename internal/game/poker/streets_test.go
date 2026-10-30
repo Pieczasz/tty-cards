@@ -173,6 +173,7 @@ func TestBetting_AllInShortStackSidePotAward(t *testing.T) {
 		},
 		Seats: seatsWithChips(map[string]uint{"short": 100, "mid": 500, "big": 500}),
 	}
+	extra.handStartChips = chipsInPlay(extra)
 	state.Extra = extra
 
 	// short all-in 100; mid and big put 300 each -> main 300 + side 400.
@@ -1087,6 +1088,7 @@ func TestLeave_TheOnlyPlayerWithChipsBehindStillPaysTheAllIns(t *testing.T) {
 		},
 		Pool: 900,
 	}
+	extra.handStartChips = chipsInPlay(extra)
 	state.Extra = extra
 	state.Deck.Shuffle()
 	rules := &Rules{}
