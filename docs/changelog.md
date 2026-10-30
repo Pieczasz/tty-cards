@@ -264,6 +264,8 @@ unnoticed for so long.
   can no longer reach the Docker daemon.
 - govulncheck also runs weekly on `main`, and Dependabot now updates the Go
   modules.
+- `make vulncheck` runs govulncheck locally at the version CI uses; the
+  govulncheck and deadcode versions live only in the `Makefile`.
 
 ### Changed - tables and lobbies
 
@@ -444,4 +446,9 @@ unnoticed for so long.
   a bot's own error was hidden behind the timeout message.
 - CI additionally builds the Docker image for amd64 and arm64 and validates
   `compose.yaml` and `nginx.conf`. Lint is pinned to golangci-lint v2.15.0.
+- Integration tests run on the same digest-pinned postgres image as
+  `compose.yaml`, and CI fails when the two differ: a bump of compose's `db`
+  image must also change `postgresImage` in `internal/testutil/db.go`.
+- The image's certs stage runs on the build platform, so a multi-arch build no
+  longer emulates it. The image itself is unchanged.
 
