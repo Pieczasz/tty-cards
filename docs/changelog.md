@@ -125,6 +125,10 @@ unnoticed for so long.
 - **A poker player who left stays folded for the rest of the match.** They used
   to come back unfolded each hand and appear at every later showdown as an extra
   seat, showing the cards of the hand they walked out of.
+- **A chopped poker pot's odd chip goes to the first winner left of the button**,
+  the standard rule, so it moves round the table. It used to go to the lowest
+  account id, and ids are time-ordered, so the older account took it every time;
+  with stacks otherwise level, that one chip decided first and second place.
 - **An erased account can never reappear on the leaderboard**, not even from a
   match that was finishing while it was deleted, and not from a leaderboard read
   that started just before.

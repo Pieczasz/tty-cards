@@ -261,7 +261,7 @@ func TestAwardPots_NamesEveryPlayerItPaid(t *testing.T) {
 		extra.Pots = []Pot{{Amount: 200, Eligible: []string{"b"}}}
 		scores := map[string]int{"a": 9000, "b": 10}
 
-		winners := awardPots(extra, contenders(state, extra), scores)
+		winners := awardPots(state, extra, contenders(state, extra), scores)
 
 		require.Len(t, winners, 1)
 		assert.Equal(t, "b", winners[0].ID, "the best hand at the table folded it")
@@ -277,11 +277,12 @@ func TestAwardPots_NamesEveryPlayerItPaid(t *testing.T) {
 		extra.Pots = []Pot{{Amount: 300, Eligible: []string{"a", "b", "c"}}}
 		scores := map[string]int{"a": 500, "b": 500, "c": 10}
 
-		winners := awardPots(extra, contenders(state, extra), scores)
+		winners := awardPots(state, extra, contenders(state, extra), scores)
 
 		require.Len(t, winners, 2, "a split pot names all co-winners")
-		assert.Equal(t, "a", winners[0].ID)
-		assert.Equal(t, "b", winners[1].ID)
+		// Named in odd-chip order: b sits left of a's button.
+		assert.Equal(t, "b", winners[0].ID)
+		assert.Equal(t, "a", winners[1].ID)
 	})
 
 	// Fewer than five cards score zero, which is what a hand shown down before the
@@ -295,7 +296,7 @@ func TestAwardPots_NamesEveryPlayerItPaid(t *testing.T) {
 		extra.Pots = []Pot{{Amount: 200, Eligible: []string{"a", "b"}}}
 		scores := map[string]int{"a": 0, "b": 0}
 
-		assert.Len(t, awardPots(extra, contenders(state, extra), scores), 2)
+		assert.Len(t, awardPots(state, extra, contenders(state, extra), scores), 2)
 	})
 
 	// The best hand at the table can be a short stack who only paid into the main
@@ -313,7 +314,7 @@ func TestAwardPots_NamesEveryPlayerItPaid(t *testing.T) {
 		}
 		scores := map[string]int{"short": 9000, "mid": 500, "big": 10}
 
-		winners := awardPots(extra, contenders(state, extra), scores)
+		winners := awardPots(state, extra, contenders(state, extra), scores)
 
 		require.Len(t, winners, 2)
 		assert.Equal(t, "short", winners[0].ID, "main pot first")
@@ -420,7 +421,7 @@ func TestAwardPots(t *testing.T) {
 		state, extra := sidePotState(t, map[string]uint{"a": 100, "b": 100, "c": 100})
 		extra.Pots = []Pot{{Amount: 300, Eligible: []string{"a", "b", "c"}}}
 
-		awardPots(extra, contenders(state, extra), map[string]int{"a": 500, "b": 500, "c": 10})
+		awardPots(state, extra, contenders(state, extra), map[string]int{"a": 500, "b": 500, "c": 10})
 
 		assert.Equal(t, uint(150), extra.Seats["a"].Chips)
 		assert.Equal(t, uint(150), extra.Seats["b"].Chips)
@@ -432,7 +433,7 @@ func TestAwardPots(t *testing.T) {
 		state, extra := sidePotState(t, map[string]uint{"a": 100, "b": 100})
 		extra.Pots = []Pot{{Amount: 200, Eligible: []string{"a", "b"}}}
 
-		awardPots(extra, contenders(state, extra), map[string]int{"a": 10, "b": 500})
+		awardPots(state, extra, contenders(state, extra), map[string]int{"a": 10, "b": 500})
 
 		assert.Zero(t, extra.Seats["a"].Chips)
 		assert.Equal(t, uint(200), extra.Seats["b"].Chips)
@@ -443,7 +444,7 @@ func TestAwardPots(t *testing.T) {
 		state, extra := sidePotState(t, map[string]uint{"a": 100, "b": 100})
 		extra.Pots = []Pot{{Amount: 200, Eligible: []string{"a", "b"}}}
 
-		awardPots(extra, contenders(state, extra), map[string]int{"a": 0, "b": 0})
+		awardPots(state, extra, contenders(state, extra), map[string]int{"a": 0, "b": 0})
 
 		assert.Equal(t, uint(200), extra.Seats["a"].Chips+extra.Seats["b"].Chips,
 			"a pot must never be left unawarded")

@@ -670,7 +670,7 @@ func TestAwardPots_OddChipRemainderIsDistributed(t *testing.T) {
 	extra.Pots = []Pot{{Amount: 100, Eligible: []string{"a", "b", "c"}}}
 	scores := map[string]int{"a": 500, "b": 500, "c": 500} // dead tie
 
-	awardPots(extra, contenders(state, extra), scores)
+	awardPots(state, extra, contenders(state, extra), scores)
 
 	total := extra.Seats["a"].Chips + extra.Seats["b"].Chips + extra.Seats["c"].Chips
 	assert.Equal(t, uint(100), total, "100 chopped three ways must still total 100")
@@ -1267,4 +1267,71 @@ func TestRecordBustouts_StampsAllInLeavers(t *testing.T) {
 
 	assert.Equal(t, 3, extra.Seats["left"].BustedAtHand)
 	assert.Zero(t, extra.Seats["live"].BustedAtHand)
+}
+
+// A chopped pot that does not divide evenly gives the odd chip to the first tied
+// winner clockwise from the button, the standard rule. It used to go to the lowest
+// player ID, and IDs are time-ordered UUIDs, so the older account took every odd
+// chip against a newer one. An all-in leaver has no seat, so they come after every
+// seated winner.
+func TestRunShowdown_OddChipGoesToTheFirstWinnerLeftOfTheButton(t *testing.T) {
+	t.Parallel()
+	low := func(a, b deck.Suit) []deck.Card {
+		return []deck.Card{{Rank: deck.Two, Suit: a}, {Rank: deck.Three, Suit: b}}
+	}
+	tests := []struct {
+		name   string
+		dealer int
+		leaver bool
+		odd    string
+	}{
+		{name: "the seat after the button", dealer: 1, odd: "p2"},
+		{name: "the button wraps round to seat zero", dealer: 2, odd: "p0"},
+		{name: "a seated winner before an all-in leaver", dealer: 0, leaver: true, odd: "p2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// p0 and p2 both play the broadway board; p1 put in a chip and folded,
+			// so the pot is 101 and one chip is left over.
+			players := []*game.Player{
+				{ID: "p0", Cards: low(deck.Clubs, deck.Diamonds)},
+				{ID: "p1", Cards: low(deck.Hearts, deck.Spades)},
+				{ID: "p2", Cards: low(deck.Diamonds, deck.Clubs)},
+			}
+			state := game.NewState(&Rules{}, players, deck.Standard())
+			extra := &State{
+				Phase:       PhaseRiver,
+				DealerIndex: tt.dealer,
+				Pool:        101,
+				Table: []deck.Card{
+					{Rank: deck.Ten, Suit: deck.Spades},
+					{Rank: deck.Jack, Suit: deck.Hearts},
+					{Rank: deck.Queen, Suit: deck.Diamonds},
+					{Rank: deck.King, Suit: deck.Clubs},
+					{Rank: deck.Ace, Suit: deck.Spades},
+				},
+				Seats: map[string]*Seat{
+					"p0": {Contributed: 50},
+					"p1": {Contributed: 1, Folded: true},
+					"p2": {Contributed: 50},
+				},
+			}
+			if tt.leaver {
+				// p0 sat this one out and "a", who sorts before every seated ID, left
+				// all-in on the same broadway: ID order would hand them the chip.
+				extra.Seats["p0"] = &Seat{Folded: true}
+				extra.Seats["a"] = &Seat{Contributed: 50, AllIn: true}
+				state.LeftPlayers = []*game.Player{{ID: "a", Cards: []deck.Card{
+					{Rank: deck.Four, Suit: deck.Hearts}, {Rank: deck.Five, Suit: deck.Hearts},
+				}}}
+			}
+			state.Extra = extra
+
+			require.NoError(t, runShowdown(state, extra))
+
+			assert.Equal(t, uint(51), extra.Seats[tt.odd].Chips, "the odd chip")
+			assert.Zero(t, extra.Pool)
+		})
+	}
 }
