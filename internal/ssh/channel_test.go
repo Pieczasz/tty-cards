@@ -238,7 +238,8 @@ func sendWindowChanges(ch gossh.Channel, n int) {
 	}
 }
 
-// within fails the test unless fn returns inside two seconds.
+// within fails the test unless fn returns inside five seconds: room for a loaded
+// -race run, and a wedged connection never answers at all.
 func within(t *testing.T, what string, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -248,7 +249,7 @@ func within(t *testing.T, what string, fn func()) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatalf("%s hung: the connection is wedged", what)
 	}
 }

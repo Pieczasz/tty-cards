@@ -414,7 +414,11 @@ func TestSession_FreedExtraCellsReachASessionHeldBack(t *testing.T) {
 	require.Eventually(t, func() bool { return tracker.Count() == 2 && grantedSizes(reg)[second] == sizeTiers[0] },
 		5*time.Second, 10*time.Millisecond, "the second session should be held at the floor")
 
+	// The slot is given up after the cells, so once it is, the sweep has been sent.
+	// Generous, as a teardown under a loaded -race run can take seconds.
 	_ = firstClient.Close()
+	require.Eventually(t, func() bool { return tracker.Count() == 1 }, 20*time.Second, 10*time.Millisecond,
+		"the first session never ended")
 	require.Eventually(t, func() bool { return grantedSizes(reg)[second] == termSize{250, 80} },
 		5*time.Second, 10*time.Millisecond, "the cells the first session freed never reached the second")
 }
