@@ -54,8 +54,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) View() tea.View {
 	name := "Player"
-	if m.global.User != nil {
-		name = m.global.User.Username
+	if p := views.SessionPlayer(m.global); p != nil {
+		name = p.Name
 	}
 
 	g, theme := m.global, m.global.Palette()
