@@ -19,7 +19,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 	crazyview "github.com/Pieczasz/tty-cards/internal/tui/views/gameview/crazyeight"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
-	lobbyview "github.com/Pieczasz/tty-cards/internal/tui/views/lobby"
+	lobbyview "github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"

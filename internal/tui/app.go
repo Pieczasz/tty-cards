@@ -12,7 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/leaderboard"
-	"github.com/Pieczasz/tty-cards/internal/tui/views/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/profile"
 
 	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
