@@ -58,6 +58,7 @@ linters:
     - sloglint
     # Architecture: the layer rules from CLAUDE.md, enforced rather than remembered.
     - depguard
+    - importas
     - iface
     - recvcheck
     - errname
@@ -150,6 +151,14 @@ linters:
           files: ["**/internal/drain/**", "!$test"]
           allow:
             - $gostd
+    # "lobby" is the domain package everywhere and the lobby screens are lobbyview. An
+    # alias for either brings back the view-or-domain guess the rename removed.
+    importas:
+      alias:
+        - pkg: github.com/Pieczasz/tty-cards/internal/lobby
+          alias: lobby
+        - pkg: github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview
+          alias: lobbyview
     dupl:
       threshold: 120
     gocritic:

@@ -155,6 +155,11 @@ clockwise from the hero's left. Wire it the way `crazyeight` does:
 - Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
   render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
 
+The view package keeps your rules package's name, as `text/template` and
+`html/template` share one, and imports the rules as `logic`. `lobby` is the
+exception: it always names `internal/lobby`, so the lobby screens are package
+`lobbyview`, and `importas` fails any other alias for either.
+
 Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`), in one pure
 `readTable(state, ...)` that returns a value you assign once `Sync` returns, as
 poker, hearts and gin rummy do. The
