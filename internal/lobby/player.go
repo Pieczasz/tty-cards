@@ -14,6 +14,10 @@ import (
 // game.Player, which is what lets internal/game stay free of internal/db: the
 // ratings are flattened here, once, from the Rankings the session preloaded, keyed
 // by slug - a game's name can change without moving anyone's rating.
+//
+// The seat key, Player.ID, is the account id as a string. Manager.refreshRatings
+// finds a player's table by that key from the ids a ranked write returns, so a
+// Player built any other way is not refreshed.
 func NewPlayer(u *db.User) *game.Player {
 	if u == nil {
 		return nil

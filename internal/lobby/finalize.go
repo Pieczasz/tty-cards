@@ -135,6 +135,9 @@ func (m *Manager) persistFinishedMatch(
 // the ones its session logged in with. A player seated nowhere is not refreshed: the
 // next login reads the stored rating.
 //
+// The index is keyed by Player.ID, found here as the account id's string form:
+// NewPlayer, the only way a session is seated, sets ID that way.
+//
 // m.mu is held, read-only, across each lobby's update so no player can change tables
 // between the index lookup and the seat write; the broadcasts wait for both locks to
 // be released.
