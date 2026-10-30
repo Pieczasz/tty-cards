@@ -550,6 +550,11 @@ func (reg *sessionRegistry) reportProgramExit(s ssh.Session, err error) {
 		if st.panicked {
 			return
 		}
+		// Only endRun cancels the program's st.run, and before the program ends only a
+		// displacement calls it: the newer session is why, not the program failing.
+		if st.run != nil && st.run.Err() != nil && errors.Is(err, context.Canceled) {
+			return
+		}
 		ctx = st.traceCtx
 	}
 	slog.ErrorContext(ctx, "session program ended with an error", "error", err)

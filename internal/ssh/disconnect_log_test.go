@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -32,16 +33,17 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// A closing connection ends its programs through wish's Quit, a clean exit. A run
-// context tied to the connection's as well killed the program first, and wish logged
-// every ordinary disconnect as an ERROR.
+// A closing connection ends its programs through runProgram's Quit, a clean exit. A
+// run context tied to the connection's as well killed the program first, and every
+// ordinary disconnect was logged as an ERROR, by wish and then by runProgram.
 //
-//nolint:paralleltest // swaps charm log's process-wide default logger
+//nolint:paralleltest // swaps the process-wide slog and charm loggers
 func TestNewServer_ADisconnectIsNotLoggedAsAnError(t *testing.T) {
 	charm := &lockedBuffer{}
 	prev := log.Default()
 	log.SetDefault(log.New(charm))
 	t.Cleanup(func() { log.SetDefault(prev) })
+	logs := captureLogs(t)
 	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(97), Username: "leaver"})
 	client := dialInProcess(t, addr, "leaver")
 	openShell(t, client)
@@ -54,4 +56,7 @@ func TestNewServer_ADisconnectIsNotLoggedAsAnError(t *testing.T) {
 	require.Eventually(t, func() bool { return tracker.Count() == 0 }, 5*time.Second, 10*time.Millisecond)
 
 	assert.NotContains(t, charm.String(), "app exit with error")
+	for _, r := range logs.snapshot() {
+		assert.Less(t, r.Level, slog.LevelError, "a disconnect logged %q at %s", r.Message, r.Level)
+	}
 }

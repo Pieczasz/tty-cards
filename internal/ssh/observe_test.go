@@ -220,7 +220,8 @@ func TestSessionLifecycle_ARefusalWhileDrainingIsCounted(t *testing.T) {
 }
 
 // A program's error is logged once, through slog: not when the input guard or
-// reportPanic has already said why the session ended.
+// reportPanic has already said why the session ended, and not when a newer session
+// displacing it cancelled the program's context.
 //
 //nolint:paralleltest // swaps the slog default
 func TestReportProgramExit(t *testing.T) {
@@ -229,8 +230,10 @@ func TestReportProgramExit(t *testing.T) {
 		name     string
 		err      error
 		panicked bool
+		ended    bool
 		want     map[slog.Level]int
 	}{
+		{name: "a displacement", err: fmt.Errorf("%w: %w", tea.ErrProgramKilled, context.Canceled), ended: true, want: map[slog.Level]int{}},
 		{name: "an input trip", err: fmt.Errorf("%w: %w", tea.ErrProgramKilled, errInputOverBudget), want: map[slog.Level]int{}},
 		{name: "a reported panic", err: tea.ErrProgramPanic, panicked: true, want: map[slog.Level]int{}},
 		{name: "anything else", err: tea.ErrProgramKilled, want: map[slog.Level]int{slog.LevelError: 1}},
@@ -240,7 +243,12 @@ func TestReportProgramExit(t *testing.T) {
 			logs := captureLogs(t)
 			s := &stubSession{addr: stubAddr{"10.0.0.31:1"}}
 			reg := &sessionRegistry{}
-			reg.store(s, &sessionState{traceCtx: t.Context(), panicked: tt.panicked})
+			st := &sessionState{traceCtx: t.Context(), panicked: tt.panicked}
+			st.run, st.endRun = context.WithCancel(t.Context())
+			if tt.ended {
+				st.endRun()
+			}
+			reg.store(s, st)
 
 			reg.reportProgramExit(s, tt.err)
 
