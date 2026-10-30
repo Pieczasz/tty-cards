@@ -8,8 +8,10 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
-
 	"github.com/Pieczasz/tty-cards/internal/testutil"
+
+	"uuid"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,5 +89,21 @@ func openTable(t *testing.T, manager *lobby.Manager, idx, n int) *lobby.Lobby {
 
 func benchPlayer(table, seat int) *game.Player {
 	id := fmt.Sprintf("t%d-s%d", table, seat)
-	return &game.Player{ID: id, UserID: testutil.UID(byte(table*100 + seat + 1)), Name: id}
+	return &game.Player{ID: id, UserID: testutil.UID(table*100 + seat + 1), Name: id}
+}
+
+// The capacity tables must have the shape real players give them: one account per
+// seat and never uuid.Nil, which the lobby treats as "no account".
+func TestBenchPlayer_GivesEverySeatItsOwnAccount(t *testing.T) {
+	t.Parallel()
+	seen := map[uuid.UUID]string{}
+	for table := range 201 {
+		for seat := range 6 {
+			p := benchPlayer(table, seat)
+			require.NotEqual(t, uuid.Nil(), p.UserID, p.ID)
+			other, dup := seen[p.UserID]
+			require.False(t, dup, "%s shares an account with %s", p.ID, other)
+			seen[p.UserID] = p.ID
+		}
+	}
 }
