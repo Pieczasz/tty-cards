@@ -46,7 +46,9 @@ func (m *model) keyHints() string {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
 	case logic.PhaseAwaitingDiscard:
-		return "<-/h: left | ->/l: right | enter: discard | k: knock | esc: leave"
+		// One cursor binding, not two: spelled out as left and right the line ran 65
+		// columns and wrapped "leave" onto a row of its own at 64.
+		return "<-/h ->/l: move | enter: discard | k: knock | esc: leave"
 	default:
 		return "esc: leave"
 	}

@@ -384,3 +384,19 @@ func TestView_HandOverKeepsTheHeadlineAtEverySize(t *testing.T) {
 		})
 	}
 }
+
+// The key line is wrapped to the terminal, so one longer than 64 columns breaks inside
+// a binding at the minimum size and leaves "leave" alone under "esc:".
+func TestView_KeyHintsFitOneLineAtTheMinimumSize(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []logic.Phase{logic.PhaseAwaitingDraw, logic.PhaseAwaitingDiscard} {
+		m := viewAt(styles.MinWidth, styles.MinHeight)
+		m.phase = phase
+
+		hints := m.keyHints()
+		assert.LessOrEqual(t, lg.Width(hints), styles.MinWidth, "phase %v: %q", phase, hints)
+		out := tuitest.StripANSI(m.View().Content)
+		assert.Contains(t, out, hints, "phase %v: the key line is drawn whole on one row", phase)
+	}
+}

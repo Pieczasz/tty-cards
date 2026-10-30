@@ -390,6 +390,8 @@ unnoticed for so long.
 - **A Gin Rummy wall says why it walled.** A hand the two seats spent a hundred
   turns trading the upcard in read "WALL - stock exhausted" with the stock still
   full; it now reads "WALL - turn limit".
+- Gin Rummy's discard key line fits one row at 64 columns. It used to break
+  inside "esc: leave".
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.
