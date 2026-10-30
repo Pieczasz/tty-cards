@@ -287,7 +287,9 @@ jobs:
         jq -e '.services.backend.environment.SSH_KEY_PATH | startswith("/data/ssh/")' <<<"$cfg" >/dev/null \
           || fail "SSH_KEY_PATH must live in /data/ssh, the directory backup.sh copies"
 
-        # Local backups never enter the image build context.
-        grep -qx 'backups/' .dockerignore || fail ".dockerignore must exclude backups/"
+        # Local backups never enter the image build context: .dockerignore is an
+        # allowlist that starts from * and never lets backups/ back in.
+        grep -qx '\*' .dockerignore || fail ".dockerignore must start from * (an allowlist)"
+        ! grep -q '^!backups' .dockerignore || fail ".dockerignore must not re-include backups/"
 
         echo "deployment hardening holds"

@@ -1,19 +1,8 @@
-.env
-.wishlist/
-.git/
-.github/
-.idea/
-.gocache/
-bin/
-coverage.out
-*.md
-LICENSE
-Makefile
-compose.yaml
-.DS_Store
-
-# Marketing site: never part of the Go image build context.
-web/
-
-# Local database dumps (scripts/backup.sh): the whole user base, never image content.
-backups/
+# An allowlist: the image is built from the Go sources alone. Everything else in a
+# checkout - local backups (the whole user base), secrets the .gitignore expects,
+# review and editor tooling - stays out of the build context without being named.
+*
+!go.mod
+!go.sum
+!cmd
+!internal
