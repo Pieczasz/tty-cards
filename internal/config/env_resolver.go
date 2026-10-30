@@ -110,15 +110,34 @@ func resolveEnvironment() (string, error) {
 	switch env {
 	case envProduction:
 	case envDevelopment, envStaging:
-		// A missing .env is normal; one that fails to parse would otherwise boot
-		// without whatever it was meant to set.
-		if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("load .env: %w", err)
+		if err := loadDotEnv(); err != nil {
+			return "", err
 		}
 	default:
 		return "", fmt.Errorf("invalid ENV %q: want production, staging or development", env)
 	}
 	return env, nil
+}
+
+// loadDotEnv refuses an ENV line because ENV is settled before .env is read
+// (production never reads it), so the line could only mislead: ENV=staging there
+// would boot as development with every fail-closed check off. A missing .env is
+// normal; one that fails to parse would otherwise boot without what it set.
+func loadDotEnv() error {
+	vars, err := godotenv.Read()
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load .env: %w", err)
+	}
+	if _, ok := vars["ENV"]; ok {
+		return errors.New("ENV in .env is never read: remove it and set ENV in the process environment")
+	}
+	if err := godotenv.Load(); err != nil {
+		return fmt.Errorf("load .env: %w", err)
+	}
+	return nil
 }
 
 func getEnv(key string, fallback string) string {

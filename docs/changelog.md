@@ -217,6 +217,11 @@ unnoticed for so long.
   false for some variables and true for others: write `false`. OTel plaintext is
   decided by the endpoint URL scheme (`http://` vs `https://`); database
   plaintext is accepted only with `ENV=development`.
+- **`ENV` is read from the process environment only.** It is settled before
+  `.env` is read, so an `ENV` line in `.env` was silently ignored: `ENV=staging`
+  there booted as development with every fail-closed check off, and `ENV=prod`
+  there booted at all. An `ENV` line in `.env` now fails the boot. **Remove it
+  from an `.env` copied from an older `.env.example` and export `ENV` instead.**
 - **Every invalid variable is reported at once**, not just the first, and a boot
   failure is printed once instead of twice.
 - **The stats API refuses to start with a missing dependency** instead of

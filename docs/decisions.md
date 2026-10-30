@@ -14,7 +14,7 @@ is in [`architecture.md`](architecture.md).
 9. **Never publish `:6969` or `:6970`.** PROXY and `X-Forwarded-For` are believed only from `PROXY_TRUSTED_CIDRS`. Outside development, turning either trust on with an empty list fails boot. `0.0.0.0/0` and `::/0` are rejected.
 10. **Network limits key on the IPv6 /64, and the wide budget on the /48.** Auth and registration spend both; a /48 refusal gives the /64 its attempt back. Registration is refunded when `RegisterUserWithSSHKey` does not create an account. An address that cannot be keyed is refused.
 11. **Identity is the SSH key fingerprint.** Usernames are unique case-insensitively. Erasure anonymises the user row rather than deleting the match history.
-12. **A plaintext database is development-only.** An unknown `ENV` fails the boot.
+12. **A plaintext database is development-only.** An unknown `ENV` fails the boot. `ENV` comes from the process environment only; `.env` setting it fails the boot.
 13. **Leaving asks first.** Esc on a game that is not finished arms a confirmation. Esc and enter leave immediately only once the game is finished.
 14. **Chips are conserved.** A mismatch ends the match as a rules error. At showdown, an all-in player who left still has their hole cards shown.
 15. **Lock order is account, then manager, then lobby, then engine.** The rating policy is a pure function; the repository does the locks and the writes.

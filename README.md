@@ -203,7 +203,7 @@ Full list with comments in [`.env.example`](.env.example).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD` |
+| `ENV` | `development` | `production`, `staging` or `development`; anything else fails the boot. `production` requires `DB_PASSWORD`. Process environment only: `.env` is read after `ENV`, so an `ENV` line there fails the boot |
 | `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `6969` | never publish `6969`; an IPv6 literal host (`::`) binds |
 | `PROXY_PROTOCOL` | `true` | `false` for a bare local `ssh` client |
 | `PROXY_TRUSTED_CIDRS` | empty | comma-separated; when set, a PROXY header is honored only from these networks and every other connection is refused. Empty trusts any peer |

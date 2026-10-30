@@ -70,6 +70,8 @@ func (c *Config) IsProduction() bool  { return c.Env == envProduction }
 func (c *Config) IsDevelopment() bool { return c.Env == envDevelopment }
 
 // Load reads the environment (and .env outside production) into a validated Config.
+// ENV itself comes from the process environment only, since it decides whether
+// .env is read at all.
 func Load() (*Config, error) {
 	environment, err := resolveEnvironment()
 	if err != nil {
