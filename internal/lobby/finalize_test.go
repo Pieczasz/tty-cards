@@ -387,6 +387,19 @@ func TestReleaseHeldSeats_StaleReleaseKeepsANewerHold(t *testing.T) {
 	assert.True(t, l.HasPlayer(guest), "a stale release forfeited the newer game's seat")
 }
 
+// Closing a table unmaps every seat at it, so a hold left armed there would later
+// take the player out of whichever table they sat down at next.
+func TestRemoveLobby_GivesUpHeldSeats(t *testing.T) {
+	t.Parallel()
+
+	m, l, _, guest := startedGame(t)
+	m.DisconnectPlayer(guest)
+	require.True(t, pendingGrace(m, guest.ID))
+
+	m.RemoveLobby(l.Code())
+	assert.False(t, pendingGrace(m, guest.ID), "the closed table's hold is still armed")
+}
+
 // expireLeaveGen claims the grace before LeaveLobby runs. A resume in that gap must
 // not return — and so must not sit the player back down — until the leave finishes.
 func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
