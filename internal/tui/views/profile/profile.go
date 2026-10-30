@@ -341,16 +341,22 @@ func resultPlain(h db.MatchParticipant) string {
 	return fmt.Sprintf("Elo %d", h.EloDelta)
 }
 
+// placementPlain spells the place as an ordinal; 11-13 take "th" whatever their
+// last digit, hence the tens check.
 func placementPlain(placement int) string {
-	switch placement {
-	case 1, 2, 3:
-		return placementWords[placement-1]
-	default:
-		return fmt.Sprintf("%d place", placement)
+	suffix := "th"
+	if tens := placement % 100; tens < 11 || tens > 13 {
+		switch placement % 10 {
+		case 1:
+			suffix = "st"
+		case 2:
+			suffix = "nd"
+		case 3:
+			suffix = "rd"
+		}
 	}
+	return fmt.Sprintf("%d%s place", placement, suffix)
 }
-
-var placementWords = [3]string{"1st place", "2nd place", "3rd place"}
 
 // accountDeletedMsg is the result of the erasure round trip; err nil means the row
 // is already anonymised and the session has nothing left to authenticate.

@@ -451,6 +451,8 @@ unnoticed for so long.
   hand as the rank-and-suit strip. A strip too long for its rows (a 46-card Uno
   hand at 64x20) scrolls with the cursor instead of pushing the pile and the
   picker's frame off the screen.
+- The profile history reads "4th place" for a fourth place, and so on past it.
+  It used to read "4 place".
 
 ### Fixed - internals worth knowing about
 

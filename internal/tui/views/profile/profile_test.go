@@ -489,13 +489,15 @@ func TestResultPlain(t *testing.T) {
 	}
 }
 
-// Beyond third the ordinal suffix is not worth a table, so the placement falls back
-// to a number - it still has to fit the fixed cell.
+// Every placement reads as an ordinal: a 4-seat match always has a 4th place, and
+// 11-13 take "th" whatever their last digit. It still has to fit the fixed cell.
 func TestPlacementPlain(t *testing.T) {
 	t.Parallel()
 
 	for placement, want := range map[int]string{
-		1: "1st place", 2: "2nd place", 3: "3rd place", 4: "4 place", 11: "11 place",
+		1: "1st place", 2: "2nd place", 3: "3rd place", 4: "4th place", 10: "10th place",
+		11: "11th place", 12: "12th place", 13: "13th place", 21: "21st place", 22: "22nd place",
+		23: "23rd place",
 	} {
 		assert.Equal(t, want, placementPlain(placement))
 		assert.LessOrEqual(t, len(want), colPlace, "the placement cell is fixed-width")
