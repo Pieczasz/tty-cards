@@ -223,6 +223,11 @@ unnoticed for so long.
   `ssh -N`, or a connection kept after its last session closed, used to hold a
   listener slot for the whole 30-minute idle timeout without being counted or
   logged. Its close is logged at info.
+- **No more plain-text lines in the server log** (operators). A session cut off
+  for flooding input, or interrupted, also wrote an unstructured
+  `ERROR app exit with error` line that bypassed the JSON log and OTLP. The
+  flood's own WARN is now the only record of it, and any other error a session's
+  screen ends with is logged as JSON at ERROR.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 

@@ -214,7 +214,7 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 		// wish's logging middleware: that one writes through the charm logger, which
 		// bypasses slog and so never reaches the OTLP handler.
 		wish.WithMiddleware(
-			bm.MiddlewareWithProgramHandler(sessionProgram(deps, reg, registerBudget)),
+			reg.runProgram(sessionProgram(deps, reg, registerBudget)),
 			activeterm.Middleware(),
 			sessionLifecycle(deps, reg),
 		),
@@ -499,6 +499,60 @@ func sessionProgram(
 		}
 		return program
 	}
+}
+
+// runProgram is wish's bubbletea middleware, reporting through slog. wish's writes a
+// plain-text line through the charm logger, which bypasses slog and with it the
+// JSON log and OTLP, and it did so at ERROR for every input-budget trip, a
+// client-caused end the guard has already logged. activeterm runs first, so the
+// session has a pty and its window changes.
+func (reg *sessionRegistry) runProgram(newProgram bm.ProgramHandler) wish.Middleware {
+	return func(next ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			program := newProgram(s)
+			if program == nil {
+				next(s)
+				return
+			}
+			_, resizes, _ := s.Pty()
+			ctx, cancel := context.WithCancel(s.Context())
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						program.Quit()
+						return
+					case w := <-resizes:
+						program.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+					}
+				}
+			}()
+			if _, err := program.Run(); err != nil {
+				reg.reportProgramExit(s, err)
+			}
+			// Restores the terminal if the program ended without doing so itself.
+			program.Kill()
+			cancel()
+			next(s)
+		}
+	}
+}
+
+// reportProgramExit logs a program that ended with an error, unless that end was
+// already reported: by the input guard, or by reportPanic on the event loop, which
+// is the goroutine Run returned on.
+func (reg *sessionRegistry) reportProgramExit(s ssh.Session, err error) {
+	if errors.Is(err, errInputOverBudget) {
+		return
+	}
+	var ctx context.Context = s.Context()
+	if st, ok := reg.load(s); ok {
+		if st.panicked {
+			return
+		}
+		ctx = st.traceCtx
+	}
+	slog.ErrorContext(ctx, "session program ended with an error", "error", err)
 }
 
 // filterSessionMsg makes bubbletea's messages safe for a remote terminal. A suspend

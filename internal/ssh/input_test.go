@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/log/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
@@ -275,7 +277,38 @@ func TestSessionInput_ThroughBubbletea(t *testing.T) {
 func TestNewServer_UnterminatedPasteClosesTheSession(t *testing.T) {
 	t.Parallel()
 	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(40), Username: "paster"})
-	client := dialInProcess(t, addr, "paster")
+	assert.Contains(t, floodPaste(t, addr, "paster"), "Too much input too fast", "the player was not told why")
+}
+
+// A trip is an expected, client-caused end, and the session's one structured WARN
+// says so. wish's middleware also wrote a plain-text ERROR for it through the charm
+// logger, which bypasses slog and with it the JSON log and OTLP.
+//
+//nolint:paralleltest // swaps the process-wide slog and charm loggers
+func TestNewServer_AnInputTripLogsOnlyItsWarning(t *testing.T) {
+	charm := &screen{}
+	prev := log.Default()
+	log.SetDefault(log.New(charm))
+	t.Cleanup(func() { log.SetDefault(prev) })
+	logs := captureLogs(t)
+	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(41), Username: "paster"})
+
+	floodPaste(t, addr, "paster")
+	// The program's exit is reported before the teardown frees the slot.
+	require.Eventually(t, func() bool { return tracker.Count() == 0 }, 5*time.Second, 10*time.Millisecond)
+
+	assert.Empty(t, charm.visible(), "a line bypassed slog")
+	assert.Equal(t, map[slog.Level]int{slog.LevelWarn: 1}, logs.levels("closing ssh session: input over budget"))
+	for _, r := range logs.snapshot() {
+		assert.Less(t, r.Level, slog.LevelError, "an expected trip logged %q at %s", r.Message, r.Level)
+	}
+}
+
+// floodPaste opens a session and pastes 10 MiB with no end marker, and returns what
+// the server wrote to stderr once it has closed the session.
+func floodPaste(t *testing.T, addr, user string) string {
+	t.Helper()
+	client := dialInProcess(t, addr, user)
 
 	s, err := client.NewSession()
 	require.NoError(t, err)
@@ -307,5 +340,5 @@ func TestNewServer_UnterminatedPasteClosesTheSession(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the session is still open under a 10 MiB unterminated paste")
 	}
-	assert.Contains(t, stderr.String(), "Too much input too fast", "the player was not told why")
+	return stderr.String()
 }
