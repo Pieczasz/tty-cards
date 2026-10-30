@@ -109,7 +109,9 @@ func (m *model) handOverHint() string {
 	default:
 		next = "waiting for the next hand"
 	}
-	return next + "   |   " + leave
+	// Two lines: on one, a long name or the warning itself is wider than the box at
+	// 64 columns, and the clamp would cut the warning short.
+	return next + "\n" + leave
 }
 
 // seatZones places the opponents around the table, starting from the seat on the

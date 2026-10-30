@@ -61,8 +61,20 @@ func (h *HandOver) ApplyMatchEnd(reason game.EndReason, matchOver bool, phase ga
 }
 
 // RenderHandOver draws h centred on the whole screen and clamped to it.
+//
+// Clamp drops rows from the top, which on a results screen is the headline. So a box
+// that does not fit sheds its Body first: that is the game's card art, while the
+// headlines, standings and hint are what a player reads the screen for.
 func RenderHandOver(g router.GlobalContext, h HandOver) string {
-	t := g.Palette()
+	box := renderHandOverBox(g.Palette(), h)
+	if h.Body != "" && (lg.Width(box) > g.Width || lg.Height(box) > g.Height) {
+		h.Body = ""
+		box = renderHandOverBox(g.Palette(), h)
+	}
+	return styles.Clamp(g.Width, g.Height, styles.Place(g.Width, g.Height, lg.Center, lg.Center, box))
+}
+
+func renderHandOverBox(t *styles.Theme, h HandOver) string {
 	parts := []string{t.Accented.Bold(true).Render(h.Title)}
 	if h.Subtitle != "" {
 		parts = append(parts, t.Accented.Render(h.Subtitle))
@@ -75,10 +87,10 @@ func RenderHandOver(g router.GlobalContext, h HandOver) string {
 	if h.Header != "" {
 		rows = append([]string{t.SectionHeading.Render(h.Header)}, rows...)
 	}
-	parts = append(parts, styles.JoinVertical(lg.Left, rows...), "", t.Dim.Render(h.Hint))
+	// Centred line by line, so a hint split over two lines still reads as one block.
+	parts = append(parts, styles.JoinVertical(lg.Left, rows...), "", t.Dim.Align(lg.Center).Render(h.Hint))
 
 	// The menus' box, so a result reads as a screen of its own rather than a few lines
 	// floating in an empty terminal.
-	content := t.Box.Render(styles.JoinVertical(lg.Center, parts...))
-	return styles.Clamp(g.Width, g.Height, styles.Place(g.Width, g.Height, lg.Center, lg.Center, content))
+	return t.Box.Render(styles.JoinVertical(lg.Center, parts...))
 }

@@ -477,3 +477,17 @@ func TestHandOverHint_SaysNothingIsLeftForABustedHero(t *testing.T) {
 	m.Base.MyTurn = false
 	assert.Contains(t, m.handOverHint(), "waiting for the next hand")
 }
+
+// Nine seats at the declared minimum is the tightest results screen there is: the box
+// and the whole of the hint still have to fit, since the hint is what warns that esc
+// forfeits the stack.
+func TestRenderHandOver_FitsNineSeatsAtTheMinimum(t *testing.T) {
+	t.Parallel()
+
+	m := tableOf(styles.MinWidth, styles.MinHeight, 9)
+	m.handComplete = true
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "HAND 3/10 COMPLETE")
+	assert.Contains(t, out, "forfeiting your chips")
+}

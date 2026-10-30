@@ -332,6 +332,11 @@ unnoticed for so long.
   as 0.
 - Hearts, Gin Rummy and Poker share one between-hands result screen, so the
   three lay out their standings the same way.
+- **The result screen keeps its headline on a small terminal.** At 80x24 Gin
+  Rummy used to cut off the hand number, the GIN/KNOCK banner and who scored,
+  showing only the bottom of the card art. The cards are now drawn small there,
+  and dropped before the headline when even that does not fit. Poker's leave
+  warning is on its own line so 64 columns no longer cut it short.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
