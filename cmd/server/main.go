@@ -20,6 +20,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -137,11 +138,13 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	userRepo := repository.NewUserRepository(database)
 	// One catalog for both: the registry the manager checks a new table against, and
 	// the entries the menus offer and the routes render.
-	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database), catalog.NewRegistry())
+	games := catalog.Games
+	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database),
+		game.NewRegistry(catalog.Modules(games)...))
 	defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)
 
 	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := newSSHServer(cfg, userRepo, lobbyManager, catalog.Games, tracker)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, games, tracker)
 	if err != nil {
 		return err
 	}
