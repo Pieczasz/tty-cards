@@ -332,7 +332,10 @@ func (m *joinModel) visibleWindow(rows int) (start, end int) {
 
 func (m *joinModel) renderList(rows int) string {
 	if len(m.entries) == 0 {
-		return m.global.Palette().Muted.Render("No tables match right now - press g, m or o to widen the filters.")
+		// Wrapped, not padded, to the frame: wider than 54 columns it widened the
+		// whole layout, so the footer broke mid-action and the title went off centre.
+		notice := m.global.Palette().Muted.Render("No tables match right now - press g, m or o to widen the filters.")
+		return lg.Wrap(notice, styles.InnerWidth(m.global.Width), "")
 	}
 
 	start, end := m.visibleWindow(rows)

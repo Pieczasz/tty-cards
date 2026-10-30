@@ -9,6 +9,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	"uuid"
@@ -337,6 +338,42 @@ func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	rendered := tuitest.StripANSI(view.View().Content)
 
 	assert.Contains(t, rendered, "No tables match")
+}
+
+// framedLine is the line holding needle, inside the frame's side borders, with the
+// blank columns either side of its text counted.
+func framedLine(t *testing.T, out, needle string) (left, right int) {
+	t.Helper()
+	for line := range strings.SplitSeq(out, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		_, inner, ok := strings.Cut(line, "│")
+		require.True(t, ok, "%q is outside the frame", line)
+		inner, _, ok = strings.Cut(inner, "│")
+		require.True(t, ok, "%q is outside the frame", line)
+		text := strings.TrimLeft(inner, " ")
+		left = lg.Width(inner) - lg.Width(text)
+		return left, lg.Width(text) - lg.Width(strings.TrimRight(text, " "))
+	}
+	require.Failf(t, "not on screen", "%q is missing from:\n%s", needle, out)
+	return 0, 0
+}
+
+// The empty-list notice is wider than the frame at 64 columns. Laid out unwrapped,
+// the centred layout was measured that wide: the footer broke inside "o - Seats" and
+// the title sat right of centre.
+func TestJoin_AnEmptyListKeepsTheLayoutAtTheMinimumSize(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+	view.global.Theme = styles.NewTheme(true)
+	view.global.Width, view.global.Height = styles.MinWidth, styles.MinHeight
+
+	out := tuitest.StripANSI(view.View().Content)
+
+	assert.Contains(t, out, "o - Seats", "the footer broke inside an action:\n%s", out)
+	left, right := framedLine(t, out, "Join Game")
+	assert.InDelta(t, left, right, 1, "the title is off centre:\n%s", out)
 }
 
 func manyTables(n int) []lobby.BrowseEntry {

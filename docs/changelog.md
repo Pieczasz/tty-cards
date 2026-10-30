@@ -467,6 +467,8 @@ unnoticed for so long.
 - The join screen's game filter keeps the game's name ("Crazy Eights") when its
   last open table goes private or starts. It used to show the internal
   `crazy_eights`.
+- At 64 columns an empty join list no longer breaks the footer inside
+  "o - Seats" or pushes the title off centre.
 
 ### Fixed - internals worth knowing about
 
