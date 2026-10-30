@@ -376,7 +376,8 @@ func (e *Engine) applyActionLocked(current *Player, action Action) error {
 }
 
 // finishGameLocked settles the winner from the rules standings and ends the table;
-// fallback names the winner when the rules rank nobody. Caller holds e.mu.
+// fallback names the winner when the rules rank nobody, and a shared first place
+// names nobody. Caller holds e.mu.
 func (e *Engine) finishGameLocked(fallback *Player, reason EndReason) {
 	// Finished and the clock stopped before the rules are asked anything: a panic in
 	// Standings then leaves a table that cannot auto-play, for endOnRulesPanicLocked
@@ -386,6 +387,10 @@ func (e *Engine) finishGameLocked(fallback *Player, reason EndReason) {
 
 	winner := fallback
 	switch standings := e.state.Rules.Standings(e.state); {
+	case len(standings) > 1 && standings[1].Place == standings[0].Place:
+		// A shared first place is a draw, and finalize records it as one; naming the
+		// seat that happens to sort first would announce a result nobody got.
+		winner = nil
 	case len(standings) > 0:
 		winner = standings[0].Player
 	case fallback == nil && len(e.state.Players) > 0:

@@ -276,3 +276,22 @@ func TestToCall_IsCappedAtTheHeroStack(t *testing.T) {
 	assert.Contains(t, bar, "c: call 15 (all-in)")
 	assert.Contains(t, tuitest.StripANSI(m.renderCenter(true)), "to call 15")
 }
+
+// PT-07: a match that ends with two stacks level shares first place, which syncState
+// reads from the same standings the engine and the database rank on.
+func TestSyncState_ReadsASharedFirstPlace(t *testing.T) {
+	t.Parallel()
+	engine, m := startedTable(t)
+	engine.WithState(func(state *game.State) {
+		e := extra(t, state)
+		for _, p := range state.Players {
+			*e.Seats[p.ID] = logic.Seat{Chips: logic.DefaultStack}
+		}
+		e.Pool, e.CurrentBet = 0, 0
+		e.Phase = logic.PhaseShowdown
+		e.MatchComplete = true
+	})
+	m.syncState()
+
+	assert.ElementsMatch(t, []string{"alice", "bob"}, m.coWinners)
+}

@@ -508,3 +508,25 @@ func TestRenderHandOver_FitsNineSeatsAtTheMinimum(t *testing.T) {
 	assert.Contains(t, out, "HAND 3/10 COMPLETE")
 	assert.Contains(t, out, "forfeiting your chips")
 }
+
+// PT-07: two seats that bust on the same hand share first place, and the database
+// records both as first. The result screen used to name one of them as the winner;
+// it has to name the tie, and still fit the smallest terminal.
+func TestRenderHandOver_NamesASharedFirstPlace(t *testing.T) {
+	t.Parallel()
+
+	m := tableOf(styles.MinWidth, styles.MinHeight, 4)
+	m.seats[0].Name, m.seats[1].Name = "sixteen_chars_aa", "sixteen_chars_bb"
+	m.handComplete, m.matchComplete = true, true
+	m.winnerName = ""
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonWin
+	m.coWinners = []string{"sixteen_chars_aa", "sixteen_chars_bb"}
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "MATCH COMPLETE - tie for first")
+	assert.Contains(t, out, "sixteen_c..., sixteen_c...")
+	assert.NotContains(t, out, " wins")
+	assert.LessOrEqual(t, lg.Width(out), styles.MinWidth)
+	assert.LessOrEqual(t, lg.Height(out), styles.MinHeight)
+}

@@ -33,6 +33,9 @@ type table struct {
 	handNumber    int
 	handsTotal    int
 	winnerName    string
+	// coWinners names the seats sharing first place once the match is over, the draw
+	// the engine names no single winner for; nil when one seat won outright.
+	coWinners []string
 
 	// raiseMin..raiseMax is what logic.RaiseBounds allows the hero; raiseOK is false
 	// when there is no raise to make at all.
@@ -114,10 +117,31 @@ func readTable(state *game.State, heroID string) table {
 	if len(e.Winners) > 0 && !t.matchComplete {
 		t.winnerName = e.Winners[0].DisplayName()
 	}
+	// Only once the rules have played the match out: a table ended by an error is
+	// never ranked, and the screen names no result for it.
+	if e.MatchComplete {
+		t.coWinners = sharedFirst(state)
+	}
 
 	t.board = slices.Clone(e.Table)
 	t.seats = logic.SeatsFor(state, heroID)
 	return t
+}
+
+// sharedFirst is the names of the seats the standings place first, when more than one
+// is: the same ranking finalize records. Caller must hold the state lock.
+func sharedFirst(state *game.State) []string {
+	var names []string
+	for _, s := range state.Rules.Standings(state) {
+		if s.Place != 1 {
+			break
+		}
+		names = append(names, s.Player.DisplayName())
+	}
+	if len(names) < 2 {
+		return nil
+	}
+	return names
 }
 
 // clampRaise holds a raise-to amount within the band the rules accept.

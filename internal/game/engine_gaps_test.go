@@ -81,3 +81,27 @@ func TestEngine_RemovePlayer_InterruptedLeaveIsNotAWin(t *testing.T) {
 	assert.True(t, engine.IsFinished())
 	assert.Equal(t, EndReasonInterrupted, endedEvent(t, drainEvents(events)).Reason)
 }
+
+// sharedFirstRules ends the match on any move with the first two seats sharing first.
+type sharedFirstRules struct{ *timeoutRules }
+
+func (*sharedFirstRules) CheckWinCondition(*State) bool { return true }
+func (*sharedFirstRules) Standings(s *State) []Standing {
+	out := inOrder(s.Players)
+	out[1].Place = 1
+	return out
+}
+
+// PT-07: two seats sharing first place is a draw, and the database records it as one.
+// The engine used to name the first of them as the match's sole winner.
+func TestEngine_SharedFirstPlaceNamesNoSingleWinner(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, &sharedFirstRules{&timeoutRules{}}, "a", "b", "c")
+
+	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), namedAction{name: "end"}))
+
+	snap := engine.Snapshot()
+	require.Equal(t, Finished, snap.Phase)
+	assert.Equal(t, EndReasonWin, snap.EndReason)
+	assert.Empty(t, snap.WinnerName, "a shared first place has no single winner")
+}

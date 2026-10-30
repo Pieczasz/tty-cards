@@ -74,6 +74,10 @@ func (m *model) renderHandOver() string {
 		h.Subtitle = ""
 	}
 	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.winnerName, nil)
+	if m.Base.EndReason == game.EndReasonWin && len(m.coWinners) > 1 {
+		h.Title = gameview.MatchOverTitle("") + " - tie for first"
+		h.Subtitle = m.tiedNames()
+	}
 
 	for _, s := range m.seats {
 		// Chip glyphs carry their own colour, so they are joined in rather than
@@ -89,6 +93,16 @@ func (m *model) renderHandOver() string {
 		h.Rows = append(h.Rows, line)
 	}
 	return gameview.RenderHandOver(m.Global, h)
+}
+
+// tiedNames lists the seats sharing first place, each elided to the name column so
+// four 16-character names still fit the 64-column box.
+func (m *model) tiedNames() string {
+	names := make([]string, len(m.coWinners))
+	for i, n := range m.coWinners {
+		names[i] = strings.TrimRight(styles.PadTruncate(n, seatNameWidth), " ")
+	}
+	return strings.Join(names, ", ")
 }
 
 // handOverHint spells out that esc leaves the whole match. The screen looks like

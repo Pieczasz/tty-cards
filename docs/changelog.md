@@ -416,6 +416,10 @@ unnoticed for so long.
 - **A poker stack short of the bet is quoted what it can actually call.** With 15
   chips facing a 50 big blind the bar reads `c: call 15 (all-in)` and the bet
   line "to call 15"; both used to quote the full 50.
+- **A shared first place is no longer announced as one player's win.** When the
+  standings place two seats first, no game names a single winner any more, and
+  Poker's result screen reads "MATCH COMPLETE - tie for first" over the tied
+  names, matching the draw recorded in the match history.
 
 ### Fixed - internals worth knowing about
 
