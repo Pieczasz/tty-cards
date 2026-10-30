@@ -27,8 +27,10 @@ var (
 	// errTooManyRegistrations refuses a *new* account, never a returning player.
 	errTooManyRegistrations = errors.New("too many new accounts from your network; please try again later")
 	// errNameUnavailable is what an unauthenticated client gets for a name that is
-	// taken. Echoing db.ErrUsernameTaken turned the login banner into a "does this
-	// account exist" oracle over every username. An invalid name is not folded into
+	// taken. It does not hide that the name exists - a free name registers, so any
+	// answer but success says it is taken, and the refund makes asking free - and it
+	// is not meant to: ranked names are public on the leaderboard. It only keeps the
+	// database's own error text off the banner. An invalid name is not folded into
 	// it: that is a fixed rule, not a fact about other accounts, so the player is told
 	// why. LoadOrRegisterUser logs the real cause either way.
 	errNameUnavailable = errors.New("could not register that name; try another with ssh -l <name>")

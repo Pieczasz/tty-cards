@@ -72,10 +72,9 @@ func TestLoadOrRegisterUser_RegisterError(t *testing.T) {
 	assert.ErrorIs(t, err, errRegistrationFailed)
 }
 
-// The caller here is unauthenticated, so "that name is taken" must not be told apart
-// from any other refusal: it would let anyone enumerate which usernames exist. A key
-// already registered is the caller's own key and tells them nothing new, so it still
-// comes back as itself.
+// The caller here is unauthenticated, so it gets fixed texts, never the database's
+// own error. A key already registered is the caller's own key and tells them nothing
+// new, so it still comes back as itself.
 func TestLoadOrRegisterUser_MapsRegistrationFailures(t *testing.T) {
 	t.Parallel()
 

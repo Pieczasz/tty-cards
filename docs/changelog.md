@@ -132,9 +132,10 @@ unnoticed for so long.
 - **A second connection to the same account now closes the first one.** A
   half-open TCP session used to keep you out of your own seat for the whole
   90-second reconnect window.
-- **A taken username gets the same answer as any other refusal.** The login
-  banner had become a way to ask "does this account exist". (An invalid name now
-  says why; see identity above.)
+- **A taken username gets a fixed answer**, not the database's error text. It
+  still says the name is taken: a free name would have registered, and ranked
+  names are public on the leaderboard anyway. (An invalid name now says why; see
+  identity above.)
 - **Reconnecting while your old session is still closing is safe.** The old
   session gives up the seat and the slot in one step, so it can no longer start a
   disconnect timer on the seat your new session is playing; and a reconnect
