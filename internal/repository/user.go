@@ -275,15 +275,15 @@ func (q *UserRepository) storeBestPlayers(gameSlug string, gen uint64, rankings 
 	}
 }
 
-// UserProfile is the account with its keys and rankings.
+// UserProfile is the account with its rankings and their games. Not its keys: the
+// profile screen never shows them, so loading them cost a query per open.
 func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *db.User, err error) {
 	ctx, span := tracer.Start(ctx, "db.UserProfile",
 		trace.WithAttributes(attribute.String("user_id", userID.String())))
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	var user db.User
-	err = q.db.WithContext(ctx).Preload("PublicSSHKeys").
-		Preload("Rankings.Game").
+	err = q.db.WithContext(ctx).Preload("Rankings.Game").
 		Where("id = ?", userID.String()).
 		First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
