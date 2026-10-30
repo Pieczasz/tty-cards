@@ -409,6 +409,10 @@ unnoticed for so long.
 - Eight fuzz targets, including `FuzzBestMeldSplit` and `FuzzClassifyHand`.
 - `goleak` in 26 packages, fit tests per screen, and `-race` tests pinning that
   hand manipulation never aliases the pile.
+- The bot end-to-end test in `cmd/loadtest` fails when its table stops moving
+  or a bot reports an error, not after a fixed minute: on a busy CI runner two
+  random-length games under `-race` outlived the minute while still playing, and
+  a bot's own error was hidden behind the timeout message.
 - CI additionally builds the Docker image for amd64 and arm64 and validates
   `compose.yaml` and `nginx.conf`. Lint is pinned to golangci-lint v2.15.0.
 
