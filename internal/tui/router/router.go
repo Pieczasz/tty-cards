@@ -116,15 +116,8 @@ type GlobalContext struct {
 	Theme *styles.Theme
 }
 
-// EnsureTheme fills the dark palette when the session has not resolved one.
-// A render holds the pointer; the unset zero is nil, not a usable palette.
-func (g *GlobalContext) EnsureTheme() {
-	if g.Theme == nil {
-		g.Theme = styles.NewTheme(true)
-	}
-}
-
-// Palette is the session theme, or the shared dark one when none is set yet.
+// Palette is the session theme, or the shared dark one when none is set yet. Every
+// render reads the theme through it, so a nil Theme needs no filling in.
 func (g *GlobalContext) Palette() *styles.Theme {
 	return styles.Or(g.Theme)
 }
@@ -165,9 +158,6 @@ type Router struct {
 
 // New is a router for one session, starting at RouteHome with no views registered.
 func New(global GlobalContext) *Router {
-	// Dark until the terminal says otherwise: most terminals are, and one that
-	// never answers the background query must still be legible.
-	global.Theme = styles.NewTheme(true)
 	return &Router{
 		Global:       global,
 		views:        make(map[Route]ViewFactory),

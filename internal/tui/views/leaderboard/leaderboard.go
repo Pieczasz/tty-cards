@@ -67,7 +67,6 @@ type model struct {
 
 // New builds the board with one filter per game on offer, in menu order.
 func New(global router.GlobalContext) tea.Model {
-	global.EnsureTheme()
 	filters := make([]boardFilter, 1, 1+len(global.Games))
 	filters[0] = boardFilter{label: filterAll}
 	for _, mod := range global.Games {

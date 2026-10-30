@@ -63,7 +63,6 @@ type Session struct {
 // before it reached the view. The error is for display, not a failure: an unsubscribed
 // view still renders, it just never updates, so it tells the player to rejoin.
 func NewSession(global router.GlobalContext, table *game.BoundEngine, slug string) (Session, error) {
-	global.EnsureTheme()
 	s := Session{Global: global, Bound: table, slug: slug}
 	if s.Bound == nil {
 		return s, nil
