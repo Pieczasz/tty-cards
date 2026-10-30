@@ -18,7 +18,9 @@ const (
 	MaxPlayers = 6
 )
 
-// dealCount is the hand every seat is dealt.
+// dealCount is the hand every seat is dealt. Deviation: the common rules deal seven
+// only heads-up and five to three or more players. Seven at every size leaves a
+// six-seat table a stock of nine, so the discard is reshuffled into it sooner.
 const dealCount = 7
 
 // Rules implements Crazy Eights; one hand is the whole game.

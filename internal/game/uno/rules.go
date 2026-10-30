@@ -48,7 +48,10 @@ func openTable(state *game.State) error {
 	extra := &State{Direction: 1}
 	state.Extra = extra
 
-	// Official Uno never starts on a Wild; redraw until a colored card surfaces.
+	// Deviation: the official rules open on a plain Wild and let the first seat name
+	// the colour, and reshuffle only a Wild Draw Four. This table has no colour
+	// prompt before the first turn, so it redraws on any Wild until a coloured card
+	// surfaces.
 	top, err := shed.OpenDiscard(state, func(c deck.Card) bool { return !IsWild(c) })
 	if err != nil {
 		return fmt.Errorf("open the uno discard pile: %w", err)
@@ -81,7 +84,7 @@ func applyOpeningCard(state *game.State, extra *State, card deck.Card) {
 		// it and only the direction flips.
 		extra.Direction = -1
 	default:
-		// A number card (a Wild cannot open, see OnGameStart): the first seat plays.
+		// A number card (a Wild cannot open, see openTable): the first seat plays.
 	}
 	state.SetTurn(first)
 }
