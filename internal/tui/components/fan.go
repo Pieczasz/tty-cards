@@ -190,6 +190,10 @@ func renderFanColumn(t *styles.Theme, card deck.Card, selected bool, width int, 
 	closeTop, closeMid, closeBot := "", "", ""
 	if closed {
 		closeTop, closeMid, closeBot = edge.Render("╮"), edge.Render("│"), edge.Render("╯")
+	} else {
+		// The mirrored corner lies under the next card, as on a real fan. Cut at the
+		// overlap, a ten's corner read "1" and a Reverse's "R": another card's rank.
+		cells[len(cells)-1] = blankRow()
 	}
 
 	lines := make([]string, 0, cardRows)

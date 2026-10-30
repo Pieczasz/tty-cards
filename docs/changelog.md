@@ -435,6 +435,10 @@ unnoticed for so long.
   standings place two seats first, no game names a single winner any more, and
   Poker's result screen reads "MATCH COMPLETE - tie for first" over the tied
   names, matching the draw recorded in the match history.
+- A card covered by the next one in your hand no longer shows half its
+  bottom-right rank: a covered ten read "1" there and a Reverse "R". The corner
+  under the next card is left blank, as on a real fan; the top-left still names
+  the card.
 
 ### Fixed - internals worth knowing about
 
