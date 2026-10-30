@@ -13,56 +13,50 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		return m.handleKey(key)
+		cmd := m.handleKey(key)
+		return m, cmd
 	}
 	return m, nil
 }
 
-func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// esc takes the raise prompt down before it can mean leaving the table.
 	if msg.String() == "esc" && m.raising {
 		m.raising = false
-		return m, nil
+		return nil
 	}
 	if cmd, ok := m.HandleLeaveKey(msg.String()); ok {
-		return m, cmd
+		return cmd
 	}
 
 	switch msg.String() {
 	case "f":
 		if m.canFold() {
-			return m.submit(logic.ActionFold{})
+			m.submit(logic.ActionFold{})
 		}
-		return m, nil
 	case "c":
 		if m.canCheck() {
-			return m.submit(logic.ActionCheck{})
+			m.submit(logic.ActionCheck{})
+		} else if m.canCall() {
+			m.submit(logic.ActionCall{})
 		}
-		if m.canCall() {
-			return m.submit(logic.ActionCall{})
-		}
-		return m, nil
 	case "a":
 		if m.canAllIn() {
 			m.raising = false
-			return m.submit(logic.ActionAllIn{})
+			m.submit(logic.ActionAllIn{})
 		}
-		return m, nil
 	case "r":
-		return m.beginRaise()
+		m.beginRaise()
 	case "1", "2", "3", "4":
 		m.addChip(msg.String())
-		return m, nil
 	case "[", "h":
 		m.stepRaise(-1)
-		return m, nil
 	case "]", "l":
 		m.stepRaise(+1)
-		return m, nil
 	case "enter":
-		return m.confirm()
+		m.confirm()
 	}
-	return m, nil
+	return nil
 }
 
 // addChip pushes one chip of the keyed denomination into the pending raise, which
@@ -98,41 +92,39 @@ func (m *model) stepRaise(direction int) {
 
 // confirm deals the next hand or commits the pending raise. Leaving a finished match
 // is HandleLeaveKey's, the one leave path, so it is never a forfeit unasked.
-func (m *model) confirm() (tea.Model, tea.Cmd) {
+func (m *model) confirm() {
 	if m.canDeal() {
-		return m.submit(logic.ActionNextHand{})
+		m.submit(logic.ActionNextHand{})
+		return
 	}
 	if m.raising && m.Base.MyTurn {
 		amount := m.raiseAmount
 		m.raising = false
-		return m.submit(logic.ActionRaiseTo{Amount: amount})
+		m.submit(logic.ActionRaiseTo{Amount: amount})
 	}
-	return m, nil
 }
 
 // beginRaise opens the raise prompt at the smallest legal raise, so every chip
 // the player then adds is on top of an amount that is already valid.
-func (m *model) beginRaise() (tea.Model, tea.Cmd) {
+func (m *model) beginRaise() {
 	if !m.canRaise() {
-		return m, nil
+		return
 	}
 	m.raising = true
 	m.raiseAmount = m.raiseMin
-	return m, nil
 }
 
-func (m *model) submit(action game.Action) (tea.Model, tea.Cmd) {
+func (m *model) submit(action game.Action) {
 	if m.HeroID() == "" || !m.Base.MyTurn {
-		return m, nil
+		return
 	}
 	if err := m.Submit(action); err != nil {
-		return m, nil
+		return
 	}
 	// Re-sync immediately so the turn indicator and actions reflect the applied
 	// move without waiting for the broadcast event to round-trip.
 	m.raising = false
 	m.syncState()
-	return m, nil
 }
 
 // Close comes from the embedded Session. Without it a mid-game disconnect never runs

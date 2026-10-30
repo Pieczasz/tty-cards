@@ -88,7 +88,7 @@ func TestConfirm_DealsTheNextHandInsteadOfLeaving(t *testing.T) {
 
 	// The button lands on either seat, so both sides of the prompt get asserted.
 	heroDeals := m.canDeal()
-	_, cmd := m.confirm()
+	_, cmd := m.Update(tuitest.Key("enter"))
 	assert.Nil(t, cmd, "enter between hands never navigates away")
 	if !heroDeals {
 		assert.True(t, m.handComplete, "the hero cannot deal on another player's button")
@@ -372,9 +372,8 @@ func TestSubmit(t *testing.T) {
 		if m.toCall > 0 {
 			action = logic.ActionCall{}
 		}
-		_, cmd := m.submit(action)
+		m.submit(action)
 
-		assert.Nil(t, cmd)
 		// Submit returns nil only when the engine applied the move, so a clear
 		// error line is also the proof the action reached the engine.
 		require.NoError(t, m.ActionErr, "a successful move clears the previous complaint")
@@ -387,9 +386,8 @@ func TestSubmit(t *testing.T) {
 		heroOnTurn(t, engine, m)
 
 		street := m.street
-		_, cmd := m.submit(logic.ActionRaiseTo{Amount: 1})
+		m.submit(logic.ActionRaiseTo{Amount: 1})
 
-		assert.Nil(t, cmd)
 		require.Error(t, m.ActionErr, "the player has to be told why nothing happened")
 		assert.Equal(t, street, m.street, "and the table has not moved")
 	})
@@ -400,9 +398,8 @@ func TestSubmit(t *testing.T) {
 		m.Base.MyTurn = false
 		m.ActionErr = nil
 
-		_, cmd := m.submit(logic.ActionFold{})
+		m.submit(logic.ActionFold{})
 
-		assert.Nil(t, cmd)
 		require.NoError(t, m.ActionErr, "there is nothing to report, the key is simply not ours")
 		assert.False(t, m.handComplete, "and the hand is untouched")
 	})
