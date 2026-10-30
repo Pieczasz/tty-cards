@@ -51,15 +51,15 @@ internal and holds only Alloy and the docker socket proxy.
 | PROXY header | only from `PROXY_TRUSTED_CIDRS` | `proxyListener` |
 | listener | `2 x MAX_CONNECTIONS` | `netutil.LimitListener` |
 | account slots | `MAX_CONNECTIONS`; a second connect displaces the first | `ssh.SessionTracker` |
-| auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` per network | `ssh.rateLimitAuth` |
+| auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` per network, 16x that per IPv6 /48 | `ssh.rateLimitAuth` |
 | registration | per window: 5 /64, 20 /48, 600 global; refunded if no account is created | `ssh.allowRegistration` |
 | session input | 1 KiB/s after a 16 KiB burst; 32 KiB without a pause | `ssh.inputGuard` |
 | terminal size | tiers 250x80 down to a 120x40 floor inside a 5M-cell budget | `internal/ssh/termsize.go` |
 | stats API | `API_REQUESTS_PER_MINUTE` per network | `httpapi.withRateLimit` |
 | disconnect grace | 90s mid-game; waiting seats leave immediately | `lobby.DisconnectPlayer` |
 
-Network limits key on `ratelimit.NetKey` (IPv6 /64). Registration also spends
-`ratelimit.WideKey` (IPv6 /48).
+Network limits key on `ratelimit.NetKey` (IPv6 /64). Auth and registration also
+spend `ratelimit.WideKey` (IPv6 /48).
 
 ## Invariants
 

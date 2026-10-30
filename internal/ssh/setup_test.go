@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -170,7 +171,7 @@ func TestRateLimitAuth(t *testing.T) {
 			t.Parallel()
 			nextCalls := 0
 			handler := rateLimitAuth(
-				ratelimit.New(3, time.Minute), ratelimit.New(1, time.Minute),
+				ratelimit.New(3, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 				func(ssh.Context, ssh.PublicKey) bool { nextCalls++; return true },
 			)
 
@@ -190,13 +191,33 @@ func TestRateLimitAuth_CollapsesIPv6ToItsPrefix(t *testing.T) {
 	t.Parallel()
 
 	handler := rateLimitAuth(
-		ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
+		ratelimit.New(1, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true },
 	)
 
 	assert.True(t, handler(newStubSSHContext(stubAddr{"[2001:db8::1]:2222"}), nil))
 	assert.False(t, handler(newStubSSHContext(stubAddr{"[2001:db8::dead:beef]:2222"}), nil),
 		"a second address in the same /64 spent someone else's budget")
+}
+
+// A free tunnel is a /48: 65,536 /64s, each a fresh per-network bucket. Without a
+// /48 budget, one tunnel started sessions - each a database lookup and a TUI - as
+// fast as it could finish handshakes.
+func TestRateLimitAuth_ATunnelSharesOneWideBudget(t *testing.T) {
+	t.Parallel()
+	narrow := ratelimit.New(1, time.Minute)
+	handler := rateLimitAuth(narrow, ratelimit.New(16, time.Minute), ratelimit.New(1, time.Minute),
+		func(ssh.Context, ssh.PublicKey) bool { return true })
+
+	accepted := 0
+	for n := range 1000 {
+		if handler(newStubSSHContext(stubAddr{fmt.Sprintf("[2001:db8:0:%x::1]:2222", n)}), nil) {
+			accepted++
+		}
+	}
+	assert.Equal(t, 16, accepted, "every /64 of the /48 got a budget of its own")
+	assert.True(t, narrow.Allow(ratelimit.NetKey("2001:db8:0:3e7::1")),
+		"a /64 the wide budget refused still lost its own attempt")
 }
 
 func testBudget(perNet, perWide, global int) registrationBudget {

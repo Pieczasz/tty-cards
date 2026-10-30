@@ -186,7 +186,9 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 	server, err := wish.NewServer(
 		wish.WithHostKeyPEM(key.RawPrivateKey()),
 		wish.WithIdleTimeout(connIdleTimeout),
-		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter, ratelimit.New(1, authRefusalLogEvery),
+		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter,
+			ratelimit.New(authWideFactor*deps.Config.RateLimitCount, deps.Config.RateLimitWindow),
+			ratelimit.New(1, authRefusalLogEvery),
 			func(_ ssh.Context, _ ssh.PublicKey) bool { return true })),
 		// wish runs the last middleware first, so this slice is in reverse execution
 		// order. Connect/disconnect logging is sessionLifecycle's job rather than
@@ -243,7 +245,14 @@ func clientHost(addr net.Addr) (string, bool) {
 // an address, in a store kept 14 days; the rest go to debug and the counter.
 const authRefusalLogEvery = time.Minute
 
-func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
+// authWideFactor sizes the /48's auth budget against one network's. A free tunnel
+// is 65,536 /64s, each a fresh network budget; 16 networks' worth still lets a site
+// behind one /48 sign in with ssh-agents offering several keys each.
+const authWideFactor = 16
+
+// rateLimitAuth spends limiter's budget on the client's network and wide's on its
+// /48, refusing when either is spent; warned only picks the refusal's log level.
+func rateLimitAuth(limiter, wide, warned *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
 	return func(ctx ssh.Context, key ssh.PublicKey) bool {
 		host, ok := clientHost(ctx.RemoteAddr())
 		if !ok {
@@ -254,7 +263,7 @@ func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyH
 			}
 			return false
 		}
-		if !limiter.Allow(ratelimit.NetKey(host)) {
+		if !allowAuth(limiter, wide, host) {
 			observability.RateLimitReject(ctx, "ssh")
 			if firstAuthRefusal(ctx) {
 				observability.SSHAuthReject(ctx, "ratelimit")
@@ -269,6 +278,20 @@ func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyH
 		}
 		return next(ctx, key)
 	}
+}
+
+// allowAuth spends the network's budget, then the /48's. A /48 refusal gives the
+// network back its attempt, as registration does: the attempt never happened.
+func allowAuth(limiter, wide *ratelimit.SlidingWindow, host string) bool {
+	key := ratelimit.NetKey(host)
+	if !limiter.Allow(key) {
+		return false
+	}
+	if !wide.Allow(ratelimit.WideKey(host)) {
+		limiter.Refund(key)
+		return false
+	}
+	return true
 }
 
 // firstAuthRefusal reports whether this is the connection's first refused auth

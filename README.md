@@ -210,7 +210,7 @@ Full list with comments in [`.env.example`](.env.example).
 | `MAX_CONNECTIONS` | `1000` | concurrent sessions (one per account; compose sets 1250, the most measured to hold on its 3 cores); the listener's backstop is twice this. Each session costs memory (`docs/architecture.md` §3.2), so raise it only with `GOMEMLIMIT` and the backend's `mem_limit` |
 | `SSH_KEY_PATH` | `.wishlist/server` | host key |
 | `SERVICE_VERSION` | the build's module version | stamped on `service.version` so dashboards can tell deploys apart |
-| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network. The window is a Go duration (`1s`, `500ms`) |
+| `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` | `5` / `1s` | SSH **auth attempts** per client network (IPv6 /64), and 16 times that per IPv6 /48 (a free tunnel is one /48 of 65,536 /64s). The window is a Go duration (`1s`, `500ms`) |
 | `REGISTRATION_LIMIT` / `REGISTRATION_WINDOW` | `5` / `1h` | new accounts per client network (IPv6 /64); raise for `make loadtest` |
 | `REGISTRATION_LIMIT_WIDE` | `20` | new accounts per IPv6 /48 per `REGISTRATION_WINDOW` (a free tunnel is one /48 of 65,536 /64s); IPv4 stays per address. Raise with `REGISTRATION_LIMIT` for `make loadtest` |
 | `REGISTRATION_GLOBAL_LIMIT` | `600` | new accounts across every network per `REGISTRATION_WINDOW`; returning players never spend it. Raise for `make loadtest` |

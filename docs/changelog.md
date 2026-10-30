@@ -190,6 +190,9 @@ unnoticed for so long.
   `127.0.0.1:3000` behind an SSH tunnel.
 - nginx's connection and request limits key on the IPv6 /64, so one customer with
   a /64 no longer has 2^64 ways around them.
+- **SSH sign-in has a budget per IPv6 /48 too** (operators), 16 times
+  `RATE_LIMIT_CONNECTIONS`. A free tunnel is one /48 of 65,536 /64s, and each /64
+  had a fresh sign-in budget of its own.
 - Stats-API metrics no longer take their server label from the client's own
   `Host` header.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service

@@ -69,7 +69,7 @@ func TestRateLimitAuth_CountsARefusedConnectionOnce(t *testing.T) {
 	sessionsBefore := metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_ratelimit")
 	unkeyableBefore := metricTotal(t, rejects, "reason", "unkeyable")
 
-	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
+	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true })
 	agent := newStubSSHContext(stubAddr{"198.51.100.20:2222"})
 	for range 6 {
@@ -94,7 +94,7 @@ func TestRateLimitAuth_CountsARefusedConnectionOnce(t *testing.T) {
 //nolint:paralleltest // swaps the process-global logger
 func TestRateLimitAuth_WarnsOncePerNetworkPerWindow(t *testing.T) {
 	logs := captureLogs(t)
-	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
+	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true })
 
 	// Ten /64s of one /48, each spending its budget and then refused.
