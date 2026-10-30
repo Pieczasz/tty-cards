@@ -965,10 +965,10 @@ func TestRunShowdown_UncalledBetComesBackToADepartedOverBettor(t *testing.T) {
 	assert.Equal(t, uint(300), potTotal(extra.Pots), "only the matched chips form a pot")
 }
 
-// A deal that cannot be completed leaves chips in the pool that no showdown will ever
-// award. The hand is unwound rather than closed over them: finishHand would otherwise
-// report a match whose standings are short a pot.
-func TestSettleFailure_HandsThePotBack(t *testing.T) {
+// MaxPlayers keeps a real deck from running dry, so only an injected one reaches this.
+// A street that cannot be dealt is an error from both paths, and the engine ends the
+// match on it as a rules error: the hand is not closed over chips no showdown awarded.
+func TestSettleFailure_EndsTheMatch(t *testing.T) {
 	t.Parallel()
 
 	brokenTable := func() (*game.State, *State) {
@@ -987,12 +987,8 @@ func TestSettleFailure_HandsThePotBack(t *testing.T) {
 		t.Parallel()
 		state, extra := brokenTable()
 
-		require.Error(t, afterBettingAction(state, extra))
-
-		assert.True(t, extra.HandComplete(), "the same unwind as a leave: the hand is closed")
-		assert.Equal(t, uint(1000), extra.Seats["a"].Chips)
-		assert.Equal(t, uint(1000), extra.Seats["b"].Chips)
-		assert.Zero(t, extra.Pool)
+		require.ErrorContains(t, afterBettingAction(state, extra), "deck empty")
+		assert.False(t, extra.HandComplete(), "no showdown paid the pot, so the hand is not closed")
 	})
 
 	t.Run("after a player leaves", func(t *testing.T) {
@@ -1001,11 +997,7 @@ func TestSettleFailure_HandsThePotBack(t *testing.T) {
 
 		assert.Panics(t, func() { (&Rules{}).AfterPlayerRemoved(state, 0) },
 			"a leave reports a deal failure the same way ApplyAction does: the match ends")
-
-		assert.True(t, extra.HandComplete(), "the hand is closed, not left on a dead deck")
-		assert.Equal(t, uint(1000), extra.Seats["a"].Chips)
-		assert.Equal(t, uint(1000), extra.Seats["b"].Chips)
-		assert.Zero(t, extra.Pool)
+		assert.False(t, extra.HandComplete())
 	})
 }
 

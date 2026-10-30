@@ -5,6 +5,7 @@ package poker
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
@@ -79,6 +80,9 @@ func (r *Rules) OnGameStart(state *game.State) error {
 	nPlayers := len(state.Players)
 	if nPlayers == 0 {
 		return errors.New("cannot start a hand with no players")
+	}
+	if nPlayers > MaxPlayers {
+		return fmt.Errorf("poker seats at most %d players, got %d", MaxPlayers, nPlayers)
 	}
 
 	extra := &State{

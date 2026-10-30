@@ -126,6 +126,20 @@ func TestRules_OnGameStart_RefusesAnEmptyTable(t *testing.T) {
 	assert.Nil(t, state.Extra)
 }
 
+// MaxPlayers is what keeps one deck enough for every hand, so the rules hold the
+// line themselves rather than trust every caller to.
+func TestRules_OnGameStart_RefusesMoreThanMaxPlayers(t *testing.T) {
+	t.Parallel()
+	players := make([]*game.Player, MaxPlayers+1)
+	for i := range players {
+		players[i] = &game.Player{ID: fmt.Sprintf("p%d", i)}
+	}
+	state := game.NewState(&Rules{}, players, nil)
+
+	require.ErrorContains(t, (&Rules{}).OnGameStart(state), "seats at most")
+	assert.Nil(t, state.Extra)
+}
+
 func TestRules_ApplyAction(t *testing.T) {
 	t.Parallel()
 
