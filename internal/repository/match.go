@@ -239,25 +239,21 @@ func deltasOf(writes []rating.Write) map[uuid.UUID]int {
 }
 
 // seedRankingRows gives fetchRankings something to lock. A first-time (user_id, game_id)
-// has no row, so FOR UPDATE locks nothing and two concurrent finalizes both insert: one
-// hits 23505, rolls back and loses the match. Sorted by user_id because a conflicting
-// insert still waits on the inserting transaction, though the ordering that matters is
-// fetchRankings' - ON CONFLICT DO NOTHING takes no lock on an existing row.
+// has no row, so FOR UPDATE locks nothing and applyRatings has nothing to update. Row
+// order does not matter here: every writer of a user's rankings already holds that
+// user's seat lock (lockPairing or lockSeat, invariant 7), so two transactions that
+// share a user never interleave on these rows.
 //
 // Soft-deleted rankings are revived first: DO NOTHING leaves them invisible to the
 // default scope, and a missing row used to abort the whole table's finalize.
 func seedRankingRows(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) error {
-	// Sorted for the same reason fetchRankings orders: an UPDATE locks the rows its
-	// IN list yields, so two finalizes over overlapping seats would otherwise take
-	// the revived rows in opposite orders and Postgres would abort one.
-	sorted := sortedUserIDs(userIDs)
 	if err := tx.Unscoped().Model(&db.Ranking{}).
-		Where("user_id IN ? AND game_id = ? AND deleted_at IS NOT NULL", uuidStrings(sorted), gameID).
+		Where("user_id IN ? AND game_id = ? AND deleted_at IS NOT NULL", uuidStrings(userIDs), gameID).
 		Update("deleted_at", nil).Error; err != nil {
 		return fmt.Errorf("revive rankings: %w", err)
 	}
 	seeds := make([]db.Ranking, 0, len(userIDs))
-	for _, userID := range sorted {
+	for _, userID := range userIDs {
 		seeds = append(seeds, db.Ranking{UserID: userID, GameID: gameID, Elo: elo.ToUint32(elo.DefaultRating)})
 	}
 	if err := tx.Clauses(clause.OnConflict{
@@ -492,12 +488,6 @@ func likePrefix(prefix string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix) + "%"
 }
 
-func sortedUserIDs(userIDs []uuid.UUID) []uuid.UUID {
-	out := slices.Clone(userIDs)
-	slices.SortFunc(out, uuid.UUID.Compare)
-	return out
-}
-
 func uuidStrings(ids []uuid.UUID) []string {
 	// Stdlib uuid.UUID has no database/sql Valuer; pgx will not encode it as uuid.
 	out := make([]string, len(ids))
@@ -542,13 +532,10 @@ func recordMatch(
 
 func fetchRankings(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) (map[uuid.UUID]*db.Ranking, error) {
 	var rankings []db.Ranking
-	// FOR UPDATE: serialize concurrent finalize transactions to avoid lost Elo updates.
-	//
-	// ORDER BY user_id is what makes that safe rather than deadlock-prone: this is
-	// where the row locks are actually taken (the seed's ON CONFLICT DO NOTHING locks
-	// nothing when the row already exists, which is the common case), so without a
-	// fixed order two finalizes over overlapping seats can lock in opposite orders.
-	// Postgres then aborts one, and transactRetrying only runs it again so many times.
+	// The seat locks serialize every transaction that writes these users' rankings
+	// (lockPairing or lockSeat, invariant 7), so they, not this, are what stop lost
+	// Elo updates and deadlocks. FOR UPDATE with a fixed ORDER BY is a cheap backstop
+	// should a writer ever skip them, not the protocol.
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("user_id IN ? AND game_id = ?", uuidStrings(userIDs), gameID).
 		Order("user_id").Find(&rankings).Error; err != nil {
