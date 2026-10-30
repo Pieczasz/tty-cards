@@ -8,6 +8,7 @@ make test # go test -race ./...
 make test-integration # -tags=integration, needs Docker (testcontainers)
 make lint # golangci-lint, both build tags
 make semgrep # .semgrep/ project-invariant rules: their tests, then a scan
+make vulncheck # govulncheck, the version and scan CI runs
 make cover # unit + integration with -race; fails under 95% combined coverage
 make build # -> bin/server
 make ci # fmt, fix, lint, deadcode, semgrep, cover, build (needs Docker and uv)
