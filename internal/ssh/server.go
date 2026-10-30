@@ -19,6 +19,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
@@ -77,9 +78,11 @@ type sessionState struct {
 	traceCtx context.Context
 	span     trace.Span
 	started  time.Time
-	// user is set only once the session owns its tracker slot, so a nil user is
-	// what tells the teardown there is no slot or seat to give up.
-	user     *db.User
+	// player is set only once the session owns its tracker slot, so a nil player is
+	// what tells the teardown there is no slot or seat to give up. It is the login's
+	// db.User mapped to a seat once, here at the auth boundary, and the same pointer
+	// the TUI is built from.
+	player   *game.Player
 	model    router.Closer
 	gen      uint64
 	panicked bool
@@ -358,12 +361,13 @@ func sessionModel(
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
 		}
+		player := lobby.NewPlayer(user)
 		// Built before the slot is claimed: a panic in here would otherwise strand a
 		// tracker slot that nothing releases - and that account cannot connect again
 		// until a restart.
 		model := tui.New(tui.Deps{
 			SessionCtx:   traceCtx,
-			User:         *user,
+			Player:       player,
 			Profiles:     deps.Profiles,
 			Leaderboard:  deps.Leaderboard,
 			LobbyManager: deps.LobbyManager,
@@ -374,7 +378,7 @@ func sessionModel(
 		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
 		st.run, st.endRun = context.WithCancel(context.Background())
-		gen, err := deps.Tracker.Connect(user.ID, conn, displaceable(s, st.endRun))
+		gen, err := deps.Tracker.Connect(player.UserID, conn, displaceable(s, st.endRun))
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
@@ -383,11 +387,11 @@ func sessionModel(
 		}
 		observability.SSHSession(traceCtx, "accepted")
 		// Published before ResumeSeat: a panic there still has to ReleaseWith, and
-		// releaseSession skips a session whose user was never stored. Only once the
+		// releaseSession skips a session whose player was never stored. Only once the
 		// slot is ours, though — a refused session must not cancel the grace timer
 		// holding this player's seat, and a displaced one has finished its teardown
 		// by now, so any timer it armed is there to cancel.
-		st.user = user
+		st.player = player
 		st.gen = gen
 		st.model = model
 		tui.ResumeSeat(model)

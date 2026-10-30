@@ -50,7 +50,7 @@ func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.Use
 
 	r := New(Deps{
 		SessionCtx:   t.Context(),
-		User:         *user,
+		Player:       internallobby.NewPlayer(user),
 		LobbyManager: manager,
 		Games:        catalog.Games,
 	})
@@ -64,7 +64,7 @@ func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
 	t.Parallel()
 	only := catalog.Games[1:2]
 
-	r := New(Deps{User: db.User{ID: testutil.UID(1)}, Games: only})
+	r := New(Deps{Player: internallobby.NewPlayer(&db.User{ID: testutil.UID(1)}), Games: only})
 
 	require.Len(t, r.Global.Games, 1)
 	assert.Equal(t, only[0].Slug, r.Global.Games[0].Slug)
@@ -76,7 +76,7 @@ func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
 // compares that seat against are one pointer until a ranked match reseats it.
 func TestNew_BuildsTheSessionPlayerOnce(t *testing.T) {
 	t.Parallel()
-	r := New(Deps{User: db.User{ID: testutil.UID(1), Username: "alice"}})
+	r := New(Deps{Player: internallobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})})
 
 	require.NotNil(t, r.Global.Player)
 	assert.Equal(t, testutil.UID(1), r.Global.Player.UserID)
@@ -208,7 +208,7 @@ func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 
 		r := New(Deps{
 			SessionCtx:   t.Context(),
-			User:         *user,
+			Player:       internallobby.NewPlayer(user),
 			LobbyManager: manager,
 			Games:        catalog.Games,
 		})

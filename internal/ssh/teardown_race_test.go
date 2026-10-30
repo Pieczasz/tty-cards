@@ -47,7 +47,7 @@ func TestReleaseSession_RacingReconnectNeverLeavesTheSeatOnATimer(t *testing.T) 
 		require.NoError(t, err)
 		reg := &sessionRegistry{}
 		old := &stubSession{addr: stubAddr{"10.0.0.1:1"}}
-		reg.store(old, &sessionState{user: user, gen: oldGen})
+		reg.store(old, &sessionState{player: lobby.NewPlayer(user), gen: oldGen})
 
 		deps := newSessionDeps(t, stubUserRepo{user: user})
 		deps.LobbyManager = manager

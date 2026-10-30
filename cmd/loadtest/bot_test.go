@@ -72,7 +72,7 @@ func playTable(t *testing.T, seats, games int) *recorder {
 	for seat := range seats {
 		model := tui.New(tui.Deps{
 			SessionCtx: t.Context(), LobbyManager: mgr, Games: catalog.Games,
-			User: db.User{ID: testutil.UID(seat + 1), Username: fmt.Sprintf("bot_%d", seat)},
+			Player: lobby.NewPlayer(&db.User{ID: testutil.UID(seat + 1), Username: fmt.Sprintf("bot_%d", seat)}),
 		})
 		_, scr, keys := startProgram(t, model)
 		b := &bot{

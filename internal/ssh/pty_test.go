@@ -119,7 +119,7 @@ func TestSessionLifecycle_PanicClosingTheViewStillReleasesTheSession(t *testing.
 		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
 			st, ok := reg.load(s)
 			require.True(t, ok)
-			st.user = user
+			st.player = lobby.NewPlayer(user)
 			st.gen = gen
 			st.model = panickyModel{}
 		}),

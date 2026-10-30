@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 
 	"charm.land/ssh"
@@ -220,8 +219,8 @@ func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
 		"outcome", outcome,
 	)
 
-	if st.user != nil {
-		st.span.SetAttributes(attribute.String("user", st.user.Username))
+	if st.player != nil {
+		st.span.SetAttributes(attribute.String("user", st.player.Name))
 	}
 	st.span.End()
 }
@@ -285,12 +284,12 @@ func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
 // neither.
 func (reg *sessionRegistry) releaseSession(s ssh.Session, deps Deps) {
 	st, ok := reg.load(s)
-	if !ok || st.user == nil {
+	if !ok || st.player == nil {
 		return
 	}
 	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
 	// for the grace window, so a reconnect resumes the match instead of forfeiting.
-	deps.Tracker.ReleaseWith(st.user.ID, st.gen, func() {
-		deps.LobbyManager.DisconnectPlayer(st.traceCtx, lobby.NewPlayer(st.user))
+	deps.Tracker.ReleaseWith(st.player.UserID, st.gen, func() {
+		deps.LobbyManager.DisconnectPlayer(st.traceCtx, st.player)
 	})
 }

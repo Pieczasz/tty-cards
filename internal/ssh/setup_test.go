@@ -20,6 +20,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
+	"github.com/Pieczasz/tty-cards/internal/tui/router"
 
 	"uuid"
 
@@ -508,7 +509,10 @@ func TestSessionModel_AcceptedSessionIsFullyRegistered(t *testing.T) {
 	require.NotNil(t, model)
 	t.Cleanup(func() { st.model.Close() })
 
-	assert.Equal(t, user, st.user, "teardown skips a session with no user, so it would free nothing")
+	assert.Equal(t, lobby.NewPlayer(user), st.player, "teardown skips a session with no player, so it would free nothing")
+	r, ok := st.model.(*router.Router)
+	require.True(t, ok)
+	assert.Same(t, st.player, r.Global.Player, "the session's identity is mapped once, at the auth boundary")
 	assert.NotZero(t, st.gen)
 	assert.NotNil(t, st.model, "closeSessionModel would leave the view's subscriptions running")
 	assert.True(t, release(tracker, user.ID, st.gen), "the session does not own the slot it claimed")
@@ -530,7 +534,7 @@ func TestSessionModel_ResumePanicStillPublishesTheSlot(t *testing.T) {
 	deps.LobbyManager = nil
 
 	require.Panics(t, func() { sessionModel(deps, reg, testBudget(5, 5, 5))(s) })
-	require.NotNil(t, st.user, "teardown skips a session whose user was never stored")
+	require.NotNil(t, st.player, "teardown skips a session whose player was never stored")
 	assert.NotZero(t, st.gen)
 	require.NotNil(t, st.model)
 	t.Cleanup(func() { st.model.Close() })

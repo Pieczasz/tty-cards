@@ -7,6 +7,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
@@ -21,8 +22,10 @@ import (
 
 // Deps is what New needs from the session and the server.
 type Deps struct {
-	SessionCtx   context.Context
-	User         db.User
+	SessionCtx context.Context
+	// Player is the session's identity, mapped from the login's db.User once at the
+	// ssh auth boundary. The views read it, never the GORM model.
+	Player       *game.Player
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
 	LobbyManager *internallobby.Manager
@@ -36,7 +39,7 @@ type Deps struct {
 // value would hide the one method that releases the active view's subscription.
 func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
-		Player:       internallobby.NewPlayer(&deps.User),
+		Player:       deps.Player,
 		Profiles:     deps.Profiles,
 		Leaderboard:  deps.Leaderboard,
 		LobbyManager: deps.LobbyManager,
