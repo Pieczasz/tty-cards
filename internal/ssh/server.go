@@ -407,10 +407,10 @@ type closerFunc func() error
 func (f closerFunc) Close() error { return f() }
 
 // displaceable is what Connect closes when a newer session for the account arrives
-// on s's own connection. Closing the channel alone ends nothing: the program keeps
-// running on the connection's context, and the channel cap frees its slot as soon
-// as the channel closes, so one connection looping shells would hold any number of
-// TUIs. Cancelling the run context first also covers a program not yet started,
+// on s's own connection. Closing the channel alone ends nothing: wish quits the
+// program only when the session's context ends, which charm ssh shares across the
+// connection, and the channel cap frees its slot as soon as the channel closes, so
+// one connection looping shells would hold any number of TUIs. Cancelling the run context first also covers a program not yet started,
 // whose Run then returns at once.
 func displaceable(s ssh.Session, endRun context.CancelFunc) io.Closer {
 	return closerFunc(func() error {
