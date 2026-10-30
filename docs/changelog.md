@@ -156,7 +156,10 @@ unnoticed for so long.
   and a connection can no longer open more session channels than the cap (or
   flood the environment) before being counted. The exception is a second session
   on the same connection, as OpenSSH's `ControlMaster` opens: only the first
-  session's channel is closed, where hanging up the connection used to drop both.
+  session is ended, where hanging up the connection used to drop both. Its screen
+  now stops on the server too, not just its channel: one connection opening shell
+  after shell used to pile up running screens, and every one of them shrank the
+  screen size the server grants to all players.
 - **A typo in `ENV` fails the boot** (operators). `ENV=prod` used to start a
   production server in development mode with every production check off. In
   production, `DB_SSLMODE` must also be `require`, `verify-ca` or `verify-full`

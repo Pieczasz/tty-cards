@@ -89,6 +89,13 @@ type sessionState struct {
 	size    sessionSize
 	// program is set before the program runs, for the retier sweep to nudge.
 	program atomic.Pointer[tea.Program]
+	// run is the program's context and endRun ends it. charm ssh hands every session
+	// on a connection that connection's context, so a session displaced by a newer
+	// one on the same connection has nothing else that stops its program. Both are
+	// set just before Connect; endRun is safe from any goroutine, and finishSession
+	// calls it so run leaves its parent.
+	run    context.Context
+	endRun context.CancelFunc
 }
 
 // filter is the session's bubbletea message filter: the input guard's bookkeeping and
@@ -364,7 +371,8 @@ func sessionModel(
 		// any other channel on it up until the peer notices. The session is for a
 		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		gen, err := deps.Tracker.Connect(user.ID, conn, s)
+		st.run, st.endRun = context.WithCancel(s.Context())
+		gen, err := deps.Tracker.Connect(user.ID, conn, displaceable(s, st.endRun))
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
@@ -389,6 +397,24 @@ func sessionModel(
 		// down the process for every connected player, not just this session.
 		return reportingModel{Model: model, session: s, reg: reg}
 	}
+}
+
+// closerFunc is an io.Closer made of a func.
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+// displaceable is what Connect closes when a newer session for the account arrives
+// on s's own connection. Closing the channel alone ends nothing: the program keeps
+// running on the connection's context, and the channel cap frees its slot as soon
+// as the channel closes, so one connection looping shells would hold any number of
+// TUIs. Cancelling the run context first also covers a program not yet started,
+// whose Run then returns at once.
+func displaceable(s ssh.Session, endRun context.CancelFunc) io.Closer {
+	return closerFunc(func() error {
+		endRun()
+		return s.Close()
+	})
 }
 
 // reportingModel reports a panic in the TUI against the session's trace context and
@@ -447,7 +473,8 @@ func sessionProgram(
 			tea.WithInput(st.input),
 			tea.WithWindowSize(size.w, size.h),
 			tea.WithFPS(sessionFPS),
-			tea.WithFilter(st.filter))...)
+			tea.WithFilter(st.filter),
+			tea.WithContext(st.run))...)
 		st.program.Store(program)
 		if moved {
 			reg.retier()

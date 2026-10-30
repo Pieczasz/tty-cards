@@ -343,3 +343,30 @@ func TestNewServer_SecondChannelOnTheSameConnectionDisplacesOnlyTheFirst(t *test
 	}
 	assert.Equal(t, 1, tracker.Count())
 }
+
+// Closing a displaced session's channel alone ends nothing on the server: its
+// program runs on the connection's context, and the channel cap frees the slot as
+// soon as the channel closes. One connection looping shells would otherwise keep a
+// live TUI per shell, each holding its size budget and its lobby feed.
+func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	addr, tracker := startServerWithRegistry(t, stubUserRepo{user: &db.User{ID: testutil.UID(95), Username: "looper"}}, reg)
+	client := dialInProcess(t, addr, "looper")
+	live := func() int {
+		n := 0
+		reg.states.Range(func(_, _ any) bool { n++; return true })
+		return n
+	}
+
+	for range 2 * maxSessionsPerConnection {
+		openShell(t, client)
+		require.Eventually(t, func() bool { return tracker.Count() == 1 && live() >= 1 },
+			3*time.Second, 10*time.Millisecond)
+		// Long enough for the program to be running before the next shell displaces it.
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	assert.Eventually(t, func() bool { return live() == 1 }, 3*time.Second, 20*time.Millisecond,
+		"displaced sessions still running")
+}

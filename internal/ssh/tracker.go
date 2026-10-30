@@ -93,8 +93,10 @@ func (t *SessionTracker) unref(userID uuid.UUID, a *account) {
 // hold any number of live TUIs and lobby subscriptions. sess is the session itself,
 // closed instead when the newer session arrived on the same connection: an OpenSSH
 // ControlMaster multiplexes both onto one, and hanging that up would end the newer
-// session too. That connection is demonstrably alive, and the per-connection
-// channel cap bounds what the old channel can hold.
+// session too. Closing sess has to end the session's program as well as its
+// channel: the program runs on the connection's context, and the per-connection
+// channel cap frees its slot once the channel closes, so a channel alone bounds
+// nothing.
 func (t *SessionTracker) Connect(userID uuid.UUID, conn, sess io.Closer) (uint64, error) {
 	a := t.acquire(userID, true)
 	defer t.unref(userID, a)
