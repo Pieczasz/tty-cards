@@ -330,6 +330,9 @@ unnoticed for so long.
 
 ### Changed - terminal UI
 
+- **A terminal that reports no size gets an 80x24 screen**, not a blank one that
+  still acted on every key. `ssh -tt` with stdin not a terminal reports 0x0; the
+  first real resize takes over, and a later resize with no size is ignored.
 - **Every screen now fits an 80x24 terminal**, and a 64x20 one. Menus, the
   leaderboard, the profile and the join browser all size themselves to the space
   they actually have instead of assuming it.

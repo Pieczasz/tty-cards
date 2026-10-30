@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/testutil"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gossh "golang.org/x/crypto/ssh"
@@ -231,12 +233,71 @@ func TestSessionSize_Filter(t *testing.T) {
 		assert.False(t, sz.stale())
 	})
 
+	// ssh -tt with stdin not a terminal asks for 0x0. Granted as asked, the TUI read
+	// it as "no size yet": nothing was drawn, yet every key still acted.
+	t.Run("a pty with no size starts at the default", func(t *testing.T) {
+		t.Parallel()
+		sz := &sessionSize{}
+		start, _ := sz.start(&sizeBudget{}, termSize{0, 0})
+		assert.Equal(t, termSize{80, 24}, start)
+		assert.Equal(t, tea.WindowSizeMsg{Width: 80, Height: 24},
+			sz.filter(tea.WindowSizeMsg{Width: 80, Height: 24}), "the echo of the default")
+	})
+
+	t.Run("a resize with no size keeps the one the session has", func(t *testing.T) {
+		t.Parallel()
+		sz := &sessionSize{}
+		sz.start(&sizeBudget{}, termSize{100, 30})
+		sz.filter(tea.WindowSizeMsg{Width: 100, Height: 30}) // the echo
+
+		for _, unknown := range []tea.WindowSizeMsg{{}, {Width: 100}, {Height: 30}} {
+			assert.Nil(t, sz.filter(unknown), "%v blanked the screen", unknown)
+		}
+		assert.Equal(t, termSize{100, 30}, *sz.granted.Load())
+	})
+
 	t.Run("anything else passes through", func(t *testing.T) {
 		t.Parallel()
 		sz := &sessionSize{}
 		sz.start(&sizeBudget{}, termSize{80, 24})
 		assert.Equal(t, tea.KeyPressMsg{Code: 'a'}, sz.filter(tea.KeyPressMsg{Code: 'a'}))
 	})
+}
+
+// screen is a session's stdout, read while the session writes it.
+type screen struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (s *screen) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+// visible is what the session drew, without its escape sequences.
+func (s *screen) visible() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.TrimSpace(ansi.Strip(s.buf.String()))
+}
+
+// The whole path for a 0x0 pty-req, as `ssh -tt host < /dev/null` sends: the
+// session has to draw a screen rather than act on keys nobody can see the result of.
+func TestSession_APtyWithNoSizeIsDrawn(t *testing.T) {
+	t.Parallel()
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(97), Username: "sizeless"})
+	s, err := dialInProcess(t, addr, "sizeless").NewSession()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	out := &screen{}
+	s.Stdout, s.Stderr = out, io.Discard
+	require.NoError(t, s.RequestPty("xterm", 0, 0, gossh.TerminalModes{}))
+	require.NoError(t, s.Shell())
+
+	assert.Eventually(t, func() bool { return out.visible() != "" },
+		3*time.Second, 20*time.Millisecond, "a 0x0 terminal got a blank screen")
 }
 
 // grantedSizes is the size every live session was last told, by what it asked for.
