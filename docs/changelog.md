@@ -409,6 +409,10 @@ unnoticed for so long.
   took the same per-player lock a ranked finalize holds, so a player reconnecting
   while their table's result was being written sat on a frozen screen. The stamp
   is now one conditional update that still skips an erased account.
+- Migration `000002` drops two indexes nothing could use (operators: it applies
+  on start, no volume rebuild): the raw `users.username` unique, implied by the
+  case-insensitive one, and `match_participants(user_id)`, a prefix of
+  `(user_id, match_id DESC)`. Registering and saving a result maintain two fewer.
 - The `lobby.SessionAPI` interface is gone; views take the manager directly. It
   had one implementation and one consumer.
 - **Registering a game twice, or a half-declared one, panics at boot**

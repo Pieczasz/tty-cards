@@ -87,3 +87,18 @@ func TestSchemaHasHotPathIndexes(t *testing.T) {
 		assert.Equal(t, int64(1), count, "index %s is missing", name)
 	}
 }
+
+// Every insert pays for every index, so one no query can use is pure cost. The raw
+// username unique is implied by idx_users_username_lower, and the single-column
+// user_id index is a prefix of idx_match_participants_user_match.
+func TestSchemaHasNoRedundantIndexes(t *testing.T) {
+	t.Parallel()
+	database := testutil.SetupTestDB(t)
+
+	for _, name := range []string{"users_username_key", "idx_match_participants_user_id"} {
+		var count int64
+		require.NoError(t, database.Raw(
+			`SELECT count(*) FROM pg_indexes WHERE indexname = ?`, name).Scan(&count).Error)
+		assert.Zero(t, count, "index %s is redundant", name)
+	}
+}

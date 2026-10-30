@@ -275,9 +275,8 @@ maintenance signal.)
 ## Database migrations
 
 Schema changes are SQL files in `internal/db/migrations/`, applied with
-[golang-migrate](https://github.com/golang-migrate/migrate). There is a single
-`000001_init` pair today: the project has never shipped, so upgrade migrations
-are deleted rather than kept as archaeology.
+[golang-migrate](https://github.com/golang-migrate/migrate). `000001_init` is
+the squashed base schema; every change since is a new numbered pair on top of it.
 
 - **Up *and* down, always.** `make migrate-create` writes both.
 - **No GORM AutoMigrate.** `testutil.SetupTestDB` replays these same files, up,
@@ -286,9 +285,8 @@ are deleted rather than kept as archaeology.
 - **Say so when a down loses data.** Mark it `-- LOSSY.` and say what is lost.
 - Compose runs them automatically before the backend starts.
 - Put the *reason* in the file as a SQL comment.
-- Until there is a real deploy to keep alive, prefer rewriting `000001` over
-  stacking a new version (recreate the Postgres volume; a checksum change will
-  otherwise refuse to start).
+- Never edit an applied migration: a database already past it would never see
+  the change. Add the next number with `make migrate-create`.
 
 ## Commits and pull requests
 

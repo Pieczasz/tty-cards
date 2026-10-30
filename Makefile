@@ -103,7 +103,7 @@ migrate-up:
 	migrate -path internal/db/migrations -database "$$DB_DSN" up
 
 # One step, and only after a typed yes: DB_DSN stays exported for migrate-up, and
-# with a single init migration one step down is every table.
+# once the database is down to 000001 one step down is every table.
 migrate-down:
 	@read -p "Roll back the newest migration on \$$DB_DSN? Type yes: " ok; [ "$$ok" = yes ]
 	migrate -path internal/db/migrations -database "$$DB_DSN" down 1
