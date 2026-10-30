@@ -720,7 +720,8 @@ func TestEngine_SubmitAction_ApplyErrorFinishesTheGame(t *testing.T) {
 	ch, err := engine.Subscribe()
 	require.NoError(t, err)
 	require.NoError(t, engine.Start())
-	require.Equal(t, []EventType{EventGameStarted}, eventTypes(drainEvents(ch)))
+	// Start announces nothing: in production the lobby subscribes only after it.
+	require.Empty(t, drainEvents(ch))
 
 	action := MockAction{name: "Boom"}
 	m.On("ValidateAction", mock.Anything, action).Return(nil)

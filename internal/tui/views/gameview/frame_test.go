@@ -76,20 +76,20 @@ func TestRenderTableRow_CapsTheSidesAtAThird(t *testing.T) {
 
 // The tick chain is driven by the view: a tick while the table is still waiting
 // returns no command, so a view built before the game started had a dead clock for
-// the whole match unless the event that starts the game re-arms it.
+// the whole match unless the first event once it plays re-arms it.
 func TestHandleFrame_ReArmsTheClockWhenTheTableStartsPlaying(t *testing.T) {
 	t.Parallel()
 
 	s := &Session{Base: BaseState{Phase: game.Waiting}}
 	events := make(chan game.Event, 1)
-	events <- game.Event{Type: game.EventGameStarted}
+	events <- game.Event{Type: game.EventTurnAdvanced}
 	s.events = events
 
 	// The sync a real view would run: the engine has started by the time the event
 	// lands, so the cached phase moves to Playing.
 	sync := func() { s.Base.Phase = game.Playing }
 
-	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventGameStarted, Source: events}, sync)
+	cmd, handled := s.HandleFrame(EventMsg{Type: game.EventTurnAdvanced, Source: events}, sync)
 	require.True(t, handled)
 	require.NotNil(t, cmd, "the event has to arm both the listener and the clock")
 

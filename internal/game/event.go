@@ -16,7 +16,6 @@ const (
 	EventUnknown EventType = iota
 	EventTurnAdvanced
 	EventGameEnded
-	EventGameStarted
 	EventTurnTimedOut
 	EventPlayerIdle
 	EventPlayerLeft
@@ -60,8 +59,6 @@ func (t EventType) String() string {
 		return "turn_advanced"
 	case EventGameEnded:
 		return "game_ended"
-	case EventGameStarted:
-		return "game_started"
 	case EventTurnTimedOut:
 		return "turn_timed_out"
 	case EventPlayerIdle:

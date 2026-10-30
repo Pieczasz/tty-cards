@@ -153,8 +153,9 @@ func (e *Engine) Start() (err error) {
 		return fmt.Errorf("set up game: %w", err)
 	}
 	e.state.Phase = Playing
+	// No event: the lobby subscribes only once Start returns, and announces the
+	// table itself (lobby.EventGameStarted).
 	e.settleTurnLocked()
-	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
 	return nil
 }
 

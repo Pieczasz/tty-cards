@@ -108,7 +108,8 @@ func TestBoundEngine_SubscribeAndUnsubscribe(t *testing.T) {
 	require.Equal(t, 1, engine.SubscriberCount())
 
 	require.NoError(t, engine.Start())
-	assert.Equal(t, EventGameStarted, (<-events).Type)
+	require.NoError(t, Bind(engine, engine.CurrentPlayerID()).Submit(noopAction{}))
+	assert.Equal(t, EventTurnAdvanced, (<-events).Type)
 
 	bound.Unsubscribe(events)
 	assert.Zero(t, engine.SubscriberCount(), "unsubscribing returns the slot")
