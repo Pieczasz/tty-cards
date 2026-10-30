@@ -236,6 +236,23 @@ func TestView_RendersLobbyAndConfirmPopup(t *testing.T) {
 	assert.Contains(t, m.View().Content, "Are you sure")
 }
 
+// The leave confirmation answers only y, n and esc, so a footer still offering
+// "r - Ready" under it advertised a key that did nothing.
+func TestView_TheLeaveConfirmFooterOffersOnlyItsOwnKeys(t *testing.T) {
+	t.Parallel()
+	m, _ := leaderView(t)
+	t.Cleanup(m.Close)
+
+	_, _ = press(m, "x")
+	out := tuitest.StripANSI(m.View().Content)
+
+	assert.NotContains(t, out, "r - Ready", "the confirmation ignores r")
+	assert.NotContains(t, out, "x - Leave Lobby", "x does not answer the question")
+	assert.Contains(t, out, "y - Leave")
+	assert.Contains(t, out, "n - Stay")
+	assert.Contains(t, out, "ctrl+c - Quit")
+}
+
 func TestView_NoActiveLobby(t *testing.T) {
 	t.Parallel()
 	m, ok := New(router.GlobalContext{}, nil).(*model)

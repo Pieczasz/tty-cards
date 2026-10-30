@@ -750,6 +750,32 @@ func TestView_AdvertisesTheDeleteKey(t *testing.T) {
 	assert.Contains(t, tuitest.StripANSI(m.View().Content), "x - Delete account")
 }
 
+// While the confirmation owns the keyboard every letter is typed into it, so a footer
+// still offering n, f, p, t, g, r and x advertised keys that spelled "> nft" instead.
+func TestView_TheConfirmationFooterOffersOnlyItsOwnKeys(t *testing.T) {
+	t.Parallel()
+	m, _ := deletingModel(t, nil)
+	m.phase = deleteConfirming
+
+	out := tuitest.StripANSI(m.View().Content)
+
+	for _, swallowed := range []string{"g - Game", "r - Result", "x - Delete account",
+		"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard"} {
+		assert.NotContains(t, out, swallowed, "the prompt takes this key as text")
+	}
+	assert.Contains(t, out, "enter - Delete")
+	assert.Contains(t, out, "esc - Cancel")
+	assert.Contains(t, out, "ctrl+c - Quit")
+
+	for _, phase := range []deletePhase{deleteRunning, deleteDone} {
+		m.phase = phase
+		out = tuitest.StripANSI(m.View().Content)
+		assert.NotContains(t, out, "n - New Game", "no key but quit does anything once the erasure runs")
+		assert.NotContains(t, out, "esc - Cancel", "it cannot be backed out of")
+		assert.Contains(t, out, "ctrl+c - Quit")
+	}
+}
+
 // At the declared minimum the full warning is taller than the rows the frame has, and
 // the layout clips rather than shrinking - so what disappears is the bottom, which is
 // the line the player has to type into. The short form says the same things in four.

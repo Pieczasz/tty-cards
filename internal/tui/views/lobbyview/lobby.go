@@ -314,6 +314,10 @@ func (m *model) View() tea.View {
 	}
 
 	actions := []string{"x - Leave Lobby", "r - Ready"}
+	if m.showLeaveConfirm {
+		// handleLeaveConfirm answers only these: r and x would do nothing.
+		actions = []string{"y - Leave", "n - Stay"}
+	}
 	return tea.NewView(views.RenderSeatedScreen(m.global, "Lobby", actions, func(height int) string {
 		if m.showLeaveConfirm {
 			redYes := m.global.Palette().ErrorText.Bold(true).Render("Yes")

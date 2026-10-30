@@ -308,6 +308,27 @@ func TestJoin_TypingReachesTheCodeField(t *testing.T) {
 	assert.Equal(t, "AB", view.textInput.Value(), "codes are upper-cased as they are typed")
 }
 
+// While the code prompt is open every letter is typed into the code, so a footer still
+// offering g, m, o and the global shortcuts advertised keys that do something else.
+func TestJoin_TheCodePromptFooterOffersOnlyItsOwnKeys(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	pressJoin(t, view, "c")
+	out := tuitest.StripANSI(view.View().Content)
+
+	for _, swallowed := range []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats",
+		"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard"} {
+		assert.NotContains(t, out, swallowed, "the code field takes this key as text")
+	}
+	assert.Contains(t, out, "enter - Join")
+	assert.Contains(t, out, "esc - Cancel")
+	assert.Contains(t, out, "ctrl+c - Quit")
+
+	pressJoin(t, view, "esc")
+	assert.Contains(t, tuitest.StripANSI(view.View().Content), "g - Game", "browsing offers the filters again")
+}
+
 func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)

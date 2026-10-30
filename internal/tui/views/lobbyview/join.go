@@ -349,8 +349,13 @@ func (m *joinModel) View() tea.View {
 	if key := m.renderKey(); key == m.lastKey && m.lastView != "" {
 		return tea.NewView(m.lastView)
 	}
-	actions := []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats"}
-	rendered := views.RenderScreen(m.global, "Join Game", actions, m.renderContent)
+	var rendered string
+	if m.writingCode {
+		rendered = views.RenderModalScreen(m.global, "Join Game", []string{"enter - Join", "esc - Cancel"}, m.renderContent)
+	} else {
+		actions := []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats"}
+		rendered = views.RenderScreen(m.global, "Join Game", actions, m.renderContent)
+	}
 	m.lastKey, m.lastView = m.renderKey(), rendered
 	return tea.NewView(rendered)
 }

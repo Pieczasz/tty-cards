@@ -154,6 +154,13 @@ func RenderSeatedScreen(g router.GlobalContext, title string, localActions []str
 	return renderFramed(g, screenHeader(g, title), SeatedFooter(g.Palette(), localActions), content)
 }
 
+// RenderModalScreen is RenderScreen while a prompt owns the keyboard. The global
+// shortcuts are letters the prompt types or ignores, so the footer offers only the
+// prompt's own keys and quit, which HandleCommonMsg serves before any prompt.
+func RenderModalScreen(g router.GlobalContext, title string, promptActions []string, content func(height int) string) string {
+	return RenderSeatedScreen(g, title, promptActions, content)
+}
+
 func renderFramed(g router.GlobalContext, header, footer string, content func(height int) string) string {
 	return RenderCenteredLayout(g, header, content(styles.AvailableContentHeight(g.Width, g.Height, header, footer)), footer)
 }

@@ -171,9 +171,20 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() tea.View {
+	switch m.phase {
+	case deleteConfirming:
+		actions := []string{"enter - Delete", "esc - Cancel"}
+		return tea.NewView(views.RenderModalScreen(m.global, screenTitle, actions, m.renderContent))
+	case deleteRunning, deleteDone:
+		// handleKey ignores every key here, so only quit is left to offer.
+		return tea.NewView(views.RenderModalScreen(m.global, screenTitle, nil, m.renderContent))
+	case deleteIdle:
+	}
 	actions := []string{"g - Game", "r - Result", "x - Delete account"}
-	return tea.NewView(views.RenderScreen(m.global, "User Profile", actions, m.renderContent))
+	return tea.NewView(views.RenderScreen(m.global, screenTitle, actions, m.renderContent))
 }
+
+const screenTitle = "User Profile"
 
 func (m *model) renderContent(contentHeight int) string {
 	switch m.phase {

@@ -460,6 +460,10 @@ unnoticed for so long.
   more" while two blank rows stayed on screen. When seats still have to be
   hidden, the guest under the leader's cursor is always drawn, so enter never
   kicks a player the leader cannot see.
+- **A prompt's footer lists only the prompt's keys.** Under the account-deletion
+  confirmation, the join screen's code entry and the lobby's leave confirmation
+  the footer used to keep offering the screen's shortcuts, which the prompt typed
+  into its field (`> nft`) or ignored.
 
 ### Fixed - internals worth knowing about
 
