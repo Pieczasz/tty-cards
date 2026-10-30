@@ -183,11 +183,10 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 		prev = lvl
 		// A level always has at least one contributor sitting exactly on it - every
 		// level is somebody's contribution - and lvl > prev, so amount is never zero.
-		amount += orphan
-		orphan = 0
 		if len(eligible) == 0 {
-			// Dead money carries forward to the next pot layer.
-			orphan = amount
+			// Eligibility only shrinks as the levels rise, so no pot forms above this
+			// one: dead money above every contender rides with the last live layer.
+			orphan += amount
 			continue
 		}
 		slices.Sort(eligible) // stable pot eligibility order
