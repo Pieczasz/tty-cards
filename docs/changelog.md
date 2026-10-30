@@ -405,6 +405,10 @@ unnoticed for so long.
 - `idx_matches_ranked_created` indexes the day's ranked matches, so the
   anti-farm check no longer reads a veteran's whole history on every ranked
   result.
+- **A login no longer waits for a ranked result to save.** Stamping last-seen
+  took the same per-player lock a ranked finalize holds, so a player reconnecting
+  while their table's result was being written sat on a frozen screen. The stamp
+  is now one conditional update that still skips an erased account.
 - The `lobby.SessionAPI` interface is gone; views take the manager directly. It
   had one implementation and one consumer.
 - **Registering a game twice, or a half-declared one, panics at boot**
