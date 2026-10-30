@@ -204,6 +204,21 @@ func TestShedTable_RenderTableShowsThePickerInPlaceOfThePile(t *testing.T) {
 	assert.Contains(t, tbl.RenderTable("THE PILE", "").Content, "Game Over")
 }
 
+// enter and d do nothing off turn, so a waiting seat is not offered them: a hint for a
+// key that does nothing reads as a broken key. Hearts and gin already worked this way.
+func TestShedTable_OffTurnHintsOfferNoPlayKeys(t *testing.T) {
+	t.Parallel()
+	tbl := shedTableAt(120, 50)
+
+	assert.Contains(t, tuitest.StripANSI(tbl.RenderTable("", "").Content), HandKeyHints)
+
+	tbl.Base.MyTurn = false
+	out := tuitest.StripANSI(tbl.RenderTable("", "").Content)
+	assert.Contains(t, out, WaitingKeyHints)
+	assert.NotContains(t, out, "d: draw")
+	assert.NotContains(t, out, "enter:")
+}
+
 // The frame's messages are the frame's: a resize reaches the table without touching
 // the hand or the picker.
 func TestShedTable_HandleLeavesTheFrameToSession(t *testing.T) {

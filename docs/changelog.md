@@ -441,6 +441,9 @@ unnoticed for so long.
   the card.
 - At 64 columns the in-game key line wraps between keys instead of leaving
   "esc:" at the end of one row and "leave/cancel" on the next.
+- Crazy Eights and Uno no longer offer `enter: play/confirm` and `d: draw` to a
+  seat waiting for its turn, where both did nothing; like Hearts and Gin Rummy,
+  the waiting seats see only the cursor keys and esc.
 
 ### Fixed - internals worth knowing about
 

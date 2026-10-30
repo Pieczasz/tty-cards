@@ -134,7 +134,13 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 		center = t.Picker.Render(g.Palette())
 	}
 
-	return tea.NewView(RenderBands(g, top, t.renderHero(aboveHand), HandKeyHints, func(height int) string {
+	// enter and d wait for the turn, so a waiting seat is offered only what still works.
+	hints := HandKeyHints
+	if !t.Base.MyTurn {
+		hints = WaitingKeyHints
+	}
+
+	return tea.NewView(RenderBands(g, top, t.renderHero(aboveHand), hints, func(height int) string {
 		left, right := RenderOpponentSides(g.Palette(), t.Base, height, minimalSeats)
 		return RenderTableRow(g.Width, height, left, styles.MarginTop(1, center), right)
 	}))
