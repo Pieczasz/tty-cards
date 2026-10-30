@@ -439,6 +439,8 @@ unnoticed for so long.
   bottom-right rank: a covered ten read "1" there and a Reverse "R". The corner
   under the next card is left blank, as on a real fan; the top-left still names
   the card.
+- At 64 columns the in-game key line wraps between keys instead of leaving
+  "esc:" at the end of one row and "leave/cancel" on the next.
 
 ### Fixed - internals worth knowing about
 

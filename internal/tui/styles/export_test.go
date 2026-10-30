@@ -7,7 +7,6 @@ var (
 	BoxHeight     = boxHeight
 	PadHorizontal = padHorizontal
 	PadVertical   = padVertical
-	WrapActions   = wrapActions
 	RenderBox     = renderBox
 	CentreWrapped = centreWrapped
 )

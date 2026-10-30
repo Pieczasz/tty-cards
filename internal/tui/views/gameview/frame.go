@@ -56,8 +56,9 @@ func renderTopBand(g router.GlobalContext, top string) string {
 func renderBottomBand(g router.GlobalContext, player, hints string) string {
 	// Wrapped to the terminal, not clamped to it: the key line is longer than 64
 	// columns, and cutting it would both hide the last key and drag every row of the
-	// hand above it sideways, since the band is centred on its widest line.
-	hintLine := g.Palette().Dim.Width(g.Width).Align(lg.Center).Render(hints)
+	// hand above it sideways, since the band is centred on its widest line. It breaks
+	// between pairs: word wrapping left "esc:" on one row and what it does on the next.
+	hintLine := g.Palette().Dim.Width(g.Width).Align(lg.Center).Render(styles.WrapActions(hints, g.Width))
 
 	var band string
 	if IsCompact(g.Width, g.Height) {
