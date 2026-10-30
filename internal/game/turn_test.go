@@ -22,6 +22,15 @@ func TestState_SetTurn(t *testing.T) {
 	assert.Equal(t, 0, *s.OverrideNextTurn)
 }
 
+func TestState_ContinueTurn(t *testing.T) {
+	t.Parallel()
+	s := &State{CurrentTurn: 1}
+	s.ContinueTurn()
+	require.NotNil(t, s.OverrideNextTurn)
+	assert.Equal(t, 1, *s.OverrideNextTurn, "the seat on turn stays on turn")
+	assert.True(t, s.continuesTurn, "and the engine is told the turn carries on")
+}
+
 func TestSeatAt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

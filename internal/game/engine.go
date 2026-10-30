@@ -354,7 +354,12 @@ func (e *Engine) applyActionLocked(current *Player, action Action) error {
 	// the state half-applied, so, like a rules panic, it ends the table without asking
 	// the rules to rank anyone on it - and ends it, with the broadcast, or every client
 	// sits on a frame that never updates and the lobby never records the match.
-	if err := e.state.Rules.ApplyAction(e.state, action); err != nil {
+	err := e.state.Rules.ApplyAction(e.state, action)
+	// Read and cleared on every outcome, so a flag set by a move that then errors or
+	// wins is never left for a later leave to find.
+	continues := e.state.continuesTurn
+	e.state.continuesTurn = false
+	if err != nil {
 		e.endGameLocked(nil, EndReasonRulesError)
 		return fmt.Errorf("apply action: %w", err)
 	}
@@ -366,6 +371,12 @@ func (e *Engine) applyActionLocked(current *Player, action Action) error {
 		return nil
 	}
 
+	if !continues {
+		// A move ends the turn unless the rules said otherwise: dropping the deadline
+		// gives the next turn a full clock and a fresh miss even when it lands back on
+		// the same seat.
+		e.clock.deadline = time.Time{}
+	}
 	e.advanceTurnLocked()
 	e.broadcaster.Broadcast(Event{Type: EventTurnAdvanced})
 	return nil

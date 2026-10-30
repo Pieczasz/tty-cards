@@ -275,6 +275,14 @@ unnoticed for so long.
   while the table reopens.
 - Closing a table no longer unseats a player who had already moved to another
   one.
+- **A new turn gets the whole clock, even when it comes straight back to you.**
+  A Hearts trick winner leading the next trick, the heads-up poker big blind
+  opening the flop, and a heads-up Uno Skip, Reverse or Draw now start a fresh
+  30 seconds instead of the 10 left over from the turn before, and an absent
+  seat that keeps getting the turn back is charged a miss for each turn, so it
+  is removed after three. Only Gin's draw then discard is one turn on one clock.
+  This supersedes the earlier note that an Uno skip or a Hearts trick winner
+  kept the clock.
 
 ### Changed - terminal UI
 
@@ -325,11 +333,12 @@ unnoticed for so long.
 - The turn-timeout event is now broadcast on the same lock hold that charges the
   miss, so a player whose move lands in the gap is not told they timed out after
   the miss was refunded.
-- **A turn that carries on keeps its clock.** Gin's draw then discard, an Uno
-  skip that comes back to you, a Hearts trick winner leading again, or someone
-  else leaving no longer hands the same player a fresh 30 seconds; at least 10
-  are always left. A turn costs one miss, not one per expiry, so an absent Gin
-  player loses the seat after three turns instead of one and a half.
+- **A turn that carries on keeps its clock.** Gin's draw then discard, or
+  someone else leaving, no longer hands the same player a fresh 30 seconds; at
+  least 10 are always left. A turn costs one miss, not one per expiry, so an
+  absent Gin player loses the seat after three turns instead of one and a half.
+  A new turn that comes straight back to you is a full turn: see "A new turn
+  gets the whole clock" under tables and lobbies.
 - **Smarter auto-play for an absent player:** poker calls when nobody can make
   the call cost anything instead of folding a covered bet; Hearts passes the
   queen of spades and the high spades and hearts instead of its three lowest

@@ -198,8 +198,8 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		p.Cards = append(p.Cards, drawn)
 		extra.TakenUpcard = nil
 		extra.Phase = PhaseAwaitingDiscard
-		// Draw then discard is one turn: keep the cursor on this seat.
-		state.OverrideTurn(state.CurrentTurn)
+		// Draw then discard is one turn: keep the seat, and its clock, on turn.
+		state.ContinueTurn()
 	case ActionDrawDiscard:
 		drawn, ok := state.Discard.Draw()
 		if !ok {
@@ -208,7 +208,7 @@ func (r *Rules) ApplyAction(state *game.State, action game.Action) error {
 		p.Cards = append(p.Cards, drawn)
 		extra.TakenUpcard = &drawn
 		extra.Phase = PhaseAwaitingDiscard
-		state.OverrideTurn(state.CurrentTurn)
+		state.ContinueTurn()
 	case ActionDiscard:
 		p.Cards = deck.RemoveOne(p.Cards, action.Card)
 		state.Discard.Add(action.Card)

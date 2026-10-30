@@ -17,6 +17,9 @@ type State struct {
 	Discard          *deck.Pile
 	Rules            Rules
 	Extra            any
+	// continuesTurn is set by ContinueTurn and consumed by the engine after the action:
+	// unexported so only a deliberate call, never a stray write, keeps a seat's clock.
+	continuesTurn bool
 	// logger is unexported so the rules can read it but never swap it; the engine
 	// sets it from WithLogger.
 	logger *slog.Logger
