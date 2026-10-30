@@ -192,7 +192,7 @@ func tableOf(width, height, n int) *model {
 		},
 		pot: 480, sidePots: 2, street: "RIVER",
 		currentBet: 50, toCall: 50,
-		raiseMin: 100, raiseMax: 500, raiseOK: true,
+		raiseMin: 100, raiseMax: 500, raiseOK: true, allInOK: true,
 		handNumber: 3, handsTotal: 10, winnerName: "player_1",
 	}
 	m.Global = router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height}
@@ -304,7 +304,7 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		t.Parallel()
 		m := tableOf(120, 50, 3)
 		m.seats[0].Chips, m.seats[0].Bet = 0, 0
-		m.raiseOK = false // what logic.RaiseBounds reports for an empty stack
+		m.raiseOK, m.allInOK = false, false // what the rules report for an empty stack
 		bar := m.renderActionBar()
 		assert.NotContains(t, bar, "r: raise")
 		assert.NotContains(t, bar, "a: all-in")

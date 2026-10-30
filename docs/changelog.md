@@ -406,6 +406,9 @@ unnoticed for so long.
   the table has finished.
 - The welcome banner no longer renders your username as ASCII art (it also
   stopped being a way to fill a shared render cache).
+- **Poker no longer offers an all-in the table refuses.** After a short all-in
+  that does not reopen the betting, the bar shows only fold and call; `a:
+  all-in` used to stay up and was refused with "betting is not reopened".
 
 ### Fixed - internals worth knowing about
 

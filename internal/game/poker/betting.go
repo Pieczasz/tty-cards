@@ -85,6 +85,31 @@ func RaiseBounds(state *game.State, playerID string) (lo, hi uint, ok bool) {
 	return lo, hi, true
 }
 
+func validateAllIn(extra *State, seat *Seat) error {
+	if seat.Chips == 0 {
+		return errors.New("no chips to go all-in")
+	}
+	// A shove that lands above the current bet is a raise, and a player who is only
+	// owed the difference from a sub-minimum all-in has no raise to make.
+	if seat.Bet+seat.Chips > extra.CurrentBet {
+		return checkBettingReopened(extra, seat)
+	}
+	return nil
+}
+
+// AllInOK reports whether ValidateAction accepts ActionAllIn from playerID right now,
+// whose turn it is aside. Views read it for the same reason they read RaiseBounds: a
+// shove past the current bet is a raise, and the bar must not offer one the betting
+// has not been reopened for.
+func AllInOK(state *game.State, playerID string) bool {
+	extra, isPoker := state.Extra.(*State)
+	if !isPoker || extra.HandComplete() {
+		return false
+	}
+	seat := extra.Seats[playerID]
+	return seat != nil && seat.canAct() && validateAllIn(extra, seat) == nil
+}
+
 // largestCallableBet is the highest street total any opponent still in the hand could
 // match: their own effective stack, what they already have out plus what is behind it.
 // Betting past it is chips nobody can call, and the showdown hands them straight back,

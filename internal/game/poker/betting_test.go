@@ -998,3 +998,50 @@ func TestRaiseBounds_NoSuchSeat(t *testing.T) {
 	_, _, ok = RaiseBounds(state, "a")
 	assert.False(t, ok, "a state that is not poker")
 }
+
+// AllInOK is the bar's a: all-in, so it has to agree with ValidateAction on every
+// seat: a shove past the bet is a raise the unreopened betting refuses, while one
+// that only covers what is owed is a call and always open.
+func TestAllInOK(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		currentBet uint
+		hero       seat
+		want       bool
+	}{
+		{name: "a fresh decision", currentBet: 50, hero: seat{id: "a", chips: 1000}, want: true},
+		{
+			name: "a raise the betting is not reopened for", currentBet: 70,
+			hero: seat{id: "a", chips: 1000, bet: 50, acted: true, level: 50},
+		},
+		{
+			name: "a short stack that only calls", currentBet: 700,
+			hero: seat{id: "a", chips: 100, bet: 50, acted: true, level: 50}, want: true,
+		},
+		{name: "no chips", currentBet: 50, hero: seat{id: "a", bet: 50, allIn: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			state, _ := seatedRound(tt.currentBet, tt.hero, seat{id: "b", chips: 1000})
+			state.CurrentTurn = 0
+
+			assert.Equal(t, tt.want, AllInOK(state, "a"))
+			assert.Equal(t, tt.want, (&Rules{}).ValidateAction(state, ActionAllIn{}) == nil, "agrees with ValidateAction")
+		})
+	}
+}
+
+func TestAllInOK_NoHandToShoveInto(t *testing.T) {
+	t.Parallel()
+	state, extra := seatedRound(0, seat{id: "a", chips: 1000}, seat{id: "b", chips: 1000})
+
+	assert.False(t, AllInOK(state, "gone"), "a player who is not seated")
+	extra.Phase = PhaseShowdown
+	assert.False(t, AllInOK(state, "a"), "a finished hand")
+	state.Extra = "not poker"
+	assert.False(t, AllInOK(state, "a"), "a state that is not poker")
+}

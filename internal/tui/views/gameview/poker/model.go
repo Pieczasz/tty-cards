@@ -38,6 +38,8 @@ type table struct {
 	// when there is no raise to make at all.
 	raiseMin, raiseMax uint
 	raiseOK            bool
+	// allInOK is logic.AllInOK for the hero.
+	allInOK bool
 }
 
 type model struct {
@@ -96,6 +98,7 @@ func readTable(state *game.State, heroID string) table {
 	t.street = e.Phase.String()
 	t.currentBet = e.CurrentBet
 	t.raiseMin, t.raiseMax, t.raiseOK = logic.RaiseBounds(state, heroID)
+	t.allInOK = logic.AllInOK(state, heroID)
 	t.toCall = e.ToCall(heroID)
 	t.handComplete = e.HandComplete() || finished
 	t.matchComplete = e.MatchComplete || finished
@@ -139,8 +142,7 @@ func (m *model) canRaise() bool {
 }
 
 func (m *model) canAllIn() bool {
-	hero := m.heroSeat()
-	return m.Base.MyTurn && !m.handComplete && hero != nil && hero.Chips > 0
+	return m.Base.MyTurn && !m.handComplete && m.allInOK
 }
 
 func (m *model) canFold() bool {
