@@ -27,7 +27,7 @@ GOVULNCHECK = go run golang.org/x/vuln/cmd/govulncheck@v1.8.0
 # Tests count as roots: the engine's WithTurnTimeout and the two figlet-cache hooks
 # exist for them. Anything unreachable from main AND from every test is dead.
 deadcode:
-	@out=$$($(DEADCODE) -test ./...); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
+	@out=$$($(DEADCODE) -test ./...) || exit 1; if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
 
 # Known vulnerabilities the code can reach, not just ones somewhere in go.sum.
 vulncheck:

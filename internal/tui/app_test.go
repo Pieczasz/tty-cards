@@ -71,14 +71,15 @@ func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
 	assert.False(t, r.HasRoute(router.GameRoute(catalog.Games[0].Slug)), "a game not handed in has no route")
 }
 
-// The session's player is built once, so the seat a view takes and the copy it later
-// compares that seat against are one pointer until a ranked match reseats it.
-func TestNew_BuildsTheSessionPlayerOnce(t *testing.T) {
+// The session's player is built once, at auth, so the seat a view takes and the copy
+// it later compares that seat against are one pointer until a ranked match reseats
+// it. New must keep that pointer rather than build or copy its own.
+func TestNew_KeepsTheSessionPlayerItIsGiven(t *testing.T) {
 	t.Parallel()
-	r := New(Deps{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})})
+	p := lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})
+	r := New(Deps{Player: p})
 
-	require.NotNil(t, r.Global.Player)
-	assert.Equal(t, testutil.UID(1), r.Global.Player.UserID)
+	assert.Same(t, p, r.Global.Player)
 }
 
 // Every route the views navigate to has to be registered, or Goto is a silent no-op

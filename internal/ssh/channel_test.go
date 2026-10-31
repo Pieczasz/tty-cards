@@ -393,10 +393,11 @@ func TestNewServer_SecondChannelOnTheSameConnectionDisplacesOnlyTheFirst(t *test
 	assert.Equal(t, 1, tracker.Count())
 }
 
-// Closing a displaced session's channel alone ends nothing on the server: its
-// program runs on the connection's context, and the channel cap frees the slot as
-// soon as the channel closes. One connection looping shells would otherwise keep a
-// live TUI per shell, each holding its size budget and its lobby feed.
+// Closing a displaced session's channel alone ends nothing on the server: wish
+// quits its program only when the session's context ends, which charm ssh shares
+// across the connection, and the channel cap frees the slot as soon as the channel
+// closes. One connection looping shells would otherwise keep a live TUI per shell,
+// each holding its size budget and its lobby feed.
 func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
 	t.Parallel()
 	reg := newSessionRegistry(cellBudget, extraCellBudget)

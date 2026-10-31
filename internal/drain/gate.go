@@ -43,6 +43,13 @@ func (g *Gate) Close() {
 	g.mu.Unlock()
 }
 
+// Closed reports whether the gate has stopped admitting work, by Close or Wait.
+func (g *Gate) Closed() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.closed
+}
+
 // Wait closes the gate, then blocks until every admitted unit is released or ctx
 // ends, and reports whether everything drained. Because the gate is closed, the
 // count only goes down, so the shared waiter exits once the last unit does.

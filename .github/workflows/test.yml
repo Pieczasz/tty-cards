@@ -183,6 +183,9 @@ jobs:
         # one without the other fails here.
         grep -qF "const postgresImage = \"$(jq -r .services.db.image <<<"$cfg")\"" internal/testutil/db.go \
           || fail "internal/testutil/db.go postgresImage must equal compose's db image"
+        # cmd/server's TestDrainBudgetFitsStopGracePeriod checks the drain against this.
+        [ "$(jq -r .services.backend.stop_grace_period <<<"$cfg")" = 1m20s ] \
+          || fail "backend stop_grace_period must stay 80s, or TestDrainBudgetFitsStopGracePeriod changes with it"
 
         # No service may gain privileges; the proxy keeps only what nginx needs.
         missing=$(jq -r '.services | to_entries[] | select((.value.security_opt // []) | index("no-new-privileges:true") | not) | .key' <<<"$cfg")
