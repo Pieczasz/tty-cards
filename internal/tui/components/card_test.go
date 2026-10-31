@@ -229,3 +229,27 @@ func TestFaceCells_EveryRankHasAFullFace(t *testing.T) {
 		}
 	}
 }
+
+// A covered card shows tuck columns of its face, and a two-character rank's mirrored
+// corner straddles the edge: the overlap cut it to "1" for a ten and "R" for a Reverse,
+// which reads as a different card. The corner is whole or not drawn.
+func TestRenderFan_ACoveredCardNeverShowsHalfACornerRank(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	cover := deck.Card{Rank: deck.Two, Suit: deck.Spades}
+
+	for _, rank := range deck.AllRanks {
+		label := rankLabels[rank]
+		for tuck := overlapWidth; tuck >= minTuckWidth; tuck-- {
+			fan := RenderFan(theme, []deck.Card{{Rank: rank, Suit: deck.Clubs}, cover}, nil, tuck)
+			lines := strings.Split(tuitest.StripANSI(fan), "\n")
+			// The covered card's slice of the bottom rank row: its left border, then
+			// the tuck columns of face still showing.
+			corner := string([]rune(lines[FaceHeight])[1 : 1+tuck])
+
+			shown := strings.TrimSpace(corner)
+			assert.Truef(t, shown == "" || shown == label,
+				"%s at tuck %d shows %q in its corner", label, tuck, shown)
+		}
+	}
+}

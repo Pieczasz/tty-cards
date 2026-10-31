@@ -37,7 +37,7 @@ func TestFanTuck_FitsTheWidthItIsGiven(t *testing.T) {
 
 				tuck := FanTuck(n, width)
 				if tuck == 0 {
-					strip := RenderStrip(theme, hand, nil, 0, width)
+					strip := RenderStrip(theme, hand, nil, 0, width, 0)
 					assert.LessOrEqual(t, lg.Width(strip), width, "the strip is the last resort and must fit")
 					return
 				}
@@ -79,7 +79,7 @@ func TestRenderStrip_NamesEveryCardAndWrapsToWidth(t *testing.T) {
 		{Rank: deck.Ace, Suit: deck.Spades},
 		{Rank: deck.King, Suit: deck.Clubs},
 	}
-	out := tuitest.StripANSI(RenderStrip(theme, hand, nil, 1, 8))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, nil, 1, 8, 0))
 
 	assert.Contains(t, out, "10")
 	assert.Contains(t, out, "A")

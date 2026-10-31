@@ -34,10 +34,9 @@ func FansHand(handSize, maxWidth, maxRows int) bool {
 // under it. A hand that fits no fan falls back to the rank-and-suit strip, which has no
 // index row to line up.
 //
-// maxRows bounds the fan only. The strip wraps to however many rows the hand needs: a
-// forty-card Uno hand on a short terminal costs the table a row or two, which the frame
-// absorbs by clamping, and that is the better trade - cards cut out of a player's own
-// hand are cards they cannot play.
+// maxRows bounds both. A strip longer than that scrolls to the cursor: a forty-card Uno
+// hand that wrapped to more rows instead pushed the pile's border and rank, or the
+// colour picker's frame, off the top of a 64x20 screen.
 //
 // staged nil is a single selection: the card under cursor is lifted, and a negative
 // cursor lifts nothing. A non-nil staged is a multi-card move (hearts' pass): the staged
@@ -69,7 +68,7 @@ func renderHand(
 	}
 	tuck := components.FanTuck(len(hand), maxWidth)
 	if tuck == 0 || !fanFits(maxRows) {
-		return components.RenderStrip(t, hand, staged, cursor, maxWidth)
+		return components.RenderStrip(t, hand, staged, cursor, maxWidth, maxRows)
 	}
 	fan := components.RenderFan(t, hand, picked, tuck)
 

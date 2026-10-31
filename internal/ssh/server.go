@@ -45,7 +45,7 @@ type ctxKey int
 // per TCP connection to every channel opened on it (and to its auth callbacks).
 // Everything a session needs lives in sessionState, keyed by the session itself.
 const (
-	ctxKeyChannelCount ctxKey = iota
+	ctxKeyConnSessions ctxKey = iota
 	// ctxKeyAuthRefused marks a connection already counted as refused at auth.
 	ctxKeyAuthRefused
 )
@@ -53,6 +53,11 @@ const (
 const (
 	handshakeTimeout = 20 * time.Second
 	connIdleTimeout  = 30 * time.Minute
+	// sessionlessTimeout bounds a connection, from accept, with no session channel
+	// open: past the handshake's own bound, and long enough after it for any real
+	// client, which opens its session the moment it is authenticated. Without it an
+	// `ssh -N` held a listener slot for connIdleTimeout, uncounted and unlogged.
+	sessionlessTimeout = handshakeTimeout + 10*time.Second
 	// sessionFPS caps each session's renderer ticks. bubbletea's default is 60, and
 	// every tick compares the whole frame with the last one even when nothing
 	// changed, so an idle session costs in proportion to fps x terminal cells. A card
@@ -67,8 +72,11 @@ const (
 	// pool, so an unbounded client could exhaust the database from a single TCP
 	// connection. Two allows the reconnect overlap a real client produces.
 	maxSessionsPerConnection = 2
-	maxEnvRequests           = 32
-	maxEnvBytes              = 8 << 10
+	// displacedCloseAfter bounds how long a displaced session's channel waits for its
+	// program to quit. A quit takes milliseconds; only a wedged one runs this out.
+	displacedCloseAfter = 2 * time.Second
+	maxEnvRequests      = 32
+	maxEnvBytes         = 8 << 10
 )
 
 // sessionState is per-channel session state. It cannot live on the ssh.Context: that
@@ -122,6 +130,14 @@ type sessionRegistry struct {
 	// that neither its Shutdown nor its Close waits for, so without this the drain
 	// would move on while teardowns are still giving up seats.
 	live drain.Gate
+	// sessionless is how long a connection may go with no session channel open
+	// before it is closed: sessionlessTimeout, or less in a test.
+	sessionless time.Duration
+	// ending is closed by EndSessions: every program running, or started after it,
+	// quits and its session gets the restart notice. newSessionRegistry makes it; a
+	// nil one, in a test's bare registry, never fires.
+	ending  chan struct{}
+	endOnce sync.Once
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -147,13 +163,23 @@ type Server struct {
 }
 
 // WaitSessions refuses any session not yet started, then blocks until every running
-// session handler has finished its teardown or ctx ends. Close is what ends them, so
-// it is called after Close.
+// session handler has finished its teardown or ctx ends. EndSessions and Close are
+// what end them, so it is called after them.
 func (s *Server) WaitSessions(ctx context.Context) error {
 	if !s.sessions.live.Wait(ctx) {
 		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
 	}
 	return nil
+}
+
+// EndSessions is the end of the drain window for whoever is left: each program
+// quits while its connection is still up, so its teardown restores the client's
+// terminal, and the session is closed with the restart notice. It then waits like
+// WaitSessions. A program the quit cannot reach, its peer withholding ssh window, is
+// not waited for past ctx: Close hangs up on it as before.
+func (s *Server) EndSessions(ctx context.Context) error {
+	s.sessions.endOnce.Do(func() { close(s.sessions.ending) })
+	return s.WaitSessions(ctx)
 }
 
 // errNoTracker refuses a server with no session tracker. A default one used to be
@@ -206,7 +232,7 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 		// wish's logging middleware: that one writes through the charm logger, which
 		// bypasses slog and so never reaches the OTLP handler.
 		wish.WithMiddleware(
-			bm.MiddlewareWithProgramHandler(sessionProgram(deps, reg, registerBudget)),
+			reg.runProgram(sessionProgram(deps, reg, registerBudget)),
 			activeterm.Middleware(),
 			sessionLifecycle(deps, reg),
 		),
@@ -215,6 +241,7 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 		return nil, fmt.Errorf("create wish server: %w", err)
 	}
 	server.HandshakeTimeout = handshakeTimeout
+	server.ConnCallback = closeSessionless(reg.sessionless)
 	server.ChannelHandlers = map[string]ssh.ChannelHandler{
 		"session": limitSessionChannels(ssh.DefaultSessionHandler),
 	}
@@ -415,10 +442,16 @@ func (f closerFunc) Close() error { return f() }
 // connection, and the channel cap frees its slot as soon as the channel closes, so
 // one connection looping shells would hold any number of TUIs. Cancelling the run context first also covers a program not yet started,
 // whose Run then returns at once.
+//
+// The channel is not closed in the same breath: the program's teardown is what
+// restores the client's terminal, and the handler closes the channel once it has
+// run. The timer is for a program stuck on a peer withholding its window, which a
+// cancel does not reach; closing an already closed channel is harmless.
 func displaceable(s ssh.Session, endRun context.CancelFunc) io.Closer {
 	return closerFunc(func() error {
 		endRun()
-		return s.Close()
+		time.AfterFunc(displacedCloseAfter, func() { _ = s.Close() })
+		return nil
 	})
 }
 
@@ -475,6 +508,10 @@ func sessionProgram(
 		// the filter, so it is granted here as well as there.
 		size, moved := st.size.start(&reg.sizes, termSize{pty.Window.Width, pty.Window.Height})
 		program := tea.NewProgram(model, append(bm.MakeOptions(s),
+			// bubbletea's own handler quits the program on the process's SIGINT or
+			// SIGTERM, which ended every session the instant the drain began.
+			// Shutdown is cmd/server's: it stops accepting, then closes sessions.
+			tea.WithoutSignalHandler(),
 			tea.WithInput(st.input),
 			tea.WithWindowSize(size.w, size.h),
 			tea.WithFPS(sessionFPS),
@@ -486,6 +523,77 @@ func sessionProgram(
 		}
 		return program
 	}
+}
+
+// runProgram is wish's bubbletea middleware, reporting through slog. wish's writes a
+// plain-text line through the charm logger, which bypasses slog and with it the
+// JSON log and OTLP, and it did so at ERROR for every input-budget trip, a
+// client-caused end the guard has already logged. activeterm runs first, so the
+// session has a pty and its window changes.
+func (reg *sessionRegistry) runProgram(newProgram bm.ProgramHandler) wish.Middleware {
+	return func(next ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			program := newProgram(s)
+			if program == nil {
+				next(s)
+				return
+			}
+			_, resizes, _ := s.Pty()
+			ctx, cancel := context.WithCancel(s.Context())
+			// Quit is sent from here, never from the drain: a Send waits for the event
+			// loop, and a session whose peer withholds its window has one that is stuck.
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						program.Quit()
+						return
+					case <-reg.ending:
+						program.Quit()
+						return
+					case w := <-resizes:
+						program.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+					}
+				}
+			}()
+			if _, err := program.Run(); err != nil {
+				reg.reportProgramExit(s, err)
+			}
+			// Restores the terminal if the program ended without doing so itself.
+			program.Kill()
+			select {
+			case <-reg.ending:
+				// After the restore, so the notice lands on the player's own screen, not
+				// on the alt screen the restore leaves.
+				wish.Fatalln(s, restartNotice)
+			default:
+			}
+			cancel()
+			next(s)
+		}
+	}
+}
+
+// reportProgramExit logs a program that ended with an error, unless that end was
+// already reported: by the input guard, or by reportPanic on the event loop, which
+// is the goroutine Run returned on.
+func (reg *sessionRegistry) reportProgramExit(s ssh.Session, err error) {
+	if errors.Is(err, errInputOverBudget) {
+		return
+	}
+	var ctx context.Context = s.Context()
+	if st, ok := reg.load(s); ok {
+		if st.panicked {
+			return
+		}
+		// Only endRun cancels the program's st.run, and before the program ends only a
+		// displacement calls it: the newer session is why, not the program failing.
+		if st.run != nil && st.run.Err() != nil && errors.Is(err, context.Canceled) {
+			return
+		}
+		ctx = st.traceCtx
+	}
+	slog.ErrorContext(ctx, "session program ended with an error", "error", err)
 }
 
 // filterSessionMsg makes bubbletea's messages safe for a remote terminal. A suspend
@@ -521,23 +629,46 @@ func (reg *sessionRegistry) retier() {
 	})
 }
 
+// connSessions is a connection's open session channels, and the timer that closes
+// the connection once it has had none for a while. It lives on the
+// connection-scoped Context, set before any channel can open.
+type connSessions struct {
+	open    atomic.Int32
+	idle    *time.Timer
+	timeout time.Duration
+}
+
+// closeSessionless arms each new connection's connSessions, so one that is
+// authenticated and never opens a session, or keeps the socket after its last one
+// closed, gives its listener slot back.
+func closeSessionless(timeout time.Duration) ssh.ConnCallback {
+	return func(ctx ssh.Context, conn net.Conn) net.Conn {
+		cs := &connSessions{timeout: timeout}
+		cs.idle = time.AfterFunc(timeout, func() {
+			// A connection already gone can still get here: its last channel's
+			// teardown re-arms the timer after the connection's own end stopped it.
+			if ctx.Err() != nil || cs.open.Load() > 0 {
+				return
+			}
+			slog.InfoContext(ctx, "closing ssh connection with no session open",
+				"client_net", clientNet(conn.RemoteAddr()), "timeout", timeout)
+			_ = conn.Close()
+		})
+		context.AfterFunc(ctx, func() { cs.idle.Stop() })
+		ctx.SetValue(ctxKeyConnSessions, cs)
+		return conn
+	}
+}
+
 // limitSessionChannels enforces the per-connection channel cap where the channel is
 // opened, before Accept. Counted in the middleware it bound nothing: a channel that
 // never asks for a shell never reaches it, yet holds its request goroutine and
-// buffers for as long as the client likes. The counter lives on the connection-scoped
-// Context, whose own lock makes the first-writer race harmless.
+// buffers for as long as the client likes.
 func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 	return func(srv *ssh.Server, conn *gossh.ServerConn, newChan gossh.NewChannel, ctx ssh.Context) {
-		ctx.Lock()
-		counter, ok := ctx.Value(ctxKeyChannelCount).(*atomic.Int32)
-		if !ok {
-			counter = new(atomic.Int32)
-			ctx.SetValue(ctxKeyChannelCount, counter)
-		}
-		ctx.Unlock()
-
-		if counter.Add(1) > maxSessionsPerConnection {
-			counter.Add(-1)
+		cs, _ := ctx.Value(ctxKeyConnSessions).(*connSessions) // closeSessionless set it
+		if cs.open.Add(1) > maxSessionsPerConnection {
+			cs.open.Add(-1)
 			observability.SSHSession(ctx, "rejected_channel_limit")
 			slog.WarnContext(ctx, "too many session channels on one connection",
 				"remote_addr", conn.RemoteAddr().String(), "limit", maxSessionsPerConnection)
@@ -546,7 +677,11 @@ func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 		}
 		// The session handler returns once the channel's request stream closes, which
 		// is the channel going away.
-		defer counter.Add(-1)
+		defer func() {
+			if cs.open.Add(-1) == 0 {
+				cs.idle.Reset(cs.timeout)
+			}
+		}()
 		next(srv, conn, envCappedChannel{NewChannel: newChan}, ctx)
 	}
 }

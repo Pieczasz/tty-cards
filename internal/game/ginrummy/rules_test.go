@@ -377,6 +377,7 @@ func TestRules_Wall_AfterDiscard(t *testing.T) {
 	assert.True(t, extra.HandComplete())
 	require.NotNil(t, extra.LastHandResult)
 	assert.Equal(t, OutcomeWall, extra.LastHandResult.Outcome)
+	assert.Equal(t, "stock exhausted", extra.LastHandResult.WallCause)
 	assert.Equal(t, 0, extra.CumulativeScores["p1"])
 	assert.Equal(t, 0, extra.CumulativeScores["p2"])
 }

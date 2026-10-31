@@ -2,6 +2,8 @@ package components
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -164,7 +166,7 @@ func TestRenderStrip_MarksStagedCardsApartFromTheCursor(t *testing.T) {
 	theme := styles.NewTheme(true)
 
 	hand := testHand(4)
-	out := tuitest.StripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0))
+	out := tuitest.StripANSI(RenderStrip(theme, hand, map[int]struct{}{0: {}}, 1, 0, 0))
 
 	assert.Contains(t, out, "*", "a staged card is starred")
 	assert.Contains(t, out, ">", "the cursor is an arrow")
@@ -172,7 +174,52 @@ func TestRenderStrip_MarksStagedCardsApartFromTheCursor(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(out, ">"))
 	assert.NotContains(t, out, "\n", "an unbounded width keeps the hand on one row")
 
-	assert.Empty(t, RenderStrip(theme, nil, nil, 0, 20), "no cards, nothing to draw")
+	assert.Empty(t, RenderStrip(theme, nil, nil, 0, 20, 0), "no cards, nothing to draw")
+}
+
+// A strip capped at maxRows scrolls to the cursor rather than growing into the pile
+// above it, and keeps the cursor's card in view wherever it is.
+func TestRenderStrip_ScrollsToTheCursorPastMaxRows(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	hand := testHand(10) // two cells a row at eight columns: five rows
+
+	for cursor := -1; cursor < len(hand); cursor++ {
+		out := tuitest.StripANSI(RenderStrip(theme, hand, nil, cursor, 8, 2))
+		assert.Len(t, strings.Split(out, "\n"), 2, "cursor %d: the strip outgrew its rows", cursor)
+		if cursor >= 0 {
+			assert.Contains(t, out, ">", "cursor %d scrolled out of view", cursor)
+		}
+	}
+	assert.Equal(t, tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 0)),
+		tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, 8, 5)), "a strip that fits is not cut")
+}
+
+// A scrolled strip says how many cards it cut off above and below, in its own width:
+// a 45-card hand at 64x20 showed 30 cards and nothing to say the rest existed.
+func TestRenderStrip_CountsTheCardsItScrolledAway(t *testing.T) {
+	t.Parallel()
+	theme := styles.NewTheme(true)
+	hand := testHand(45)
+	const maxWidth, maxRows = 62, 2 // the hero's strip at 64x20
+	marker := regexp.MustCompile(`([↑↓])(\d+)`)
+
+	for cursor := range hand {
+		out := tuitest.StripANSI(RenderStrip(theme, hand, nil, cursor, maxWidth, maxRows))
+		hidden := map[string]int{}
+		for _, m := range marker.FindAllStringSubmatch(out, -1) {
+			hidden[m[1]], _ = strconv.Atoi(m[2])
+		}
+		shown := strings.Count(out, "♠") + strings.Count(out, "♥") + strings.Count(out, "♦") + strings.Count(out, "♣")
+
+		assert.Equal(t, len(hand), shown+hidden["↑"]+hidden["↓"], "cursor %d: %q", cursor, out)
+		assert.LessOrEqual(t, lg.Width(out), maxWidth, "cursor %d: the marker overran the strip", cursor)
+		assert.Contains(t, out, ">", "cursor %d scrolled out of view", cursor)
+	}
+	assert.Contains(t, tuitest.StripANSI(RenderStrip(theme, hand, nil, 0, maxWidth, maxRows)), "↓",
+		"the start of a long hand says more follow")
+	assert.NotRegexp(t, marker, tuitest.StripANSI(RenderStrip(theme, testHand(30), nil, 0, maxWidth, maxRows)),
+		"a strip that fits has nothing to mark")
 }
 
 // A budget narrower than a single cell must still put one card per row rather than
@@ -181,7 +228,7 @@ func TestRenderStrip_AlwaysFitsAtLeastOneCard(t *testing.T) {
 	t.Parallel()
 	theme := styles.NewTheme(true)
 
-	out := tuitest.StripANSI(RenderStrip(theme, testHand(3), nil, 0, 1))
+	out := tuitest.StripANSI(RenderStrip(theme, testHand(3), nil, 0, 1, 0))
 	assert.Len(t, strings.Split(out, "\n"), 3, "one card per row when nothing else fits")
 }
 

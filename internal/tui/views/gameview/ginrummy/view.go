@@ -46,7 +46,9 @@ func (m *model) keyHints() string {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
 	case logic.PhaseAwaitingDiscard:
-		return "<-/h: left | ->/l: right | enter: discard | k: knock | esc: leave"
+		// One cursor binding, not two: spelled out as left and right the line ran 65
+		// columns and wrapped "leave" onto a row of its own at 64.
+		return "<-/h ->/l: move | enter: discard | k: knock | esc: leave"
 	default:
 		return "esc: leave"
 	}
@@ -71,7 +73,7 @@ func (m *model) renderScoreLine() string {
 func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Palette(), m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handView := gameview.RenderHand(m.Global.Palette(), m.Base.Hand, m.Selected, nil,
-		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
+		gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Width, m.Global.Height))
 
 	return gameview.RenderHeroBand(m.Global.Palette(), m.ActionErr, statusView, handView)
 }
@@ -80,17 +82,57 @@ func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
 		Title:    fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
 		Subtitle: m.renderOutcome(),
-		Body:     m.renderHandResult(),
 		Header:   fmt.Sprintf("%-12s  %9s", "player", "total"),
 		Hint:     m.handOverHint(),
 	}
-	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, m.leavers)
-
-	for _, seat := range m.Base.Seats {
-		h.Rows = append(h.Rows, m.Global.Palette().Muted.Render(fmt.Sprintf("%-12s  %9d",
-			styles.PadTruncate(seat.Name, 12), m.cumulativeScores[seat.ID])))
+	names := make([]string, 0, len(m.leavers))
+	for _, l := range m.leavers {
+		names = append(names, l.name)
 	}
+	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, names)
+	// The title names the seat that stayed as the winner; without this the screen
+	// never said the match was won by the other player leaving.
+	if m.Base.EndReason == game.EndReasonForfeit {
+		h.Subtitle = m.Global.Palette().WarningText.Render(strings.Join(names, ", ") + " left the table")
+	}
+
+	// The leavers' rows too: a forfeit takes the leaver out of the seats, and a
+	// scoreboard without them read as a win against nobody.
+	for _, seat := range m.Base.Seats {
+		h.Rows = append(h.Rows, m.scoreRow(seat.ID, seat.Name))
+	}
+	for _, l := range m.leavers {
+		h.Rows = append(h.Rows, m.scoreRow(l.id, l.name))
+	}
+	// The leave line took the knock headline's place, so the last hand's cards would
+	// be left with nothing saying whose they are. That hand is in the totals already.
+	if m.Base.EndReason == game.EndReasonForfeit {
+		return gameview.RenderHandOver(m.Global, h)
+	}
+	return m.renderWithResult(h)
+}
+
+// renderWithResult draws h with the hand's cards as its body: full faces where they
+// fit, mini cards otherwise. RenderHandOver sheds a body too big for the screen
+// whole, so faces that overflowed 80x40 to 120x40 used to cost the player every card
+// while a smaller terminal still showed them small.
+func (m *model) renderWithResult(h gameview.HandOver) string {
+	if !gameview.IsCompact(m.Global.Width, m.Global.Height) {
+		withFaces := h
+		withFaces.Body = m.renderHandResult(true)
+		out := gameview.RenderHandOver(m.Global, withFaces)
+		// A shed body renders exactly as no body does.
+		if withFaces.Body == "" || out != gameview.RenderHandOver(m.Global, h) {
+			return out
+		}
+	}
+	h.Body = m.renderHandResult(false)
 	return gameview.RenderHandOver(m.Global, h)
+}
+
+func (m *model) scoreRow(id, name string) string {
+	return m.Global.Palette().Muted.Render(fmt.Sprintf("%-12s  %9d",
+		styles.PadTruncate(name, 12), m.cumulativeScores[id]))
 }
 
 // handOverHint offers enter only to the seat that deals. Everyone else is waiting.
@@ -113,7 +155,7 @@ func (m *model) renderOutcome() string {
 	var banner string
 	switch r.Outcome {
 	case logic.OutcomeWall:
-		return m.Global.Palette().WarningText.Render("WALL - stock exhausted, no score")
+		return m.Global.Palette().WarningText.Render("WALL - " + r.WallCause + ", no score")
 	case logic.OutcomeGin:
 		banner = m.Global.Palette().SuccessText.Render("GIN!")
 	case logic.OutcomeUndercut:
@@ -127,33 +169,41 @@ func (m *model) renderOutcome() string {
 }
 
 // renderHandResult is the cards behind the outcome: the knocker's melds, what the
-// opponent was left holding and what they laid off. A wall has none.
-func (m *model) renderHandResult() string {
+// opponent was left holding and what they laid off, as nine-row faces or, with faces
+// false, four-column mini cards. A wall has none.
+func (m *model) renderHandResult(faces bool) string {
 	r := m.lastHandResult
 	if r == nil || r.Outcome == logic.OutcomeWall {
 		return ""
 	}
 
-	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds)
-	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false)
+	art := m.miniCard
+	if faces {
+		art = m.faceCard
+	}
+	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds, art)
+	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false, art)
 	laidOff := ""
 	if len(r.LaidOffCards) > 0 {
-		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true)
+		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true, art)
 	}
 
 	return styles.JoinVertical(lg.Center, knockerMelds, oppDead, laidOff)
 }
 
-// renderCard draws a result card as a face, or in four columns on a terminal that
-// cannot hold three rows of nine-row faces next to the standings.
-func (m *model) renderCard(card deck.Card, highlight bool) string {
-	if gameview.IsCompact(m.Global.Width, m.Global.Height) {
-		return components.RenderMiniCard(m.Global.Palette(), card)
-	}
+// cardArt draws one result card, highlighted or not.
+type cardArt func(card deck.Card, highlight bool) string
+
+func (m *model) faceCard(card deck.Card, highlight bool) string {
 	return components.RenderCard(m.Global.Palette(), card, highlight)
 }
 
-func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
+// miniCard has no highlight: four columns leave no room to mark a card.
+func (m *model) miniCard(card deck.Card, _ bool) string {
+	return components.RenderMiniCard(m.Global.Palette(), card)
+}
+
+func (m *model) renderMeldGroups(label string, melds [][]deck.Card, art cardArt) string {
 	if len(melds) == 0 {
 		return m.Global.Palette().Dim.Render(label + ": -")
 	}
@@ -165,7 +215,7 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 		}
 		cards := make([]string, 0, len(meld))
 		for _, card := range meld {
-			cards = append(cards, m.renderCard(card, false))
+			cards = append(cards, art(card, false))
 		}
 		box := styles.JoinHorizontal(lg.Top, cards...)
 		groups = append(groups, m.Global.Palette().MeldBox.Render(
@@ -177,13 +227,13 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 	)
 }
 
-func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool) string {
+func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool, art cardArt) string {
 	if len(cards) == 0 {
 		return m.Global.Palette().Dim.Render(label + ": -")
 	}
 	parts := make([]string, 0, len(cards))
 	for _, card := range cards {
-		parts = append(parts, m.renderCard(card, highlight))
+		parts = append(parts, art(card, highlight))
 	}
 	return styles.JoinVertical(lg.Left,
 		m.Global.Palette().Muted.Render(label),

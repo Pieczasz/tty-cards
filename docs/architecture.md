@@ -50,6 +50,7 @@ internal and holds only Alloy and the docker socket proxy.
 | nginx (http) | 16 concurrent / network, 64 /48; 2 r/s + burst 10 on `/api/` | `nginx.conf` |
 | PROXY header | only from `PROXY_TRUSTED_CIDRS` | `proxyListener` |
 | listener | `2 x MAX_CONNECTIONS` | `netutil.LimitListener` |
+| connection with no session open | closed 30s after accept, or 30s after its last session closes | `ssh.closeSessionless` |
 | account slots | `MAX_CONNECTIONS`; a second connect displaces the first | `ssh.SessionTracker` |
 | auth | `RATE_LIMIT_CONNECTIONS` / `RATE_LIMIT_WINDOW` per network, 16x that per IPv6 /48 | `ssh.rateLimitAuth` |
 | registration | per window: 5 /64, 20 /48, 600 global; refunded if no account is created | `ssh.allowRegistration` |
@@ -65,7 +66,7 @@ spend `ratelimit.WideKey` (IPv6 /48).
 
 1. Never publish `:6969` or `:6970`.
 2. `sessionLifecycle` is outermost. Recover is a direct defer. The bubbletea path is `reportingModel`, and the notice goes to `s.Stderr()`.
-3. A displaced session must not `LeaveLobby` or free the replacement's tracker slot. `Connect` closes the old connection outside the account lock, or, when the new session arrived on that same connection, only the old session: its program is ended and its channel closed. Teardown gives up the seat and the slot together under that lock (`ReleaseWith`). `ResumeSeat` runs only once the slot is owned, and the slot's player and generation are stored before it runs.
+3. A displaced session must not `LeaveLobby` or free the replacement's tracker slot. `Connect` closes the old connection outside the account lock, or, when the new session arrived on that same connection, only the old session: its program is ended, and its channel closed once that program has restored the terminal (`displacedCloseAfter` bounds the wait). Teardown gives up the seat and the slot together under that lock (`ReleaseWith`). `ResumeSeat` runs only once the slot is owned, and the slot's player and generation are stored before it runs.
 4. A mid-game drop calls `DisconnectPlayer`, not `LeaveLobby`. The hold is released on hand end and on shutdown, not only by its timer. A grace callback from an older arm does not expire a newer hold.
 5. Finalize lives on the Manager and uses the snapshot taken at game start. Rules error, abandoned and shutdown are history without Elo. Interrupted writes only the leavers' losses.
 6. Soft-deleted rankings must be revived before the seed, or finalize aborts.

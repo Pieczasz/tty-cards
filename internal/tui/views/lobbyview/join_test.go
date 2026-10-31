@@ -9,6 +9,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
 	"uuid"
@@ -308,6 +309,27 @@ func TestJoin_TypingReachesTheCodeField(t *testing.T) {
 	assert.Equal(t, "AB", view.textInput.Value(), "codes are upper-cased as they are typed")
 }
 
+// While the code prompt is open every letter is typed into the code, so a footer still
+// offering g, m, o and the global shortcuts advertised keys that do something else.
+func TestJoin_TheCodePromptFooterOffersOnlyItsOwnKeys(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	pressJoin(t, view, "c")
+	out := tuitest.StripANSI(view.View().Content)
+
+	for _, swallowed := range []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats",
+		"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard"} {
+		assert.NotContains(t, out, swallowed, "the code field takes this key as text")
+	}
+	assert.Contains(t, out, "enter - Join")
+	assert.Contains(t, out, "esc - Cancel")
+	assert.Contains(t, out, "ctrl+c - Quit")
+
+	pressJoin(t, view, "esc")
+	assert.Contains(t, tuitest.StripANSI(view.View().Content), "g - Game", "browsing offers the filters again")
+}
+
 func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
 	m := newManager(t)
@@ -316,6 +338,104 @@ func TestJoin_ViewSaysWhenNothingMatches(t *testing.T) {
 	rendered := tuitest.StripANSI(view.View().Content)
 
 	assert.Contains(t, rendered, "No tables match")
+}
+
+// The code field takes g, m and o as letters, so the empty-list notice must not
+// offer them while it is open: pressing g typed a G into the code instead.
+func TestJoin_TheCodePromptNoticeOffersNoFilterKeys(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	pressJoin(t, view, "c")
+	out := tuitest.StripANSI(view.View().Content)
+
+	assert.Contains(t, out, "No tables match", "the empty list still says why it is empty")
+	assert.NotContains(t, out, "press g, m or o", "the code field takes these keys as text")
+
+	pressJoin(t, view, "esc")
+	assert.Contains(t, tuitest.StripANSI(view.View().Content), "press g, m or o",
+		"browsing offers the filters again")
+}
+
+// Opening the code prompt shortens the empty-list notice; the block is centred on
+// its widest line, so a shorter notice moved everything sideways. The row may still
+// shift: the modal footer is shorter, and the frame centres the content vertically.
+func TestJoin_TheCodePromptKeepsTheNoticeInPlace(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+
+	column := func() int {
+		for line := range strings.SplitSeq(tuitest.StripANSI(view.View().Content), "\n") {
+			if c := strings.Index(line, "No tables match"); c >= 0 {
+				return c
+			}
+		}
+		t.Fatal("no empty-list notice on screen")
+		return 0
+	}
+
+	browsing := column()
+	pressJoin(t, view, "c")
+	assert.Equal(t, browsing, column(), "the notice moved sideways when the code prompt opened")
+}
+
+// framedLine is the line holding needle, inside the frame's side borders, with the
+// blank columns either side of its text counted.
+func framedLine(t *testing.T, out, needle string) (left, right int) {
+	t.Helper()
+	for line := range strings.SplitSeq(out, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		_, inner, ok := strings.Cut(line, "│")
+		require.True(t, ok, "%q is outside the frame", line)
+		inner, _, ok = strings.Cut(inner, "│")
+		require.True(t, ok, "%q is outside the frame", line)
+		text := strings.TrimLeft(inner, " ")
+		left = lg.Width(inner) - lg.Width(text)
+		return left, lg.Width(text) - lg.Width(strings.TrimRight(text, " "))
+	}
+	require.Failf(t, "not on screen", "%q is missing from:\n%s", needle, out)
+	return 0, 0
+}
+
+// The empty-list notice is wider than the frame at 64 columns. Laid out unwrapped,
+// the centred layout was measured that wide: the footer broke inside "o - Seats" and
+// the title sat right of centre.
+func TestJoin_AnEmptyListKeepsTheLayoutAtTheMinimumSize(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+	view.global.Theme = styles.NewTheme(true)
+	view.global.Width, view.global.Height = styles.MinWidth, styles.MinHeight
+
+	out := tuitest.StripANSI(view.View().Content)
+
+	assert.Contains(t, out, "o - Seats", "the footer broke inside an action:\n%s", out)
+	left, right := framedLine(t, out, "Join Game")
+	assert.InDelta(t, left, right, 1, "the title is off centre:\n%s", out)
+}
+
+// A join error used to be padded to the frame's full width, so the block it joined
+// was as wide as the frame and the filter line, list and prompt jumped to its left edge.
+func TestJoin_AnErrorKeepsTheScreenCentred(t *testing.T) {
+	t.Parallel()
+	for _, size := range []tuitest.Size{{Name: "80x24", Width: 80, Height: 24}, {Name: "100x30", Width: 100, Height: 30}} {
+		t.Run(size.Name, func(t *testing.T) {
+			t.Parallel()
+			view := newJoinModel(t, newManager(t))
+			view.global.Theme = styles.NewTheme(true)
+			view.global.Width, view.global.Height = size.Width, size.Height
+			view.entries = manyTables(3)
+			before, _ := framedLine(t, tuitest.StripANSI(view.View().Content), "game: any")
+
+			view.err = errors.New("invalid lobby code")
+			out := tuitest.StripANSI(view.View().Content)
+
+			after, _ := framedLine(t, out, "game: any")
+			assert.Equal(t, before, after, "the filter line moved:\n%s", out)
+			assert.Contains(t, out, "Error: invalid lobby code")
+		})
+	}
 }
 
 func manyTables(n int) []lobby.BrowseEntry {
@@ -495,6 +615,26 @@ func TestJoin_CodeEntryFlow(t *testing.T) {
 		assert.NoError(t, view.err, "cancelling is not a failed join")
 	})
 
+	// Esc used to leave "> ABC" and its error on screen, and the next c appended to it.
+	t.Run("escape clears the code and its error", func(t *testing.T) {
+		t.Parallel()
+		view := newJoinModel(t, newManager(t))
+		pressJoin(t, view, "c")
+		for _, key := range []string{"a", "b", "c", "enter"} {
+			pressJoin(t, view, key)
+		}
+		require.Error(t, view.err, "an unknown code has to fail for this to mean anything")
+
+		pressJoin(t, view, "esc")
+		assert.Empty(t, view.textInput.Value(), "a cancelled code is gone")
+		require.NoError(t, view.err, "and so is the error it left")
+		assert.NotContains(t, tuitest.StripANSI(view.View().Content), "Error:")
+
+		pressJoin(t, view, "c")
+		pressJoin(t, view, "d")
+		assert.Equal(t, "D", view.textInput.Value(), "the next code starts empty")
+	})
+
 	t.Run("backspace corrects a typo", func(t *testing.T) {
 		t.Parallel()
 		view := newJoinModel(t, newManager(t))
@@ -560,10 +700,24 @@ func TestJoin_FilterLineNamesEveryFilter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			view := newJoinModel(t, newManager(t))
+			// Games on offer are always catalog games, so the catalog holds poker too.
 			view.games = []game.Module{{Name: "Poker", Slug: "poker"}}
+			view.global.Games = view.games
 			view.filter = tt.filter
 
 			assert.Equal(t, tt.want, tuitest.StripANSI(view.filterLine()))
 		})
 	}
+}
+
+// The filter stays pinned to a game whose last table went private or started, so the
+// label must not depend on that game still having a table: it used to fall back to
+// the internal slug ("crazy_eights").
+func TestJoin_FilterLineNamesAGameWithNoTablesLeft(t *testing.T) {
+	t.Parallel()
+	view := newJoinModel(t, newManager(t))
+	view.games = nil
+	view.filter = lobby.BrowseFilter{Slug: testGameSlug}
+
+	assert.Equal(t, "game: "+testGameName+"   mode: any   showing: all tables", tuitest.StripANSI(view.filterLine()))
 }

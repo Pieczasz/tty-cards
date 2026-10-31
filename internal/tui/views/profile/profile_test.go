@@ -489,13 +489,15 @@ func TestResultPlain(t *testing.T) {
 	}
 }
 
-// Beyond third the ordinal suffix is not worth a table, so the placement falls back
-// to a number - it still has to fit the fixed cell.
+// Every placement reads as an ordinal: a 4-seat match always has a 4th place, and
+// 11-13 take "th" whatever their last digit. It still has to fit the fixed cell.
 func TestPlacementPlain(t *testing.T) {
 	t.Parallel()
 
 	for placement, want := range map[int]string{
-		1: "1st place", 2: "2nd place", 3: "3rd place", 4: "4 place", 11: "11 place",
+		1: "1st place", 2: "2nd place", 3: "3rd place", 4: "4th place", 10: "10th place",
+		11: "11th place", 12: "12th place", 13: "13th place", 21: "21st place", 22: "22nd place",
+		23: "23rd place",
 	} {
 		assert.Equal(t, want, placementPlain(placement))
 		assert.LessOrEqual(t, len(want), colPlace, "the placement cell is fixed-width")
@@ -746,6 +748,32 @@ func TestView_AdvertisesTheDeleteKey(t *testing.T) {
 	m, _ := deletingModel(t, nil)
 
 	assert.Contains(t, tuitest.StripANSI(m.View().Content), "x - Delete account")
+}
+
+// While the confirmation owns the keyboard every letter is typed into it, so a footer
+// still offering n, f, p, t, g, r and x advertised keys that spelled "> nft" instead.
+func TestView_TheConfirmationFooterOffersOnlyItsOwnKeys(t *testing.T) {
+	t.Parallel()
+	m, _ := deletingModel(t, nil)
+	m.phase = deleteConfirming
+
+	out := tuitest.StripANSI(m.View().Content)
+
+	for _, swallowed := range []string{"g - Game", "r - Result", "x - Delete account",
+		"n - New Game", "f - Join Game", "p - Profile", "t - Leaderboard"} {
+		assert.NotContains(t, out, swallowed, "the prompt takes this key as text")
+	}
+	assert.Contains(t, out, "enter - Delete")
+	assert.Contains(t, out, "esc - Cancel")
+	assert.Contains(t, out, "ctrl+c - Quit")
+
+	for _, phase := range []deletePhase{deleteRunning, deleteDone} {
+		m.phase = phase
+		out = tuitest.StripANSI(m.View().Content)
+		assert.NotContains(t, out, "n - New Game", "no key but quit does anything once the erasure runs")
+		assert.NotContains(t, out, "esc - Cancel", "it cannot be backed out of")
+		assert.Contains(t, out, "ctrl+c - Quit")
+	}
 }
 
 // At the declared minimum the full warning is taller than the rows the frame has, and

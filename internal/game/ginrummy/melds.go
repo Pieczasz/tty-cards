@@ -114,7 +114,11 @@ func bestSplitBy(
 	melds = make([][]deck.Card, 0, len(bestMasks))
 	var used uint16
 	for _, mask := range bestMasks {
-		melds = append(melds, pick(make([]deck.Card, 0, maxSetSize), cards, mask, true))
+		meld := pick(make([]deck.Card, 0, maxSetSize), cards, mask, true)
+		// pick walks hand order, and the melds are shown as scored: a run held
+		// 4 A 2 3 has to read A 2 3 4. Stable so a set keeps its hand order.
+		slices.SortStableFunc(meld, byRunOrder)
+		melds = append(melds, meld)
 		used |= mask
 	}
 	return melds, pick(make([]deck.Card, 0, n), cards, used, false), bestPts

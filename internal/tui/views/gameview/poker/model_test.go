@@ -8,6 +8,7 @@ import (
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
+	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"uuid"
@@ -220,4 +221,77 @@ func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
 
 	m.confirm()
 	require.NoError(t, m.ActionErr, "the engine accepts the amount the view offered")
+}
+
+// otherSeat is the one opponent at a heads-up table.
+func otherSeat(t *testing.T, state *game.State, heroID string) *game.Player {
+	t.Helper()
+	for _, p := range state.Players {
+		if p.ID != heroID {
+			return p
+		}
+	}
+	require.FailNow(t, "no opponent seated")
+	return nil
+}
+
+// PT-01: the hero raises to 600 and the big blind shoves 925, a raise of 325 under
+// the 550 minimum. The betting is not reopened, so the hero may only call or fold; a
+// bar that still offered a: all-in offered a move the engine refuses.
+func TestActionBar_HidesAllInWhenTheBettingIsNotReopened(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t, 2)
+	heroID := m.HeroID()
+
+	var villainID string
+	engine.WithState(func(state *game.State) {
+		villain := otherSeat(t, state, heroID)
+		villainID = villain.ID
+		// The big blind has 50 posted, so 875 behind is a 925 shove.
+		extra(t, state).Seats[villainID].Chips = 875
+	})
+	require.NoError(t, engine.SubmitAction(heroID, logic.ActionRaiseTo{Amount: 600}))
+	require.NoError(t, engine.SubmitAction(villainID, logic.ActionAllIn{}))
+	m.syncState()
+
+	require.True(t, m.Base.MyTurn)
+	engine.WithState(func(state *game.State) {
+		require.Error(t, state.Rules.ValidateAction(state, logic.ActionAllIn{}), "the rules refuse the shove")
+	})
+	bar := tuitest.StripANSI(m.renderActionBar())
+	assert.Contains(t, bar, "c: call 325")
+	assert.NotContains(t, bar, "a: all-in", "the bar offers only what the engine accepts")
+}
+
+// PT-02: a 15-chip stack facing the 50 big blind can only put in its 15. The bar and
+// the bet line used to quote the whole 50, which is not what pressing c commits.
+func TestToCall_IsCappedAtTheHeroStack(t *testing.T) {
+	t.Parallel()
+	engine, m := tableOnTurn(t, 3)
+	heroID := m.HeroID()
+	engine.WithState(func(state *game.State) { extra(t, state).Seats[heroID].Chips = 15 })
+	m.syncState()
+
+	bar := tuitest.StripANSI(m.renderActionBar())
+	assert.Contains(t, bar, "c: call 15 (all-in)")
+	assert.Contains(t, tuitest.StripANSI(m.renderCenter(true)), "to call 15")
+}
+
+// PT-07: a match that ends with two stacks level shares first place, which syncState
+// reads from the same standings the engine and the database rank on.
+func TestSyncState_ReadsASharedFirstPlace(t *testing.T) {
+	t.Parallel()
+	engine, m := startedTable(t)
+	engine.WithState(func(state *game.State) {
+		e := extra(t, state)
+		for _, p := range state.Players {
+			*e.Seats[p.ID] = logic.Seat{Chips: logic.DefaultStack}
+		}
+		e.Pool, e.CurrentBet = 0, 0
+		e.Phase = logic.PhaseShowdown
+		e.MatchComplete = true
+	})
+	m.syncState()
+
+	assert.ElementsMatch(t, []string{"alice", "bob"}, m.coWinners)
 }

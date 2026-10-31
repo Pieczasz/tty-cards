@@ -145,8 +145,12 @@ func (m *joinModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *joinModel) handleCodeEntry(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc":
+		// Cancel drops the code and its error: kept, the next c appended to a code
+		// the player had abandoned, under an error about it.
 		m.writingCode = false
 		m.textInput.Blur()
+		m.textInput.Reset()
+		m.err = nil
 		return m, nil
 	case "enter":
 		return m.joinByCode(strings.ToUpper(m.textInput.Value()))
@@ -265,9 +269,11 @@ func (m *joinModel) gameIndex(slug string) int {
 }
 
 func (m *joinModel) filterLine() string {
+	// The name comes from the whole catalog, not m.games: a pinned game whose last
+	// table just went private or started is still the filter, and still has a name.
 	label := "any"
-	if i := m.gameIndex(m.filter.Slug); i >= 0 {
-		label = m.games[i].Name
+	if i := slices.IndexFunc(m.global.Games, func(g game.Module) bool { return g.Slug == m.filter.Slug }); i >= 0 {
+		label = m.global.Games[i].Name
 	} else if m.filter.Slug != "" {
 		label = m.filter.Slug
 	}
@@ -330,7 +336,19 @@ func (m *joinModel) visibleWindow(rows int) (start, end int) {
 
 func (m *joinModel) renderList(rows int) string {
 	if len(m.entries) == 0 {
-		return m.global.Palette().Muted.Render("No tables match right now - press g, m or o to widen the filters.")
+		// Wrapped, not padded, to the frame: wider than 54 columns it widened the
+		// whole layout, so the footer broke mid-action and the title went off centre.
+		// The code prompt takes g, m and o as letters, so it must not offer them.
+		muted := m.global.Palette().Muted
+		full := lg.Wrap(muted.Render("No tables match right now - press g, m or o to widen the filters."),
+			styles.InnerWidth(m.global.Width), "")
+		if !m.writingCode {
+			return full
+		}
+		// The short notice keeps the full one's box: the layout centres on its widest
+		// line, so a narrower notice moved the whole screen when the prompt opened.
+		w, h := lg.Size(full)
+		return lg.NewStyle().Width(w).Height(h).Render(muted.Render("No tables match right now."))
 	}
 
 	start, end := m.visibleWindow(rows)
@@ -349,8 +367,13 @@ func (m *joinModel) View() tea.View {
 	if key := m.renderKey(); key == m.lastKey && m.lastView != "" {
 		return tea.NewView(m.lastView)
 	}
-	actions := []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats"}
-	rendered := views.RenderScreen(m.global, "Join Game", actions, m.renderContent)
+	var rendered string
+	if m.writingCode {
+		rendered = views.RenderModalScreen(m.global, "Join Game", []string{"enter - Join", "esc - Cancel"}, m.renderContent)
+	} else {
+		actions := []string{"c - Enter Code", "g - Game", "m - Mode", "o - Seats"}
+		rendered = views.RenderScreen(m.global, "Join Game", actions, m.renderContent)
+	}
 	m.lastKey, m.lastView = m.renderKey(), rendered
 	return tea.NewView(rendered)
 }
@@ -363,10 +386,12 @@ func (m *joinModel) renderContent(contentHeight int) string {
 
 	// The error is wrapped and measured before the list takes its rows: appended after
 	// a list that had spent the whole budget, it pushed the frame past the terminal.
+	// Wrapped rather than given a Width, which pads it to the frame and leaves the
+	// block nothing to centre.
 	var errLine string
 	if m.err != nil {
-		errLine = m.global.Palette().ErrorText.Width(styles.InnerWidth(m.global.Width)).
-			Render("Error: " + m.err.Error())
+		errLine = lg.Wrap(m.global.Palette().ErrorText.Render("Error: "+m.err.Error()),
+			styles.InnerWidth(m.global.Width), "")
 		contentHeight -= lg.Height(errLine)
 	}
 

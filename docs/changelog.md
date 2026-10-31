@@ -113,6 +113,10 @@ unnoticed for so long.
   only the one slice nobody matched goes back; the rest, folders' chips included,
   goes to the winner. A player who called and then folded used to get part of it
   back.
+- **Leaving a poker hand forfeits everything you put in.** Leaving folds, and the
+  uncalled part of your bet now goes to the pot's winner instead of back to your
+  departed stack: a big blind who walks out before the small blind acts loses
+  the whole 50, and a raise left on the table is won by the seat that stayed.
 - **Short all-ins that add up to a full raise reopen the betting**, as the
   standard (TDA) rule has it. A player who had already acted can raise again.
 - **Poker raises you can actually make.** A deep stack can put a short one
@@ -136,6 +140,10 @@ unnoticed for so long.
   game can be renamed without orphaning every rating attached to it. Scalar
   columns that used to scan a SQL NULL into a silent Go zero (Elo 0, game 0)
   are `NOT NULL`.
+- **A forfeit's rating change shows at once.** A player who left a ranked match
+  saw their old rating in every lobby they joined, and was matched by it, until
+  they logged in again. The next table they sit at, and the join list, now use
+  the rating the match wrote.
 
 ### Changed - sessions and security
 
@@ -211,6 +219,35 @@ unnoticed for so long.
   `Host` header.
 - A session turned away because the server is shutting down is now counted, as
   `outcome="rejected_draining"` on `ttycards.ssh.sessions` (operators).
+- **A deploy no longer drops every player the instant it starts.** Each session's
+  screen quit on the server's own SIGTERM or SIGINT, so the 30-second drain had
+  nobody left to drain: games in progress were held for a reconnect, then
+  recorded unrated, and players saw a blank screen with no notice. Sessions now
+  play on through the drain and are closed with the restart notice at its end.
+- **Your terminal is left usable when a deploy or a second session ends yours.**
+  At the end of the drain the connection was simply cut: no restart notice, and
+  the terminal stayed in the alt screen with a hidden cursor and the kitty
+  keyboard mode on, so the shell's input came out garbled. A session displaced
+  by a second one on the same connection lost its restore the same way. Each one
+  now quits first, which puts the terminal back, and a drained one is then told
+  the server is restarting. A session that cannot be reached, its client no
+  longer reading, is still closed within two seconds.
+- **SIGHUP drains like SIGTERM** (operators). It used to end the process at once:
+  no drain, frozen screens, and the games in play missing from history. SIGQUIT
+  is still Go's goroutine dump and exits without a drain.
+- **A connection that opens no session is closed after 30 seconds** (operators).
+  `ssh -N`, or a connection kept after its last session closed, used to hold a
+  listener slot for the whole 30-minute idle timeout without being counted or
+  logged. Its close is logged at info.
+- **No more plain-text lines in the server log** (operators). A session cut off
+  for flooding input, or interrupted, also wrote an unstructured
+  `ERROR app exit with error` line that bypassed the JSON log and OTLP. The
+  flood's own WARN is now the only record of it, and any other error a session's
+  screen ends with is logged as JSON at ERROR.
+- **`/healthz` no longer reports an outage when the prober hangs up early**
+  (operators). A probe that half-closed its side, as `nc` does, got a 503 and
+  left an ERROR `health check failed` line on a healthy server, as often as anyone
+  asked. The database check now runs to its own 2-second bound regardless.
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 
@@ -318,6 +355,9 @@ unnoticed for so long.
 
 ### Changed - terminal UI
 
+- **A terminal that reports no size gets an 80x24 screen**, not a blank one that
+  still acted on every key. `ssh -tt` with stdin not a terminal reports 0x0; the
+  first real resize takes over, and a later resize with no size is ignored.
 - **Every screen now fits an 80x24 terminal**, and a 64x20 one. Menus, the
   leaderboard, the profile and the join browser all size themselves to the space
   they actually have instead of assuming it.
@@ -359,6 +399,25 @@ unnoticed for so long.
   for its turn. Space and enter in the Hearts pass, and draw, discard and knock
   in Gin, did nothing off-turn; the waiting seats now see only the cursor keys
   and esc.
+- **A Gin Rummy wall says why it walled.** A hand the two seats spent a hundred
+  turns trading the upcard in read "WALL - stock exhausted" with the stock still
+  full; it now reads "WALL - turn limit".
+- Gin Rummy's discard key line fits one row at 64 columns. It used to break
+  inside "esc: leave".
+- Pressing enter twice to deal the next Gin Rummy hand no longer leaves "the hand
+  is still being played" under your turn for the whole first turn. The second
+  enter is ignored.
+- **A Gin Rummy forfeit keeps both players on the scoreboard** and says who left
+  the table. The player who left used to vanish from it, so a match they led 8-0
+  read as a 0-point win against nobody. A forfeit on the between-hands screen
+  also drops the last hand's cards, which stayed on screen with nothing saying
+  whose melds they were once the leave line replaced the knock headline.
+- **Gin Rummy's hand result keeps its cards on a bigger terminal.** From 80x40
+  to about 150 columns the knocker's melds, the opponent's deadwood and the
+  layoffs vanished, leaving only the headline and the totals, while a smaller
+  terminal showed them. They are drawn small wherever the full cards do not fit.
+- A Gin Rummy run on the hand result reads in rank order, A 2 3 4, instead of
+  the order the knocker happened to hold it in.
 - A failed join no longer pushes the join browser past the edge of an 80x24 or
   64x20 terminal: the error line is wrapped and the table list gives up a row
   for it.
@@ -382,6 +441,65 @@ unnoticed for so long.
   the table has finished.
 - The welcome banner no longer renders your username as ASCII art (it also
   stopped being a way to fill a shared render cache).
+- **Poker no longer offers an all-in the table refuses.** After a short all-in
+  that does not reopen the betting, the bar shows only fold and call; `a:
+  all-in` used to stay up and was refused with "betting is not reopened".
+- **A poker stack short of the bet is quoted what it can actually call.** With 15
+  chips facing a 50 big blind the bar reads `c: call 15 (all-in)` and the bet
+  line "to call 15"; both used to quote the full 50.
+- **A shared first place is no longer announced as one player's win.** When the
+  standings place two seats first, no game names a single winner any more, and
+  Poker's result screen reads "MATCH COMPLETE - tie for first" over the tied
+  names, matching the draw recorded in the match history.
+- A card covered by the next one in your hand no longer shows half its
+  bottom-right rank: a covered ten read "1" there and a Reverse "R". The corner
+  under the next card is left blank, as on a real fan; the top-left still names
+  the card.
+- At 64 columns the in-game key line wraps between keys instead of leaving
+  "esc:" at the end of one row and "leave/cancel" on the next.
+- Crazy Eights and Uno no longer offer `enter: play/confirm` and `d: draw` to a
+  seat waiting for its turn, where both did nothing; like Hearts and Gin Rummy,
+  the waiting seats see only the cursor keys and esc.
+- The suit and colour picker's key line names its own keys: up/down to reach
+  its second row, `enter: pick` and `esc: back`. It used to keep offering
+  `d: draw`, which does nothing while the picker is open, and never mentioned
+  up/down.
+- **The pile and the colour or suit picker are never cut off at the top.** A
+  card-art hand at 26 to 28 rows, or a row or two taller where the key line wraps
+  onto a second row, cost the stock and discard their top border and rank; those
+  sizes now draw the
+  hand as the rank-and-suit strip. A strip too long for its rows (a 46-card Uno
+  hand at 64x20) scrolls with the cursor instead of pushing the pile and the
+  picker's frame off the screen.
+- A scrolled hand strip says how many cards it cut off: `↑N` at the end of its
+  first row for cards above, `↓N` at the end of its last row for cards below. A
+  45-card hand at 64x20 showed 28 cards and nothing to say the rest existed.
+- The profile history reads "4th place" for a fourth place, and so on past it.
+  It used to read "4 place".
+- The leaderboard rows line up under their column titles again. Every row sat
+  one column right of the header.
+- **The lobby lists its players at 64x20.** The blank rows above the roster are
+  given up before a seat is hidden; every name used to hide behind "... and N
+  more" while two blank rows stayed on screen. When seats still have to be
+  hidden, the guest under the leader's cursor is always drawn, so enter never
+  kicks a player the leader cannot see.
+- **A prompt's footer lists only the prompt's keys.** Under the account-deletion
+  confirmation, the join screen's code entry and the lobby's leave confirmation
+  the footer used to keep offering the screen's shortcuts, which the prompt typed
+  into its field (`> nft`) or ignored.
+- The join screen's game filter keeps the game's name ("Crazy Eights") when its
+  last open table goes private or starts. It used to show the internal
+  `crazy_eights`.
+- At 64 columns an empty join list no longer breaks the footer inside
+  "o - Seats" or pushes the title off centre.
+- A join error no longer shoves the join screen against the frame's left edge;
+  the list and the code prompt stay centred with the error under them.
+- With no table to list, the join screen's code entry no longer says "press g,
+  m or o to widen the filters"; those keys type into the code there.
+- Esc out of the join screen's code entry clears the code and its error. The next
+  `c` used to carry on from the abandoned code under the old "invalid lobby code".
+- The lobby's settings and player list stay put when a player readies up or
+  stands down. The whole form used to jump four columns sideways each time.
 
 ### Fixed - internals worth knowing about
 

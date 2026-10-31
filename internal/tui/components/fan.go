@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -113,13 +114,24 @@ const stripCellWidth = 4
 // RenderStrip is the hand as rank-and-suit cells wrapped to maxWidth, for when no fan
 // fits: thirteen cards of art run past a hundred columns. selected marks staged cards,
 // cursor the focused one; nil map means single selection.
-func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth int) string {
+//
+// Past maxRows the strip scrolls to keep the cursor's row in view. A strip that grew
+// instead pushed the pile above it out of the top of a 64x20 screen; a card scrolled
+// away is still a cursor key away. Zero maxRows is unbounded.
+//
+// A scrolled strip gives each row's last cell to a count of the cards cut off above
+// (first row) and below (last row): a hand cut silently read as the whole hand.
+func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, cursor, maxWidth, maxRows int) string {
 	if len(cards) == 0 {
 		return ""
 	}
 	perRow := len(cards)
 	if maxWidth > 0 {
 		perRow = max(maxWidth/stripCellWidth, 1)
+	}
+	scrolls := maxRows > 0 && (len(cards)+perRow-1)/perRow > maxRows
+	if scrolls && perRow > 1 {
+		perRow--
 	}
 
 	rows := make([]string, 0, len(cards)/perRow+1)
@@ -131,7 +143,39 @@ func RenderStrip(t *styles.Theme, cards []deck.Card, selected map[int]struct{}, 
 		}
 		row.WriteString(stripCell(t, card, i, selected, cursor))
 	}
-	return strings.Join(append(rows, row.String()), "\n")
+	rows = append(rows, row.String())
+	if !scrolls {
+		return strings.Join(rows, "\n")
+	}
+	return scrollStrip(t, rows, len(cards), perRow, cursor, maxRows)
+}
+
+// scrollStrip is the maxRows of rows around the cursor's, each ending in the cell
+// RenderStrip set aside for the count of cards scrolled off.
+func scrollStrip(t *styles.Theme, rows []string, cards, perRow, cursor, maxRows int) string {
+	first := min(max(cursor/perRow-maxRows+1, 0), len(rows)-maxRows)
+	rows = rows[first : first+maxRows]
+	above, below := first*perRow, max(cards-(first+maxRows)*perRow, 0)
+	marks := make([]string, len(rows))
+	last := len(rows) - 1
+	// One row has room for one count; with both cut, it says how many are off screen.
+	switch {
+	case last == 0 && above > 0 && below > 0:
+		marks[0] = "↕" + strconv.Itoa(above+below)
+	default:
+		if above > 0 {
+			marks[0] = "↑" + strconv.Itoa(above)
+		}
+		if below > 0 {
+			marks[last] = "↓" + strconv.Itoa(below)
+		}
+	}
+	// Every row gets the cell, blank or not: the band centres each line on its own, so
+	// a row one cell shorter would sit half a cell off the grid.
+	for i, mark := range marks {
+		rows[i] += t.Dim.Render(fmt.Sprintf("%*s", stripCellWidth, mark))
+	}
+	return strings.Join(rows, "\n")
 }
 
 func stripCell(t *styles.Theme, card deck.Card, i int, selected map[int]struct{}, cursor int) string {
@@ -190,6 +234,10 @@ func renderFanColumn(t *styles.Theme, card deck.Card, selected bool, width int, 
 	closeTop, closeMid, closeBot := "", "", ""
 	if closed {
 		closeTop, closeMid, closeBot = edge.Render("╮"), edge.Render("│"), edge.Render("╯")
+	} else {
+		// The mirrored corner lies under the next card, as on a real fan. Cut at the
+		// overlap, a ten's corner read "1" and a Reverse's "R": another card's rank.
+		cells[len(cells)-1] = blankRow()
 	}
 
 	lines := make([]string, 0, cardRows)

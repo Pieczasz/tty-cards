@@ -72,7 +72,12 @@ func (m *model) submitIfTurn(action game.Action) {
 }
 
 func (m *model) submit(action game.Action) {
-	_ = m.Submit(action) // kept in ActionErr, which the hero band renders
+	// A refusal is kept in ActionErr, which the hero band renders. An accepted move is
+	// read back at once rather than when its event arrives: until then the keys act on
+	// the old phase, and a second enter on the hand-over sent a deal the engine refused.
+	if m.Submit(action) == nil {
+		m.syncState()
+	}
 }
 
 var _ router.Closer = (*model)(nil)

@@ -33,6 +33,13 @@ func startServerWith(tb testing.TB, repo db.Authenticator) (string, *SessionTrac
 // startServerWithRegistry is startServerWith over a registry the test sized.
 func startServerWithRegistry(tb testing.TB, repo db.Authenticator, reg *sessionRegistry) (string, *SessionTracker) {
 	tb.Helper()
+	_, addr, tracker := startServer(tb, repo, reg)
+	return addr, tracker
+}
+
+// startServer is startServerWithRegistry for a test that drives the server itself.
+func startServer(tb testing.TB, repo db.Authenticator, reg *sessionRegistry) (*Server, string, *SessionTracker) {
+	tb.Helper()
 	deps := newSessionDeps(tb, repo)
 	deps.Config = &config.Config{
 		SSHKeyPath:      tb.TempDir() + "/id_ed25519",
@@ -54,7 +61,7 @@ func startServerWithRegistry(tb testing.TB, repo db.Authenticator, reg *sessionR
 		_ = server.Close()
 		<-served
 	})
-	return listener.Addr().String(), deps.Tracker
+	return server, listener.Addr().String(), deps.Tracker
 }
 
 func dialInProcess(tb testing.TB, addr, user string) *gossh.Client {
@@ -316,6 +323,49 @@ func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
 	within(t, "a second channel", func() { openAnotherChannel(client) })
 }
 
+// An authenticated connection that opens no session (`ssh -N`) held a listener slot
+// for the whole idle timeout, never counted and never logged. A connection with a
+// session open is not affected, and one whose sessions have all closed is held to
+// the same bound again.
+func TestNewServer_ClosesAConnectionWithNoSessionOpen(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	// Counted from accept, so it has to outlast a handshake and the second subtest's
+	// NewSession on a loaded -race run; within's 5s still bounds the close.
+	reg.sessionless = 2 * time.Second
+	addr, _ := startServerWithRegistry(t, stubUserRepo{user: &db.User{ID: testutil.UID(96), Username: "idler"}}, reg)
+	closed := func(client *gossh.Client) <-chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			_ = client.Wait()
+			close(done)
+		}()
+		return done
+	}
+
+	t.Run("never opened one", func(t *testing.T) {
+		t.Parallel()
+		gone := closed(dialInProcess(t, addr, "idler"))
+		within(t, "closing the sessionless connection", func() { <-gone })
+	})
+
+	t.Run("with one open, then after it closes", func(t *testing.T) {
+		t.Parallel()
+		client := dialInProcess(t, addr, "idler")
+		gone := closed(client)
+		s, err := client.NewSession()
+		require.NoError(t, err)
+
+		select {
+		case <-gone:
+			t.Fatal("a connection with a session open was closed")
+		case <-time.After(2 * reg.sessionless):
+		}
+		require.NoError(t, s.Close())
+		within(t, "closing the connection its last session left", func() { <-gone })
+	})
+}
+
 // OpenSSH's ControlMaster runs a second `ssh` as a second session channel on the
 // connection the first one opened. Displacing the first session hung up that shared
 // connection, and with it the session that had just arrived.
@@ -361,7 +411,17 @@ func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
 	}
 
 	for range 2 * maxSessionsPerConnection {
-		openShell(t, client)
+		// The displaced channel closes only once its program has quit, so its slot
+		// under the per-connection cap frees a little after the next shell starts.
+		var s *gossh.Session
+		require.Eventually(t, func() bool {
+			var err error
+			s, err = client.NewSession()
+			return err == nil
+		}, 5*time.Second, 20*time.Millisecond, "the displaced session never freed its slot")
+		t.Cleanup(func() { _ = s.Close() })
+		require.NoError(t, s.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+		require.NoError(t, s.Shell())
 		require.Eventually(t, func() bool { return tracker.Count() == 1 && live() >= 1 },
 			3*time.Second, 10*time.Millisecond)
 		// Long enough for the program to be running before the next shell displaces it.
@@ -370,4 +430,21 @@ func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
 
 	assert.Eventually(t, func() bool { return live() == 1 }, 3*time.Second, 20*time.Millisecond,
 		"displaced sessions still running")
+}
+
+// A displaced session's program has to quit before its channel closes: bubbletea's
+// teardown is what leaves the alt screen and pops the keyboard mode, and it was
+// cancelled and hung up on in the same breath, so its restore never reached the
+// client.
+func TestNewServer_SameConnectionDisplacementRestoresTheOldTerminal(t *testing.T) {
+	t.Parallel()
+	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(97), Username: "restorer"})
+	client := dialInProcess(t, addr, "restorer")
+	first, out := shellRecording(t, client)
+	require.Eventually(t, func() bool { return tracker.Count() == 1 }, 3*time.Second, 10*time.Millisecond)
+
+	openShell(t, client)
+
+	within(t, "the displaced session's end", func() { _ = first.Wait() })
+	assertRestored(t, out.String())
 }

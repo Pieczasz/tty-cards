@@ -1,6 +1,7 @@
 package gameview
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -195,4 +197,34 @@ func hasClockTick(cmd tea.Cmd) bool {
 		return slices.ContainsFunc(msg, hasClockTick)
 	}
 	return false
+}
+
+// A key line wider than the terminal wraps between its pairs, never inside one: word
+// wrapping left "esc:" at the end of one row and "leave/cancel" alone on the next, at
+// the 64 columns the server admits.
+func TestRenderBands_WrapsTheKeyLineBetweenPairs(t *testing.T) {
+	t.Parallel()
+
+	for _, hints := range []string{
+		HandKeyHints,
+		WaitingKeyHints,
+		PickerKeyHints,
+		"<-/h: left | ->/l: right | space: toggle | enter: pass 3 | esc: leave",
+	} {
+		pairs := strings.Split(hints, " | ")
+		for _, width := range []int{styles.MinWidth, 70, 80} {
+			t.Run(fmt.Sprintf("%d_%s", width, pairs[len(pairs)-2]), func(t *testing.T) {
+				t.Parallel()
+				out := ansi.Strip(RenderBands(testContext(width, 24), "", "", hints, func(int) string { return "" }))
+
+				var shown []string
+				for line := range strings.Lines(out) {
+					if line = strings.TrimSpace(line); line != "" {
+						shown = append(shown, strings.Split(line, " | ")...)
+					}
+				}
+				assert.Equal(t, pairs, shown, "a key and what it does were split across rows")
+			})
+		}
+	}
 }

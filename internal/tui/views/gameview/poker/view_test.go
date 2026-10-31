@@ -192,7 +192,7 @@ func tableOf(width, height, n int) *model {
 		},
 		pot: 480, sidePots: 2, street: "RIVER",
 		currentBet: 50, toCall: 50,
-		raiseMin: 100, raiseMax: 500, raiseOK: true,
+		raiseMin: 100, raiseMax: 500, raiseOK: true, allInOK: true,
 		handNumber: 3, handsTotal: 10, winnerName: "player_1",
 	}
 	m.Global = router.GlobalContext{Theme: styles.NewTheme(true), Width: width, Height: height}
@@ -304,7 +304,7 @@ func TestRenderActionBar_OffersOnlyTheLegalMoves(t *testing.T) {
 		t.Parallel()
 		m := tableOf(120, 50, 3)
 		m.seats[0].Chips, m.seats[0].Bet = 0, 0
-		m.raiseOK = false // what logic.RaiseBounds reports for an empty stack
+		m.raiseOK, m.allInOK = false, false // what the rules report for an empty stack
 		bar := m.renderActionBar()
 		assert.NotContains(t, bar, "r: raise")
 		assert.NotContains(t, bar, "a: all-in")
@@ -507,4 +507,26 @@ func TestRenderHandOver_FitsNineSeatsAtTheMinimum(t *testing.T) {
 	out := tuitest.StripANSI(m.View().Content)
 	assert.Contains(t, out, "HAND 3/10 COMPLETE")
 	assert.Contains(t, out, "forfeiting your chips")
+}
+
+// PT-07: two seats that bust on the same hand share first place, and the database
+// records both as first. The result screen used to name one of them as the winner;
+// it has to name the tie, and still fit the smallest terminal.
+func TestRenderHandOver_NamesASharedFirstPlace(t *testing.T) {
+	t.Parallel()
+
+	m := tableOf(styles.MinWidth, styles.MinHeight, 4)
+	m.seats[0].Name, m.seats[1].Name = "sixteen_chars_aa", "sixteen_chars_bb"
+	m.handComplete, m.matchComplete = true, true
+	m.winnerName = ""
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonWin
+	m.coWinners = []string{"sixteen_chars_aa", "sixteen_chars_bb"}
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "MATCH COMPLETE - tie for first")
+	assert.Contains(t, out, "sixteen_c..., sixteen_c...")
+	assert.NotContains(t, out, " wins")
+	assert.LessOrEqual(t, lg.Width(out), styles.MinWidth)
+	assert.LessOrEqual(t, lg.Height(out), styles.MinHeight)
 }

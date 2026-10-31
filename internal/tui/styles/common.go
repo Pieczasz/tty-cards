@@ -86,7 +86,7 @@ func layoutHeights(screenWidth, screenHeight int, header, footer string) (
 	// go-figure leaves trailing newlines that inflate the measured height. Wrap before
 	// measuring, or lg.Height reports the unwrapped height.
 	wrappedHeader = centreWrapped(width, strings.TrimRight(header, "\r\n"))
-	wrappedFooter = centreWrapped(width, wrapActions(strings.TrimRight(footer, "\r\n"), width))
+	wrappedFooter = centreWrapped(width, WrapActions(strings.TrimRight(footer, "\r\n"), width))
 
 	hContent = max(innerHeight-lg.Height(wrappedHeader)-lg.Height(wrappedFooter), 0)
 	return wrappedHeader, wrappedFooter, hContent
@@ -117,9 +117,9 @@ func centreWrapped(width int, s string) string {
 // actionSeparator joins the footer's actions (RenderActionFooter).
 const actionSeparator = " | "
 
-// wrapActions breaks a footer that is wider than width between its actions, never
+// WrapActions breaks a footer that is wider than width between its actions, never
 // inside one: word wrapping split "t - Leaderboard" across two lines.
-func wrapActions(footer string, width int) string {
+func WrapActions(footer string, width int) string {
 	if width <= 0 || lg.Width(footer) <= width || strings.Contains(footer, "\n") {
 		return footer
 	}

@@ -325,6 +325,7 @@ func TestCanAllInAndHeroBusted(t *testing.T) {
 			hero := m.heroSeat()
 			require.NotNil(t, hero)
 			hero.Chips = tt.chips
+			m.allInOK = tt.chips > 0 // what logic.AllInOK reports for a stack facing no raise
 			m.Base.MyTurn = tt.myTurn
 			m.handComplete = tt.handComplete
 

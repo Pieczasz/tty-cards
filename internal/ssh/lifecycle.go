@@ -60,6 +60,9 @@ func notifySessionPanic(s ssh.Session) {
 	}
 }
 
+// restartNotice is what a session is told when the drain turns it away or ends it.
+const restartNotice = "The server is restarting - please reconnect in a moment."
+
 func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
@@ -72,7 +75,7 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			if !ok {
 				// Before any span: this session is never started, only counted.
 				observability.SSHSession(s.Context(), "rejected_draining")
-				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
+				wish.Fatalln(s, restartNotice)
 				return
 			}
 			// Registered first, so it runs last: the drain is over only once the

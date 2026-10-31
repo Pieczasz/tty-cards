@@ -155,7 +155,7 @@ func TestRenderHandColorRow_FollowsTheHandItSitsOver(t *testing.T) {
 			}
 
 			handWidth := gameview.HandWidth(tt.width)
-			handRows := gameview.HandRows(tt.height)
+			handRows := gameview.HandRows(tt.width, tt.height)
 			row := m.renderHandColorRow(handWidth, handRows)
 
 			fanned := gameview.FansHand(len(hand), handWidth, handRows)

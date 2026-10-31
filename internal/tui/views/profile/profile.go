@@ -171,9 +171,20 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() tea.View {
+	switch m.phase {
+	case deleteConfirming:
+		actions := []string{"enter - Delete", "esc - Cancel"}
+		return tea.NewView(views.RenderModalScreen(m.global, screenTitle, actions, m.renderContent))
+	case deleteRunning, deleteDone:
+		// handleKey ignores every key here, so only quit is left to offer.
+		return tea.NewView(views.RenderModalScreen(m.global, screenTitle, nil, m.renderContent))
+	case deleteIdle:
+	}
 	actions := []string{"g - Game", "r - Result", "x - Delete account"}
-	return tea.NewView(views.RenderScreen(m.global, "User Profile", actions, m.renderContent))
+	return tea.NewView(views.RenderScreen(m.global, screenTitle, actions, m.renderContent))
 }
+
+const screenTitle = "User Profile"
 
 func (m *model) renderContent(contentHeight int) string {
 	switch m.phase {
@@ -341,16 +352,22 @@ func resultPlain(h db.MatchParticipant) string {
 	return fmt.Sprintf("Elo %d", h.EloDelta)
 }
 
+// placementPlain spells the place as an ordinal; 11-13 take "th" whatever their
+// last digit, hence the tens check.
 func placementPlain(placement int) string {
-	switch placement {
-	case 1, 2, 3:
-		return placementWords[placement-1]
-	default:
-		return fmt.Sprintf("%d place", placement)
+	suffix := "th"
+	if tens := placement % 100; tens < 11 || tens > 13 {
+		switch placement % 10 {
+		case 1:
+			suffix = "st"
+		case 2:
+			suffix = "nd"
+		case 3:
+			suffix = "rd"
+		}
 	}
+	return fmt.Sprintf("%d%s place", placement, suffix)
 }
-
-var placementWords = [3]string{"1st place", "2nd place", "3rd place"}
 
 // accountDeletedMsg is the result of the erasure round trip; err nil means the row
 // is already anonymised and the session has nothing left to authenticate.

@@ -22,9 +22,12 @@ type table struct {
 	cumulativeScores map[string]int
 	matchComplete    bool
 	lastHandResult   *logic.HandResult
-	// leavers are who left, by name, for an interrupted match's end screen.
-	leavers []string
+	// leavers are who left. A forfeit drops the leaver from the seats, and the end
+	// screen still owes them their row and their total.
+	leavers []leaver
 }
+
+type leaver struct{ id, name string }
 
 // model is the Gin Rummy view of one seat at the table.
 type model struct {
@@ -51,9 +54,9 @@ func (m *model) syncState() {
 // readTable copies one frame of the table out of the live state, the scores and the
 // last hand's result cloned. Caller holds the engine lock.
 func readTable(state *game.State) table {
-	t := table{leavers: make([]string, 0, len(state.LeftPlayers))}
+	t := table{leavers: make([]leaver, 0, len(state.LeftPlayers))}
 	for _, p := range state.LeftPlayers {
-		t.leavers = append(t.leavers, p.Name)
+		t.leavers = append(t.leavers, leaver{id: p.ID, name: p.Name})
 	}
 	s, ok := state.Extra.(*logic.State)
 	if !ok {

@@ -116,6 +116,11 @@ type HandResult struct {
 
 	ScoreDelta int
 	Winner     string // player ID credited; empty on a wall
+
+	// WallCause is why a hand walled, "stock exhausted" or "turn limit"; empty on
+	// any other outcome. A hand traded on the upcard ends with the stock still full,
+	// so a screen that always blamed the stock told the player something false.
+	WallCause string
 }
 
 // Clone deep-copies the result so a view can keep reading it after releasing the

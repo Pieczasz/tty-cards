@@ -35,9 +35,18 @@ var lobbyCodePattern = regexp.MustCompile(`^[A-Z0-9]{8}$`)
 // persists finished matches and holds a dropped player's seat for a reconnect. All
 // methods are safe for concurrent use.
 type Manager struct {
-	mu                  sync.RWMutex
-	lobbies             map[string]*Lobby
-	playerLobby         map[string]*Lobby
+	mu          sync.RWMutex
+	lobbies     map[string]*Lobby
+	playerLobby map[string]*Lobby
+	// written is the last rating each ranked write stored, by player ID then slug,
+	// for as long as that player's session may still hold the login's copy. A seat
+	// gets it from refreshRatings; a player seated nowhere when the write commits -
+	// a forfeiter - gets it at the next table they sit at, and BrowseLobbies ranks
+	// them by it. DisconnectPlayer forgets it: the next login reads the stored one.
+	// A match that commits after its player dropped writes the entry again, and it
+	// stays until that account's next session ends, so the map is bounded by
+	// accounts, a few bytes per game each, rather than by sessions.
+	written             map[string]map[string]uint32
 	games               *game.Registry
 	cachedPublicLobbies []*Lobby
 	cacheLastUpdated    time.Time
@@ -90,6 +99,7 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.R
 	return &Manager{
 		lobbies:     make(map[string]*Lobby),
 		playerLobby: make(map[string]*Lobby),
+		written:     make(map[string]map[string]uint32),
 		games:       games,
 		grace:       newGraceTimers(),
 		matchRepo:   matchRepo,
@@ -145,6 +155,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 	if _, seated := m.playerLobby[leader.ID]; seated {
 		return nil, errAlreadyInLobby
 	}
+	leader = withRatings(leader, m.written[leader.ID])
 
 	code, err := m.generateLobbyCodeLocked()
 	if err != nil {
@@ -233,6 +244,7 @@ func (m *Manager) JoinLobbyByCode(ctx context.Context, code string, p *game.Play
 		return nil, errLobbyNotFound
 	}
 
+	p = withRatings(p, m.written[p.ID])
 	if err := lobby.addGuest(p); err != nil {
 		observability.LobbyJoin(ctx, "refused")
 		return nil, err

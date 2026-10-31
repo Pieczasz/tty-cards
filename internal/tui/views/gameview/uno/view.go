@@ -15,7 +15,7 @@ import (
 )
 
 func (m *model) View() tea.View {
-	colorRow := m.renderHandColorRow(gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Height))
+	colorRow := m.renderHandColorRow(gameview.HandWidth(m.Global.Width), gameview.HandRows(m.Global.Width, m.Global.Height))
 	return m.RenderTable(m.renderCenterTable(), colorRow)
 }
 

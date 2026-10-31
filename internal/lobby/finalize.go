@@ -132,33 +132,41 @@ func (m *Manager) persistFinishedMatch(
 // players, at whichever table each sits at now - by the time the write commits the
 // table has reopened, and a player may have moved on. Matchmaking, the table's
 // average and the waiting room all read a seat's ratings, which would otherwise stay
-// the ones its session logged in with. A player seated nowhere is not refreshed: the
-// next login reads the stored rating.
+// the ones its session logged in with.
+//
+// It also keeps them in m.written. A player seated nowhere when the write commits -
+// a forfeiter, who left before the match ended - has no seat to refresh, and their
+// session holds the login's copy: the next table they sit at seats them with the
+// written ratings, and the lobby view hands that seat back to the session.
 //
 // The index is keyed by Player.ID, found here as the account id's string form:
 // NewPlayer, the only way a session is seated, sets ID that way.
 //
-// m.mu is held, read-only, across each lobby's update so no player can change tables
-// between the index lookup and the seat write; the broadcasts wait for both locks to
-// be released.
+// m.mu is held across each lobby's update so no player can change tables between the
+// index lookup and the seat write; the broadcasts wait for both locks to be released.
 func (m *Manager) refreshRatings(slug string, written map[uuid.UUID]uint32) {
 	if len(written) == 0 {
 		return
 	}
-	m.mu.RLock()
+	m.mu.Lock()
 	tables := make(map[*Lobby]struct{}, len(written))
-	for id := range written {
-		if l := m.playerLobby[id.String()]; l != nil {
+	for id, rating := range written {
+		key := id.String()
+		if m.written[key] == nil {
+			m.written[key] = make(map[string]uint32, 1)
+		}
+		m.written[key][slug] = rating
+		if l := m.playerLobby[key]; l != nil {
 			tables[l] = struct{}{}
 		}
 	}
 	var changed []*broadcaster.Broadcaster[Event]
 	for l := range tables {
-		if bc := l.refreshRatings(slug, written); bc != nil {
+		if bc := l.refreshRatings(m.written); bc != nil {
 			changed = append(changed, bc)
 		}
 	}
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	for _, bc := range changed {
 		bc.Broadcast(Event{Type: EventPlayersUpdated})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
@@ -591,4 +592,45 @@ func TestCycleFilter_StillPagesAt80x24(t *testing.T) {
 
 	next, _ = nm.goPage(1)
 	assert.Equal(t, 1, next.(*model).page, "the second page has to be reachable")
+}
+
+// Every row has to be as wide as the header: the board is centred line by line, so a
+// row one cell narrower lands one column right of the titles it sits under.
+func TestView_RowsLineUpUnderTheHeader(t *testing.T) {
+	t.Parallel()
+	sizes := append([]tuitest.Size{{Name: "100x30", Width: 100, Height: 30}}, tuitest.FitSizes...)
+	for _, size := range sizes {
+		t.Run(size.Name, func(t *testing.T) {
+			t.Parallel()
+			ranks := rankings(3)
+			ranks[2].Elo = 987 // a 3-digit rating must not shift against the 4-digit ones
+			m := &model{
+				global:   router.GlobalContext{Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height},
+				rankings: ranks,
+				filters:  []boardFilter{{label: filterAll}},
+			}
+
+			out := tuitest.StripANSI(m.View().Content)
+			header := -1
+			var rows []int
+			for line := range strings.SplitSeq(out, "\n") {
+				before, _, found := strings.Cut(line, " | ")
+				if !found {
+					continue
+				}
+				col := lg.Width(before)
+				switch {
+				case strings.Contains(line, "Rank"):
+					header = col
+				case strings.Contains(line, "| player"):
+					rows = append(rows, col)
+				}
+			}
+			require.GreaterOrEqual(t, header, 0, "no header line in:\n%s", out)
+			require.Len(t, rows, len(ranks), out)
+			for i, col := range rows {
+				assert.Equal(t, header, col, "row %d is off the header's separator:\n%s", i+1, out)
+			}
+		})
+	}
 }

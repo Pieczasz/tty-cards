@@ -13,6 +13,15 @@ type termSize struct{ w, h int }
 
 func (s termSize) cells() int { return s.w * s.h }
 
+// known reports whether the client said how big its terminal is. `ssh -tt` with
+// stdin not a terminal sends 0x0, and the TUI reads a zero dimension as "no size
+// yet": it drew nothing while every key still acted.
+func (s termSize) known() bool { return s.w > 0 && s.h > 0 }
+
+// defaultTermSize is the size a session starts at when its pty-req has none: the
+// classic terminal, which every layout fits. Its first real resize replaces it.
+var defaultTermSize = termSize{80, 24}
+
 // sizeTiers are the terminal sizes the server grants, smallest first. Each nests in
 // the next, so the largest tier a session was ever granted bounds every buffer its
 // renderer has allocated. The floor is granted to everyone, however full the server:
@@ -80,7 +89,11 @@ type sizeBudget struct {
 }
 
 func newSessionRegistry(cells, extra int) *sessionRegistry {
-	reg := &sessionRegistry{sizes: sizeBudget{cells: cells, extra: extra}}
+	reg := &sessionRegistry{
+		sizes:       sizeBudget{cells: cells, extra: extra},
+		sessionless: sessionlessTimeout,
+		ending:      make(chan struct{}),
+	}
 	// An empty server is at the top, not climbing to it.
 	reg.sizes.tier.Store(int32(len(sizeTiers) - 1))
 	return reg
@@ -155,6 +168,9 @@ type sessionSize struct {
 func (sz *sessionSize) start(b *sizeBudget, want termSize) (termSize, bool) {
 	sz.budget = b
 	moved := b.join()
+	if !want.known() {
+		want = defaultTermSize
+	}
 	sz.wanted.Store(&want)
 	size := sz.regrant()
 	sz.echo = &size
@@ -175,12 +191,16 @@ func (sz *sessionSize) stale() bool {
 	return termSize{min(want.w, limit.w), min(want.h, limit.h)} != *sz.granted.Load()
 }
 
-// filter turns a resize into the granted size. The renderer never passes its start
-// size through here, which is why start grants that one.
+// filter turns a resize into the granted size, and drops one with no size, which
+// says nothing about the terminal. The renderer never passes its start size through
+// here, which is why start grants that one.
 func (sz *sessionSize) filter(msg tea.Msg) tea.Msg {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		got := termSize{msg.Width, msg.Height}
+		if !got.known() {
+			return nil
+		}
 		if sz.echo != nil && got == *sz.echo {
 			sz.echo = nil
 		} else {

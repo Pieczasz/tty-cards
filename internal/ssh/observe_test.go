@@ -3,6 +3,7 @@ package ssh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
 	"github.com/stretchr/testify/assert"
@@ -48,6 +50,13 @@ func (s *logSink) levels(msg string) map[slog.Level]int {
 		}
 	}
 	return got
+}
+
+// snapshot is every record so far.
+func (s *logSink) snapshot() []slog.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]slog.Record(nil), s.records...)
 }
 
 func captureLogs(t *testing.T) *logSink {
@@ -208,4 +217,42 @@ func TestSessionLifecycle_ARefusalWhileDrainingIsCounted(t *testing.T) {
 	_, _ = testsession.New(t, srv, nil).CombinedOutput("")
 
 	assert.Equal(t, int64(1), metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_draining")-before)
+}
+
+// A program's error is logged once, through slog: not when the input guard or
+// reportPanic has already said why the session ended, and not when a newer session
+// displacing it cancelled the program's context.
+//
+//nolint:paralleltest // swaps the slog default
+func TestReportProgramExit(t *testing.T) {
+	const msg = "session program ended with an error"
+	tests := []struct {
+		name     string
+		err      error
+		panicked bool
+		ended    bool
+		want     map[slog.Level]int
+	}{
+		{name: "a displacement", err: fmt.Errorf("%w: %w", tea.ErrProgramKilled, context.Canceled), ended: true, want: map[slog.Level]int{}},
+		{name: "an input trip", err: fmt.Errorf("%w: %w", tea.ErrProgramKilled, errInputOverBudget), want: map[slog.Level]int{}},
+		{name: "a reported panic", err: tea.ErrProgramPanic, panicked: true, want: map[slog.Level]int{}},
+		{name: "anything else", err: tea.ErrProgramKilled, want: map[slog.Level]int{slog.LevelError: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureLogs(t)
+			s := &stubSession{addr: stubAddr{"10.0.0.31:1"}}
+			reg := &sessionRegistry{}
+			st := &sessionState{traceCtx: t.Context(), panicked: tt.panicked}
+			st.run, st.endRun = context.WithCancel(t.Context())
+			if tt.ended {
+				st.endRun()
+			}
+			reg.store(s, st)
+
+			reg.reportProgramExit(s, tt.err)
+
+			assert.Equal(t, tt.want, logs.levels(msg))
+		})
+	}
 }

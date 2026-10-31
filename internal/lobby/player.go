@@ -6,8 +6,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/broadcaster"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
-
-	"uuid"
 )
 
 // NewPlayer seats a database user. It is the only place a db.User becomes a
@@ -36,28 +34,41 @@ func NewPlayer(u *db.User) *game.Player {
 	}
 }
 
-// refreshRatings replaces each seat written names with a copy carrying its new rating
-// in slug, and returns the feed to announce it on, or nil when no seat changed.
+// withRatings is p carrying ratings (slug to rating): a copy when any of them differs,
+// p itself otherwise.
 //
 // A copy, never a write through the pointer: snapshots, sessions and browse rows
-// hold the seated *game.Player and its Ratings map without l.mu.
-func (l *Lobby) refreshRatings(slug string, written map[uuid.UUID]uint32) *broadcaster.Broadcaster[Event] {
+// hold the seated *game.Player and its Ratings map without a lock.
+func withRatings(p *game.Player, ratings map[string]uint32) *game.Player {
+	next := p
+	for slug, rating := range ratings {
+		if next.Ratings[slug] == rating {
+			continue
+		}
+		if next == p {
+			cp := *p
+			cp.Ratings = maps.Clone(p.Ratings)
+			if cp.Ratings == nil {
+				cp.Ratings = make(map[string]uint32, len(ratings))
+			}
+			next = &cp
+		}
+		next.Ratings[slug] = rating
+	}
+	return next
+}
+
+// refreshRatings replaces each seat written (player ID to slug to rating) names with
+// a copy carrying those ratings, and returns the feed to announce it on, or nil when
+// no seat changed.
+func (l *Lobby) refreshRatings(written map[string]map[string]uint32) *broadcaster.Broadcaster[Event] {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	changed := false
 	refresh := func(p *game.Player) *game.Player {
-		elo, ok := written[p.UserID]
-		if !ok || p.UserID == uuid.Nil() || p.Ratings[slug] == elo {
-			return p
-		}
-		changed = true
-		next := *p
-		next.Ratings = maps.Clone(p.Ratings)
-		if next.Ratings == nil {
-			next.Ratings = make(map[string]uint32, 1)
-		}
-		next.Ratings[slug] = elo
-		return &next
+		next := withRatings(p, written[p.ID])
+		changed = changed || next != p
+		return next
 	}
 	l.leader = refresh(l.leader)
 	for i, g := range l.guests {

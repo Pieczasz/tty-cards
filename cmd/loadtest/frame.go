@@ -22,6 +22,11 @@ const (
 	viewGameOver
 )
 
+// gameKeys opens the table's key line on and off turn alike, and under the suit
+// picker. "d: draw" is offered only on turn, and a waiting seat read as no screen at
+// all never settled its move; the picker drops it too, since d does nothing there.
+const gameKeys = "<-/h: left | ->/l: right"
+
 // classify names the screen. The order matters: the footer of every menu repeats
 // the home screen's keys, so home is whatever is left.
 func classify(lines []string) view {
@@ -32,7 +37,7 @@ func classify(lines []string) view {
 	}{
 		{"Game Over!", viewGameOver},
 		{"Leave and forfeit this game?", viewForfeit},
-		{"d: draw", viewGame},
+		{gameKeys, viewGame},
 		{"want to leave the lobby?", viewLobbyLeave},
 		{"Lobby Code:", viewLobby},
 		{"[ Create Lobby ]", viewCreate},
@@ -88,7 +93,7 @@ func parseCrazy(lines []string) crazyTable {
 			t.picker = true
 		case suitLine.MatchString(line):
 			t.suit, t.top = suitGlyph[suitLine.FindStringSubmatch(line)[1]], discardAbove(lines[:i])
-		case status >= 0 && strings.Contains(line, "d: draw"):
+		case status >= 0 && strings.Contains(line, gameKeys):
 			return t
 		case status >= 0:
 			cards, cursor := stripCards(line)

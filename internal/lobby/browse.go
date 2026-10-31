@@ -76,7 +76,10 @@ func (m *Manager) BrowseLobbies(p *game.Player, f BrowseFilter) []BrowseEntry {
 	lobbies := m.publicLobbies()
 	var ratings map[string]uint32
 	if p != nil {
-		ratings = p.Ratings
+		// A forfeiter's session still holds the login's ratings: see Manager.written.
+		m.mu.RLock()
+		ratings = withRatings(p, m.written[p.ID]).Ratings
+		m.mu.RUnlock()
 	}
 
 	limit := f.limit()

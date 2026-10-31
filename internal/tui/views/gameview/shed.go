@@ -134,7 +134,17 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 		center = t.Picker.Render(g.Palette())
 	}
 
-	return tea.NewView(RenderBands(g, top, t.renderHero(aboveHand), HandKeyHints, func(height int) string {
+	// enter and d wait for the turn, so a waiting seat is offered only what still works,
+	// and the open picker takes the keys the hand would.
+	hints := HandKeyHints
+	switch {
+	case t.Picker.Open:
+		hints = PickerKeyHints
+	case !t.Base.MyTurn:
+		hints = WaitingKeyHints
+	}
+
+	return tea.NewView(RenderBands(g, top, t.renderHero(aboveHand), hints, func(height int) string {
 		left, right := RenderOpponentSides(g.Palette(), t.Base, height, minimalSeats)
 		return RenderTableRow(g.Width, height, left, styles.MarginTop(1, center), right)
 	}))
@@ -143,6 +153,6 @@ func (t *ShedTable) RenderTable(center, aboveHand string) tea.View {
 func (t *ShedTable) renderHero(aboveHand string) string {
 	g := t.Global
 	status := RenderStatus(g.Palette(), t.Base.CurrentPlayerName, t.Base.MyTurn, t.Base.TurnRemaining)
-	hand := RenderHand(g.Palette(), t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Height))
+	hand := RenderHand(g.Palette(), t.Base.Hand, t.HandCursor(), nil, HandWidth(g.Width), HandRows(g.Width, g.Height))
 	return RenderHeroBand(g.Palette(), t.ActionErr, status, aboveHand, hand)
 }

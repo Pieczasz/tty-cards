@@ -33,11 +33,16 @@ type table struct {
 	handNumber    int
 	handsTotal    int
 	winnerName    string
+	// coWinners names the seats sharing first place once the match is over, the draw
+	// the engine names no single winner for; nil when one seat won outright.
+	coWinners []string
 
 	// raiseMin..raiseMax is what logic.RaiseBounds allows the hero; raiseOK is false
 	// when there is no raise to make at all.
 	raiseMin, raiseMax uint
 	raiseOK            bool
+	// allInOK is logic.AllInOK for the hero.
+	allInOK bool
 }
 
 type model struct {
@@ -96,7 +101,13 @@ func readTable(state *game.State, heroID string) table {
 	t.street = e.Phase.String()
 	t.currentBet = e.CurrentBet
 	t.raiseMin, t.raiseMax, t.raiseOK = logic.RaiseBounds(state, heroID)
+	t.allInOK = logic.AllInOK(state, heroID)
 	t.toCall = e.ToCall(heroID)
+	// A stack short of the bet calls all-in for what it has, so that is what c
+	// commits and what the table quotes.
+	if hero := e.Seats[heroID]; hero != nil {
+		t.toCall = min(t.toCall, hero.Chips)
+	}
 	t.handComplete = e.HandComplete() || finished
 	t.matchComplete = e.MatchComplete || finished
 	t.handNumber = e.HandNumber
@@ -106,10 +117,31 @@ func readTable(state *game.State, heroID string) table {
 	if len(e.Winners) > 0 && !t.matchComplete {
 		t.winnerName = e.Winners[0].DisplayName()
 	}
+	// Only once the rules have played the match out: a table ended by an error is
+	// never ranked, and the screen names no result for it.
+	if e.MatchComplete {
+		t.coWinners = sharedFirst(state)
+	}
 
 	t.board = slices.Clone(e.Table)
 	t.seats = logic.SeatsFor(state, heroID)
 	return t
+}
+
+// sharedFirst is the names of the seats the standings place first, when more than one
+// is: the same ranking finalize records. Caller must hold the state lock.
+func sharedFirst(state *game.State) []string {
+	var names []string
+	for _, s := range state.Rules.Standings(state) {
+		if s.Place != 1 {
+			break
+		}
+		names = append(names, s.Player.DisplayName())
+	}
+	if len(names) < 2 {
+		return nil
+	}
+	return names
 }
 
 // clampRaise holds a raise-to amount within the band the rules accept.
@@ -139,8 +171,7 @@ func (m *model) canRaise() bool {
 }
 
 func (m *model) canAllIn() bool {
-	hero := m.heroSeat()
-	return m.Base.MyTurn && !m.handComplete && hero != nil && hero.Chips > 0
+	return m.Base.MyTurn && !m.handComplete && m.allInOK
 }
 
 func (m *model) canFold() bool {

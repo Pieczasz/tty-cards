@@ -61,6 +61,8 @@ func TestMatch_UpcardTradingCannotStallTheHand(t *testing.T) {
 			assert.Equal(t, OutcomeWall, extra.LastHandResult.Outcome, "a stalled hand settles as a wall")
 			assert.Equal(t, openingStock, state.Deck.Size(), "no stock was ever drawn")
 			assert.Equal(t, maxHandTurns, extra.TurnsThisHand)
+			assert.Equal(t, "turn limit", extra.LastHandResult.WallCause,
+				"the result names the turn limit, not an exhausted stock")
 			return
 		}
 

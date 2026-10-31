@@ -167,7 +167,7 @@ func (m *model) renderPassDirection() string {
 func (m *model) renderPlayerSection() string {
 	statusView := gameview.RenderStatus(m.Global.Palette(), m.Base.CurrentPlayerName, m.Base.MyTurn, m.Base.TurnRemaining)
 	handWidth := gameview.HandWidth(m.Global.Width)
-	handRows := gameview.HandRows(m.Global.Height)
+	handRows := gameview.HandRows(m.Global.Width, m.Global.Height)
 	var staged map[int]struct{}
 	if m.phase == logic.PhasePassing {
 		staged = m.passIndices()

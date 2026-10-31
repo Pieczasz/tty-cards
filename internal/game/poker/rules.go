@@ -182,14 +182,7 @@ func validateBet(state *game.State, extra *State, action game.Action) error {
 	case ActionRaiseTo:
 		return validateRaiseTo(state, extra, p, action.Amount)
 	case ActionAllIn:
-		if seat.Chips == 0 {
-			return errors.New("no chips to go all-in")
-		}
-		// A shove that lands above the current bet is a raise, and a player who is
-		// only owed the difference from a sub-minimum all-in has no raise to make.
-		if seat.Bet+seat.Chips > extra.CurrentBet {
-			return checkBettingReopened(extra, seat)
-		}
+		return validateAllIn(extra, seat)
 	}
 	// A fold is always open to a seat that can act.
 	return nil

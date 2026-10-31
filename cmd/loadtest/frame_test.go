@@ -114,7 +114,9 @@ func TestClassify_RealScreens(t *testing.T) {
 		{"join, typing a code", lobbyview.NewJoin(g), "c", viewJoin},
 		{"lobby", lobbyview.New(g, l), "", viewLobby},
 		{"lobby, leave prompt", lobbyview.New(g, l), "x", viewLobbyLeave},
+		// Both seats, so one of them is waiting for its turn whoever deals first.
 		{"game", seatView(t, engine, 1), "", viewGame},
+		{"game, the other seat", seatView(t, engine, 2), "", viewGame},
 		{"game, forfeit prompt", seatView(t, engine, 1), keyEsc, viewForfeit},
 		{"game over", seatView(t, over, 1), "", viewGameOver},
 	}

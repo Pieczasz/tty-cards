@@ -68,18 +68,36 @@ func TestView_HandOverWallBanner(t *testing.T) {
 	assert.Contains(t, out, "WALL")
 }
 
+// A wall names its cause: a hand traded on the upcard for a hundred turns walls with
+// the stock still full, and "stock exhausted" there is simply false.
+func TestView_HandOverWallNamesItsCause(t *testing.T) {
+	t.Parallel()
+
+	for _, cause := range []string{"stock exhausted", "turn limit"} {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			m := viewAt(80, 24)
+			m.phase = logic.PhaseHandOver
+			m.lastHandResult = &logic.HandResult{Outcome: logic.OutcomeWall, WallCause: cause}
+
+			out := tuitest.StripANSI(m.View().Content)
+			assert.Contains(t, out, "WALL - "+cause+", no score")
+		})
+	}
+}
+
 func TestView_InterruptedMatchDoesNotNameAWinner(t *testing.T) {
 	t.Parallel()
 	m := &model{
 		Global: router.GlobalContext{Theme: styles.NewTheme(true), Width: 80, Height: 24},
 		Base: gameview.BaseState{
 			Phase: game.Finished, EndReason: game.EndReasonInterrupted, WinnerName: "alice",
-			Seats: aliceAndBob,
+			Seats: aliceAndBob[:1], // the engine takes a leaver out of the seats
 		},
 		phase:            logic.PhaseHandOver,
 		handNumber:       2,
 		matchComplete:    true,
-		leavers:          []string{"bob"},
+		leavers:          []leaver{{id: "2", name: "bob"}},
 		cumulativeScores: map[string]int{"1": 0, "2": 0},
 	}
 
@@ -136,6 +154,13 @@ func TestView_FitsTheTerminal(t *testing.T) {
 			m.Base.Phase = game.Finished
 			m.Base.WinnerName = "alice"
 			m.lastHandResult = knockResult()
+		},
+		"a forfeit": func(m *model) {
+			m.Base.Phase = game.Finished
+			m.Base.EndReason = game.EndReasonForfeit
+			m.Base.WinnerName = "alice"
+			m.Base.Seats = m.Base.Seats[:1]
+			m.leavers = []leaver{{id: "2", name: "bob"}}
 		},
 	}
 
@@ -215,11 +240,11 @@ func TestRenderMeldGroups_LabelsSetsAndRuns(t *testing.T) {
 	t.Parallel()
 	m := viewAt(120, 50)
 
-	out := m.renderMeldGroups("knocker melds", knockResult().KnockerMelds)
+	out := m.renderMeldGroups("knocker melds", knockResult().KnockerMelds, m.faceCard)
 	assert.Contains(t, out, "SET")
 	assert.Contains(t, out, "RUN")
 
-	assert.Contains(t, m.renderMeldGroups("knocker melds", nil), "knocker melds: -",
+	assert.Contains(t, m.renderMeldGroups("knocker melds", nil, m.faceCard), "knocker melds: -",
 		"an empty group says so rather than leaving a gap")
 }
 
@@ -227,8 +252,8 @@ func TestRenderCardRow_SaysWhenThereIsNothingToShow(t *testing.T) {
 	t.Parallel()
 	m := viewAt(120, 50)
 
-	assert.Contains(t, m.renderCardRow("laid off", nil, true), "laid off: -")
-	assert.NotEmpty(t, m.renderCardRow("laid off", []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}}, true))
+	assert.Contains(t, m.renderCardRow("laid off", nil, true, m.faceCard), "laid off: -")
+	assert.NotEmpty(t, m.renderCardRow("laid off", []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}}, true, m.faceCard))
 }
 
 // The key line is the only prompt a player gets, so it has to follow the phase: the
@@ -332,6 +357,36 @@ func TestView_ForfeitShowsTheScoreboard(t *testing.T) {
 	assert.Contains(t, out, "40")
 }
 
+// A forfeit on the hand-over screen replaces the knock headline with who left, so
+// the last hand's cards would sit there with nothing saying whose they were. The
+// scoreboard is what the end of the match is read from, and it has to stay.
+func TestView_ForfeitAfterAHandDropsTheHandsCards(t *testing.T) {
+	t.Parallel()
+	for _, size := range []struct{ w, h int }{{80, 24}, {80, 40}, {160, 50}} {
+		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
+			t.Parallel()
+			m := viewAt(size.w, size.h)
+			m.phase = logic.PhaseHandOver
+			m.lastHandResult = knockResult()
+			m.Base.Phase = game.Finished
+			m.Base.EndReason = game.EndReasonForfeit
+			m.Base.WinnerName = "alice"
+			m.Base.Seats = m.Base.Seats[:1]
+			m.leavers = []leaver{{id: "2", name: "bob"}}
+
+			out := tuitest.StripANSI(m.View().Content)
+			assert.Contains(t, out, "bob left the table")
+			for _, label := range []string{"knocker melds", "opponent deadwood", "laid off"} {
+				assert.NotContains(t, out, label)
+			}
+			assert.Contains(t, out, "alice")
+			assert.Contains(t, out, "40")
+			assert.Contains(t, out, "bob")
+			assert.Contains(t, out, "22")
+		})
+	}
+}
+
 // A rules error ends the match unrated and without a winner, so it must not read as
 // a completed match.
 func TestView_ARulesErrorSaysTheTableFailed(t *testing.T) {
@@ -364,5 +419,51 @@ func TestView_HandOverKeepsTheHeadlineAtEverySize(t *testing.T) {
 			assert.Contains(t, out, "+14 -> alice")
 			assert.Contains(t, out, "enter: deal next hand")
 		})
+	}
+}
+
+// A bigger terminal shows at least what a smaller one does. Past the compact
+// threshold the cards were drawn as full faces, which overflowed 80x40 to 120x40, and
+// the whole body was dropped - while 79x39 showed it in mini cards.
+func TestView_HandOverKeepsTheCardsOnABiggerTerminal(t *testing.T) {
+	t.Parallel()
+
+	sevenDeadwood := knockResult()
+	sevenDeadwood.OpponentDeadwood = handOf(7)
+	results := map[string]*logic.HandResult{"a knock": knockResult(), "seven deadwood": sevenDeadwood}
+
+	sizes := []struct{ w, h int }{{79, 39}, {100, 30}, {80, 40}, {100, 45}, {120, 40}, {160, 50}, {200, 60}}
+	for _, size := range sizes {
+		for name, result := range results {
+			t.Run(fmt.Sprintf("%dx%d_%s", size.w, size.h, strings.ReplaceAll(name, " ", "_")), func(t *testing.T) {
+				t.Parallel()
+				m := viewAt(size.w, size.h)
+				m.phase = logic.PhaseHandOver
+				m.lastHandResult = result
+
+				out := tuitest.StripANSI(m.View().Content)
+				for _, label := range []string{"knocker melds", "opponent deadwood", "laid off"} {
+					assert.Contains(t, out, label)
+				}
+				assert.LessOrEqual(t, lg.Width(out), size.w)
+				assert.LessOrEqual(t, lg.Height(out), size.h)
+			})
+		}
+	}
+}
+
+// The key line is wrapped to the terminal, so one longer than 64 columns breaks inside
+// a binding at the minimum size and leaves "leave" alone under "esc:".
+func TestView_KeyHintsFitOneLineAtTheMinimumSize(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []logic.Phase{logic.PhaseAwaitingDraw, logic.PhaseAwaitingDiscard} {
+		m := viewAt(styles.MinWidth, styles.MinHeight)
+		m.phase = phase
+
+		hints := m.keyHints()
+		assert.LessOrEqual(t, lg.Width(hints), styles.MinWidth, "phase %v: %q", phase, hints)
+		out := tuitest.StripANSI(m.View().Content)
+		assert.Contains(t, out, hints, "phase %v: the key line is drawn whole on one row", phase)
 	}
 }

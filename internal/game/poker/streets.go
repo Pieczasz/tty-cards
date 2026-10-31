@@ -193,9 +193,10 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 		pots = append(pots, Pot{Amount: amount, Eligible: eligible})
 	}
 	if orphan > 0 {
-		// Levels above the largest eligible contribution can only hold money somebody
-		// matched - refundUncalled already took the unmatched part out - so this is
-		// dead money from players who folded, and it rides with the last live layer.
+		// Levels above the largest eligible contribution hold only money from players
+		// who folded - refundUncalled already took a live bettor's unmatched part out,
+		// and a folded one forfeits theirs - so this is dead money, and it rides with
+		// the last live layer.
 		// A layer always formed: every contender had to match the big blind to be one.
 		pots[len(pots)-1].Amount += orphan
 	}
@@ -207,6 +208,10 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 // contribution was matched by somebody - and it has to leave the pot before the side
 // pots are cut: a layer above every eligible player is unwinnable, and folding it into
 // the live pot would pay one player's uncalled chips to their opponents.
+//
+// A top contributor who folded gets nothing back: a fold forfeits everything put in,
+// and the only way to fold while holding the biggest bet is to leave the table
+// (OnPlayerLeave). Their excess stays in the pool as dead money for whoever wins it.
 func refundUncalled(extra *State) {
 	var topSeat *Seat
 	var top, second uint
@@ -219,7 +224,7 @@ func refundUncalled(extra *State) {
 		}
 	}
 	uncalled := top - second
-	if uncalled == 0 {
+	if uncalled == 0 || topSeat.Folded {
 		return
 	}
 	topSeat.Contributed = second
@@ -318,7 +323,7 @@ func handScores(extra *State, players []*game.Player) map[string]int {
 
 // awardUncontested pays the last live player when everyone else folded or left. The
 // pot is split the way the showdown path splits it: refundUncalled hands back the one
-// slice nobody matched - the top contributor's excess over the second-highest - and
+// slice nobody matched - a live top contributor's excess over the second-highest - and
 // everything else, dead money from folders included, goes to the winner, just as
 // buildSidePots rides it with the last live layer. Refunding each folder their excess
 // over the winner instead would let a player who called and folded take back chips

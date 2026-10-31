@@ -34,17 +34,24 @@ import (
 )
 
 // compose's stop_grace_period (80s) has to outlast the whole sequential drain:
-// ssh, then the session teardowns its Close sets off, then the stats api, then two
+// ssh, then the session teardowns that EndSessions and Close set off (the quit wait
+// is a share of that window, not one of its own), then the stats api, then two
 // finalizer windows, then otel, whose three providers get 2s each
 // (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. A match write gets a second
 // finalizer window rather than an outbox. TestDrainBudgetFitsStopGracePeriod pins
 // the sum.
 const (
 	sshDrainTimeout = 30 * time.Second
-	// sessionDrainTimeout bounds the wait for session handlers after Close. Their
-	// teardown is in-memory work, but it is what ends the tables still in play, and
-	// the finalizer drain that follows waits for each of those to be written.
-	sessionDrainTimeout  = 5 * time.Second
+	// sessionDrainTimeout bounds the wait for session handlers once the window is
+	// over, sessionQuitTimeout of it before Close and the rest after. Their teardown
+	// is in-memory work, but it is what ends the tables still in play, and the
+	// finalizer drain that follows waits for each of those to be written.
+	sessionDrainTimeout = 5 * time.Second
+	// sessionQuitTimeout is how long the sessions left get to quit before Close cuts
+	// them off. A quit takes milliseconds; only a program stuck on a peer that
+	// withholds its window runs it out.
+	sessionQuitTimeout = 2 * time.Second
+
 	apiDrainTimeout      = 5 * time.Second
 	finalizeDrainTimeout = 15 * time.Second
 	otelDrainTimeout     = 6 * time.Second
@@ -83,10 +90,12 @@ func healthcheck() int {
 }
 
 // run keeps the signals registered until the drain is over, so a second SIGTERM
-// cannot kill a shutdown in progress.
+// cannot kill a shutdown in progress. SIGHUP drains too: a process manager or a
+// closed terminal sends it, and Go's default for it exits at once, dropping every
+// table in play with no history row. SIGQUIT stays Go's goroutine dump.
 func run() error {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -268,6 +277,7 @@ type sshServer interface {
 	Serve(net.Listener) error
 	Shutdown(context.Context) error
 	Close() error
+	EndSessions(context.Context) error
 	WaitSessions(context.Context) error
 }
 
@@ -355,9 +365,14 @@ func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error)
 // drainServer stops accepting, gives live tables the graceful window, then tears the
 // sessions down. Shutdown ends no session, so tables keep playing through that window
 // and a ranked match that finishes there by play is rated; onShutdown marks the lobby
-// only once the window is over, right before Close decides who is left. No new game
-// may start in the window, though: stopNewGames runs first, because Close would cut
-// such a game short and it would be recorded unrated.
+// only once the window is over, right before the sessions left are ended. No new game
+// may start in the window, though: stopNewGames runs first, because ending the
+// sessions would cut such a game short and it would be recorded unrated.
+//
+// EndSessions runs before Close because the restart notice and the client's
+// terminal restore need the connection: Close alone left every player's terminal in
+// the alt screen with a hidden cursor. It is bounded, and Close then hangs up on
+// whatever would not quit.
 func drainServer(stopNewGames, onShutdown func(), server sshServer) {
 	if stopNewGames != nil {
 		stopNewGames()
@@ -371,14 +386,20 @@ func drainServer(stopNewGames, onShutdown func(), server sshServer) {
 	if onShutdown != nil {
 		onShutdown()
 	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), sessionDrainTimeout)
+	defer cancelWait()
+	quitCtx, cancelQuit := context.WithTimeout(waitCtx, sessionQuitTimeout)
+	defer cancelQuit()
+	if err := server.EndSessions(quitCtx); err != nil {
+		slog.WarnContext(quitCtx, "sessions did not quit in time; closing them",
+			"error", err, "timeout", sessionQuitTimeout)
+	}
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)
 	}
 
 	// Close returns before the session handlers it ends have given up their seats;
 	// the finalizer drain the caller runs next must not start until they have.
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), sessionDrainTimeout)
-	defer cancelWait()
 	if err := server.WaitSessions(waitCtx); err != nil {
 		slog.WarnContext(waitCtx, "session teardowns outlasted their window; the finalizer drain may wait on their tables",
 			"error", err, "timeout", sessionDrainTimeout)
