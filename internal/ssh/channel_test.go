@@ -410,7 +410,17 @@ func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
 	}
 
 	for range 2 * maxSessionsPerConnection {
-		openShell(t, client)
+		// The displaced channel closes only once its program has quit, so its slot
+		// under the per-connection cap frees a little after the next shell starts.
+		var s *gossh.Session
+		require.Eventually(t, func() bool {
+			var err error
+			s, err = client.NewSession()
+			return err == nil
+		}, 5*time.Second, 20*time.Millisecond, "the displaced session never freed its slot")
+		t.Cleanup(func() { _ = s.Close() })
+		require.NoError(t, s.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+		require.NoError(t, s.Shell())
 		require.Eventually(t, func() bool { return tracker.Count() == 1 && live() >= 1 },
 			3*time.Second, 10*time.Millisecond)
 		// Long enough for the program to be running before the next shell displaces it.
