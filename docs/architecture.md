@@ -79,6 +79,6 @@ spend `ratelimit.WideKey` (IPv6 /48).
 14. Chips are conserved. A failure ends the match as a rules error; the next hand does not zero a pot that never paid out.
 15. `TimeoutAction` must return a move the same package's `ValidateAction` accepts.
 16. A rules panic ends the table, not the process. The recovers in `Start`, `SubmitAction`, `RemovePlayer` and `onTurnTimeout` are direct defers taken under the lock, and none asks the rules for standings. The idle-removal hook, the game watcher and the disconnect-grace timer recover on their own goroutines.
-17. The same seat with the same turn length keeps its deadline (10s floor), and a miss is charged once per seat-turn.
+17. A seat keeps its deadline (10s floor) only while its turn carries on: `State.ContinueTurn` (gin's draw then discard), a refused auto-play, a leave elsewhere. Any other move starts a full clock, even for the same seat, and a miss is charged once per seat-turn.
 18. Every TUI feed message carries the channel that delivered it. A view drops one stamped with any other.
 19. The floor tier (120x40) times `MAX_CONNECTIONS`, plus `extraCellBudget`, has to fit `GOMEMLIMIT`, and `cellBudget` has to fit the cores. Raise one only with the others, after a load test.

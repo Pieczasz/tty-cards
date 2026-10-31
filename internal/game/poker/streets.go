@@ -139,7 +139,7 @@ func runShowdown(state *game.State, extra *State) error {
 	scores := handScores(extra, live)
 	refundUncalled(extra)
 	extra.Pots = buildSidePots(extra, live)
-	extra.Winners = awardPots(extra, live, scores)
+	extra.Winners = awardPots(state, extra, live, scores)
 	return nil
 }
 
@@ -240,9 +240,7 @@ func refundUncalled(extra *State) {
 }
 
 // splitEvenly hands amount to ids, the odd chips going one each to the front of the
-// slice. Callers sort ids first, which is a deviation worth naming: a casino gives the
-// odd chip to the first player left of the button, this gives it to the lowest-sorted
-// player ID. It is deterministic, which is what matters for a replayable table.
+// slice. awardPots sorts ids by oddChipOrder first.
 func splitEvenly(extra *State, ids []string, amount uint) {
 	share := amount / uint(len(ids))
 	rem := amount % uint(len(ids))
@@ -264,7 +262,8 @@ func splitEvenly(extra *State, ids []string, amount uint) {
 // Every pot is cut from Pool, so paying one takes it back out rather than the pool
 // being zeroed on trust: a layer that never reaches a stack is then still sitting in
 // Pool for the conservation check in finishHand to find.
-func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game.Player {
+func awardPots(state *game.State, extra *State, live []*game.Player, scores map[string]int) []*game.Player {
+	order := oddChipOrder(state, extra)
 	playerByID := make(map[string]*game.Player, len(live))
 	for _, p := range live {
 		playerByID[p.ID] = p
@@ -285,7 +284,7 @@ func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game
 				potWinners = append(potWinners, id)
 			}
 		}
-		slices.Sort(potWinners)
+		slices.SortFunc(potWinners, order)
 		splitEvenly(extra, potWinners, pot.Amount)
 		extra.Pool -= pot.Amount
 		for _, id := range potWinners {
@@ -295,6 +294,28 @@ func awardPots(extra *State, live []*game.Player, scores map[string]int) []*game
 		}
 	}
 	return winners
+}
+
+// oddChipOrder orders a pot's tied winners for splitEvenly: clockwise from the first
+// seat left of the button, the standard rule, so the odd chip moves with the button.
+// Sorting by ID instead handed it to the oldest account every time, since IDs are
+// time-ordered UUIDs. An all-in leaver has no seat, so they come after every seated
+// winner, by ID among themselves.
+func oddChipOrder(state *game.State, extra *State) func(a, b string) int {
+	n := len(state.Players)
+	seat := make(map[string]int, n)
+	for i, p := range state.Players {
+		seat[p.ID] = game.SeatAt(i-extra.DealerIndex-1, n)
+	}
+	pos := func(id string) int {
+		if i, ok := seat[id]; ok {
+			return i
+		}
+		return n
+	}
+	return func(a, b string) int {
+		return cmp.Or(cmp.Compare(pos(a), pos(b)), cmp.Compare(a, b))
+	}
 }
 
 // handScores evaluates each player's hand once, so callers avoid re-running the

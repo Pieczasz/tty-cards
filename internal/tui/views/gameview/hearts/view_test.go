@@ -263,6 +263,23 @@ func TestKeyHints_FollowTheStage(t *testing.T) {
 	assert.Equal(t, keyHintsPass, m.keyHints())
 }
 
+// Seats pass and play one at a time, and space and enter do nothing off-turn, so the
+// waiting seats are offered only the cursor and leaving.
+func TestView_OffTurnHintsOfferNoPlayKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []logic.Phase{logic.PhasePassing, logic.PhaseTrickPlay} {
+		m := fourHanded(80, 40)
+		m.phase = phase
+		m.Base.MyTurn = false
+
+		out := tuitest.StripANSI(m.View().Content)
+		assert.NotContains(t, out, "space: toggle", "phase %v", phase)
+		assert.NotContains(t, out, "enter:", "phase %v", phase)
+		assert.Contains(t, out, "->/l: right", "phase %v: the cursor still moves", phase)
+	}
+}
+
 // Which way the three cards travel changes what a player keeps, so the direction has
 // to be on screen during the pass and gone once it is over.
 func TestRenderPassDirection_ShowsOnlyDuringThePass(t *testing.T) {
@@ -341,4 +358,19 @@ func TestView_AMatchCutShortByALeaveSaysSo(t *testing.T) {
 
 	assert.Contains(t, out, "MATCH ENDED EARLY - dave left the table")
 	assert.NotContains(t, out, "wins", "an interrupted match named a winner")
+}
+
+// A rules error ends the table mid-trick with no winner and no match-complete flag.
+// The scoreboard still has to show, saying the table failed, not "Winner: " and nothing.
+func TestView_ARulesErrorShowsTheScoreboard(t *testing.T) {
+	t.Parallel()
+	m := fourHanded(80, 24)
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonRulesError
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.NotContains(t, out, "Winner:")
+	assert.Contains(t, out, "table error")
+	assert.Contains(t, out, "40", "bob's total")
+	assert.Contains(t, out, gameview.LobbyHint)
 }

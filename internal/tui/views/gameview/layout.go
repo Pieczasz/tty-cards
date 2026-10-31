@@ -348,14 +348,19 @@ func AttachTurnClock(block, clock string, orientation Orientation) string {
 // ClockTickMsg drives the turn countdown. Source is the feed of the session that armed
 // it, for the same reason EventMsg carries one: a session handles only its own ticks,
 // and every tick, the first one from ClockTick included, is armed with the feed.
-type ClockTickMsg struct{ Source <-chan game.Event }
+// Gen is the chain within that session: a re-arm starts a new one, and the tick the
+// old chain still has in flight is dropped, so there is never a second chain.
+type ClockTickMsg struct {
+	Source <-chan game.Event
+	Gen    uint64
+}
 
 // clockTickFrom ticks once a second, or ten times a second only for the player whose
 // clock is running out. onTurn is what keeps a table cheap: a frame costs thousands of
 // allocations, and every seat paying that rate for somebody else's digit multiplies the
 // table's work for nothing.
-func clockTickFrom(src <-chan game.Event, remaining time.Duration, onTurn bool) tea.Cmd {
-	return tea.Tick(tickInterval(remaining, onTurn), func(time.Time) tea.Msg { return ClockTickMsg{Source: src} })
+func clockTickFrom(src <-chan game.Event, gen uint64, remaining time.Duration, onTurn bool) tea.Cmd {
+	return tea.Tick(tickInterval(remaining, onTurn), func(time.Time) tea.Msg { return ClockTickMsg{Source: src, Gen: gen} })
 }
 
 // tickInterval is how long until the clock this seat reads next changes.
@@ -376,7 +381,11 @@ func tickInterval(remaining time.Duration, onTurn bool) time.Duration {
 // after it ends.
 func RenderWaitingScreen(g router.GlobalContext, phase game.Phase, winner string) string {
 	content := "Waiting for game to start..."
-	if phase == game.Finished {
+	switch {
+	case phase == game.Finished && winner == "":
+		// A rules error ends the table with nobody named.
+		content = "Game Over!\n\nPress Esc to go back."
+	case phase == game.Finished:
 		content = fmt.Sprintf("Game Over! Winner: %s\n\nPress Esc to go back.", winner)
 	}
 	return renderGameNotice(g, content)

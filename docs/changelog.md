@@ -122,6 +122,13 @@ unnoticed for so long.
   players still seated. A pot won face-down, or a leaver's hand, no longer splits
   a draw by cards nobody showed, and a final pot won face-down stays face-down on
   the result screen.
+- **A poker player who left stays folded for the rest of the match.** They used
+  to come back unfolded each hand and appear at every later showdown as an extra
+  seat, showing the cards of the hand they walked out of.
+- **A chopped poker pot's odd chip goes to the first winner left of the button**,
+  the standard rule, so it moves round the table. It used to go to the lowest
+  account id, and ids are time-ordered, so the older account took it every time;
+  with stacks otherwise level, that one chip decided first and second place.
 - **An erased account can never reappear on the leaderboard**, not even from a
   match that was finishing while it was deleted, and not from a leaderboard read
   that started just before.
@@ -273,8 +280,31 @@ unnoticed for so long.
   started.
 - A match that ends just as the server begins shutting down is no longer dropped
   while the table reopens.
+- **A ranked match finished during a deploy's 30-second drain is rated.** The
+  server used to mark itself as shutting down before that window, so a game that
+  ended there by play was stored without Elo. Only the tables the drain tears down
+  at its end are recorded unrated now. No new game starts inside the window: a
+  table that readies up there stays waiting, rather than starting a match the
+  drain would cut short.
+- **A taken `API_PORT` refuses the boot** (operators). The stats API used to bind
+  in the background, so the server logged "starting stats api", opened SSH to
+  players and only then failed. It now binds before the SSH listener opens.
 - Closing a table no longer unseats a player who had already moved to another
   one.
+- **A new turn gets the whole clock, even when it comes straight back to you.**
+  A Hearts trick winner leading the next trick, the heads-up poker big blind
+  opening the flop, and a heads-up Uno Skip, Reverse or Draw now start a fresh
+  30 seconds instead of the 10 left over from the turn before, and an absent
+  seat that keeps getting the turn back is charged a miss for each turn, so it
+  is removed after three. Only Gin's draw then discard is one turn on one clock.
+  This supersedes the earlier note that an Uno skip or a Hearts trick winner
+  kept the clock.
+- A player who readied and then dropped from a waiting table is un-readied before
+  they leave, so the last ready-up in that moment can no longer start the game
+  with them in it and forfeit their seat without the 90-second hold.
+- The release of held seats at hand end only gives up the holds it found. A
+  player who reconnected, started the next game and dropped again in that moment
+  keeps their new 90-second hold instead of being forfeited at once.
 
 ### Changed - terminal UI
 
@@ -304,6 +334,32 @@ unnoticed for so long.
   as 0.
 - Hearts, Gin Rummy and Poker share one between-hands result screen, so the
   three lay out their standings the same way.
+- **The result screen keeps its headline on a small terminal.** At 80x24 Gin
+  Rummy used to cut off the hand number, the GIN/KNOCK banner and who scored,
+  showing only the bottom of the card art. The cards are now drawn small there,
+  and dropped before the headline when even that does not fit. Poker's leave
+  warning is on its own line so 64 columns no longer cut it short.
+- **A table that ends on an error says so.** It used to read "MATCH COMPLETE"
+  over " wins" in Poker and Gin Rummy, and "Game Over! Winner: " with no name in
+  Hearts, as if somebody had won a match that is recorded unrated. It now reads
+  "MATCH ENDED - table error", and Hearts keeps its scoreboard on screen.
+- Your own turn clock starts counting the moment the turn reaches you. It used
+  to sit on the full time for up to five seconds first.
+- Hearts and Gin Rummy no longer offer the play keys to a seat that is waiting
+  for its turn. Space and enter in the Hearts pass, and draw, discard and knock
+  in Gin, did nothing off-turn; the waiting seats now see only the cursor keys
+  and esc.
+- A failed join no longer pushes the join browser past the edge of an 80x24 or
+  64x20 terminal: the error line is wrapped and the table list gives up a row
+  for it.
+- An empty leaderboard says no one has ranked yet instead of staying on
+  "Loading leaderboard." forever.
+- A player kicked, or whose table closed, in the moment between joining and the
+  table screen opening is sent home instead of being left on a roster they are
+  no longer in.
+- **A kicked guest is sent home at once.** The kick used to leave them on a
+  frozen roster that still listed them, every key answering "player not in
+  lobby", until they pressed x then y.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
@@ -325,11 +381,12 @@ unnoticed for so long.
 - The turn-timeout event is now broadcast on the same lock hold that charges the
   miss, so a player whose move lands in the gap is not told they timed out after
   the miss was refunded.
-- **A turn that carries on keeps its clock.** Gin's draw then discard, an Uno
-  skip that comes back to you, a Hearts trick winner leading again, or someone
-  else leaving no longer hands the same player a fresh 30 seconds; at least 10
-  are always left. A turn costs one miss, not one per expiry, so an absent Gin
-  player loses the seat after three turns instead of one and a half.
+- **A turn that carries on keeps its clock.** Gin's draw then discard, or
+  someone else leaving, no longer hands the same player a fresh 30 seconds; at
+  least 10 are always left. A turn costs one miss, not one per expiry, so an
+  absent Gin player loses the seat after three turns instead of one and a half.
+  A new turn that comes straight back to you is a full turn: see "A new turn
+  gets the whole clock" under tables and lobbies.
 - **Smarter auto-play for an absent player:** poker calls when nobody can make
   the call cost anything instead of folding a covered bet; Hearts passes the
   queen of spades and the high spades and hearts instead of its three lowest
@@ -365,6 +422,10 @@ unnoticed for so long.
 - Eight fuzz targets, including `FuzzBestMeldSplit` and `FuzzClassifyHand`.
 - `goleak` in 26 packages, fit tests per screen, and `-race` tests pinning that
   hand manipulation never aliases the pile.
+- The bot end-to-end test in `cmd/loadtest` fails when its table stops moving
+  or a bot reports an error, not after a fixed minute: on a busy CI runner two
+  random-length games under `-race` outlived the minute while still playing, and
+  a bot's own error was hidden behind the timeout message.
 - CI additionally builds the Docker image for amd64 and arm64 and validates
   `compose.yaml` and `nginx.conf`. Lint is pinned to golangci-lint v2.15.0.
 

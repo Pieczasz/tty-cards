@@ -12,16 +12,17 @@ const (
 	// MaxMissedTurns is how many turns in a row a seat may miss before it is taken.
 	MaxMissedTurns = 3
 	// minTurnRemaining is the least a seat keeping the turn is left with, so a turn
-	// that carries on (gin's draw then discard, an auto-play, a leave elsewhere) never
-	// lands on a clock already at zero.
+	// that carries on (State.ContinueTurn, a refused auto-play, a leave elsewhere)
+	// never lands on a clock already at zero.
 	minTurnRemaining = 10 * time.Second
 )
 
 // armTurnTimerLocked (re)starts the clock for the seat on turn. The same seat with the
-// same turn length is the same turn carrying on - gin's draw then discard, a re-armed
-// auto-play, somebody else leaving - and keeps its running deadline, floored at
-// minTurnRemaining. Anything else is a fresh turn with the full length, and only a
-// fresh turn can be charged a new miss.
+// same turn length and a running deadline is the same turn carrying on - a
+// State.ContinueTurn move, a re-armed refused auto-play, somebody else leaving - and
+// keeps that deadline, floored at minTurnRemaining. Any other move drops the deadline
+// first (applyActionLocked), so a new turn is fresh with the full length even on the
+// same seat, and only a fresh turn can be charged a new miss.
 func (e *Engine) armTurnTimerLocked() {
 	prevDeadline, prevPlayer, prevLength := e.clock.deadline, e.clock.playerID, e.clock.length
 	e.stopTurnTimerLocked()

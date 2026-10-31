@@ -176,6 +176,37 @@ func TestToggleReady_NoGameStartsWhileTheServerDrains(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(time.Second), "the refused start kept its watcher counted")
 }
 
+// The drain closes the gate before its graceful window and marks the process as going
+// away only after it: a start inside the window is refused, but a ranked match already
+// in play that ends there by play is still rated.
+func TestStopNewGames_RefusesAStartButKeepsTheMatchInPlayRated(t *testing.T) {
+	t.Parallel()
+	repo := new(MockMatchRepo)
+	recorded := make(chan struct{}, 1)
+	repo.On("FinalizeRankedMatch", mock.Anything, gameRef("MockGame"), []uuid.UUID{testutil.UID(1), testutil.UID(2)}, mock.Anything).
+		Run(func(mock.Arguments) { recorded <- struct{}{} }).
+		Return(nil)
+	m, _, engine := newFinishedGameLobby(t, repo)
+	host, guest := mockPlayer("host", testutil.UID(3)), mockPlayer("joiner", testutil.UID(4))
+	next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("mockgame"))
+	require.NoError(t, err)
+	require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+	require.NoError(t, m.ToggleReady(host))
+
+	m.StopNewGames()
+
+	require.ErrorIs(t, m.ToggleReady(guest), errServerRestarting)
+	assert.Nil(t, next.ActiveGame(), "a game started after new games stopped")
+	endHand(engine, stubWin)
+	select {
+	case <-recorded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the match in play was not rated after new games stopped")
+	}
+	require.True(t, m.WaitForFinalizers(2*time.Second))
+	repo.AssertNotCalled(t, "RecordCasualMatch", mock.Anything, mock.Anything, mock.Anything)
+}
+
 // syncBuffer is a log sink two goroutines can touch: the finalizer writes to it while
 // the assertion polls it.
 type syncBuffer struct {
@@ -352,14 +383,51 @@ func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	m, l, _, guest := startedGame(t)
 
 	m.DisconnectPlayer(guest)
-	m.expireLeave(guest)
+	m.expireLeaveGen(guest, 0)
 
 	assert.False(t, l.HasPlayer(guest), "the expired seat is given up")
 	m.ResumePlayer(guest)
 	assert.Nil(t, m.FindLobbyByPlayer(guest), "nothing to resume after expiry")
 }
 
-// expireLeave claims the grace before LeaveLobby runs. A resume in that gap must
+// releaseHeldSeats collects the holds under m.mu and expires them after releasing it.
+// A hold armed in that gap is not the one it saw, and must survive the stale release
+// (invariant 4): expiring whatever is pending, or re-reading the generation after the
+// lock, would take the player's newer seat.
+func TestReleaseHeldSeats_StaleReleaseKeepsANewerHold(t *testing.T) {
+	t.Parallel()
+
+	m, l, _, guest := startedGame(t)
+	m.DisconnectPlayer(guest)
+	var once sync.Once
+	m.heldSeatsCollected = func() {
+		once.Do(func() {
+			// The player comes back and drops again: a newer hold on the same seat.
+			m.ResumePlayer(guest)
+			m.DisconnectPlayer(guest)
+		})
+	}
+
+	m.releaseHeldSeats(l)
+
+	assert.True(t, pendingGrace(m, guest.ID), "a stale release expired the newer hold")
+	assert.True(t, l.HasPlayer(guest), "a stale release forfeited the newer hold's seat")
+}
+
+// Closing a table unmaps every seat at it, so a hold left armed there would later
+// take the player out of whichever table they sat down at next.
+func TestRemoveLobby_GivesUpHeldSeats(t *testing.T) {
+	t.Parallel()
+
+	m, l, _, guest := startedGame(t)
+	m.DisconnectPlayer(guest)
+	require.True(t, pendingGrace(m, guest.ID))
+
+	m.RemoveLobby(l.Code())
+	assert.False(t, pendingGrace(m, guest.ID), "the closed table's hold is still armed")
+}
+
+// expireLeaveGen claims the grace before LeaveLobby runs. A resume in that gap must
 // not return — and so must not sit the player back down — until the leave finishes.
 func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
 	t.Parallel()
@@ -651,7 +719,7 @@ func TestFeedEnd_ReleasesHeldSeatsWhenFinished(t *testing.T) {
 	engine.WithState(func(state *game.State) { state.Phase = game.Finished })
 	engine.Close()
 
-	// Both in one condition: expireLeave drops the pending grace under m.mu and only
+	// Both in one condition: expireLeaveGen drops the pending grace under m.mu and only
 	// then takes the seat, so "grace gone" alone can be observed a moment early.
 	require.Eventually(t, func() bool { return !pendingGrace(m, guest.ID) && !l.HasPlayer(guest) },
 		2*time.Second, 10*time.Millisecond,
@@ -673,6 +741,26 @@ func TestBeginShutdown_GivesUpSeatsHeldForAReconnect(t *testing.T) {
 	assert.False(t, pendingGrace(m, guest.ID), "a grace timer survived shutdown")
 	assert.False(t, l.HasPlayer(guest), "the seat was still held when the process went away")
 	assert.Nil(t, m.FindLobbyByPlayer(guest))
+}
+
+// A hold that runs out inside the drain window must not forfeit there: the match is
+// still rated until BeginShutdown, and the closed listener keeps the player from
+// coming back. BeginShutdown gives the seat up afterwards, unrated.
+func TestStopNewGames_KeepsAHoldThatExpiresInTheDrainWindow(t *testing.T) {
+	t.Parallel()
+	m, l, _, guest := startedGame(t)
+
+	m.DisconnectPlayer(guest)
+	m.StopNewGames()
+	m.expireLeaveGen(guest, 0)
+
+	assert.True(t, pendingGrace(m, guest.ID), "the hold expired inside the drain window")
+	assert.True(t, l.HasPlayer(guest), "the seat was forfeited while the match was still rated")
+
+	m.BeginShutdown()
+
+	assert.False(t, pendingGrace(m, guest.ID))
+	assert.False(t, l.HasPlayer(guest), "BeginShutdown did not give the held seat up")
 }
 
 // A finished match that produces no row still has to show up as one: these paths

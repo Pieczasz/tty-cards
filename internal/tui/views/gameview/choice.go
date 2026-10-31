@@ -69,11 +69,17 @@ func (p *ChoicePicker) Render(t *styles.Theme) string {
 	}
 	labels := make([]string, 0, len(p.Choices))
 	var tones []color.Color
-	for _, c := range p.Choices {
+	for i, c := range p.Choices {
 		labels = append(labels, c.Label)
-		if c.Tone != nil {
-			tones = append(tones, c.Tone(t))
+		if c.Tone == nil {
+			continue
 		}
+		// Colors is positional, so the untoned cells before this one take the colour
+		// GridPicker gives a cell it has none for; otherwise this tone lands on them.
+		for len(tones) < i {
+			tones = append(tones, t.TextMuted)
+		}
+		tones = append(tones, c.Tone(t))
 	}
 	return components.GridPicker{Title: p.Title, Labels: labels, Colors: tones, Cursor: p.Cursor}.Render(t)
 }

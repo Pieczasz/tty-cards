@@ -477,3 +477,34 @@ func TestHandOverHint_SaysNothingIsLeftForABustedHero(t *testing.T) {
 	m.Base.MyTurn = false
 	assert.Contains(t, m.handOverHint(), "waiting for the next hand")
 }
+
+// A chip-conservation failure ends the match as a rules error with no winner. It must
+// not read as a completed, won match: finalize records it without a rating change.
+func TestRenderHandOver_ARulesErrorNamesNoWinner(t *testing.T) {
+	t.Parallel()
+
+	m := tableOf(80, 24, 3)
+	m.handComplete, m.matchComplete = true, true
+	m.winnerName = ""
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonRulesError
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "table error")
+	assert.NotContains(t, out, "wins")
+	assert.NotContains(t, out, "MATCH COMPLETE")
+}
+
+// Nine seats at the declared minimum is the tightest results screen there is: the box
+// and the whole of the hint still have to fit, since the hint is what warns that esc
+// forfeits the stack.
+func TestRenderHandOver_FitsNineSeatsAtTheMinimum(t *testing.T) {
+	t.Parallel()
+
+	m := tableOf(styles.MinWidth, styles.MinHeight, 9)
+	m.handComplete = true
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "HAND 3/10 COMPLETE")
+	assert.Contains(t, out, "forfeiting your chips")
+}

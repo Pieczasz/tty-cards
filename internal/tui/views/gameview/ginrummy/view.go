@@ -39,6 +39,9 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) keyHints() string {
+	if !m.Base.MyTurn {
+		return gameview.WaitingKeyHints
+	}
 	switch m.phase {
 	case logic.PhaseAwaitingDraw:
 		return "s: draw stock | t: take discard | esc: leave"
@@ -75,10 +78,11 @@ func (m *model) renderPlayerSection() string {
 
 func (m *model) renderHandOver() string {
 	h := gameview.HandOver{
-		Title:  fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
-		Body:   m.renderHandResult(),
-		Header: fmt.Sprintf("%-12s  %9s", "player", "total"),
-		Hint:   m.handOverHint(),
+		Title:    fmt.Sprintf("HAND %d COMPLETE", m.handNumber),
+		Subtitle: m.renderOutcome(),
+		Body:     m.renderHandResult(),
+		Header:   fmt.Sprintf("%-12s  %9s", "player", "total"),
+		Hint:     m.handOverHint(),
 	}
 	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.Base.WinnerName, m.leavers)
 
@@ -97,7 +101,10 @@ func (m *model) handOverHint() string {
 	return "waiting for the next hand | esc: leave"
 }
 
-func (m *model) renderHandResult() string {
+// renderOutcome is how the hand ended and who scored. It is the hand-over's subtitle
+// rather than part of the card art below it, so it survives a terminal too small for
+// the art.
+func (m *model) renderOutcome() string {
 	r := m.lastHandResult
 	if r == nil {
 		return ""
@@ -116,7 +123,16 @@ func (m *model) renderHandResult() string {
 	}
 
 	winnerName := m.Base.SeatNames()[r.Winner]
-	delta := m.Global.Palette().SuccessText.Render(fmt.Sprintf("+%d -> %s", r.ScoreDelta, winnerName))
+	return banner + "  " + m.Global.Palette().SuccessText.Render(fmt.Sprintf("+%d -> %s", r.ScoreDelta, winnerName))
+}
+
+// renderHandResult is the cards behind the outcome: the knocker's melds, what the
+// opponent was left holding and what they laid off. A wall has none.
+func (m *model) renderHandResult() string {
+	r := m.lastHandResult
+	if r == nil || r.Outcome == logic.OutcomeWall {
+		return ""
+	}
 
 	knockerMelds := m.renderMeldGroups("knocker melds", r.KnockerMelds)
 	oppDead := m.renderCardRow("opponent deadwood", r.OpponentDeadwood, false)
@@ -125,7 +141,16 @@ func (m *model) renderHandResult() string {
 		laidOff = m.renderCardRow("laid off", r.LaidOffCards, true)
 	}
 
-	return styles.JoinVertical(lg.Center, banner, delta, "", knockerMelds, oppDead, laidOff)
+	return styles.JoinVertical(lg.Center, knockerMelds, oppDead, laidOff)
+}
+
+// renderCard draws a result card as a face, or in four columns on a terminal that
+// cannot hold three rows of nine-row faces next to the standings.
+func (m *model) renderCard(card deck.Card, highlight bool) string {
+	if gameview.IsCompact(m.Global.Width, m.Global.Height) {
+		return components.RenderMiniCard(m.Global.Palette(), card)
+	}
+	return components.RenderCard(m.Global.Palette(), card, highlight)
 }
 
 func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
@@ -140,7 +165,7 @@ func (m *model) renderMeldGroups(label string, melds [][]deck.Card) string {
 		}
 		cards := make([]string, 0, len(meld))
 		for _, card := range meld {
-			cards = append(cards, components.RenderCard(m.Global.Palette(), card, false))
+			cards = append(cards, m.renderCard(card, false))
 		}
 		box := styles.JoinHorizontal(lg.Top, cards...)
 		groups = append(groups, m.Global.Palette().MeldBox.Render(
@@ -158,7 +183,7 @@ func (m *model) renderCardRow(label string, cards []deck.Card, highlight bool) s
 	}
 	parts := make([]string, 0, len(cards))
 	for _, card := range cards {
-		parts = append(parts, components.RenderCard(m.Global.Palette(), card, highlight))
+		parts = append(parts, m.renderCard(card, highlight))
 	}
 	return styles.JoinVertical(lg.Left,
 		m.Global.Palette().Muted.Render(label),

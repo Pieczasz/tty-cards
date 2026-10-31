@@ -68,9 +68,12 @@ func (m *model) renderHandOver() string {
 		Rows:     make([]string, 0, len(m.seats)),
 		Hint:     m.handOverHint(),
 	}
+	// The headline names the match's winner, so the hand's winner goes; a rules error
+	// leaves no winner to name.
 	if m.matchComplete {
-		h.Title, h.Subtitle = gameview.MatchOverTitle(""), m.winnerName+" wins"
+		h.Subtitle = ""
 	}
+	h.ApplyMatchEnd(m.Base.EndReason, m.matchComplete, m.Base.Phase, m.winnerName, nil)
 
 	for _, s := range m.seats {
 		// Chip glyphs carry their own colour, so they are joined in rather than
@@ -109,7 +112,9 @@ func (m *model) handOverHint() string {
 	default:
 		next = "waiting for the next hand"
 	}
-	return next + "   |   " + leave
+	// Two lines: on one, a long name or the warning itself is wider than the box at
+	// 64 columns, and the clamp would cut the warning short.
+	return next + "\n" + leave
 }
 
 // seatZones places the opponents around the table, starting from the seat on the

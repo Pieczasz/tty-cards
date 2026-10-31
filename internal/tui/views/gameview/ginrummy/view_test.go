@@ -29,9 +29,10 @@ func TestView_ActionBarHints(t *testing.T) {
 			Height: 40,
 		},
 		Base: gameview.BaseState{
-			Phase: game.Playing,
-			Hand:  []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}},
-			Seats: aliceAndBob,
+			Phase:  game.Playing,
+			MyTurn: true,
+			Hand:   []deck.Card{{Rank: deck.Ace, Suit: deck.Spades}},
+			Seats:  aliceAndBob,
 		},
 		phase:      logic.PhaseAwaitingDraw,
 		handNumber: 1,
@@ -176,7 +177,7 @@ func ginResult() *logic.HandResult {
 
 // The summary is how a player learns why they scored what they did, so each of the
 // three outcomes has to name itself and the melds have to be labelled set or run.
-func TestRenderHandResult_NamesEveryOutcome(t *testing.T) {
+func TestRenderOutcome_NamesEveryOutcome(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -197,14 +198,14 @@ func TestRenderHandResult_NamesEveryOutcome(t *testing.T) {
 			t.Parallel()
 			m := viewAt(120, 50)
 			m.lastHandResult = tc.result
-			assert.Contains(t, m.renderHandResult(), tc.want)
+			assert.Contains(t, m.renderOutcome(), tc.want)
 		})
 	}
 
 	t.Run("no result yet draws nothing", func(t *testing.T) {
 		t.Parallel()
 		m := viewAt(120, 50)
-		assert.Empty(t, m.renderHandResult())
+		assert.Empty(t, m.renderOutcome())
 	})
 }
 
@@ -250,6 +251,24 @@ func TestKeyHints_FollowTheHandPhase(t *testing.T) {
 			m.phase = tc.phase
 			assert.Contains(t, m.keyHints(), tc.want)
 		})
+	}
+}
+
+// Drawing, discarding and knocking all wait for the turn, so the seat that is not on
+// turn is offered only the cursor and leaving.
+func TestView_OffTurnHintsOfferNoPlayKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []logic.Phase{logic.PhaseAwaitingDraw, logic.PhaseAwaitingDiscard} {
+		m := viewAt(80, 40)
+		m.phase = phase
+		m.Base.MyTurn = false
+
+		out := tuitest.StripANSI(m.View().Content)
+		for _, key := range []string{"draw stock", "take discard", "enter: discard", "knock"} {
+			assert.NotContains(t, out, key, "phase %v", phase)
+		}
+		assert.Contains(t, out, "->/l: right", "phase %v: the cursor still moves", phase)
 	}
 }
 
@@ -311,4 +330,39 @@ func TestView_ForfeitShowsTheScoreboard(t *testing.T) {
 	assert.NotContains(t, out, "Press Esc to go back")
 	assert.Contains(t, out, "alice")
 	assert.Contains(t, out, "40")
+}
+
+// A rules error ends the match unrated and without a winner, so it must not read as
+// a completed match.
+func TestView_ARulesErrorSaysTheTableFailed(t *testing.T) {
+	t.Parallel()
+	m := viewAt(80, 24)
+	m.Base.Phase = game.Finished
+	m.Base.EndReason = game.EndReasonRulesError
+
+	out := tuitest.StripANSI(m.View().Content)
+	assert.Contains(t, out, "table error")
+	assert.NotContains(t, out, "MATCH COMPLETE")
+}
+
+// The hand-over screen is how a player learns who won the hand and why, so the
+// headline, the outcome and the hint have to survive on every terminal; only the
+// card art may give way.
+func TestView_HandOverKeepsTheHeadlineAtEverySize(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range tuitest.FitSizes {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
+			t.Parallel()
+			m := viewAt(size.Width, size.Height)
+			m.phase = logic.PhaseHandOver
+			m.lastHandResult = knockResult()
+
+			out := tuitest.StripANSI(m.View().Content)
+			assert.Contains(t, out, "HAND 3 COMPLETE")
+			assert.Contains(t, out, "KNOCK")
+			assert.Contains(t, out, "+14 -> alice")
+			assert.Contains(t, out, "enter: deal next hand")
+		})
+	}
 }

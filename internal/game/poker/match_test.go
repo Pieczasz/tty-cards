@@ -290,6 +290,28 @@ func TestBeginHand_BustedPlayerSitsOut(t *testing.T) {
 	assert.NotEqual(t, 1, state.CurrentTurn, "the turn cursor skips the empty seat")
 }
 
+// A player who left in an earlier hand stays folded in every later one. The reset
+// clears every seat, a leaver's included, and only seated players are dealt, so a
+// leaver came back unfolded: SeatsFor showed their old hole cards at every later
+// showdown, as an extra seat that was never in the pot.
+func TestBeginHand_AnEarlierLeaverStaysFolded(t *testing.T) {
+	t.Parallel()
+	state, extra := tableWithChips(1000, 1000, 1000)
+	leaver := state.Players[2]
+	leaver.Cards = []deck.Card{{Rank: deck.Nine, Suit: deck.Clubs}, {Rank: deck.Four, Suit: deck.Hearts}}
+	state.Players = state.Players[:2]
+	state.LeftPlayers = []*game.Player{leaver}
+	extra.Seats[leaver.ID].Folded = true
+
+	require.NoError(t, beginHand(state, extra, 0))
+
+	assert.True(t, extra.Seats[leaver.ID].Folded, "a leaver is not dealt back in")
+	extra.ReachedShowdown = true
+	for _, s := range SeatsFor(state, "p0") {
+		assert.NotEqual(t, leaver.ID, s.PlayerID, "an earlier leaver is shown at a later showdown")
+	}
+}
+
 // A big blind too short to post in full is all-in for less, but the bring-in stays at
 // the full big blind and the shortfall is dead money. Letting CurrentBet follow what
 // was actually posted opened the betting below the blind and dragged the first legal

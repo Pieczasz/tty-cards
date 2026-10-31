@@ -135,6 +135,9 @@ func (m *Manager) persistFinishedMatch(
 // the ones its session logged in with. A player seated nowhere is not refreshed: the
 // next login reads the stored rating.
 //
+// The index is keyed by Player.ID, found here as the account id's string form:
+// NewPlayer, the only way a session is seated, sets ID that way.
+//
 // m.mu is held, read-only, across each lobby's update so no player can change tables
 // between the index lookup and the seat write; the broadcasts wait for both locks to
 // be released.
@@ -204,27 +207,45 @@ func (m *Manager) admitGame() bool {
 	return true
 }
 
+// StopNewGames refuses every game start from now on, and nothing else: the drain
+// calls it before its graceful window, so a table already in play can still finish
+// there, rated, while one readying up inside the window is never started only for
+// the teardown to cut it short.
+func (m *Manager) StopNewGames() {
+	if m == nil {
+		return
+	}
+	m.gateMu.Lock()
+	m.gateClosed = true
+	m.gateMu.Unlock()
+}
+
+func (m *Manager) newGamesStopped() bool {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	return m.gateClosed
+}
+
 // BeginShutdown marks the process as going away and stops new games, without
 // stopping the ones in play: a hand that ends while sessions are torn down still
 // belongs in the players' history, it just must not move anyone's rating.
 //
-// Seats still held for a reconnect are given up here. Their timers would fire long
-// after the drain, so the lobby would never be removed and its engine never closed -
-// the player is not coming back to a process that is exiting.
+// Seats still held for a reconnect are given up here, not in StopNewGames: their
+// timers would fire long after the drain, so the lobby would never be removed and
+// its engine never closed - but given up before the graceful window, the forfeit
+// would be rated against a player the closed listener keeps from coming back.
 func (m *Manager) BeginShutdown() {
 	if m == nil {
 		return
 	}
 	m.shuttingDown.Store(true)
-	m.gateMu.Lock()
-	m.gateClosed = true
-	m.gateMu.Unlock()
+	m.StopNewGames()
 	m.mu.Lock()
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
 	// LeaveLobby stops the timer under m.mu before touching the roster.
-	for _, p := range held {
-		m.LeaveLobby(p)
+	for id := range held {
+		m.LeaveLobby(&game.Player{ID: id})
 	}
 }
 

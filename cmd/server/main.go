@@ -153,11 +153,12 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	defer stopAPI()
 
 	return serve(ctx, serveDeps{
-		config:     cfg,
-		sshServer:  server,
-		apiErr:     apiErr,
-		signals:    signals,
-		onShutdown: lobbyManager.BeginShutdown,
+		config:       cfg,
+		sshServer:    server,
+		apiErr:       apiErr,
+		signals:      signals,
+		stopNewGames: lobbyManager.StopNewGames,
+		onShutdown:   lobbyManager.BeginShutdown,
 	})
 }
 
@@ -234,10 +235,18 @@ func startStatsAPI(
 		return nil, nil, fmt.Errorf("setup stats api: %w", err)
 	}
 
+	// Bind here, not on the goroutine, so a taken port refuses the boot before the
+	// ssh listener opens to players.
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stats api listen: %w", err)
+	}
+	slog.InfoContext(ctx, "starting stats api", "address", addr)
+
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.InfoContext(ctx, "starting stats api", "address", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- fmt.Errorf("stats api stopped: %w", err)
 		}
 	}()
@@ -259,11 +268,13 @@ type sshServer interface {
 }
 
 type serveDeps struct {
-	config     *config.Config
-	sshServer  sshServer
-	apiErr     <-chan error
-	signals    <-chan os.Signal
-	onShutdown func()
+	config    *config.Config
+	sshServer sshServer
+	apiErr    <-chan error
+	signals   <-chan os.Signal
+	// stopNewGames runs before the drain window, onShutdown after it.
+	stopNewGames func()
+	onShutdown   func()
 }
 
 func serve(ctx context.Context, d serveDeps) error {
@@ -297,7 +308,7 @@ func serve(ctx context.Context, d serveDeps) error {
 		serveErr <- err
 	}()
 
-	defer drainServer(d.onShutdown, server)
+	defer drainServer(d.stopNewGames, d.onShutdown, server)
 	select {
 	case err := <-serveErr:
 		if err != nil {
@@ -337,19 +348,24 @@ func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error)
 	return listener, nil
 }
 
-func drainServer(onShutdown func(), server sshServer) {
-	if onShutdown != nil {
-		onShutdown()
+// drainServer stops accepting, gives live tables the graceful window, then tears the
+// sessions down. Shutdown ends no session, so tables keep playing through that window
+// and a ranked match that finishes there by play is rated; onShutdown marks the lobby
+// only once the window is over, right before Close decides who is left. No new game
+// may start in the window, though: stopNewGames runs first, because Close would cut
+// such a game short and it would be recorded unrated.
+func drainServer(stopNewGames, onShutdown func(), server sshServer) {
+	if stopNewGames != nil {
+		stopNewGames()
 	}
-	stopServer(server)
-}
-
-func stopServer(server sshServer) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), sshDrainTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.WarnContext(shutdownCtx, "sessions outlasted the drain window; closing them",
 			"error", err, "timeout", sshDrainTimeout)
+	}
+	if onShutdown != nil {
+		onShutdown()
 	}
 	if err := server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.WarnContext(shutdownCtx, "failed to close ssh server", "error", err)

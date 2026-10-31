@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/testutil"
 	"github.com/Pieczasz/tty-cards/internal/tui"
@@ -31,10 +33,10 @@ func (r *recorder) notApplied()         { r.mu.Lock(); r.unapplied++; r.mu.Unloc
 func (r *recorder) gameOver()           { r.mu.Lock(); r.games++; r.mu.Unlock() }
 func (r *recorder) fail(err error)      { r.mu.Lock(); r.errs = append(r.errs, err); r.mu.Unlock() }
 
-func (r *recorder) gamesDone() int {
+func (r *recorder) snapshot() *recorder {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.games
+	return &recorder{moves: r.moves, unapplied: r.unapplied, games: r.games, errs: slices.Clone(r.errs)}
 }
 
 // A whole table of bots, each on the real TUI the ssh server runs, sharing one lobby
@@ -48,12 +50,15 @@ func TestBots_PlayWholeGamesThroughTheRealTUI(t *testing.T) {
 			t.Parallel()
 			stats := playTable(t, seats, 2)
 
-			assert.Empty(t, stats.errs)
 			assert.Zero(t, stats.unapplied, "every move the bots sent was applied")
 			assert.Greater(t, stats.moves, 2*seats, "the bots played rather than waited on the clock")
 		})
 	}
 }
+
+// maxMovesPerGame is far past any Crazy Eights game the bots play, which take tens
+// of moves; a table past it is cycling the draw pile rather than playing out.
+const maxMovesPerGame = 500
 
 // playTable runs one table of seats bots until it has finished games games.
 func playTable(t *testing.T, seats, games int) *recorder {
@@ -81,14 +86,32 @@ func playTable(t *testing.T, seats, games int) *recorder {
 		bots.Wait()
 	})
 
-	deadline := time.Now().Add(60 * time.Second)
-	for stats.gamesDone() < games {
-		require.True(t, time.Now().Before(deadline), "only %d of %d games finished", stats.gamesDone(), games)
-		time.Sleep(20 * time.Millisecond)
+	// A game's length is random and every move is a full render, so under -race on a
+	// loaded machine two games can take minutes: a wall-clock budget fails a table
+	// that is still playing. A stuck table stops moving, so the test fails on silence
+	// instead: longer than the host waits on guests in the lobby, then the server's
+	// turn clock, which moves a stuck seat itself. A table that keeps moving but never
+	// finishes is caught by a move cap.
+	const stallAfter = lobbyPatience + game.DefaultTurnTimeout
+	maxMoves := games * maxMovesPerGame
+	budget := 10 * time.Minute // go test's default -timeout, for a binary run without one
+	if d, ok := t.Deadline(); ok {
+		budget = time.Until(d) - 10*time.Second // fail here with the stats, not in go test's panic
 	}
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-	return &recorder{moves: stats.moves, unapplied: stats.unapplied, games: stats.games, errs: stats.errs}
+	var snap *recorder
+	moves, lastMove := 0, time.Now()
+	require.Eventually(t, func() bool {
+		snap = stats.snapshot()
+		if snap.moves > moves {
+			moves, lastMove = snap.moves, time.Now()
+		}
+		return snap.games >= games || len(snap.errs) > 0 ||
+			time.Since(lastMove) > stallAfter || snap.moves > maxMoves
+	}, budget, 20*time.Millisecond, "the bots were still playing when the test ran out of time")
+	require.Empty(t, snap.errs, "a bot gave up")
+	require.LessOrEqual(t, snap.moves, maxMoves, "%d games did not finish in %d moves", games, maxMoves)
+	require.GreaterOrEqual(t, snap.games, games, "no move landed for %v after %d moves", stallAfter, snap.moves)
+	return snap
 }
 
 // A seat the bot had and lost - it is back on the home screen - is reported rather

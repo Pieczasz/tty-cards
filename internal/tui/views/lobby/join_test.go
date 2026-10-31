@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -348,6 +349,29 @@ func TestJoin_ViewFitsTheTerminal(t *testing.T) {
 			assert.Contains(t, tuitest.StripANSI(out), ">Poker", "the cursor row is on screen")
 			assert.Contains(t, tuitest.StripANSI(out), "1525", "and it is the 26th table, not the first screenful")
 		})
+	}
+}
+
+// A failed join adds an error line under the list. It has to come out of the list's
+// budget and wrap to the frame, full list or empty, or the frame overflows the terminal.
+func TestJoin_ViewWithAnErrorFitsTheTerminal(t *testing.T) {
+	t.Parallel()
+	for _, size := range tuitest.FitSizes {
+		for _, n := range []int{30, 0} {
+			t.Run(fmt.Sprintf("%s/%d_tables", size.Name, n), func(t *testing.T) {
+				t.Parallel()
+				m := newJoinModel(t, newManager(t))
+				m.global.Width, m.global.Height = size.Width, size.Height
+				m.entries = manyTables(n)
+				m.err = errors.New("too many join attempts, please try again later")
+
+				out := m.View().Content
+
+				assert.LessOrEqual(t, lg.Height(out), size.Height, "taller than the terminal")
+				assert.LessOrEqual(t, lg.Width(out), size.Width, "wider than the terminal")
+				assert.Contains(t, tuitest.StripANSI(out), "Error:", "the error is still shown")
+			})
+		}
 	}
 }
 

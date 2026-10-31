@@ -79,6 +79,9 @@ type Manager struct {
 	// engineOpts is appended to every engine a start builds. Production leaves it
 	// empty; tests set it to force a feed the watcher cannot subscribe to.
 	engineOpts []game.EngineOption
+	// heldSeatsCollected runs in releaseHeldSeats between collecting the holds and
+	// expiring them. Production leaves it nil; tests arm a newer hold in that gap.
+	heldSeatsCollected func()
 }
 
 // disconnectGrace is how long a mid-game seat survives its session. The engine's
@@ -481,7 +484,10 @@ func (c closing) close(ctx context.Context) {
 
 // removeLobbyLocked takes l out of the manager and unmaps every seat at it. Every
 // seat is indexed to l and nowhere else - roster and index change in one hold of
-// m.mu - so the whole roster is unmapped. Caller holds m.mu.
+// m.mu - so the whole roster is unmapped. Each seat's grace hold goes with it: the
+// engine is closed unfinished, so no hand end releases it, and with the mapping gone
+// its timer would take the player out of whatever table they sat down at next.
+// Caller holds m.mu.
 func (m *Manager) removeLobbyLocked(l *Lobby) closing {
 	delete(m.lobbies, l.code)
 	m.invalidatePublicCache()
@@ -489,8 +495,10 @@ func (m *Manager) removeLobbyLocked(l *Lobby) closing {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(m.playerLobby, l.leader.ID)
+	m.grace.clear(l.leader.ID)
 	for _, g := range l.guests {
 		delete(m.playerLobby, g.ID)
+		m.grace.clear(g.ID)
 	}
 	gone := closing{engine: l.activeEngine, bc: l.broadcaster}
 	l.activeEngine = nil

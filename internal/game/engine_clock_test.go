@@ -20,7 +20,7 @@ func (r *twoStepRules) ApplyAction(state *State, action Action) error {
 	_ = r.timeoutRules.ApplyAction(state, action)
 	r.drawn = action.Name() == "draw"
 	if r.drawn {
-		state.OverrideTurn(state.CurrentTurn)
+		state.ContinueTurn()
 	}
 	return nil
 }
@@ -129,6 +129,44 @@ func TestEngine_TurnClock_OneMissPerSeatTurn(t *testing.T) {
 	fireTurnTimeout(t, engine)
 	assert.True(t, engine.IsFinished(), "the third absent turn takes the seat")
 	assert.Zero(t, engine.missedTurns(first), "reaped with the seat")
+}
+
+// sameSeatRules hands the turn straight back to the seat that acted, as a hearts trick
+// winner leading, heads-up poker's big blind opening the flop and heads-up uno's Skip
+// do: a new turn for that seat, not the old one carrying on.
+type sameSeatRules struct{ *timeoutRules }
+
+func (r sameSeatRules) ApplyAction(state *State, action Action) error {
+	_ = r.timeoutRules.ApplyAction(state, action)
+	state.SetTurn(state.CurrentTurn)
+	return nil
+}
+
+func TestEngine_TurnClock_ANewTurnForTheSameSeatIsFresh(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, sameSeatRules{&timeoutRules{}}, "a", "b")
+	setDeadline(engine, time.Now().Add(time.Second))
+
+	require.NoError(t, engine.SubmitAction(engine.CurrentPlayerID(), namedAction{name: "play"}))
+
+	assert.InDelta(t, time.Hour.Seconds(), time.Until(engine.turnDeadline()).Seconds(), 1,
+		"only State.ContinueTurn carries the old deadline over")
+}
+
+// An absent seat that keeps getting the turn back must still lose it after
+// MaxMissedTurns of its turns, or a hearts seat whose auto-played cards keep winning
+// tricks is never reaped.
+func TestEngine_TurnClock_AnIdleSeatHandedTheTurnBackIsChargedEachTurn(t *testing.T) {
+	t.Parallel()
+	engine := newTimeoutEngine(t, sameSeatRules{&timeoutRules{safe: namedAction{name: "safe"}}}, "a", "b")
+	idle := engine.CurrentPlayerID()
+
+	for range MaxMissedTurns {
+		fireTurnTimeout(t, engine)
+	}
+
+	assert.True(t, engine.IsFinished(), "the idle seat was taken and the table forfeited")
+	assert.NotEqual(t, idle, engine.Snapshot().Players[0].ID)
 }
 
 // A lobby hands the same *Player values to every engine it starts. Shared, the next

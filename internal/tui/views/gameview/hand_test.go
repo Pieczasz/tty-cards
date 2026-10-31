@@ -183,6 +183,19 @@ func TestRenderWaitingScreen_FitsTheTerminal(t *testing.T) {
 	}
 }
 
+// A table a rules error ended has no winner, and "Winner: " with nothing after it
+// reads as a result with the name missing.
+func TestRenderWaitingScreen_NamesNoWinnerItDoesNotHave(t *testing.T) {
+	t.Parallel()
+
+	out := tuitest.StripANSI(RenderWaitingScreen(testContext(80, 24), game.Finished, ""))
+	assert.Contains(t, out, "Game Over")
+	assert.NotContains(t, out, "Winner")
+
+	out = tuitest.StripANSI(RenderWaitingScreen(testContext(80, 24), game.Finished, "alice"))
+	assert.Contains(t, out, "Winner: alice")
+}
+
 // A seated player's menu shortcuts all lead back to the table, so the notice
 // screens must not advertise them.
 func TestRenderWaitingScreen_OffersOnlyQuit(t *testing.T) {

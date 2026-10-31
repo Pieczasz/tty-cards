@@ -16,6 +16,15 @@ func (s *State) OverrideTurn(seat int) {
 	s.OverrideNextTurn = &seat
 }
 
+// ContinueTurn keeps the seat on turn for the rest of the same turn, as gin's draw
+// before its discard: the clock keeps running instead of restarting. Any other turn
+// that lands back on the same seat (a hearts trick winner leading, a heads-up Skip)
+// is a new turn with a full clock, named with SetTurn or OverrideTurn.
+func (s *State) ContinueTurn() {
+	s.OverrideTurn(s.CurrentTurn)
+	s.continuesTurn = true
+}
+
 // SeatAt wraps i onto a table of n seats, negative offsets included, so a
 // counter-clockwise step never needs its own +n.
 func SeatAt(i, n int) int {

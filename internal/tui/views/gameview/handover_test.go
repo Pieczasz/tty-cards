@@ -74,6 +74,25 @@ func TestRenderHandOver_OmitsEmptyOptionalParts(t *testing.T) {
 		"a subtitle is one line and a body is itself plus a spacer")
 }
 
+// Clamp cuts from the top, which here is the headline, so a body too tall for the
+// terminal is dropped instead: the title, standings and hint are the screen.
+func TestRenderHandOver_ShedsATallBodyBeforeTheHeadline(t *testing.T) {
+	t.Parallel()
+	h := HandOver{
+		Title: "HAND 3 COMPLETE", Subtitle: "KNOCK",
+		Body: "card art" + strings.Repeat("\n|", 30),
+		Rows: []string{"alice 40", "bob 22"}, Hint: "enter: deal next hand",
+	}
+
+	out := tuitest.StripANSI(RenderHandOver(testContext(80, 24), h))
+	for _, part := range []string{h.Title, h.Subtitle, h.Rows[0], h.Hint} {
+		assert.Contains(t, out, part)
+	}
+	assert.NotContains(t, out, "card art")
+	assert.Contains(t, tuitest.StripANSI(RenderHandOver(testContext(80, 50), h)), "card art",
+		"a body that fits is kept")
+}
+
 // The screen is the whole terminal, so however small it gets the frame cannot grow
 // past it and push the renderer into scrolling.
 func TestRenderHandOver_FitsTheTerminal(t *testing.T) {

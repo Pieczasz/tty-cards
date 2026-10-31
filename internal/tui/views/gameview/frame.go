@@ -88,6 +88,11 @@ func RenderTableRow(width, height int, left, center, right string) string {
 // HandKeyHints is the key line for the games driven entirely from the hand cursor.
 const HandKeyHints = "<-/h: left | ->/l: right | enter: play/confirm | d: draw | esc: leave/cancel"
 
+// WaitingKeyHints is the key line for a seat that is not on turn. The cursor still
+// moves, but every play key does nothing until the turn comes round, and a hint for a
+// key that does nothing reads as a broken key.
+const WaitingKeyHints = "<-/h: left | ->/l: right | esc: leave"
+
 // HandWidth leaves a column at each edge so a full-width fan is not flush against it.
 func HandWidth(width int) int {
 	return max(width-2, 0)
