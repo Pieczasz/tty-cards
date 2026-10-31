@@ -30,7 +30,9 @@ func TestUpdateUserActivityDoesNotWaitForAFinalize(t *testing.T) {
 	t.Cleanup(func() { finalize.Rollback() })
 	require.NoError(t, lockSeat(finalize, user.ID))
 
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	// The seat lock is held until cleanup, so a stamp that waited on it would never
+	// return: the budget only has to outlast a slow database on a loaded runner.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, repo.UpdateUserActivity(ctx, user.ID, key.ID))
 
