@@ -152,9 +152,14 @@ func (m *Manager) DisconnectPlayer(ctx context.Context, p *game.Player) {
 
 // expireLeaveGen gives up the seat if gen is still the pending hold. A stale
 // timer (gen from an earlier arm) returns without touching the newer one.
+//
+// Once the drain has stopped new games it leaves the hold pending: the match is
+// still rated until BeginShutdown, and the closed listener keeps the player from
+// reconnecting, so a forfeit here would be rated against someone who cannot come
+// back. BeginShutdown gives the seat up afterwards, unrated.
 func (m *Manager) expireLeaveGen(p *game.Player, gen uint64) {
 	defer m.recoverGoroutine("disconnect grace")
-	if p == nil {
+	if p == nil || m.newGamesStopped() {
 		return
 	}
 	m.mu.Lock()

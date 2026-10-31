@@ -220,6 +220,12 @@ func (m *Manager) StopNewGames() {
 	m.gateMu.Unlock()
 }
 
+func (m *Manager) newGamesStopped() bool {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	return m.gateClosed
+}
+
 // BeginShutdown marks the process as going away and stops new games, without
 // stopping the ones in play: a hand that ends while sessions are torn down still
 // belongs in the players' history, it just must not move anyone's rating.
