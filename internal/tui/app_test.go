@@ -9,12 +9,11 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
-
-	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
 
 	tea "charm.land/bubbletea/v2"
 	lg "charm.land/lipgloss/v2"
@@ -42,15 +41,15 @@ func TestRegisterGameViews_EveryCatalogSlugResolves(t *testing.T) {
 // sessionModel builds the root model exactly as the ssh layer does, over a real lobby
 // manager: every route factory reaches through LobbyManager, so a fake would only
 // prove the fake works.
-func sessionModel(t *testing.T) (*router.Router, *internallobby.Manager, *db.User) {
+func sessionModel(t *testing.T) (*router.Router, *lobby.Manager, *db.User) {
 	t.Helper()
 
-	manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 	user := &db.User{ID: testutil.UID(1), Username: "alice"}
 
 	r := New(Deps{
 		SessionCtx:   t.Context(),
-		User:         *user,
+		Player:       lobby.NewPlayer(user),
 		LobbyManager: manager,
 		Games:        catalog.Games,
 	})
@@ -64,7 +63,7 @@ func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
 	t.Parallel()
 	only := catalog.Games[1:2]
 
-	r := New(Deps{User: db.User{ID: testutil.UID(1)}, Games: only})
+	r := New(Deps{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1)}), Games: only})
 
 	require.Len(t, r.Global.Games, 1)
 	assert.Equal(t, only[0].Slug, r.Global.Games[0].Slug)
@@ -72,15 +71,15 @@ func TestNew_MenusOfferTheGamesItRoutes(t *testing.T) {
 	assert.False(t, r.HasRoute(router.GameRoute(catalog.Games[0].Slug)), "a game not handed in has no route")
 }
 
-// The session's player is built once, so the seat a view takes and the copy it later
-// compares that seat against are one pointer until a ranked match reseats it.
-func TestNew_BuildsTheSessionPlayerOnce(t *testing.T) {
+// The session's player is built once, at auth, so the seat a view takes and the copy
+// it later compares that seat against are one pointer until a ranked match reseats
+// it. New must keep that pointer rather than build or copy its own.
+func TestNew_KeepsTheSessionPlayerItIsGiven(t *testing.T) {
 	t.Parallel()
-	r := New(Deps{User: db.User{ID: testutil.UID(1), Username: "alice"}})
+	p := lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})
+	r := New(Deps{Player: p})
 
-	require.NotNil(t, r.Global.Player)
-	assert.Equal(t, testutil.UID(1), r.Global.Player.UserID)
-	assert.Same(t, r.Global.Player, views.SessionPlayer(r.Global))
+	assert.Same(t, p, r.Global.Player)
 }
 
 // Every route the views navigate to has to be registered, or Goto is a silent no-op
@@ -118,9 +117,9 @@ func TestModel_ASeatedPlayerIsBouncedBackToTheirLobby(t *testing.T) {
 			t.Parallel()
 			r, manager, user := sessionModel(t)
 
-			l, err := manager.CreateLobby(internallobby.NewPlayer(user), internallobby.WithCardGame(catalog.Games[0].Slug))
+			l, err := manager.CreateLobby(lobby.NewPlayer(user), lobby.WithCardGame(catalog.Games[0].Slug))
 			require.NoError(t, err)
-			t.Cleanup(func() { manager.LeaveLobby(internallobby.NewPlayer(user)) })
+			t.Cleanup(func() { manager.LeaveLobby(lobby.NewPlayer(user)) })
 
 			r.Goto(route, router.Payload{})
 			t.Cleanup(r.Close)
@@ -185,13 +184,13 @@ func TestModel_AWrongPayloadFallsBackToHome(t *testing.T) {
 func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		manager := internallobby.NewManager(t.Context(), nil, catalog.NewRegistry())
+		manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
 
 		user := &db.User{ID: testutil.UID(1), Username: "alice"}
-		host := internallobby.NewPlayer(user)
+		host := lobby.NewPlayer(user)
 		l, err := manager.CreateLobby(host,
-			internallobby.WithCardGame(catalog.Games[0].Slug),
-			internallobby.WithMaxPlayers(2),
+			lobby.WithCardGame(catalog.Games[0].Slug),
+			lobby.WithMaxPlayers(2),
 		)
 		require.NoError(t, err)
 		// Closing the table closes its engine, which is what ends the lobby's watcher.
@@ -209,7 +208,7 @@ func TestModel_AReconnectingPlayerResumesTheirSeat(t *testing.T) {
 
 		r := New(Deps{
 			SessionCtx:   t.Context(),
-			User:         *user,
+			Player:       lobby.NewPlayer(user),
 			LobbyManager: manager,
 			Games:        catalog.Games,
 		})

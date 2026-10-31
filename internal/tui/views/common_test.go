@@ -10,6 +10,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
@@ -96,36 +97,24 @@ func TestGlobalRouteExcludesBackKeys(t *testing.T) {
 	}
 }
 
-// A view builds its seat key from the session user. A nil user is the pre-auth
-// window every view is constructed in, and returning a zero-value player there
-// would seat "0" at the table.
-func TestSessionPlayer(t *testing.T) {
+// A view builds its seat key from the session player. A nil player is the pre-auth
+// window every view is constructed in, and returning a zero-value ID there would
+// seat "0" at the table.
+func TestSessionPlayerID(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no user yet", func(t *testing.T) {
+	t.Run("no player yet", func(t *testing.T) {
 		t.Parallel()
-		assert.Nil(t, views.SessionPlayer(router.GlobalContext{}))
 		assert.Empty(t, views.SessionPlayerID(router.GlobalContext{}),
 			"an empty ID is what a caller can test; a formatted zero is not")
 	})
 
-	t.Run("a signed-in user", func(t *testing.T) {
+	// The ID has to be the same spelling the engine seats the player under, or a
+	// subscription keyed on it silently never fires.
+	t.Run("a signed-in player", func(t *testing.T) {
 		t.Parallel()
-		g := router.GlobalContext{User: &db.User{ID: testutil.UID(7),
-			Username: "alice",
-			Rankings: []db.Ranking{{Elo: 1600, Game: db.Game{Slug: "poker", Name: "Poker"}}},
-		}}
-
-		p := views.SessionPlayer(g)
-		require.NotNil(t, p)
-		assert.Equal(t, testutil.UID(7).String(), p.ID)
-		assert.Equal(t, testutil.UID(7), p.UserID)
-		assert.Equal(t, "alice", p.Name)
-		assert.Equal(t, map[string]uint32{"poker": 1600}, p.Ratings)
-
-		// The ID has to be the same spelling the engine seats the player under, or a
-		// subscription keyed on it silently never fires.
-		assert.Equal(t, p.ID, views.SessionPlayerID(g))
+		g := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(7), Username: "alice"})}
+		assert.Equal(t, testutil.UID(7).String(), views.SessionPlayerID(g))
 	})
 }
 
@@ -206,17 +195,17 @@ func TestHandleCommonMsg(t *testing.T) {
 	})
 
 	// The view on screen holds its own context too, and it seats, browses and leaves
-	// as SessionPlayer: a reseat it did not take would act with the login's ratings.
+	// as GlobalContext.Player: a reseat it did not take would act with the login's ratings.
 	t.Run("a reseated player replaces the session's", func(t *testing.T) {
 		t.Parallel()
-		g := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
+		g := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})}
 		p := &game.Player{ID: testutil.UID(1).String(), UserID: testutil.UID(1), Name: "alice"}
 
 		handled, cmd := views.HandleCommonMsg(router.UpdatePlayer(p)(), &g)
 
 		assert.True(t, handled)
 		assert.Nil(t, cmd)
-		assert.Same(t, p, views.SessionPlayer(g))
+		assert.Same(t, p, g.Player)
 	})
 
 	t.Run("ctrl+c quits", func(t *testing.T) {

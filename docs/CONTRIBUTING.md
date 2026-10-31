@@ -50,10 +50,11 @@ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
   `Engine`, and game code logs through `State.Logger()`, never bare `slog`; recover helpers are deferred directly; no client address
   on a span or metric, and none in an info/debug log; the DSN and DB password
   never reach a log, print or error; a `Subscribe` error is never dropped; boolean
-  env values go through `strconv.ParseBool`. Every rule has `// ruleid:` / `// ok:`
-  cases in `.semgrep/tty-cards.go`, and the target runs them before scanning, so a
-  rule that stopped matching fails rather than passing as a clean tree. A new rule
-  ships with its cases and at zero findings on the tree.
+  env values go through `strconv.ParseBool`; only `ssh.sessionModel` turns a
+  session's `db.User` into its `game.Player` (`lobby.NewPlayer`). Every rule has
+  `// ruleid:` / `// ok:` cases in `.semgrep/tty-cards.go`, and the target runs
+  them before scanning, so a rule that stopped matching fails rather than passing
+  as a clean tree. A new rule ships with its cases and at zero findings on the tree.
 - **`make cover`** - the whole suite, unit and integration, with `-race` and
   `-coverpkg` over the production packages, failing under 95.0% of statements.
   `internal/testutil`, `internal/game/gametest`, `internal/tui/tuitest` and
@@ -153,6 +154,11 @@ clockwise from the hero's left. Wire it the way `crazyeight` does:
 - `View` returns `m.LeaveConfirmScreen()` before anything else when it is armed.
 - Submit through `m.Submit(action)`, which keeps the result in `m.ActionErr`, and
   render `m.ActionErr` in the hero band (`gameview.RenderHeroBand`).
+
+The view package keeps your rules package's name, as `text/template` and
+`html/template` share one, and imports the rules as `logic`. `lobby` is the
+exception: it always names `internal/lobby`, so the lobby screens are package
+`lobbyview`, and `importas` fails any other alias for either.
 
 Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`), in one pure
 `readTable(state, ...)` that returns a value you assign once `Sync` returns, as

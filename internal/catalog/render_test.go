@@ -10,6 +10,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/components"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -137,7 +138,7 @@ func seatedEngineAndView(t *testing.T, entry Entry, seats, width, height int) (*
 	t.Cleanup(engine.Close)
 
 	global := router.GlobalContext{
-		User:   &db.User{ID: testutil.UID(1), Username: "p1"},
+		Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "p1"}),
 		Theme:  styles.NewTheme(true),
 		Width:  width,
 		Height: height,

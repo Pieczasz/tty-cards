@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// NewPlayer is the only place a db.User becomes a game.Player, and it sits on the
-// SSH login path, views.SessionPlayer and releaseSession. Everything the lobby shows
-// or sorts by rating reads the map it builds here, so the flattening is worth
-// pinning directly rather than through a caller that can hand Ratings in ready-made.
+// NewPlayer is the only place a db.User becomes a game.Player, and it runs once per
+// session, on the SSH login path. Everything the lobby shows or sorts by rating
+// reads the map it builds here, so the flattening is worth pinning directly rather
+// than through a caller that can hand Ratings in ready-made.
 func TestNewPlayer(t *testing.T) {
 	t.Parallel()
 

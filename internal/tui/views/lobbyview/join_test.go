@@ -1,4 +1,4 @@
-package lobby
+package lobbyview
 
 import (
 	"errors"
@@ -32,7 +32,7 @@ func openPublicTable(t *testing.T, m *lobby.Manager, id string, dbID uuid.UUID, 
 func newJoinModel(t *testing.T, m *lobby.Manager) *joinModel {
 	t.Helper()
 	global := router.GlobalContext{
-		User:         testUser(99, "browser"),
+		Player:       lobby.NewPlayer(testUser(99, "browser")),
 		LobbyManager: m,
 		Games:        testGames(),
 		Width:        120,

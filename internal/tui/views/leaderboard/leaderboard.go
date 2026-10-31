@@ -306,7 +306,7 @@ func (m *model) renderRankings(contentWidth int) string {
 // renderPlayerRow highlights the viewer's own row, so a player can find themselves.
 func (m *model) renderPlayerRow(tbl components.Table, index int, r db.Ranking) string {
 	userStr := styles.PadTruncate(r.User.Username, tbl.Cols[1].Width)
-	if m.global.User != nil && r.User.ID == m.global.User.ID {
+	if p := m.global.Player; p != nil && r.User.ID == p.UserID {
 		userStr = m.global.Palette().PlayerItemSelected.Bold(true).Render(userStr)
 	}
 	return tbl.Row(

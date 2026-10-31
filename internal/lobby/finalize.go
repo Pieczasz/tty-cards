@@ -195,18 +195,6 @@ func leaverIDs(standings []game.Standing) []uuid.UUID {
 	return ids
 }
 
-// admitGame counts the watcher of a game ToggleReady may be about to start, unless
-// shutdown has closed the gate. A caller that starts no game gives the count back.
-func (m *Manager) admitGame() bool {
-	m.gateMu.Lock()
-	defer m.gateMu.Unlock()
-	if m.gateClosed {
-		return false
-	}
-	m.watchers.Add(1)
-	return true
-}
-
 // StopNewGames refuses every game start from now on, and nothing else: the drain
 // calls it before its graceful window, so a table already in play can still finish
 // there, rated, while one readying up inside the window is never started only for
@@ -215,15 +203,7 @@ func (m *Manager) StopNewGames() {
 	if m == nil {
 		return
 	}
-	m.gateMu.Lock()
-	m.gateClosed = true
-	m.gateMu.Unlock()
-}
-
-func (m *Manager) newGamesStopped() bool {
-	m.gateMu.Lock()
-	defer m.gateMu.Unlock()
-	return m.gateClosed
+	m.watchers.Close()
 }
 
 // BeginShutdown marks the process as going away and stops new games, without
@@ -238,8 +218,11 @@ func (m *Manager) BeginShutdown() {
 	if m == nil {
 		return
 	}
-	m.shuttingDown.Store(true)
+	// Gate first: ToggleReady asks only the gate, so once shuttingDown is visible no
+	// game may still be admitted. A game ending between the two began before
+	// shutdown, so rating it is right.
 	m.StopNewGames()
+	m.shuttingDown.Store(true)
 	m.mu.Lock()
 	held := m.heldSeatsLocked(nil)
 	m.mu.Unlock()
@@ -254,39 +237,20 @@ func (m *Manager) BeginShutdown() {
 // finished, or timeout elapses. A non-positive timeout waits indefinitely.
 //
 // Watchers are counted from game start, not from game end, so a table that a late
-// session teardown ends while this waits is still written rather than refused.
-//
-// The waiter goroutine is started once and reused, so a caller that times out and
-// calls again does not strand one waiter per attempt. Because the gate is already
-// closed, the group only ever counts down, so that goroutine exits once the last
-// game does.
+// session teardown ends while this waits is still written rather than refused. A
+// caller that times out may call again; the gate reuses its one waiter.
 func (m *Manager) WaitForFinalizers(timeout time.Duration) bool {
 	if m == nil {
 		return true
 	}
+	// Wait closes the gate too, but too late: the flag must not be visible first.
+	m.watchers.Close()
 	m.shuttingDown.Store(true)
-
-	m.gateMu.Lock()
-	m.gateClosed = true
-	if m.drained == nil {
-		ch := make(chan struct{})
-		m.drained = ch
-		go func() {
-			m.watchers.Wait()
-			close(ch)
-		}()
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
-	drained := m.drained
-	m.gateMu.Unlock()
-
-	if timeout <= 0 {
-		<-drained
-		return true
-	}
-	select {
-	case <-drained:
-		return true
-	case <-time.After(timeout):
-		return false
-	}
+	return m.watchers.Wait(ctx)
 }

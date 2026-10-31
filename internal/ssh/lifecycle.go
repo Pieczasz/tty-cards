@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 
 	"charm.land/ssh"
@@ -17,42 +16,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
-
-// admit counts a session handler in, unless the server is draining.
-func (reg *sessionRegistry) admit() bool {
-	reg.liveMu.Lock()
-	defer reg.liveMu.Unlock()
-	if reg.draining {
-		return false
-	}
-	reg.live.Add(1)
-	return true
-}
-
-// waitSessions stops admitting session handlers, then blocks until every admitted
-// one has returned or ctx ends. The waiter is started once and reused, so a caller
-// that times out and calls again does not strand one per attempt.
-func (reg *sessionRegistry) waitSessions(ctx context.Context) error {
-	reg.liveMu.Lock()
-	reg.draining = true
-	if reg.drained == nil {
-		ch := make(chan struct{})
-		reg.drained = ch
-		go func() {
-			reg.live.Wait()
-			close(ch)
-		}()
-	}
-	drained := reg.drained
-	reg.liveMu.Unlock()
-
-	select {
-	case <-drained:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
-	}
-}
 
 func (reg *sessionRegistry) load(s ssh.Session) (*sessionState, bool) {
 	st, ok := reg.states.Load(s)
@@ -105,7 +68,8 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			s = takeWindowChanges(s)
 			// A handler charm ssh started just before Close can get here after the
 			// drain stopped counting; it refuses itself rather than run untracked.
-			if !reg.admit() {
+			release, ok := reg.live.Enter()
+			if !ok {
 				// Before any span: this session is never started, only counted.
 				observability.SSHSession(s.Context(), "rejected_draining")
 				wish.Fatalln(s, "The server is restarting - please reconnect in a moment.")
@@ -113,7 +77,7 @@ func sessionLifecycle(deps Deps, reg *sessionRegistry) wish.Middleware {
 			}
 			// Registered first, so it runs last: the drain is over only once the
 			// whole teardown below has run.
-			defer reg.live.Done()
+			defer release()
 			st := reg.startSession(s)
 			defer reg.finishSession(s, st)
 			defer reg.recoverSession(s)
@@ -220,8 +184,8 @@ func (reg *sessionRegistry) finishSession(s ssh.Session, st *sessionState) {
 		"outcome", outcome,
 	)
 
-	if st.user != nil {
-		st.span.SetAttributes(attribute.String("user", st.user.Username))
+	if st.player != nil {
+		st.span.SetAttributes(attribute.String("user", st.player.Name))
 	}
 	st.span.End()
 }
@@ -285,12 +249,12 @@ func (reg *sessionRegistry) closeSessionModel(s ssh.Session) {
 // neither.
 func (reg *sessionRegistry) releaseSession(s ssh.Session, deps Deps) {
 	st, ok := reg.load(s)
-	if !ok || st.user == nil {
+	if !ok || st.player == nil {
 		return
 	}
 	// DisconnectPlayer, not LeaveLobby: a dropped session keeps its mid-game seat
 	// for the grace window, so a reconnect resumes the match instead of forfeiting.
-	deps.Tracker.ReleaseWith(st.user.ID, st.gen, func() {
-		deps.LobbyManager.DisconnectPlayer(st.traceCtx, lobby.NewPlayer(st.user))
+	deps.Tracker.ReleaseWith(st.player.UserID, st.gen, func() {
+		deps.LobbyManager.DisconnectPlayer(st.traceCtx, st.player)
 	})
 }

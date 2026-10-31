@@ -93,10 +93,12 @@ func UpdatePlayer(p *game.Player) tea.Cmd {
 // GlobalContext is the session state every view is built from. Each view holds its own
 // copy, so a change a view makes to it is local until the router rebuilds the view.
 type GlobalContext struct {
-	User *db.User
-	// Player is the session's seat, built once from User. Its ratings are the login's
-	// until a ranked match reseats it with new ones: UpdatePlayer carries that copy
-	// here and to the active view.
+	// Player is the session's identity and seat, built once from the login's db.User.
+	// Views read the name and account id off it, so they never disagree with the
+	// seat. Its ratings are the login's until a ranked match reseats it with new
+	// ones: UpdatePlayer replaces this pointer with the lobby's refreshed copy, here
+	// and in the active view. The ssh teardown keeps the login's pointer, so only
+	// this one carries current ratings.
 	Player       *game.Player
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard

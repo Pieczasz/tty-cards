@@ -6,6 +6,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
 	logic "github.com/Pieczasz/tty-cards/internal/game/poker"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
@@ -27,7 +28,7 @@ func startedTable(t *testing.T) (*game.Engine, *model) {
 
 	require.NoError(t, engine.Start())
 
-	global := router.GlobalContext{User: testUser("alice")}
+	global := router.GlobalContext{Player: lobby.NewPlayer(testUser("alice"))}
 	m, ok := New(global, game.Bind(engine, views.SessionPlayerID(global)), "poker").(*model)
 	require.True(t, ok)
 	// The view first: closing it unsubscribes, which a closed engine no longer needs.
@@ -144,7 +145,7 @@ func tableOnTurn(t *testing.T, seats int) (*game.Engine, *model) {
 	id, err := uuid.Parse(engine.CurrentPlayerID())
 	require.NoError(t, err)
 
-	m, ok := New(router.GlobalContext{User: &db.User{ID: id, Username: "hero"}}, game.Bind(engine, id.String()), "poker").(*model)
+	m, ok := New(router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: id, Username: "hero"})}, game.Bind(engine, id.String()), "poker").(*model)
 	require.True(t, ok)
 	require.True(t, m.Base.MyTurn, "the view has to be bound to the seat on turn")
 	return engine, m

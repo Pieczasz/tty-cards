@@ -58,6 +58,7 @@ linters:
     - sloglint
     # Architecture: the layer rules from CLAUDE.md, enforced rather than remembered.
     - depguard
+    - importas
     - iface
     - recvcheck
     - errname
@@ -144,6 +145,20 @@ linters:
             - $gostd
             - github.com/Pieczasz/tty-cards/internal/elo
             - uuid
+        # The shutdown gate is shared by ssh and lobby, so it must not import either.
+        drain-is-a-leaf:
+          list-mode: strict
+          files: ["**/internal/drain/**", "!$test"]
+          allow:
+            - $gostd
+    # "lobby" is the domain package everywhere and the lobby screens are lobbyview. An
+    # alias for either brings back the view-or-domain guess the rename removed.
+    importas:
+      alias:
+        - pkg: github.com/Pieczasz/tty-cards/internal/lobby
+          alias: lobby
+        - pkg: github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview
+          alias: lobbyview
     dupl:
       threshold: 120
     gocritic:

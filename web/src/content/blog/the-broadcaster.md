@@ -88,7 +88,7 @@ var (
 ```
 
 The caller has to look. The lobby view puts the error on screen
-(`internal/tui/views/lobby/lobby.go`), which is how you find out that the capacity is
+(`internal/tui/views/lobbyview/lobby.go`), which is how you find out that the capacity is
 too low instead of wondering why the roster stopped updating.
 
 ## Capacity is `2*len(players) + 8`

@@ -119,7 +119,7 @@ Personal data in those logs today:
   signal.
 - **`player_id` = `users.id`**, at INFO and above, across `internal/lobby/disconnect.go`
   (disconnect, grace, resume), `internal/game/turnclock.go`, `internal/elo/elo.go`,
-  `internal/tui/views/gameview/session.go` and `internal/tui/views/lobby/lobby.go`, and as
+  `internal/tui/views/gameview/session.go` and `internal/tui/views/lobbyview/lobby.go`, and as
   map keys in the per-hand summaries in `internal/game/hearts/trick.go` and
   `internal/game/ginrummy/rules.go`.
 - **Lobby codes** in `internal/lobby/finalize.go`, `manager.go` and `watch.go` - a live

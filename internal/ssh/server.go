@@ -19,6 +19,8 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/drain"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
@@ -77,9 +79,12 @@ type sessionState struct {
 	traceCtx context.Context
 	span     trace.Span
 	started  time.Time
-	// user is set only once the session owns its tracker slot, so a nil user is
-	// what tells the teardown there is no slot or seat to give up.
-	user     *db.User
+	// player is set only once the session owns its tracker slot, so a nil player is
+	// what tells the teardown there is no slot or seat to give up. It is the login's
+	// db.User mapped to a seat once, here at the auth boundary, and the pointer the
+	// TUI is built from. A ranked match replaces the TUI's copy (UpdatePlayer) but not
+	// this one, so its Ratings go stale: the teardown reads only ID, UserID and Name.
+	player   *game.Player
 	model    router.Closer
 	gen      uint64
 	panicked bool
@@ -115,14 +120,8 @@ type sessionRegistry struct {
 	sizes  sizeBudget
 	// live counts session handlers still running. charm ssh runs each on a goroutine
 	// that neither its Shutdown nor its Close waits for, so without this the drain
-	// would move on while teardowns are still giving up seats. liveMu makes admitting
-	// a handler and starting to drain atomic: a WaitGroup alone permits Add after
-	// Wait has seen zero.
-	liveMu   sync.Mutex
-	draining bool
-	live     sync.WaitGroup
-	// drained is closed by the one waiter goroutine waitSessions ever starts.
-	drained chan struct{}
+	// would move on while teardowns are still giving up seats.
+	live drain.Gate
 }
 
 // Deps is what NewServer wires every session to. Tracker is required and is shared
@@ -151,7 +150,10 @@ type Server struct {
 // session handler has finished its teardown or ctx ends. Close is what ends them, so
 // it is called after Close.
 func (s *Server) WaitSessions(ctx context.Context) error {
-	return s.sessions.waitSessions(ctx)
+	if !s.sessions.live.Wait(ctx) {
+		return fmt.Errorf("session teardowns still running: %w", context.Cause(ctx))
+	}
+	return nil
 }
 
 // errNoTracker refuses a server with no session tracker. A default one used to be
@@ -358,12 +360,13 @@ func sessionModel(
 			reg.failSessionf(s, "auth_failed", err, "%v\n", err)
 			return nil
 		}
+		player := lobby.NewPlayer(user)
 		// Built before the slot is claimed: a panic in here would otherwise strand a
 		// tracker slot that nothing releases - and that account cannot connect again
 		// until a restart.
 		model := tui.New(tui.Deps{
 			SessionCtx:   traceCtx,
-			User:         *user,
+			Player:       player,
 			Profiles:     deps.Profiles,
 			Leaderboard:  deps.Leaderboard,
 			LobbyManager: deps.LobbyManager,
@@ -374,7 +377,7 @@ func sessionModel(
 		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
 		st.run, st.endRun = context.WithCancel(context.Background())
-		gen, err := deps.Tracker.Connect(user.ID, conn, displaceable(s, st.endRun))
+		gen, err := deps.Tracker.Connect(player.UserID, conn, displaceable(s, st.endRun))
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
@@ -383,11 +386,11 @@ func sessionModel(
 		}
 		observability.SSHSession(traceCtx, "accepted")
 		// Published before ResumeSeat: a panic there still has to ReleaseWith, and
-		// releaseSession skips a session whose user was never stored. Only once the
+		// releaseSession skips a session whose player was never stored. Only once the
 		// slot is ours, though — a refused session must not cancel the grace timer
 		// holding this player's seat, and a displaced one has finished its teardown
 		// by now, so any timer it armed is there to cancel.
-		st.user = user
+		st.player = player
 		st.gen = gen
 		st.model = model
 		tui.ResumeSeat(model)

@@ -1,6 +1,6 @@
-// Package lobby holds the three lobby screens: creating a table, finding one to join,
+// Package lobbyview holds the three lobby screens: creating a table, finding one to join,
 // and the waiting room that hands its players over to the game view.
-package lobby
+package lobbyview
 
 import (
 	"errors"
@@ -116,7 +116,7 @@ func (m *model) followSeat() (tea.Cmd, bool) {
 		m.unsubscribe()
 		return router.NavigateToGame(m.snap.Slug, table), true
 	}
-	if m.global.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(m.global)) != m.currentLobby {
+	if m.global.LobbyManager.FindLobbyByPlayer(m.global.Player) != m.currentLobby {
 		m.unsubscribe()
 		return m.goHome(), true
 	}
@@ -199,7 +199,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleLeaveConfirm(msg.String())
 	}
 
-	self := views.SessionPlayer(m.global)
+	self := m.global.Player
 	switch msg.String() {
 	case "esc", "x", "q":
 		m.showLeaveConfirm = true
@@ -247,7 +247,7 @@ func (m *model) goHome() tea.Cmd {
 func (m *model) handleLeaveConfirm(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y", "Y":
-		m.global.LobbyManager.LeaveLobby(views.SessionPlayer(m.global))
+		m.global.LobbyManager.LeaveLobby(m.global.Player)
 		m.unsubscribe()
 		cmd := m.goHome()
 		return m, cmd
@@ -297,7 +297,7 @@ func (m *model) handleLobbyEvent(msg lobby.Event) (tea.Model, tea.Cmd) {
 		return m, router.NavigateToGame(m.snap.Slug, table)
 	case lobby.EventSettingsUpdated, lobby.EventPlayersUpdated:
 		m.refresh()
-		if _, seated := m.snap.SeatOf(views.SessionPlayer(m.global)); !seated {
+		if _, seated := m.snap.SeatOf(m.global.Player); !seated {
 			m.unsubscribe()
 			cmd := m.goHome()
 			return m, cmd
@@ -321,7 +321,7 @@ func (m *model) View() tea.View {
 		}
 
 		innerWidth := styles.InnerWidth(m.global.Width)
-		isLeader := m.snap.IsLeader(views.SessionPlayer(m.global))
+		isLeader := m.snap.IsLeader(m.global.Player)
 		if m.actionErr == nil {
 			return m.renderForm(isLeader, innerWidth, height)
 		}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/db"
 	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
@@ -27,7 +28,7 @@ func TestNewSession_SubscriptionFailureIsLoggedUnderTheSessionTraceAndCounted(t 
 	before := tuitest.Count(t, testMetrics, "ttycards.broadcaster.subscribe.failures", "stream", "game_view")
 
 	global := router.GlobalContext{
-		User:       &db.User{ID: testutil.UID(1), Username: "alice"},
+		Player:     lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"}),
 		SessionCtx: tuitest.TracedContext(t),
 	}
 	broken, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")

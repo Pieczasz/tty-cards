@@ -7,25 +7,27 @@ import (
 
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
+	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/views"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/home"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/leaderboard"
-	"github.com/Pieczasz/tty-cards/internal/tui/views/lobby"
+	"github.com/Pieczasz/tty-cards/internal/tui/views/lobbyview"
 	"github.com/Pieczasz/tty-cards/internal/tui/views/profile"
-
-	internallobby "github.com/Pieczasz/tty-cards/internal/lobby"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 // Deps is what New needs from the session and the server.
 type Deps struct {
-	SessionCtx   context.Context
-	User         db.User
+	SessionCtx context.Context
+	// Player is the session's identity, mapped from the login's db.User once at the
+	// ssh auth boundary. The views read it, never the GORM model.
+	Player       *game.Player
 	Profiles     db.Profiles
 	Leaderboard  db.Leaderboard
-	LobbyManager *internallobby.Manager
+	LobbyManager *lobby.Manager
 	// Games is the catalog the menus list and the game routes render, the same entries
 	// the lobby manager's registry was built from.
 	Games []catalog.Entry
@@ -36,8 +38,7 @@ type Deps struct {
 // value would hide the one method that releases the active view's subscription.
 func New(deps Deps) *router.Router {
 	global := router.GlobalContext{
-		User:         &deps.User,
-		Player:       internallobby.NewPlayer(&deps.User),
+		Player:       deps.Player,
 		Profiles:     deps.Profiles,
 		Leaderboard:  deps.Leaderboard,
 		LobbyManager: deps.LobbyManager,
@@ -52,8 +53,8 @@ func New(deps Deps) *router.Router {
 	// until the idle timer took the seat.
 	seatedOr := func(fallback func(router.GlobalContext) tea.Model) router.ViewFactory {
 		return func(g router.GlobalContext, _ router.Payload) tea.Model {
-			if l := g.LobbyManager.FindLobbyByPlayer(views.SessionPlayer(g)); l != nil {
-				return lobby.New(g, l)
+			if l := g.LobbyManager.FindLobbyByPlayer(g.Player); l != nil {
+				return lobbyview.New(g, l)
 			}
 			return fallback(g)
 		}
@@ -62,14 +63,14 @@ func New(deps Deps) *router.Router {
 	r.Register(router.RouteHome, seatedOr(home.New))
 	r.Register(router.RouteProfile, seatedOr(profile.New))
 	r.Register(router.RouteLeaderboard, seatedOr(leaderboard.New))
-	r.Register(router.RouteLobbyCreate, seatedOr(lobby.NewCreate))
-	r.Register(router.RouteLobbyJoin, seatedOr(lobby.NewJoin))
+	r.Register(router.RouteLobbyCreate, seatedOr(lobbyview.NewCreate))
+	r.Register(router.RouteLobbyJoin, seatedOr(lobbyview.NewJoin))
 
 	r.Register(router.RouteLobby, func(g router.GlobalContext, p router.Payload) tea.Model {
 		if p.Lobby == nil {
 			return home.New(g)
 		}
-		return lobby.New(g, p.Lobby)
+		return lobbyview.New(g, p.Lobby)
 	})
 
 	registerGameViews(r, deps.Games)
@@ -85,7 +86,7 @@ func New(deps Deps) *router.Router {
 // separate from New because the ssh layer may only call it once the session owns its
 // tracker slot, and must run before the router's Init.
 func ResumeSeat(r *router.Router) {
-	r.Global.LobbyManager.ResumePlayer(r.Global.RequestContext(), views.SessionPlayer(r.Global))
+	r.Global.LobbyManager.ResumePlayer(r.Global.RequestContext(), r.Global.Player)
 }
 
 // registerGameViews is where a seat reaches a view, so it is where the handle is held

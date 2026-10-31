@@ -284,29 +284,18 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	assert.True(t, isReady(l, guest), "and it really was committed")
 }
 
-// A drain that times out used to strand its waiter goroutine, one per attempt, on a
-// path that is retried by design.
-func TestWaitForFinalizers_TimeoutDoesNotLeakItsWaiter(t *testing.T) {
+// A drain that times out is retried by design. drain.Gate reuses its one waiter
+// (TestGate_TimedOutWaitsShareOneWaiter); goleak's TestMain checks it exits here.
+func TestWaitForFinalizers_ATimedOutDrainCanBeRetried(t *testing.T) {
 	t.Parallel()
 
 	m := newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 
 	assert.False(t, m.WaitForFinalizers(10*time.Millisecond), "a game in play blocks the drain")
-
-	m.gateMu.Lock()
-	first := m.drained
-	m.gateMu.Unlock()
-
 	assert.False(t, m.WaitForFinalizers(10*time.Millisecond))
 
-	m.gateMu.Lock()
-	second := m.drained
-	m.gateMu.Unlock()
-	assert.Equal(t, first, second, "a second attempt started a second waiter")
-
-	// goleak's TestMain is the other half of this: the one waiter has to exit.
-	m.watchers.Done()
+	release()
 	assert.True(t, m.WaitForFinalizers(2*time.Second))
 }
 

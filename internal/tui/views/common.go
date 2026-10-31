@@ -1,4 +1,4 @@
-// Package views holds what every full-screen view shares: the session player, the
+// Package views holds what every full-screen view shares: the session's seat key, the
 // global shortcut table, the common message handling and the framed screen layout.
 package views
 
@@ -9,7 +9,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
@@ -20,16 +19,6 @@ import (
 
 // RequestTimeout bounds one repository round trip a view makes on the player's behalf.
 const RequestTimeout = 5 * time.Second
-
-// SessionPlayer is the session user as a seat, or nil before the user is known. It
-// is GlobalContext.Player, which tui.New builds once and UpdatePlayer keeps current; a
-// context built without one - as tests do - seats User as it is.
-func SessionPlayer(g router.GlobalContext) *game.Player {
-	if g.Player != nil {
-		return g.Player
-	}
-	return lobby.NewPlayer(g.User)
-}
 
 // errSomethingWentWrong is what the player reads for a failure that was not theirs:
 // the detail is for the log, and on screen it would be noise they cannot act on.
@@ -51,11 +40,10 @@ func PlayerError(ctx context.Context, err error) error {
 // ID off the player rather than formatting the user ID again, since a subscription keyed
 // on a different spelling silently never fires.
 func SessionPlayerID(g router.GlobalContext) string {
-	p := SessionPlayer(g)
-	if p == nil {
+	if g.Player == nil {
 		return ""
 	}
-	return p.ID
+	return g.Player.ID
 }
 
 // ListenOn delivers the next value from ch as a message. A closed or absent channel

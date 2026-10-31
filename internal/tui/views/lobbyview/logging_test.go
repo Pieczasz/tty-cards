@@ -1,4 +1,4 @@
-package lobby
+package lobbyview
 
 import (
 	"errors"
@@ -25,7 +25,7 @@ func TestUserRefusals_AreShownNotLoggedAsErrors(t *testing.T) {
 		m, l := leaderView(t)
 		t.Cleanup(m.Close)
 		global := m.global
-		global.User = testUser(3, "carol") // never joined
+		global.Player = lobby.NewPlayer(testUser(3, "carol")) // never joined
 		outsider, ok := New(global, l).(*model)
 		require.True(t, ok)
 		t.Cleanup(outsider.Close)
@@ -90,7 +90,7 @@ func TestNew_SubscriptionFailureIsLoggedUnderTheSessionTraceAndCounted(t *testin
 	m.Close()
 	m.global.LobbyManager.RemoveLobby(l.Code())
 	global := router.GlobalContext{
-		User: m.global.User, LobbyManager: m.global.LobbyManager, Games: m.global.Games,
+		Player: m.global.Player, LobbyManager: m.global.LobbyManager, Games: m.global.Games,
 		SessionCtx: tuitest.TracedContext(t),
 	}
 	before := tuitest.Count(t, testMetrics, "ttycards.broadcaster.subscribe.failures", "stream", "lobby_view")
@@ -147,7 +147,7 @@ func TestReady_GenuineStartFailuresAreLoggedOnceRefusalsAreShown(t *testing.T) {
 			l, err := manager.CreateLobby(lobby.NewPlayer(leaderUser), lobby.WithCardGame(testGameSlug))
 			require.NoError(t, err)
 			global := router.GlobalContext{
-				User: leaderUser, LobbyManager: manager, Games: []game.Module{mod},
+				Player: lobby.NewPlayer(leaderUser), LobbyManager: manager, Games: []game.Module{mod},
 				Width: 120, Height: 40, SessionCtx: tuitest.TracedContext(t),
 			}
 			m, ok := New(global, l).(*model)

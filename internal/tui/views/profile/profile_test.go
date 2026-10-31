@@ -14,7 +14,6 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/tui/router"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
-	"github.com/Pieczasz/tty-cards/internal/tui/views"
 
 	"uuid"
 
@@ -160,7 +159,7 @@ func TestView_FitsTheTerminal(t *testing.T) {
 				Theme: styles.NewTheme(true), Width: size.Width, Height: size.Height,
 				// The delete confirmation names the account it would anonymise, so the
 				// widest id is what the line has to fit.
-				User: &db.User{ID: testutil.UID(99), Username: "alice"},
+				Player: lobby.NewPlayer(&db.User{ID: testutil.UID(99), Username: "alice"}),
 			}
 			updated, _ := New(global).Update(profileLoadedMsg{user: user, history: history})
 			m, ok := updated.(*model)
@@ -302,7 +301,7 @@ func TestInit(t *testing.T) {
 		}
 		user := alice()
 
-		cmd := New(router.GlobalContext{User: user, Profiles: repo}).Init()
+		cmd := New(router.GlobalContext{Player: lobby.NewPlayer(user), Profiles: repo}).Init()
 		require.NotNil(t, cmd)
 		_, ok := cmd().(profileLoadedMsg)
 
@@ -527,7 +526,7 @@ func deletingModel(t *testing.T, err error) (*model, *int) {
 	}}
 	global := router.GlobalContext{
 		Theme: styles.NewTheme(true), Width: 100, Height: 40,
-		User: alice(), Profiles: repo,
+		Player: lobby.NewPlayer(alice()), Profiles: repo,
 	}
 	updated, _ := New(global).Update(profileLoadedMsg{user: alice()})
 	m, ok := updated.(*model)
@@ -720,7 +719,7 @@ func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {
 
 	m, calls := deletingModel(t, nil)
 	manager := lobby.NewManager(t.Context(), nil, catalog.NewRegistry())
-	_, err := manager.CreateLobby(views.SessionPlayer(m.global), lobby.WithCardGame(catalog.Games[0].Slug))
+	_, err := manager.CreateLobby(m.global.Player, lobby.WithCardGame(catalog.Games[0].Slug))
 	require.NoError(t, err)
 	m.global.LobbyManager = manager
 
@@ -757,7 +756,7 @@ func TestRenderConfirm_KeepsThePromptAtTheMinimumSize(t *testing.T) {
 
 	global := router.GlobalContext{
 		Theme: styles.NewTheme(true), Width: styles.MinWidth, Height: styles.MinHeight,
-		User: &db.User{ID: testutil.UID(99)},
+		Player: lobby.NewPlayer(&db.User{ID: testutil.UID(99)}),
 	}
 	m, ok := New(global).(*model)
 	require.True(t, ok)
@@ -798,7 +797,7 @@ func TestView_SaysItIsLoadingUntilTheProfileArrives(t *testing.T) {
 func TestUpdate_DeleteNeedsASignedInUser(t *testing.T) {
 	t.Parallel()
 	m := loaded(t, profileLoadedMsg{user: alice()})
-	m.global.User = nil
+	m.global.Player = nil
 
 	_, cmd := m.Update(tuitest.Key("x"))
 

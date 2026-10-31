@@ -201,7 +201,7 @@ func startedSession(t *testing.T) (*game.Engine, Session) {
 	require.NoError(t, engine.Start())
 	t.Cleanup(engine.Close)
 
-	global := router.GlobalContext{User: &db.User{ID: testutil.UID(1), Username: "alice"}}
+	global := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(1), Username: "alice"})}
 	s, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")
 	require.NoError(t, err)
 	return engine, s
@@ -289,7 +289,7 @@ func TestSession_Leave(t *testing.T) {
 	t.Run("a player with no session goes home and unsubscribes", func(t *testing.T) {
 		t.Parallel()
 		engine, s := startedSession(t)
-		s.Global.User = nil
+		s.Global.Player = nil
 		s.Sync(nil)
 
 		msg := s.Leave()()
@@ -302,7 +302,7 @@ func TestSession_Leave(t *testing.T) {
 	t.Run("a finished game with no session still goes home", func(t *testing.T) {
 		t.Parallel()
 		_, s := startedSession(t)
-		s.Global.User = nil
+		s.Global.Player = nil
 		s.Base.Phase = game.Finished
 
 		msg := s.Leave()()
@@ -319,7 +319,7 @@ func seatedSession(t *testing.T) (*lobby.Manager, *game.Player, Session) {
 		Name: "Crazy Eights", Slug: "crazy_eights", MinPlayers: crazyeight.MinPlayers, MaxPlayers: crazyeight.MaxPlayers,
 		Factory: func() game.Rules { return &crazyeight.Rules{} },
 	}))
-	alice := lobby.NewPlayer(s.Global.User)
+	alice := s.Global.Player
 	_, err := manager.CreateLobby(alice, lobby.WithCardGame("crazy_eights"))
 	require.NoError(t, err)
 	s.Global.LobbyManager = manager
@@ -511,7 +511,7 @@ func TestSyncBaseState_OpponentsRunClockwiseFromTheHero(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	// The hero is the third seat, so their left is the fourth and the order wraps.
-	global := router.GlobalContext{User: &db.User{ID: testutil.UID(3)}}
+	global := router.GlobalContext{Player: lobby.NewPlayer(&db.User{ID: testutil.UID(3)})}
 	s, err := NewSession(global, game.Bind(engine, views.SessionPlayerID(global)), "crazy_eights")
 	require.NoError(t, err)
 	t.Cleanup(s.Close)

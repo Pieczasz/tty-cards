@@ -49,9 +49,9 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 
 	modelClosed := false
 	reg.store(accepted, &sessionState{
-		user:  user,
-		gen:   gen,
-		model: recordingCloser{closed: &modelClosed},
+		player: lobby.NewPlayer(user),
+		gen:    gen,
+		model:  recordingCloser{closed: &modelClosed},
 	})
 	reg.store(rejected, &sessionState{})
 
@@ -106,7 +106,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 		Handler: sessionLifecycle(deps, reg)(func(s ssh.Session) {
 			st, ok := reg.load(s)
 			require.True(t, ok)
-			st.user = guest
+			st.player = lobby.NewPlayer(guest)
 			st.gen = oldGen
 			go reconnect()
 			<-displaced

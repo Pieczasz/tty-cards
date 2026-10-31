@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -250,36 +251,75 @@ func TestManager_WaitForFinalizers(t *testing.T) {
 	assert.True(t, m.WaitForFinalizers(time.Second), "nothing in flight drains immediately")
 
 	m = newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 	// Guarded: a timeout that is not honored blocks here forever, and a suite that
 	// hangs says far less than one that fails.
 	runWithTimeout(t, 5*time.Second, func() {
 		assert.False(t, m.WaitForFinalizers(50*time.Millisecond), "a game in play blocks the drain")
 	})
 
-	m.watchers.Done()
+	release()
 	assert.True(t, m.WaitForFinalizers(time.Second), "drains once its watcher is done")
 }
 
 func TestManager_WaitForFinalizers_StopsNewGames(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 
 	drained := make(chan bool, 1)
 	go func() {
 		drained <- m.WaitForFinalizers(time.Second)
 	}()
 
-	assert.Eventually(t, func() bool {
-		m.gateMu.Lock()
-		defer m.gateMu.Unlock()
-		return m.gateClosed
-	}, time.Second, time.Millisecond)
-	assert.False(t, m.admitGame(), "a game cannot start after the drain begins")
+	// The gate closes before shuttingDown is set, so once the flag is visible no
+	// game can be admitted.
+	require.Eventually(t, m.shuttingDown.Load, time.Second, time.Millisecond,
+		"the drain began without marking shutdown")
+	late, ok := m.watchers.Enter()
+	late()
+	assert.False(t, ok, "a game cannot start after the drain begins")
 
-	m.watchers.Done()
+	release()
 	assert.True(t, <-drained, "the drain waits for the game already in play")
+}
+
+// ToggleReady asks only the gate, so the gate must be closed before shuttingDown is
+// visible, or a game starts while the manager already reports shutdown. The window
+// is a few instructions wide, so each case retries it and spins rather than sleeps.
+func TestManager_Shutdown_ClosesGateBeforeFlag(t *testing.T) {
+	t.Parallel()
+	for name, begin := range map[string]func(*Manager){
+		"BeginShutdown":     (*Manager).BeginShutdown,
+		"WaitForFinalizers": func(m *Manager) { m.WaitForFinalizers(time.Second) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for range 500 {
+				m := newTestManager(t, nil)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					begin(m)
+				}()
+				for !m.shuttingDown.Load() {
+					runtime.Gosched()
+				}
+				release, ok := m.watchers.Enter()
+				release()
+				<-done
+				require.False(t, ok, "a game was admitted after shuttingDown was set")
+			}
+		})
+	}
+}
+
+// enterGame counts a game's watcher the way ToggleReady does and returns its release.
+func enterGame(t *testing.T, m *Manager) func() {
+	t.Helper()
+	release, ok := m.watchers.Enter()
+	require.True(t, ok, "the gate refused a game before shutdown")
+	return release
 }
 
 // Shutdown may run before a manager was ever built.
@@ -358,7 +398,7 @@ func TestFinalize_WriteOutlivesACancelledAppContext(t *testing.T) {
 func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t, nil)
-	require.True(t, m.admitGame())
+	release := enterGame(t, m)
 
 	drained := make(chan bool, 1)
 	go func() {
@@ -371,7 +411,7 @@ func TestManager_WaitForFinalizers_ZeroTimeoutWaitsIndefinitely(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	m.watchers.Done()
+	release()
 	select {
 	case ok := <-drained:
 		assert.True(t, ok)

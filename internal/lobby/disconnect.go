@@ -159,7 +159,7 @@ func (m *Manager) DisconnectPlayer(ctx context.Context, p *game.Player) {
 // back. BeginShutdown gives the seat up afterwards, unrated.
 func (m *Manager) expireLeaveGen(p *game.Player, gen uint64) {
 	defer m.recoverGoroutine("disconnect grace")
-	if p == nil || m.newGamesStopped() {
+	if p == nil || m.watchers.Closed() {
 		return
 	}
 	m.mu.Lock()

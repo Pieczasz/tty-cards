@@ -19,16 +19,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-func TestReserveWatcher_ASecondReleaseDoesNotPanic(t *testing.T) {
-	t.Parallel()
-	m := newTestManager(t, nil)
-	canStart, release := m.reserveWatcher()
-	require.True(t, canStart)
-	release()
-	release()
-	assert.True(t, m.WaitForFinalizers(time.Second))
-}
-
 // gamesFinished is the ttycards.games.finished total recorded for gameType so far.
 // Each test uses its own game, so parallel tests do not count each other's tables.
 func gamesFinished(t *testing.T, gameType string) int64 {

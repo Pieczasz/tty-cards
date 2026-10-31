@@ -118,10 +118,11 @@ func loadProfile(ctx context.Context, profiles db.Profiles, userID uuid.UUID) te
 }
 
 func (m *model) Init() tea.Cmd {
-	if m.global.User == nil {
+	p := m.global.Player
+	if p == nil {
 		return nil
 	}
-	return loadProfile(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
+	return loadProfile(m.global.RequestContext(), m.global.Profiles, p.UserID)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -370,13 +371,14 @@ func deleteAccount(ctx context.Context, profiles db.Profiles, userID uuid.UUID) 
 }
 
 func (m *model) openConfirm() (tea.Model, tea.Cmd) {
-	if m.global.User == nil {
+	p := m.global.Player
+	if p == nil {
 		return m, nil
 	}
 	// A seat is live state the lobby and engine hold under this player ID. Erasing the
 	// account out from under it would rename a player mid-hand and forfeit the table
 	// for everyone else, so leaving is the player's move to make first.
-	if p := views.SessionPlayer(m.global); p != nil && m.global.LobbyManager != nil &&
+	if m.global.LobbyManager != nil &&
 		m.global.LobbyManager.FindLobbyByPlayer(p) != nil {
 		m.notice = "Leave your table before deleting your account."
 		return m, nil
@@ -397,7 +399,7 @@ func (m *model) confirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.phase = deleteRunning
-		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, m.global.User.ID)
+		return m, deleteAccount(m.global.RequestContext(), m.global.Profiles, m.global.Player.UserID)
 	case "backspace":
 		if runes := []rune(m.typed); len(runes) > 0 {
 			m.typed = string(runes[:len(runes)-1])
@@ -443,7 +445,7 @@ func (m *model) accountDeleted(msg accountDeletedMsg) (tea.Model, tea.Cmd) {
 // the declared 64x20 minimum as it is (TestView_FitsTheTerminal), and an erasure
 // warning is the last screen worth trimming to save a row.
 func (m *model) renderConfirm() string {
-	anonymised := db.AnonymisedUsername(m.global.User.ID)
+	anonymised := db.AnonymisedUsername(m.global.Player.UserID)
 	prompt := "> " + styles.PadTruncate(m.typed, deleteTypedMax)
 	lines := []string{
 		m.global.Palette().ErrorText.Render("Delete your account permanently?"),
