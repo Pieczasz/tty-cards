@@ -359,6 +359,14 @@ func liveHeap() float64 {
 	return float64(m.HeapAlloc) / (1 << 20)
 }
 
+// byteCounter is a program's output that only counts what was written to it.
+type byteCounter struct{ n atomic.Int64 }
+
+func (c *byteCounter) Write(b []byte) (int, error) {
+	c.n.Add(int64(len(b)))
+	return len(b), nil
+}
+
 // fillModel draws every cell it is given, as a full-screen view does.
 type fillModel struct{ w, h int }
 
@@ -382,14 +390,22 @@ func (m fillModel) View() tea.View {
 func rendererHeap(t *testing.T, size termSize, shrink bool) float64 {
 	t.Helper()
 	before := liveHeap()
-	p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard),
+	out := &byteCounter{}
+	p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(out),
 		tea.WithWindowSize(size.w, size.h), tea.WithFPS(120), tea.WithoutSignals())
 	done := make(chan struct{})
 	go func() { defer close(done); _, _ = p.Run() }()
-	time.Sleep(100 * time.Millisecond)
+	// A frame writes at least one byte per cell, so the byte count says when one has
+	// been drawn: a fixed sleep measured an undrawn program on a loaded runner.
+	drawn := func(bytes int) {
+		require.Eventually(t, func() bool { return out.n.Load() >= int64(bytes) },
+			5*time.Second, 5*time.Millisecond, "the frame was never drawn")
+	}
+	drawn(size.w * size.h)
 	if shrink {
+		mark := int(out.n.Load())
 		p.Send(tea.WindowSizeMsg{Width: 120, Height: 40})
-		time.Sleep(100 * time.Millisecond)
+		drawn(mark + 120*40)
 	}
 	held := liveHeap() - before
 	p.Quit()
