@@ -39,6 +39,16 @@ func TestGate_EnterAfterCloseIsRefused(t *testing.T) {
 	require.True(t, g.Wait(t.Context()), "a refused entry was counted")
 }
 
+func TestGate_ClosedFollowsCloseAndWait(t *testing.T) {
+	t.Parallel()
+	var closed, waited Gate
+	assert.False(t, closed.Closed(), "the zero gate is open")
+	closed.Close()
+	assert.True(t, closed.Closed())
+	require.True(t, waited.Wait(t.Context()))
+	assert.True(t, waited.Closed(), "Wait must close the gate")
+}
+
 func TestGate_EnterAfterWaitIsRefused(t *testing.T) {
 	t.Parallel()
 	var g Gate

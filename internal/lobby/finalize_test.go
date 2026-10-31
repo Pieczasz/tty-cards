@@ -765,6 +765,26 @@ func TestBeginShutdown_GivesUpSeatsHeldForAReconnect(t *testing.T) {
 	assert.Nil(t, m.FindLobbyByPlayer(guest))
 }
 
+// A hold that runs out inside the drain window must not forfeit there: the match is
+// still rated until BeginShutdown, and the closed listener keeps the player from
+// coming back. BeginShutdown gives the seat up afterwards, unrated.
+func TestStopNewGames_KeepsAHoldThatExpiresInTheDrainWindow(t *testing.T) {
+	t.Parallel()
+	m, l, _, guest := startedGame(t)
+
+	m.DisconnectPlayer(t.Context(), guest)
+	m.StopNewGames()
+	m.expireLeaveGen(guest, 0)
+
+	assert.True(t, pendingGrace(m, guest.ID), "the hold expired inside the drain window")
+	assert.True(t, l.HasPlayer(guest), "the seat was forfeited while the match was still rated")
+
+	m.BeginShutdown()
+
+	assert.False(t, pendingGrace(m, guest.ID))
+	assert.False(t, l.HasPlayer(guest), "BeginShutdown did not give the held seat up")
+}
+
 // A finished match that produces no row still has to show up as one: these paths
 // were the only bail-outs that dropped a result with no log and no counter.
 //
