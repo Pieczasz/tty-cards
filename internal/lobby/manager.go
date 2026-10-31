@@ -43,6 +43,9 @@ type Manager struct {
 	// gets it from refreshRatings; a player seated nowhere when the write commits -
 	// a forfeiter - gets it at the next table they sit at, and BrowseLobbies ranks
 	// them by it. DisconnectPlayer forgets it: the next login reads the stored one.
+	// A match that commits after its player dropped writes the entry again, and it
+	// stays until that account's next session ends, so the map is bounded by
+	// accounts, a few bytes per game each, rather than by sessions.
 	written             map[string]map[string]uint32
 	games               *game.Registry
 	cachedPublicLobbies []*Lobby
