@@ -261,7 +261,7 @@ services:
         mv /tls/fullchain.pem.tmp /tls/fullchain.pem
 
   proxy:
-    image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    image: nginx:1.31.7-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
     restart: unless-stopped
     <<: *defaults
     mem_limit: 128m
