@@ -16,11 +16,12 @@ var errServerFull = errors.New("server is at capacity")
 // that account's reconnect; no other account ever waits on it.
 type account struct {
 	mu sync.Mutex
-	// gen and conn are the live session, guarded by mu: the generation its teardown
-	// must match, and the handle used to hang up on it when a newer one displaces it.
-	// A zero gen is no live session.
+	// gen, conn and sess are the live session, guarded by mu: the generation its
+	// teardown must match, and the handles used to hang up on it when a newer one
+	// displaces it. A zero gen is no live session.
 	gen  uint64
 	conn io.Closer
+	sess io.Closer
 	// refs counts the callers holding or waiting on mu, guarded by the tracker's mu.
 	// The entry leaves the map only once nobody does and no session is live.
 	refs int
@@ -89,8 +90,14 @@ func (t *SessionTracker) unref(userID uuid.UUID, a *account) {
 // conn is the connection the displaced session is hung up on. Without closing it,
 // the account keeps every connection it ever opened until each one's TCP dies, so the
 // per-account limit becomes advisory: Count still counts accounts, but each one can
-// hold any number of live TUIs and lobby subscriptions.
-func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, error) {
+// hold any number of live TUIs and lobby subscriptions. sess is the session itself,
+// closed instead when the newer session arrived on the same connection: an OpenSSH
+// ControlMaster multiplexes both onto one, and hanging that up would end the newer
+// session too. Closing sess has to end the session's program as well as its
+// channel: wish quits the program only when the session's context ends, which
+// charm ssh shares across the connection, and the per-connection channel cap frees
+// its slot once the channel closes, so a channel alone bounds nothing.
+func (t *SessionTracker) Connect(userID uuid.UUID, conn, sess io.Closer) (uint64, error) {
 	a := t.acquire(userID, true)
 	defer t.unref(userID, a)
 	// Waits for this account's teardown, if one is running, and only for that.
@@ -100,15 +107,18 @@ func (t *SessionTracker) Connect(userID uuid.UUID, conn io.Closer) (uint64, erro
 		a.mu.Unlock()
 		return 0, err
 	}
-	prev := a.conn
-	a.gen, a.conn = gen, conn
+	hangUp := a.conn
+	if hangUp == conn {
+		hangUp = a.sess
+	}
+	a.gen, a.conn, a.sess = gen, conn, sess
 	a.mu.Unlock()
 
 	// Outside the lock: Close writes to the network, and a wedged peer must not hold
 	// this account's next login behind it. The displaced session's own teardown is
 	// already harmless - ReleaseWith only frees a slot for the live generation.
-	if prev != nil {
-		_ = prev.Close()
+	if hangUp != nil {
+		_ = hangUp.Close()
 	}
 	return gen, nil
 }
@@ -157,7 +167,7 @@ func (t *SessionTracker) ReleaseWith(userID uuid.UUID, gen uint64, fn func()) bo
 		if a.gen != gen {
 			return
 		}
-		a.gen, a.conn = 0, nil
+		a.gen, a.conn, a.sess = 0, nil, nil
 		t.mu.Lock()
 		t.live.Add(-1)
 		t.mu.Unlock()

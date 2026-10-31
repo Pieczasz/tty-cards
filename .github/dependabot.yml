@@ -8,6 +8,18 @@ updates:
       actions:
         patterns: ["*"]
 
+  # go.mod: x/crypto/ssh, pgx, grpc and otel sit on the network path. The two
+  # families that release in lockstep move together.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      golang-x:
+        patterns: ["golang.org/x/*"]
+      otel:
+        patterns: ["go.opentelemetry.io/*"]
+
   # cmd/server/Dockerfile: the golang builder and alpine certs stages.
   - package-ecosystem: docker
     directory: /cmd/server

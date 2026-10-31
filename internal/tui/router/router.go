@@ -254,6 +254,14 @@ func (r *Router) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg, tea.MouseMsg:
 		r.lastActivity = time.Now()
+		// View draws only the resize prompt, so input here would act blind on the
+		// view: an enter that plays a card, a y that confirms a leave.
+		if styles.TooSmall(r.Global.Width, r.Global.Height) {
+			if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+c" {
+				return r, tea.Quit
+			}
+			return r, nil
+		}
 	case tickMsg:
 		if time.Since(r.lastActivity) > idleTimeout && !r.activeIdleExempt() {
 			return r, tea.Quit

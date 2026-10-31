@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -203,4 +204,170 @@ func TestEnvCappedChannel_AcceptFailureIsReturned(t *testing.T) {
 	require.ErrorIs(t, err, errUnopenable)
 	assert.Nil(t, ch)
 	assert.Nil(t, reqs)
+}
+
+func ptyReqPayload(w, h uint32) []byte {
+	return gossh.Marshal(struct {
+		Term                    string
+		Columns, Rows, PxW, PxH uint32
+		Modes                   string
+	}{"xterm", w, h, 0, 0, "\x00"})
+}
+
+func windowChangePayload(w, h uint32) []byte {
+	return gossh.Marshal(struct{ Columns, Rows, PxW, PxH uint32 }{w, h, 0, 0})
+}
+
+// openRawSession opens a session channel with a pty and nothing else, so the test
+// sends every request that follows itself.
+func openRawSession(t *testing.T, client *gossh.Client) gossh.Channel {
+	t.Helper()
+	ch, reqs, err := client.OpenChannel("session", nil)
+	require.NoError(t, err)
+	go gossh.DiscardRequests(reqs)
+	t.Cleanup(func() { _ = ch.Close() })
+	ok, err := ch.SendRequest("pty-req", true, ptyReqPayload(80, 40))
+	require.NoError(t, err)
+	require.True(t, ok)
+	return ch
+}
+
+func sendWindowChanges(ch gossh.Channel, n int) {
+	for i := range n {
+		_, _ = ch.SendRequest("window-change", false, windowChangePayload(uint32(81+i), 40))
+	}
+}
+
+// within fails the test unless fn returns inside five seconds: room for a loaded
+// -race run, and a wedged connection never answers at all.
+func within(t *testing.T, what string, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s hung: the connection is wedged", what)
+	}
+}
+
+// openAnotherChannel is the probe for a wedged connection: the request mux that
+// would answer it is the one a blocked request stream backs up.
+func openAnotherChannel(client *gossh.Client) {
+	ch, reqs, err := client.OpenChannel("session", nil)
+	if err == nil {
+		go gossh.DiscardRequests(reqs)
+		_ = ch.Close()
+	}
+}
+
+// charm ssh hands each window-change to a one-slot channel with a blocking send from
+// the goroutine reading the channel's requests, and the pty-req already filled the
+// slot. Before the shell nothing reads it, so a second resize stopped that goroutine
+// for good, the connection's request mux backed up behind it, and the connection was
+// never read again: no idle timeout, no teardown, and a listener slot gone for good.
+func TestNewServer_WindowChangeBeforeShellDoesNotWedge(t *testing.T) {
+	t.Parallel()
+	addr, _ := startInProcessServer(t, &db.User{ID: testutil.UID(91), Username: "wedge"})
+	client := dialInProcess(t, addr, "wedge")
+	ch := openRawSession(t, client)
+
+	sendWindowChanges(ch, 40)
+
+	within(t, "the shell reply", func() { _, _ = ch.SendRequest("shell", true, nil) })
+	within(t, "a second channel", func() { openAnotherChannel(client) })
+}
+
+// heldRepo refuses every lookup, but only once the test lets it: until then the
+// session handler is parked inside sessionModel, past every read of the pty.
+type heldRepo struct {
+	stubUserRepo
+	entered, release chan struct{}
+}
+
+func (r heldRepo) LoadUserByFingerprint(ctx context.Context, fp string) (*db.User, *db.PublicSSHKey, error) {
+	close(r.entered)
+	<-r.release
+	return r.stubUserRepo.LoadUserByFingerprint(ctx, fp)
+}
+
+// A refused session's handler returns while its request stream is still open, and
+// nothing read the window changes it got on the way to the refusal.
+func TestNewServer_WindowChangeDuringRefusalDoesNotWedge(t *testing.T) {
+	t.Parallel()
+	repo := heldRepo{
+		err:     errors.New("db down"),
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	addr, _ := startServerWith(t, repo)
+	client := dialInProcess(t, addr, "refused")
+	ch := openRawSession(t, client)
+
+	ok, err := ch.SendRequest("shell", true, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	<-repo.entered
+	sendWindowChanges(ch, 40)
+	close(repo.release)
+
+	within(t, "a second channel", func() { openAnotherChannel(client) })
+}
+
+// OpenSSH's ControlMaster runs a second `ssh` as a second session channel on the
+// connection the first one opened. Displacing the first session hung up that shared
+// connection, and with it the session that had just arrived.
+func TestNewServer_SecondChannelOnTheSameConnectionDisplacesOnlyTheFirst(t *testing.T) {
+	t.Parallel()
+	addr, tracker := startInProcessServer(t, &db.User{ID: testutil.UID(94), Username: "muxer"})
+	client := dialInProcess(t, addr, "muxer")
+	connGone := make(chan error, 1)
+	go func() { connGone <- client.Wait() }()
+
+	first, err := client.NewSession()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = first.Close() })
+	require.NoError(t, first.RequestPty("xterm", 40, 80, gossh.TerminalModes{}))
+	require.NoError(t, first.Shell())
+	require.Eventually(t, func() bool { return tracker.Count() == 1 }, 3*time.Second, 10*time.Millisecond)
+
+	openShell(t, client)
+
+	within(t, "the displaced session's end", func() { _ = first.Wait() })
+	select {
+	case err := <-connGone:
+		t.Fatalf("the shared connection closed with the displaced session: %v", err)
+	case <-time.After(time.Second):
+	}
+	assert.Equal(t, 1, tracker.Count())
+}
+
+// Closing a displaced session's channel alone ends nothing on the server: wish
+// quits its program only when the session's context ends, which charm ssh shares
+// across the connection, and the channel cap frees the slot as soon as the channel
+// closes. One connection looping shells would otherwise keep a live TUI per shell,
+// each holding its size budget and its lobby feed.
+func TestNewServer_SameConnectionDisplacementEndsTheOldSession(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	addr, tracker := startServerWithRegistry(t, stubUserRepo{user: &db.User{ID: testutil.UID(95), Username: "looper"}}, reg)
+	client := dialInProcess(t, addr, "looper")
+	live := func() int {
+		n := 0
+		reg.states.Range(func(_, _ any) bool { n++; return true })
+		return n
+	}
+
+	for range 2 * maxSessionsPerConnection {
+		openShell(t, client)
+		require.Eventually(t, func() bool { return tracker.Count() == 1 && live() >= 1 },
+			3*time.Second, 10*time.Millisecond)
+		// Long enough for the program to be running before the next shell displaces it.
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	assert.Eventually(t, func() bool { return live() == 1 }, 3*time.Second, 20*time.Millisecond,
+		"displaced sessions still running")
 }

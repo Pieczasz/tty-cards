@@ -314,7 +314,8 @@ func serve(ctx context.Context, d serveDeps) error {
 // proxyListener puts the PROXY protocol in front of the ssh listener. proxyproto
 // defaults to REQUIRE: every connection must open with a PROXY header, which is right
 // behind nginx. Without PROXY_TRUSTED_CIDRS any peer's header is honored, which is why
-// 6969 must never be published; with it, a connection from anywhere else is dropped
+// 6969 must never be published; config refuses that outside development, so the empty
+// branch runs only there. With the list, a connection from anywhere else is dropped
 // before its header is read. PROXY_PROTOCOL=false is the local escape hatch for bare
 // ssh.
 func proxyListener(inner net.Listener, cfg *config.Config) (net.Listener, error) {

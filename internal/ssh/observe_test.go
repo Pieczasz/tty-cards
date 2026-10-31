@@ -12,6 +12,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/ratelimit"
 
 	"charm.land/ssh"
+	"charm.land/wish/v2/testsession"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -69,7 +70,7 @@ func TestRateLimitAuth_CountsARefusedConnectionOnce(t *testing.T) {
 	sessionsBefore := metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_ratelimit")
 	unkeyableBefore := metricTotal(t, rejects, "reason", "unkeyable")
 
-	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
+	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true })
 	agent := newStubSSHContext(stubAddr{"198.51.100.20:2222"})
 	for range 6 {
@@ -94,7 +95,7 @@ func TestRateLimitAuth_CountsARefusedConnectionOnce(t *testing.T) {
 //nolint:paralleltest // swaps the process-global logger
 func TestRateLimitAuth_WarnsOncePerNetworkPerWindow(t *testing.T) {
 	logs := captureLogs(t)
-	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(1, time.Minute),
+	handler := rateLimitAuth(ratelimit.New(1, time.Minute), ratelimit.New(100, time.Minute), ratelimit.New(1, time.Minute),
 		func(ssh.Context, ssh.PublicKey) bool { return true })
 
 	// Ten /64s of one /48, each spending its budget and then refused.
@@ -192,4 +193,19 @@ func TestFinishSession_RecordsHowTheSessionEnded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A session refused because the server is draining returned before the session span
+// and the counters, so a shutdown that turned players away left no count of them.
+//
+//nolint:paralleltest // reads process-global metrics
+func TestSessionLifecycle_ARefusalWhileDrainingIsCounted(t *testing.T) {
+	before := metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_draining")
+	reg := &sessionRegistry{}
+	require.NoError(t, (&Server{sessions: reg}).WaitSessions(t.Context()))
+
+	srv := &ssh.Server{Handler: sessionLifecycle(Deps{}, reg)(func(ssh.Session) {})}
+	_, _ = testsession.New(t, srv, nil).CombinedOutput("")
+
+	assert.Equal(t, int64(1), metricTotal(t, "ttycards.ssh.sessions", "outcome", "rejected_draining")-before)
 }

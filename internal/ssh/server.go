@@ -89,6 +89,15 @@ type sessionState struct {
 	size    sessionSize
 	// program is set before the program runs, for the retier sweep to nudge.
 	program atomic.Pointer[tea.Program]
+	// run is the program's context and endRun ends it. charm ssh hands every session
+	// on a connection that connection's context, so a session displaced by a newer
+	// one on the same connection has nothing else that stops its program. run is
+	// not derived from that context: a closing connection already quits the program
+	// through wish, cleanly, where a cancelled run kills it and wish logs an ERROR.
+	// Both are set just before Connect; endRun is safe from any goroutine, and
+	// finishSession calls it to release run.
+	run    context.Context
+	endRun context.CancelFunc
 }
 
 // filter is the session's bubbletea message filter: the input guard's bookkeeping and
@@ -186,7 +195,9 @@ func newServer(deps Deps, reg *sessionRegistry) (*Server, error) {
 	server, err := wish.NewServer(
 		wish.WithHostKeyPEM(key.RawPrivateKey()),
 		wish.WithIdleTimeout(connIdleTimeout),
-		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter, ratelimit.New(1, authRefusalLogEvery),
+		wish.WithPublicKeyAuth(rateLimitAuth(rateLimiter,
+			ratelimit.New(authWideFactor*deps.Config.RateLimitCount, deps.Config.RateLimitWindow),
+			ratelimit.New(1, authRefusalLogEvery),
 			func(_ ssh.Context, _ ssh.PublicKey) bool { return true })),
 		// wish runs the last middleware first, so this slice is in reverse execution
 		// order. Connect/disconnect logging is sessionLifecycle's job rather than
@@ -243,7 +254,14 @@ func clientHost(addr net.Addr) (string, bool) {
 // an address, in a store kept 14 days; the rest go to debug and the counter.
 const authRefusalLogEvery = time.Minute
 
-func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
+// authWideFactor sizes the /48's auth budget against one network's. A free tunnel
+// is 65,536 /64s, each a fresh network budget; 16 networks' worth still lets a site
+// behind one /48 sign in with ssh-agents offering several keys each.
+const authWideFactor = 16
+
+// rateLimitAuth spends limiter's budget on the client's network and wide's on its
+// /48, refusing when either is spent; warned only picks the refusal's log level.
+func rateLimitAuth(limiter, wide, warned *ratelimit.SlidingWindow, next ssh.PublicKeyHandler) ssh.PublicKeyHandler {
 	return func(ctx ssh.Context, key ssh.PublicKey) bool {
 		host, ok := clientHost(ctx.RemoteAddr())
 		if !ok {
@@ -254,7 +272,7 @@ func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyH
 			}
 			return false
 		}
-		if !limiter.Allow(ratelimit.NetKey(host)) {
+		if !allowAuth(limiter, wide, host) {
 			observability.RateLimitReject(ctx, "ssh")
 			if firstAuthRefusal(ctx) {
 				observability.SSHAuthReject(ctx, "ratelimit")
@@ -269,6 +287,20 @@ func rateLimitAuth(limiter, warned *ratelimit.SlidingWindow, next ssh.PublicKeyH
 		}
 		return next(ctx, key)
 	}
+}
+
+// allowAuth spends the network's budget, then the /48's. A /48 refusal gives the
+// network back its attempt, as registration does: the attempt never happened.
+func allowAuth(limiter, wide *ratelimit.SlidingWindow, host string) bool {
+	key := ratelimit.NetKey(host)
+	if !limiter.Allow(key) {
+		return false
+	}
+	if !wide.Allow(ratelimit.WideKey(host)) {
+		limiter.Refund(key)
+		return false
+	}
+	return true
 }
 
 // firstAuthRefusal reports whether this is the connection's first refused auth
@@ -337,10 +369,12 @@ func sessionModel(
 			LobbyManager: deps.LobbyManager,
 			Games:        deps.Games,
 		})
-		// The connection, not the session: closing a channel leaves the socket and any
-		// other channel on it up until the peer notices.
+		// The connection, not just the session: closing a channel leaves the socket and
+		// any other channel on it up until the peer notices. The session is for a
+		// newer session on that same connection, which must not be hung up with it.
 		conn, _ := s.Context().Value(ssh.ContextKeyConn).(gossh.Conn)
-		gen, err := deps.Tracker.Connect(user.ID, conn)
+		st.run, st.endRun = context.WithCancel(context.Background())
+		gen, err := deps.Tracker.Connect(user.ID, conn, displaceable(s, st.endRun))
 		if err != nil { // errServerFull, Connect's only refusal
 			model.Close()
 			reg.failSessionf(s, "rejected_full", err,
@@ -365,6 +399,24 @@ func sessionModel(
 		// down the process for every connected player, not just this session.
 		return reportingModel{Model: model, session: s, reg: reg}
 	}
+}
+
+// closerFunc is an io.Closer made of a func.
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+// displaceable is what Connect closes when a newer session for the account arrives
+// on s's own connection. Closing the channel alone ends nothing: wish quits the
+// program only when the session's context ends, which charm ssh shares across the
+// connection, and the channel cap frees its slot as soon as the channel closes, so
+// one connection looping shells would hold any number of TUIs. Cancelling the run context first also covers a program not yet started,
+// whose Run then returns at once.
+func displaceable(s ssh.Session, endRun context.CancelFunc) io.Closer {
+	return closerFunc(func() error {
+		endRun()
+		return s.Close()
+	})
 }
 
 // reportingModel reports a panic in the TUI against the session's trace context and
@@ -423,10 +475,11 @@ func sessionProgram(
 			tea.WithInput(st.input),
 			tea.WithWindowSize(size.w, size.h),
 			tea.WithFPS(sessionFPS),
-			tea.WithFilter(st.filter))...)
+			tea.WithFilter(st.filter),
+			tea.WithContext(st.run))...)
 		st.program.Store(program)
 		if moved {
-			go reg.retier()
+			reg.retier()
 		}
 		return program
 	}
@@ -443,21 +496,23 @@ func filterSessionMsg(_ tea.Model, msg tea.Msg) tea.Msg {
 	return msg
 }
 
-// retier nudges every session the tier now sizes differently to take its new size.
-// It runs on a goroutine of its own, once per tier change: each Send waits for that
-// session's event loop, and a session's start or end must not wait for all of them.
-// Overlapping sweeps are harmless, as each nudge is granted against the tier as it
-// is when the session reads it.
+// retier nudges every session the budget now sizes differently to take its new
+// size: after a tier move, or after a leave freed extra cells.
+// Each nudge is a Send on a goroutine of its own, because a Send waits for that
+// session's event loop, and one whose peer stopped taking output is stuck: waited
+// on in turn, it held up every session after it, sweep after sweep. A session has
+// at most one nudge in flight (sessionSize.nudging), so a stuck one parks one
+// goroutine, not one per sweep, until its program ends. Overlapping sweeps are
+// harmless, as each nudge is granted against the tier as it is when the session
+// reads it.
 func (reg *sessionRegistry) retier() {
-	tier := sizeTiers[reg.sizes.tier.Load()]
-	slog.Info("terminal size tier changed", "tier_width", tier.w, "tier_height", tier.h)
 	reg.states.Range(func(_, v any) bool {
 		st, _ := v.(*sessionState)
 		// A program is stored only once its size has started. Send returns when the
 		// program ends: wish runs every program activeterm lets through, and a run
 		// cancels the program's context however it ends.
-		if p := st.program.Load(); p != nil && st.size.stale() {
-			p.Send(retierMsg{})
+		if p := st.program.Load(); p != nil && st.size.stale() && st.size.nudging.CompareAndSwap(false, true) {
+			go p.Send(retierMsg{})
 		}
 		return true
 	})
@@ -497,6 +552,16 @@ func limitSessionChannels(next ssh.ChannelHandler) ssh.ChannelHandler {
 // every accepted one for the session's life, so an unbounded stream is unbounded
 // memory. A small budget rather than none: bubbletea reads TERM and colour hints
 // from the environment.
+//
+// It also refuses a window-change before the shell or exec. charm ssh puts each one
+// on a one-slot channel with a blocking send from the goroutine reading this stream,
+// the pty-req already filled that slot, and nothing reads it before the session
+// handler runs: a second resize stopped the stream for good, the connection's
+// request mux backed up behind it, and the connection was never read again - no
+// idle timeout, no teardown, and its listener slot gone until a restart. The pty-req
+// carries the size, so nothing is lost. From the handler on, sessionLifecycle drains
+// the slot. A subsystem does not count as a start: none is registered, so charm ssh
+// refuses it and no handler ever drains.
 type envCappedChannel struct {
 	gossh.NewChannel
 }
@@ -509,15 +574,23 @@ func (c envCappedChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error)
 	out := make(chan *gossh.Request)
 	go func() {
 		defer close(out)
-		count, size := 0, 0
+		count, size, started := 0, 0, false
 		for req := range reqs {
-			if req.Type == "env" {
+			switch req.Type {
+			case "env":
 				count++
 				size += len(req.Payload)
 				if count > maxEnvRequests || size > maxEnvBytes {
 					_ = req.Reply(false, nil)
 					continue
 				}
+			case "window-change":
+				if !started {
+					_ = req.Reply(false, nil)
+					continue
+				}
+			case "shell", "exec":
+				started = true
 			}
 			out <- req
 		}

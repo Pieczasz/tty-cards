@@ -96,12 +96,9 @@ func (m *model) stepRaise(direction int) {
 	m.raiseAmount = m.clampRaise(m.raiseAmount)
 }
 
-// confirm deals the next hand, leaves a finished match, or commits the pending raise.
+// confirm deals the next hand or commits the pending raise. Leaving a finished match
+// is HandleLeaveKey's, the one leave path, so it is never a forfeit unasked.
 func (m *model) confirm() (tea.Model, tea.Cmd) {
-	if m.matchComplete {
-		cmd := m.Leave()
-		return m, cmd
-	}
 	if m.canDeal() {
 		return m.submit(logic.ActionNextHand{})
 	}

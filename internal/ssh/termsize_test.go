@@ -4,6 +4,8 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -348,4 +350,94 @@ func TestRenderer_KeepsItsBuffersAfterAShrink(t *testing.T) {
 	t.Logf("250x80 %.2f MiB, shrunk to 120x40 %.2f MiB, started at 120x40 %.2f MiB", atTop, shrunk, atFloor)
 	require.Greater(t, atTop-atFloor, 1.0, "the measurement cannot tell the two sizes apart")
 	assert.Greater(t, shrunk, atFloor+(atTop-atFloor)/2, "a shrink gave the buffers back")
+}
+
+// staleState is a session granted the top tier on a server now at the floor.
+func staleState(reg *sessionRegistry, p *tea.Program) *sessionState {
+	st := &sessionState{}
+	st.size.budget = &reg.sizes
+	top := sizeTiers[len(sizeTiers)-1]
+	st.size.wanted.Store(&top)
+	st.size.granted.Store(&top)
+	st.program.Store(p)
+	return st
+}
+
+// A session whose event loop is stuck - its peer stopped taking output - does not
+// take a nudge. The sweep used to wait on each session in turn, so every session it
+// reached after a stuck one kept a size the tier no longer grants, and every later
+// sweep stopped at the same place.
+func TestRetier_AStuckSessionDoesNotHoldUpTheOthers(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, extraCellBudget)
+	reg.sizes.tier.Store(0)
+	for i := range 4 {
+		// Never run, so a Send waits until the test ends.
+		stuck := tea.NewProgram(fillModel{}, tea.WithContext(t.Context()), tea.WithInput(nil), tea.WithOutput(io.Discard))
+		reg.states.Store(-1-i, staleState(reg, stuck))
+	}
+	var nudged atomic.Int32
+	const live = 8
+	for i := range live {
+		p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutSignals(),
+			tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+				if _, ok := msg.(retierMsg); ok {
+					nudged.Add(1)
+					return nil
+				}
+				return msg
+			}))
+		done := make(chan struct{})
+		go func() { defer close(done); _, _ = p.Run() }()
+		t.Cleanup(func() { p.Quit(); <-done })
+		reg.states.Store(i, staleState(reg, p))
+	}
+
+	reg.retier()
+
+	assert.Eventually(t, func() bool { return nudged.Load() == live }, 2*time.Second, 10*time.Millisecond,
+		"the sweep stalled behind a stuck session")
+}
+
+// An extra budget of one step to the top: the second big terminal is held at the
+// floor for want of extra cells. When the first leaves without moving the tier, the
+// cells it frees have to reach the one held back, not wait for it to resize.
+func TestLeaveSizes_FreedExtraCellsReachASessionHeldBack(t *testing.T) {
+	t.Parallel()
+	reg := newSessionRegistry(cellBudget, sizeTiers[3].cells()-sizeTiers[0].cells())
+
+	leaving := &sessionState{}
+	got, _ := leaving.size.start(&reg.sizes, termSize{300, 100})
+	require.Equal(t, termSize{250, 80}, got)
+	leaving.program.Store(tea.NewProgram(fillModel{})) // never run: leaveSizes only asks that it exists
+	session := &stubSession{}
+	reg.store(session, leaving)
+
+	held := &sessionState{}
+	got, _ = held.size.start(&reg.sizes, termSize{260, 90})
+	require.Equal(t, sizeTiers[0], got, "the second session should be held at the floor")
+	// The start size comes back once as bubbletea's first resize, which regrants:
+	// the leave has to come after it, or that regrant takes the freed cells itself.
+	echoed := make(chan struct{})
+	var once sync.Once
+	p := tea.NewProgram(fillModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutSignals(),
+		tea.WithWindowSize(got.w, got.h), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+			msg = held.size.filter(msg)
+			if _, ok := msg.(tea.WindowSizeMsg); ok {
+				once.Do(func() { close(echoed) })
+			}
+			return msg
+		}))
+	held.program.Store(p)
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = p.Run() }()
+	t.Cleanup(func() { p.Quit(); <-done })
+	reg.store(&stubSession{}, held)
+	<-echoed
+	require.Equal(t, sizeTiers[0], *held.size.granted.Load())
+
+	reg.leaveSizes(session)
+
+	assert.Eventually(t, func() bool { return *held.size.granted.Load() == termSize{250, 80} },
+		2*time.Second, 10*time.Millisecond, "the cells the first session freed never reached the second")
 }

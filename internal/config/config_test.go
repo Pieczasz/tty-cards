@@ -340,6 +340,27 @@ func TestResolveEnv_DotEnvLoadedOutsideProductionOnly(t *testing.T) {
 	}
 }
 
+// ENV is settled before .env is read, so production never reads it. An ENV line
+// in .env used to be read too late and ignored: ENV=staging there booted as
+// development with every fail-closed check off. It now fails the boot, whether or
+// not the process also sets ENV.
+func TestResolveEnv_ENVInDotEnvFailsTheBoot(t *testing.T) {
+	for _, process := range []string{"", "development", "staging"} {
+		t.Run("process ENV="+process, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("ENV=staging\n"), 0o600))
+			t.Chdir(dir)
+			t.Setenv("ENV", process)
+			if process == "" {
+				require.NoError(t, os.Unsetenv("ENV"))
+			}
+
+			_, err := config.Load()
+			require.ErrorContains(t, err, "ENV in .env")
+		})
+	}
+}
+
 // A .env that fails to parse used to be ignored, so the server booted without the
 // settings it was written to provide.
 func TestResolveEnv_MalformedDotEnvFailsTheBoot(t *testing.T) {
@@ -495,6 +516,18 @@ func TestLoad_ProxyTrustedCIDRs(t *testing.T) {
 		require.Len(t, cfg.ProxyTrustedCIDRs, 2)
 		assert.Equal(t, "172.30.0.0/24", cfg.ProxyTrustedCIDRs[0].String())
 		assert.Equal(t, "fd00:30::/64", cfg.ProxyTrustedCIDRs[1].String())
+	})
+	// net.ParseCIDR, which the PROXY listener uses, reads ::ffff:0.0.0.0/96 as
+	// 0.0.0.0/0 while netip, which the stats API uses, matches no IPv4 peer with
+	// it. An IPv4-mapped prefix is refused so the two can never disagree.
+	t.Run("an IPv4-mapped prefix fails the boot", func(t *testing.T) {
+		for _, value := range []string{"::ffff:0.0.0.0/96", "::ffff:172.29.69.0/120"} {
+			t.Setenv("ENV", "development")
+			t.Setenv("PROXY_TRUSTED_CIDRS", value)
+
+			_, err := config.Load()
+			require.ErrorContains(t, err, "PROXY_TRUSTED_CIDRS", value)
+		}
 	})
 	t.Run("the list compose sets", func(t *testing.T) {
 		t.Setenv("ENV", "development")

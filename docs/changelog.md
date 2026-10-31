@@ -16,7 +16,7 @@ unnoticed for so long.
   your ratings are erased outright; your username becomes `deleted_` plus the hex
   of your account id so the other players at your old tables keep a readable match
   history. Refused while you are seated at a table, and the session ends once it
-  is done.
+  is done. Closing the terminal after confirming does not cancel it.
 - **A separate limit on new accounts** - 5 per hour per client network by
   default, set with `REGISTRATION_LIMIT` and `REGISTRATION_WINDOW`. Playing on an
   existing account never touches that budget, and neither does a name that fails
@@ -29,7 +29,10 @@ unnoticed for so long.
   the proxy sits on: a PROXY header is honored only from them and any other
   connection is refused, and the stats API believes `X-Forwarded-For` only from
   them. Compose sets it to the new `edge` network's subnets. Empty keeps the old
-  behaviour. One malformed entry fails the boot.
+  behaviour in development only; anywhere else it fails the boot while either
+  trust is on. One malformed entry fails the boot, and so does an IPv4-mapped
+  one (`::ffff:0.0.0.0/96` read as the whole IPv4 internet on the ssh listener
+  and as nothing on the stats API): write the IPv4 network.
 - **IPv6 players get their own rate-limit bucket** (operators). nginx and the
   backend sit on an IPv6-enabled `edge` network and nginx listens on both
   families; before, every IPv6 player arrived from the Docker gateway and shared
@@ -132,17 +135,31 @@ unnoticed for so long.
 - **A second connection to the same account now closes the first one.** A
   half-open TCP session used to keep you out of your own seat for the whole
   90-second reconnect window.
-- **A taken username gets the same answer as any other refusal.** The login
-  banner had become a way to ask "does this account exist". (An invalid name now
-  says why; see identity above.)
+- **A taken username gets a fixed answer**, not the database's error text. It
+  still says the name is taken: a free name would have registered, and ranked
+  names are public on the leaderboard anyway. (An invalid name now says why; see
+  identity above.)
 - **Reconnecting while your old session is still closing is safe.** The old
   session gives up the seat and the slot in one step, so it can no longer start a
   disconnect timer on the seat your new session is playing; and a reconnect
   refused because the server is full no longer cancels the timer holding your
   seat.
+- **A terminal resize can no longer wedge a connection.** Two resizes sent before
+  the shell started, after the session ended, or while the session's screen was
+  stuck stopped the server reading that connection for good: closing it ended
+  nothing, its listener slot (and, for a live session, its account slot) never
+  came back, and enough of them shut everyone out until a restart. A resize
+  before the shell is now refused (the pty request already carries the size), and
+  later ones never wait for the screen; a session that falls behind gets the
+  latest size.
 - **The displaced session's whole connection is closed**, not just its channel,
   and a connection can no longer open more session channels than the cap (or
-  flood the environment) before being counted.
+  flood the environment) before being counted. The exception is a second session
+  on the same connection, as OpenSSH's `ControlMaster` opens: only the first
+  session is ended, where hanging up the connection used to drop both. Its screen
+  now stops on the server too, not just its channel: one connection opening shell
+  after shell used to pile up running screens, and every one of them shrank the
+  screen size the server grants to all players.
 - **A typo in `ENV` fails the boot** (operators). `ENV=prod` used to start a
   production server in development mode with every production check off. In
   production, `DB_SSLMODE` must also be `require`, `verify-ca` or `verify-full`
@@ -180,8 +197,13 @@ unnoticed for so long.
   `127.0.0.1:3000` behind an SSH tunnel.
 - nginx's connection and request limits key on the IPv6 /64, so one customer with
   a /64 no longer has 2^64 ways around them.
+- **SSH sign-in has a budget per IPv6 /48 too** (operators), 16 times
+  `RATE_LIMIT_CONNECTIONS`. A free tunnel is one /48 of 65,536 /64s, and each /64
+  had a fresh sign-in budget of its own.
 - Stats-API metrics no longer take their server label from the client's own
   `Host` header.
+- A session turned away because the server is shutting down is now counted, as
+  `outcome="rejected_draining"` on `ttycards.ssh.sessions` (operators).
 - The stack is sized to fit 5.5 GiB on a 12 GB / 6-core VPS, with a per-service
   limit that adds up (see the header comment in `compose.yaml`).
 
@@ -201,6 +223,11 @@ unnoticed for so long.
   false for some variables and true for others: write `false`. OTel plaintext is
   decided by the endpoint URL scheme (`http://` vs `https://`); database
   plaintext is accepted only with `ENV=development`.
+- **`ENV` is read from the process environment only.** It is settled before
+  `.env` is read, so an `ENV` line in `.env` was silently ignored: `ENV=staging`
+  there booted as development with every fail-closed check off, and `ENV=prod`
+  there booted at all. An `ENV` line in `.env` now fails the boot. **Remove it
+  from an `.env` copied from an older `.env.example` and export `ENV` instead.**
 - **Every invalid variable is reported at once**, not just the first, and a boot
   failure is printed once instead of twice.
 - **The stats API refuses to start with a missing dependency** instead of
@@ -211,6 +238,20 @@ unnoticed for so long.
   production (warnings and slow queries).
 - A failed interrupted-match finalize now logs as `finalize interrupted match`,
   once, instead of `finalize ranked match: finalize ranked match: ...`.
+- **`scripts/restore.sh` no longer drops the live database first.** It restores
+  into `<DB_NAME>_restore` and swaps that in only once `pg_restore` succeeds; a
+  truncated or corrupt archive used to leave an empty database behind.
+- **`make migrate-down` asks first and rolls back one migration** (developers).
+  It ran `down -all` with no prompt against whatever `DB_DSN` named.
+- **The observability sidecars drop every Linux capability** (`cap_drop: [ALL]`
+  on alloy, loki, tempo, prometheus, alertmanager and grafana); alloy keeps only
+  `DAC_OVERRIDE` for its data directory. CI fails any long-running service
+  without it.
+- **The image build context is an allowlist** (`go.mod`, `go.sum`, `cmd/`,
+  `internal/`), so `.env`, secrets, backups and anything else in the checkout
+  can no longer reach the Docker daemon.
+- govulncheck also runs weekly on `main`, and Dependabot now updates the Go
+  modules.
 
 ### Changed - tables and lobbies
 
@@ -266,6 +307,13 @@ unnoticed for so long.
 - Account deletion cannot be backed out of, or issued twice, once it is running.
 - Switching screens no longer doubles up game events or the turn clock.
 - Key hints stay visible at 80x24.
+- **Keys do nothing while the "Terminal too small" notice is up**, except ctrl+c.
+  They used to reach the hidden screen, so an enter while resizing could play a
+  card you could not see.
+- **Enter on a poker table never leaves it while the game is still running.** A
+  match result that reached the screen before the table closed made enter leave
+  without the forfeit confirmation. Esc still asks first, and enter leaves once
+  the table has finished.
 - The welcome banner no longer renders your username as ASCII art (it also
   stopped being a way to fill a shared render cache).
 
@@ -299,6 +347,14 @@ unnoticed for so long.
   missing route or a nil factory when somebody started a table.
 - Unreachable guards removed across the engine, poker and the game packages, each
   with a comment saying why it could not fire.
+- **One stuck session no longer stops the others resizing.** When the server's
+  size tier moved, the sweep that tells each session its new size waited on each
+  in turn, so a session whose screen was stuck held every later one at a size the
+  tier no longer grants. Each session now gets its nudge on its own, at most one at
+  a time.
+- **A big terminal held back for want of room gets it when room frees up.** A
+  session that left without moving the size tier gave back its extra cells, but
+  nobody was told, so a session held at a smaller size kept it until it resized.
 
 ### Testing
 

@@ -283,6 +283,35 @@ func TestRouter_View(t *testing.T) {
 	}
 }
 
+// While only the resize prompt is drawn the player cannot see the view, so a key
+// must not play a card or confirm a leave on it. Quitting still works, and the key
+// still counts as activity so a player resizing is not idled out.
+func TestRouter_KeysDoNotReachAHiddenView(t *testing.T) {
+	t.Parallel()
+
+	var last tea.Msg
+	r := New(GlobalContext{})
+	r.Register("recording", func(GlobalContext, Payload) tea.Model { return recordingModel{last: &last} })
+	r.Goto("recording", Payload{})
+	r.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	r.lastActivity = time.Now().Add(-time.Hour)
+
+	for _, msg := range []tea.Msg{tuitest.Key("enter"), tea.MouseClickMsg{}} {
+		_, cmd := r.Update(msg)
+		assert.Nil(t, cmd)
+		assert.IsType(t, tea.WindowSizeMsg{}, last, "%T reached the hidden view", msg)
+	}
+	_, cmd := r.Update(tickMsg(time.Now()))
+	assert.False(t, isQuit(cmd), "input while too small is still activity")
+
+	_, cmd = r.Update(tuitest.Key("ctrl+c"))
+	assert.True(t, isQuit(cmd), "ctrl+c still quits")
+
+	r.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	r.Update(tuitest.Key("enter"))
+	assert.Equal(t, tuitest.Key("enter"), last, "keys reach the view again once it is drawn")
+}
+
 // The prompt is rendered in the session's own palette, not a global one: two players
 // can have opposite terminal backgrounds.
 func TestRouter_ViewUsesTheSessionTheme(t *testing.T) {

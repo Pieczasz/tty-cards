@@ -38,7 +38,7 @@ func TestSessionState_IsPerChannelNotPerConnection(t *testing.T) {
 
 	tracker := NewSessionTracker(0)
 	user := &db.User{ID: testutil.UID(11), Username: "shared"}
-	gen, err := tracker.Connect(user.ID, nil)
+	gen, err := tracker.Connect(user.ID, nil, nil)
 	require.NoError(t, err)
 	deps := Deps{LobbyManager: lobby.NewManager(t.Context(), nil, catalog.NewRegistry()), Tracker: tracker}
 	reg := &sessionRegistry{}
@@ -79,7 +79,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	tracker := NewSessionTracker(0)
-	oldGen, err := tracker.Connect(guest.ID, nil)
+	oldGen, err := tracker.Connect(guest.ID, nil, nil)
 	require.NoError(t, err)
 	deps := Deps{LobbyManager: manager, Tracker: tracker}
 	reg := &sessionRegistry{}
@@ -90,7 +90,7 @@ func TestReleaseSession_GivesUpTheSeatBeforeTheSlot(t *testing.T) {
 	displaced := make(chan struct{})
 	reconnect := func() {
 		defer close(reconnected)
-		_, err := tracker.Connect(guest.ID, nil)
+		_, err := tracker.Connect(guest.ID, nil, nil)
 		if err != nil {
 			t.Errorf("displace reconnect failed: %v", err)
 			return
@@ -167,18 +167,18 @@ func TestWaitSessions_ASessionArrivingDuringTheDrainIsRefused(t *testing.T) {
 func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(2)
-	_, err := tracker.Connect(testutil.UID(1), nil)
+	_, err := tracker.Connect(testutil.UID(1), nil, nil)
 	require.NoError(t, err)
-	gen, err := tracker.Connect(testutil.UID(2), nil)
+	gen, err := tracker.Connect(testutil.UID(2), nil, nil)
 	require.NoError(t, err)
-	_, err = tracker.Connect(testutil.UID(3), nil)
+	_, err = tracker.Connect(testutil.UID(3), nil, nil)
 	require.ErrorIs(t, err, errServerFull)
 
 	// A second session for an already-connected account displaces rather than
 	// failing: half-open TCP otherwise blocks the mid-game reconnect grace.
-	gen1, err := tracker.Connect(testutil.UID(1), nil)
+	gen1, err := tracker.Connect(testutil.UID(1), nil, nil)
 	require.NoError(t, err)
-	gen2, err := tracker.Connect(testutil.UID(1), nil)
+	gen2, err := tracker.Connect(testutil.UID(1), nil, nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, gen1, gen2)
 	assert.False(t, release(tracker, testutil.UID(1), gen1), "stale generation must not free the slot")
@@ -186,7 +186,7 @@ func TestSessionTracker_RefusesBeyondCapacityWithDistinctError(t *testing.T) {
 	assert.True(t, release(tracker, testutil.UID(1), gen2))
 
 	assert.True(t, release(tracker, testutil.UID(2), gen))
-	_, err = tracker.Connect(testutil.UID(3), nil)
+	_, err = tracker.Connect(testutil.UID(3), nil, nil)
 	require.NoError(t, err, "capacity frees with the seat")
 }
 
@@ -194,7 +194,7 @@ func TestSessionTracker_ReleaseWithFreesTheSlotWhenTheTeardownPanics(t *testing.
 	t.Parallel()
 	tracker := NewSessionTracker(0)
 	user := testutil.UID(51)
-	gen, err := tracker.Connect(user, nil)
+	gen, err := tracker.Connect(user, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, tracker.Count())
 
@@ -202,7 +202,7 @@ func TestSessionTracker_ReleaseWithFreesTheSlotWhenTheTeardownPanics(t *testing.
 		tracker.ReleaseWith(user, gen, func() { panic("disconnect") })
 	})
 	assert.Equal(t, 0, tracker.Count(), "a panicking teardown still frees the slot")
-	_, err = tracker.Connect(user, nil)
+	_, err = tracker.Connect(user, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, tracker.Count())
 }
@@ -214,7 +214,7 @@ func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(0)
 	user := testutil.UID(21)
-	gen, err := tracker.Connect(user, nil)
+	gen, err := tracker.Connect(user, nil, nil)
 	require.NoError(t, err)
 
 	inTeardown, finish := make(chan struct{}), make(chan struct{})
@@ -226,7 +226,7 @@ func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
 
 	reconnected := make(chan struct{})
 	go func() {
-		_, _ = tracker.Connect(user, nil)
+		_, _ = tracker.Connect(user, nil, nil)
 		close(reconnected)
 	}()
 	select {
@@ -250,7 +250,7 @@ func TestSessionTracker_ReleaseWithHoldsOffTheReconnect(t *testing.T) {
 func TestSessionTracker_ATeardownDoesNotHoldOffOtherAccounts(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(0)
-	gen, err := tracker.Connect(testutil.UID(41), nil)
+	gen, err := tracker.Connect(testutil.UID(41), nil, nil)
 	require.NoError(t, err)
 
 	inTeardown, finish := make(chan struct{}), make(chan struct{})
@@ -263,7 +263,7 @@ func TestSessionTracker_ATeardownDoesNotHoldOffOtherAccounts(t *testing.T) {
 
 	connected := make(chan error, 1)
 	go func() {
-		_, err := tracker.Connect(testutil.UID(42), nil)
+		_, err := tracker.Connect(testutil.UID(42), nil, nil)
 		connected <- err
 	}()
 	select {
@@ -282,9 +282,9 @@ func TestSessionTracker_ATeardownDoesNotHoldOffOtherAccounts(t *testing.T) {
 func TestSessionTracker_ForgetsAnAccountOnceItsSessionEnds(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(1)
-	gen, err := tracker.Connect(testutil.UID(51), nil)
+	gen, err := tracker.Connect(testutil.UID(51), nil, nil)
 	require.NoError(t, err)
-	_, err = tracker.Connect(testutil.UID(52), nil)
+	_, err = tracker.Connect(testutil.UID(52), nil, nil)
 	require.ErrorIs(t, err, errServerFull)
 	require.True(t, release(tracker, testutil.UID(51), gen))
 
@@ -299,9 +299,9 @@ func TestSessionTracker_ForgetsAnAccountOnceItsSessionEnds(t *testing.T) {
 func TestSessionTracker_CountDoesNotWaitForATeardown(t *testing.T) {
 	t.Parallel()
 	tracker := NewSessionTracker(0)
-	gen, err := tracker.Connect(testutil.UID(31), nil)
+	gen, err := tracker.Connect(testutil.UID(31), nil, nil)
 	require.NoError(t, err)
-	_, err = tracker.Connect(testutil.UID(32), nil)
+	_, err = tracker.Connect(testutil.UID(32), nil, nil)
 	require.NoError(t, err)
 
 	inTeardown, finish := make(chan struct{}), make(chan struct{})
@@ -417,12 +417,12 @@ func TestSessionTracker_ConnectClosesTheDisplacedSession(t *testing.T) {
 	tracker := NewSessionTracker(1)
 	first := &countingCloser{}
 
-	gen1, err := tracker.Connect(testutil.UID(7), first)
+	gen1, err := tracker.Connect(testutil.UID(7), first, nil)
 	require.NoError(t, err)
 	assert.Zero(t, first.closed.Load(), "nothing is displaced yet")
 
 	second := &countingCloser{err: errors.New("already gone")}
-	gen2, err := tracker.Connect(testutil.UID(7), second)
+	gen2, err := tracker.Connect(testutil.UID(7), second, nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, gen1, gen2)

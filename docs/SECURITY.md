@@ -94,8 +94,8 @@ closed as "working as intended":
   compromised client machine** - if the attacker already has the player's SSH
   key, the game is over by definition.
 - **The reported version of a dependency** with no reachable call path.
-  `govulncheck` runs in CI and is reachability-based; if you have a reachable
-  path it missed, that *is* in scope - show the path.
+  `govulncheck` runs in CI and weekly on main, and is reachability-based; if you
+  have a reachable path it missed, that *is* in scope - show the path.
 
 ## Hardening the deployment you run
 
@@ -128,7 +128,9 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
 - **Set a strong, unique `DB_PASSWORD`.** Compose refuses to start without one,
   and with `ENV=production` the server refuses to boot without one. `ENV` itself
   must be `production`, `staging` or `development`; a typo fails the boot rather
-  than running with every production check off. Boolean settings are parsed as
+  than running with every production check off. It is read only from the process
+  environment, before `.env`, so an `ENV` line in `.env` fails the boot instead of
+  being silently ignored. Boolean settings are parsed as
   strictly (`true`/`false`, `1`/`0`, `t`/`f`), so a mistyped `PROXY_PROTOCOL` or
   `API_TRUST_PROXY` - `off`, `yes` - fails the boot instead of quietly meaning one
   or the other. Outside `ENV=development`
@@ -150,8 +152,11 @@ assumes. Breaking one is how a safe deployment becomes an unsafe one.
 - **Keep the container restrictions.** Every service runs with
   `no-new-privileges`; the backend is `FROM scratch`, `read_only` and
   `cap_drop: [ALL]`; nginx keeps only the four capabilities its master process
-  needs. Images are pinned by digest and CI actions by commit SHA, with the CI
-  token read-only and Dependabot moving the pins.
+  needs, Alloy only `DAC_OVERRIDE` for its data directory, and the other sidecars
+  none, so none of them can spoof `db` on the default network with raw packets
+  (CI asserts `cap_drop: [ALL]` on every restarting service but `db` and the
+  one-shot `migrate`). Images are pinned by digest and CI actions by commit SHA,
+  with the CI token read-only and Dependabot moving the pins and the Go modules.
 - **Protect your backups, and keep one off the host.** `scripts/backup.sh` writes
   each archive `0600` and keeps the newest `BACKUP_KEEP` (14); `backups/` never
   enters the image build context. An archive is the whole user base, fingerprints

@@ -691,6 +691,28 @@ func TestUpdate_DeleteAccountFlow(t *testing.T) {
 	})
 }
 
+// Closing the terminal right after enter is the natural last move. The erasure was
+// requested, so it has to finish rather than roll back with the session.
+func TestDeleteAccount_OutlivesTheSession(t *testing.T) {
+	t.Parallel()
+
+	var seen error
+	repo := fakeUsers{deleteAccount: func(ctx context.Context, _ uuid.UUID) error {
+		seen = ctx.Err()
+		_, hasDeadline := ctx.Deadline()
+		assert.True(t, hasDeadline, "the erasure is still bounded by the request timeout")
+		return seen
+	}}
+	session, endSession := context.WithCancel(t.Context())
+	cmd := deleteAccount(session, repo, testutil.UID(1))
+	endSession()
+
+	msg, ok := cmd().(accountDeletedMsg)
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	assert.NoError(t, seen)
+}
+
 // A seat is live state the lobby and engine hold under this player ID; erasing the
 // account under it would rename a player mid-hand.
 func TestUpdate_DeleteRefusedWhileSeated(t *testing.T) {

@@ -230,6 +230,13 @@ func TestRenderFigureUncached_LeavesTheCacheAlone(t *testing.T) {
 	}
 }
 
+// go-figure in strict mode calls log.Fatal on any rune outside printable ASCII,
+// which would end the shared process and drop every session. Non-strict draws '?'.
+func TestRenderFigureUncached_NonASCIIDoesNotExit(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, styles.RenderFigureUncached("?a", 120, 10), styles.RenderFigureUncached("éa", 120, 10))
+}
+
 // A footer too wide for its box breaks between actions: word wrapping used to leave
 // "t -" at the end of one line and "Leaderboard" at the start of the next.
 func TestWrapActions_BreaksOnlyBetweenActions(t *testing.T) {

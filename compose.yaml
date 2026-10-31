@@ -379,6 +379,13 @@ services:
     mem_limit: 256m
     cpus: 0.4
     <<: *defaults
+    # Dropping NET_RAW and the rest keeps a compromised sidecar from spoofing db on
+    # the default network. Alloy runs as root over a data directory the image gives
+    # to its alloy user (473, mode 770), so root needs DAC_OVERRIDE to reach it, and
+    # nothing more: Docker is reached over TCP through the socket proxy. The other
+    # sidecars below run as their own non-root users and need no capability.
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
     volumes:
       - ./internal/config/alloy/config.alloy:/etc/alloy/config.alloy:ro
       # Log read positions and the metrics WAL. In the container layer they went with
@@ -446,6 +453,7 @@ services:
     mem_limit: 512m
     cpus: 0.3
     <<: *defaults
+    cap_drop: [ALL]
     command: -config.file=/etc/loki/loki.yaml
     # Go does not read the cgroup limit, so without this the GC lets the heap grow
     # until the kernel kills it. ~80% of mem_limit; the same holds for tempo.
@@ -471,6 +479,7 @@ services:
     mem_limit: 384m
     cpus: 0.2
     <<: *defaults
+    cap_drop: [ALL]
     command: -config.file=/etc/tempo/tempo.yaml
     environment:
       - GOMEMLIMIT=307MiB
@@ -493,6 +502,7 @@ services:
     mem_limit: 512m
     cpus: 0.3
     <<: *defaults
+    cap_drop: [ALL]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --web.enable-remote-write-receiver
@@ -526,6 +536,7 @@ services:
     mem_limit: 32m
     cpus: 0.1
     <<: *defaults
+    cap_drop: [ALL]
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -555,6 +566,7 @@ services:
     mem_limit: 320m
     cpus: 0.2
     <<: *defaults
+    cap_drop: [ALL]
     volumes:
       - ./internal/config/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./internal/config/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro

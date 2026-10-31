@@ -186,7 +186,12 @@ jobs:
         # No service may gain privileges; the proxy keeps only what nginx needs.
         missing=$(jq -r '.services | to_entries[] | select((.value.security_opt // []) | index("no-new-privileges:true") | not) | .key' <<<"$cfg")
         [ -z "$missing" ] || fail "services without no-new-privileges: $missing"
-        jq -e '.services.proxy.cap_drop == ["ALL"]' <<<"$cfg" >/dev/null || fail "proxy must cap_drop ALL"
+        # Every long-running service drops every capability (NET_RAW among them, which
+        # would let one spoof db on the shared network), the proxy then adding back its
+        # four. db's entrypoint needs root's to step down to postgres; migrate is a
+        # one-shot job.
+        caps=$(jq -r '.services | to_entries[] | select(.value.restart != null and .key != "db" and .key != "migrate" and .value.cap_drop != ["ALL"]) | .key' <<<"$cfg")
+        [ -z "$caps" ] || fail "services without cap_drop ALL: $caps"
         jq -e '.services.proxy.cap_add | sort == ["CHOWN","NET_BIND_SERVICE","SETGID","SETUID"]' <<<"$cfg" >/dev/null \
           || fail "proxy cap_add must be exactly NET_BIND_SERVICE, CHOWN, SETUID, SETGID"
 
@@ -287,7 +292,9 @@ jobs:
         jq -e '.services.backend.environment.SSH_KEY_PATH | startswith("/data/ssh/")' <<<"$cfg" >/dev/null \
           || fail "SSH_KEY_PATH must live in /data/ssh, the directory backup.sh copies"
 
-        # Local backups never enter the image build context.
-        grep -qx 'backups/' .dockerignore || fail ".dockerignore must exclude backups/"
+        # Local backups never enter the image build context: .dockerignore is an
+        # allowlist that starts from * and never lets backups/ back in.
+        grep -qx '\*' .dockerignore || fail ".dockerignore must start from * (an allowlist)"
+        ! grep -q '^!backups' .dockerignore || fail ".dockerignore must not re-include backups/"
 
         echo "deployment hardening holds"

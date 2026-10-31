@@ -9,3 +9,4 @@ Held here, not as `TODO` comments (`godox` fails the lint). Delete an entry in t
 | A template-method framework for game views | A sixth game whose view is mostly hearts/gin plumbing |
 | Split `internal/game` into an SPI package and the engine | Rules packages start needing engine internals, or a second engine |
 | `Engine[S]` generics, or a typed `Extra` adapter | A sixth game |
+| A write deadline on session output. A peer that stops granting ssh window holds its session's event loop in a render, unbounded while it keeps sending (each read restarts the idle timeout); resizes and the retier no longer wait on it | Sessions seen parked in a renderer write, or an account slot held by a peer that sends but never reads |

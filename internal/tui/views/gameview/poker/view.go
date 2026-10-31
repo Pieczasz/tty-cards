@@ -307,10 +307,9 @@ func (m *model) renderActionBar() string {
 	if m.canAllIn() {
 		opts = append(opts, "a: all-in")
 	}
+	// A finished hand or match never reaches the action bar: View draws the hand-over
+	// screen for both.
 	if len(opts) == 0 {
-		if m.handComplete || m.Base.Phase == game.Finished {
-			return m.Global.Palette().Muted.Render("esc -> lobby")
-		}
 		return m.Global.Palette().Muted.Render("waiting…")
 	}
 	return m.Global.Palette().Accented.Render(strings.Join(opts, " | "))

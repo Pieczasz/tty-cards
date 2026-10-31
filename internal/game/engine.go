@@ -33,6 +33,8 @@ type Engine struct {
 	winner *Player
 	// onIdleRemoved is set once at construction, so it is read without the lock.
 	onIdleRemoved func(playerID string)
+	// refused is why NewEngine would not seat the roster; Start returns it.
+	refused error
 }
 
 // turnClock is the engine's per-turn timer and idle count, guarded by Engine.mu.
@@ -87,20 +89,27 @@ func WithOnIdleRemoved(fn func(playerID string)) EngineOption {
 	}
 }
 
+// NewEngine seats a copy of players. A nil player is a caller's bug: it is not
+// seated, so nothing that reads the seats dereferences it, and Start refuses the
+// table with an error instead of opening it a seat short.
 func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
-	seats := make([]*Player, len(players))
+	var refused error
+	seats := make([]*Player, 0, len(players))
 	for i, p := range players {
-		if p != nil {
-			seat := *p
-			seat.Cards = nil
-			// Ratings are the lobby's, read off its own roster; a map shared with it
-			// would be one the lobby rewrites while the table runs.
-			seat.Ratings = nil
-			seats[i] = &seat
+		if p == nil {
+			refused = fmt.Errorf("seat %d is nil", i)
+			continue
 		}
+		seat := *p
+		seat.Cards = nil
+		// Ratings are the lobby's, read off its own roster; a map shared with it
+		// would be one the lobby rewrites while the table runs.
+		seat.Ratings = nil
+		seats = append(seats, &seat)
 	}
 	e := &Engine{
-		state: NewState(rules, seats, nil),
+		refused: refused,
+		state:   NewState(rules, seats, nil),
 		// 2n: one feed per seat plus one reconnect overlapping the old teardown,
 		// +8: lobby watcher and a little spare so a real player is never the one refused.
 		broadcaster: broadcaster.New[Event](2*len(players) + 8),
@@ -130,6 +139,9 @@ func (e *Engine) Start() (err error) {
 
 	if e.closed {
 		return errClosed
+	}
+	if e.refused != nil {
+		return e.refused
 	}
 	if e.state.Phase != Waiting {
 		return errors.New("game already started")
