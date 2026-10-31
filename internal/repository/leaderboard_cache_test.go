@@ -33,8 +33,7 @@ func holdRankingsQueries(t *testing.T, database *gorm.DB) (entered <-chan struct
 		in <- struct{}{}
 		<-gate
 	}))
-	var once sync.Once
-	release = func() { once.Do(func() { close(gate) }) }
+	release = sync.OnceFunc(func() { close(gate) })
 	t.Cleanup(release)
 	return in, release, &count
 }

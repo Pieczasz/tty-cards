@@ -236,7 +236,7 @@ func (m *joinModel) joinByCode(code string) (tea.Model, tea.Cmd) {
 	if code == "" {
 		return m, nil
 	}
-	joined, err := m.global.LobbyManager.JoinLobbyByCode(code, views.SessionPlayer(m.global))
+	joined, err := m.global.LobbyManager.JoinLobbyByCode(m.global.RequestContext(), code, views.SessionPlayer(m.global))
 	if err != nil {
 		m.err = views.PlayerError(m.global.RequestContext(), err)
 		// The table may have filled or started while the list was on screen, so show

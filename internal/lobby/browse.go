@@ -144,8 +144,10 @@ func (m *Manager) GamesOnOffer() []game.Module {
 	})
 }
 
-// publicLobbyCacheTTL is what keeps a browse off every lobby's own lock. The window
-// is short enough that a new table shows up on the next refresh.
+// publicLobbyCacheTTL is how long a browse reuses the last scan of which tables are
+// on offer, which spares it a pass over every lobby on the server. It still takes
+// each offered lobby's read lock in browseEntry. The window is short enough that a
+// new table shows up on the next refresh.
 const publicLobbyCacheTTL = 2 * time.Second
 
 // invalidatePublicCache makes the next browse re-scan. Callers are the writes that

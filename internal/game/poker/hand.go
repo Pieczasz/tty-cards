@@ -16,10 +16,13 @@ const (
 	BoardSize = flopCards + 1 + 1
 
 	flopCards = 3
-	// minDeckAfterDeal is a burn, the board and a two-card margin, checked once the
-	// hole cards for the hand are out.
-	minDeckAfterDeal = 1 + BoardSize + 2
 )
+
+// One fresh deck covers any hand at a full table: hole cards for every seat, a burn
+// for each of the three streets and the board. OnGameStart refuses more than
+// MaxPlayers, and this stops compiling if either side outgrows the 52 cards, so a
+// deck that runs dry mid-hand cannot happen.
+const _ = uint(52 - MaxPlayers*HoleCards - 3 - BoardSize)
 
 var (
 	errChipsInPot  = errors.New("poker hand finished with chips still in the pot")
@@ -60,11 +63,6 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	if err := dealHoleCards(state, extra); err != nil {
 		return err
 	}
-	if state.Deck.Size() < minDeckAfterDeal {
-		state.Logger().Error("poker deck too small to run the board",
-			"hand", extra.HandNumber, "size", state.Deck.Size(), "want", minDeckAfterDeal)
-		return errors.New("not enough cards to run the board")
-	}
 
 	// Seats are counted before the blinds are posted: a blind big enough to bust a
 	// short stack would otherwise make a full table look heads-up.
@@ -82,9 +80,8 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	first := firstToActPreflop(state, extra, headsUp)
 	if first < 0 {
 		// Every funded player was put all-in by their own blind: nobody can act,
-		// so the board just runs out. The blinds are already in the pool, so a
-		// run-out that fails hands them back rather than stranding them.
-		return settleOrUnwind(state, extra)
+		// so the board just runs out.
+		return settleAndAdvance(state, extra)
 	}
 	state.SetTurn(first)
 	return nil
@@ -222,9 +219,6 @@ func checkChipConservation(state *game.State, extra *State) error {
 			"pool", extra.Pool,
 		)
 		return errChipsInPot
-	}
-	if extra.handStartChips == 0 {
-		return nil // a hand-shaped State assembled by hand, not dealt by beginHand
 	}
 	total := chipsInPlay(extra)
 	if total == extra.handStartChips {

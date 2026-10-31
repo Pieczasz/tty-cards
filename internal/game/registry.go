@@ -21,6 +21,9 @@ type Registry struct {
 	order   []string
 }
 
+// NewRegistry indexes mods in declaration order. A module missing a name, slug or
+// factory, with impossible seat bounds, or declaring a name or slug twice panics: it
+// is a wiring bug the server must not boot with.
 func NewRegistry(mods ...Module) *Registry {
 	r := &Registry{
 		modules: make(map[string]Module, len(mods)),

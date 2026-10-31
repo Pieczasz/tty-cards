@@ -2,7 +2,6 @@ package ginrummy
 
 import (
 	"slices"
-	"time"
 
 	"github.com/Pieczasz/tty-cards/internal/deck"
 	"github.com/Pieczasz/tty-cards/internal/game"
@@ -30,8 +29,7 @@ const (
 	// maxHands bounds the match. Two players who never knock never score, so the
 	// target alone is not a termination condition: a table that walls every hand
 	// redeals forever. At the cap the standings settle on the totals as they are.
-	maxHands             = 50
-	handOverTurnDuration = time.Minute
+	maxHands = 50
 
 	// A meld is three or four of a rank, or a run of three or more in one suit.
 	minMeldSize = 3
@@ -47,8 +45,10 @@ type State struct {
 	// the hand has no termination path. Nil after a stock draw or once the turn ends.
 	TakenUpcard *deck.Card
 
-	// FirstActor is the seat (0 or 1) that acted first in the current hand.
-	// Alternates every hand. Used to park the cursor between hands.
+	// FirstActor is the seat (0 or 1) that acts first in the hand being played. It
+	// alternates every hand, and closeHand flips it as the hand ends, so during
+	// PhaseHandOver it already names the next hand's first actor, the seat
+	// ActionNextHand is expected from. A hand that ends the match leaves it unflipped.
 	FirstActor int
 
 	HandNumber int

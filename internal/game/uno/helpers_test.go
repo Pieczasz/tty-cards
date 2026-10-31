@@ -11,15 +11,13 @@ import (
 
 // suite is uno described to the shared shedding-game suite.
 var suite = gametest.Shed{
-	Rules:      &Rules{},
-	MinPlayers: MinPlayers,
-	MaxPlayers: MaxPlayers,
-	Deck:       initialDeck,
-	NewExtra:   func(top deck.Card) any { return &State{CurrentColor: top.Suit, Direction: 1} },
-	ShedState:  func(e any) *shed.State { return &e.(*State).State },
-	Opens:      func(c deck.Card) bool { return !IsWild(c) },
-	Play:       func(c deck.Card, suit deck.Suit) game.Action { return ActionPlayCard{Card: c, ChosenSuit: suit} },
-	Draw:       ActionDrawCard{},
+	Rules:     &Rules{},
+	Deck:      initialDeck,
+	NewExtra:  func(top deck.Card) any { return &State{CurrentColor: top.Suit, Direction: 1} },
+	ShedState: func(e any) *shed.State { return &e.(*State).State },
+	Opens:     func(c deck.Card) bool { return !IsWild(c) },
+	Play:      func(c deck.Card, suit deck.Suit) game.Action { return ActionPlayCard{Card: c, ChosenSuit: suit} },
+	Draw:      ActionDrawCard{},
 }
 
 func TestShedContract(t *testing.T) {

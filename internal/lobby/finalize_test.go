@@ -2,6 +2,7 @@ package lobby
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -32,7 +33,7 @@ func newFinishedGameLobby(t *testing.T, repo db.MatchRepository) (*Manager, *Lob
 
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mockgame"), WithRanked(true))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	// The standings are the seats in order: leader, then guest.
 	require.NoError(t, m.ToggleReady(leader))
@@ -164,7 +165,7 @@ func TestToggleReady_NoGameStartsWhileTheServerDrains(t *testing.T) {
 	t.Parallel()
 	m, l := newTestLobby(t, 2)
 	leader, guest := l.Snapshot().Leader.Player, mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	require.NoError(t, m.ToggleReady(leader))
 
 	m.BeginShutdown()
@@ -190,7 +191,7 @@ func TestStopNewGames_RefusesAStartButKeepsTheMatchInPlayRated(t *testing.T) {
 	host, guest := mockPlayer("host", testutil.UID(3)), mockPlayer("joiner", testutil.UID(4))
 	next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("mockgame"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), next.Code(), guest)))
 	require.NoError(t, m.ToggleReady(host))
 
 	m.StopNewGames()
@@ -240,7 +241,7 @@ func TestKick_IsRejectedWhileInGame(t *testing.T) {
 	m, l := newTestLobby(t, 2)
 	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	require.NoError(t, m.ToggleReady(leader))
 	require.NoError(t, m.ToggleReady(guest))
@@ -269,7 +270,7 @@ func TestToggleReady_FailedStartStillBroadcasts(t *testing.T) {
 	guest := mockPlayer("p2", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithMaxPlayers(4), WithCardGame("mock"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	observer, err := l.Subscribe("observer")
 	require.NoError(t, err)
@@ -364,12 +365,12 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 
 	assert.True(t, l.HasPlayer(guest), "the seat is held for the grace window")
 	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "and stays indexed")
 
-	m.ResumePlayer(guest)
+	m.ResumePlayer(t.Context(), guest)
 	require.Equal(t, l, m.FindLobbyByPlayer(guest), "a reconnect lands back at the same lobby")
 	m.mu.Lock()
 	_, pending := m.grace.pending[guest.ID]
@@ -377,16 +378,48 @@ func TestDisconnectPlayer_MidGameSeatSurvivesTheGraceWindow(t *testing.T) {
 	assert.False(t, pending, "the pending leave is cancelled by the resume")
 }
 
+type sessionKey struct{}
+
+// sessionTagHandler writes the session a record's ctx carries, which is what
+// otelslog does with the trace and span in production.
+type sessionTagHandler struct{ slog.Handler }
+
+func (h sessionTagHandler) Handle(ctx context.Context, r slog.Record) error {
+	if v, ok := ctx.Value(sessionKey{}).(string); ok {
+		r.AddAttrs(slog.String("session", v))
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+// The drop and the reconnect are a session's own story: their lines have to carry
+// that session's context, or they cannot be found by its trace.
+//
+//nolint:paralleltest // slog.SetDefault is process-wide, so this cannot share the process
+func TestDisconnectPlayer_LogsUnderTheSessionContext(t *testing.T) {
+	var logged syncBuffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(sessionTagHandler{slog.NewJSONHandler(&logged, nil)}))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	m, _, _, guest := startedGame(t)
+	m.DisconnectPlayer(context.WithValue(t.Context(), sessionKey{}, "dropped"), guest)
+	m.ResumePlayer(context.WithValue(t.Context(), sessionKey{}, "resumed"), guest)
+
+	out := logged.String()
+	assert.Contains(t, out, `"msg":"session dropped mid-game, holding the seat","player_id":"p2","grace":"1m30s","session":"dropped"`)
+	assert.Contains(t, out, `"msg":"player reconnected inside the grace window","player_id":"p2","session":"resumed"`)
+}
+
 func TestDisconnectPlayer_GraceExpiryForfeitsTheSeat(t *testing.T) {
 	t.Parallel()
 
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	m.expireLeaveGen(guest, 0)
 
 	assert.False(t, l.HasPlayer(guest), "the expired seat is given up")
-	m.ResumePlayer(guest)
+	m.ResumePlayer(t.Context(), guest)
 	assert.Nil(t, m.FindLobbyByPlayer(guest), "nothing to resume after expiry")
 }
 
@@ -398,13 +431,13 @@ func TestReleaseHeldSeats_StaleReleaseKeepsANewerHold(t *testing.T) {
 	t.Parallel()
 
 	m, l, _, guest := startedGame(t)
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	var once sync.Once
 	m.heldSeatsCollected = func() {
 		once.Do(func() {
 			// The player comes back and drops again: a newer hold on the same seat.
-			m.ResumePlayer(guest)
-			m.DisconnectPlayer(guest)
+			m.ResumePlayer(t.Context(), guest)
+			m.DisconnectPlayer(t.Context(), guest)
 		})
 	}
 
@@ -420,7 +453,7 @@ func TestRemoveLobby_GivesUpHeldSeats(t *testing.T) {
 	t.Parallel()
 
 	m, l, _, guest := startedGame(t)
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	require.True(t, pendingGrace(m, guest.ID))
 
 	m.RemoveLobby(l.Code())
@@ -434,7 +467,7 @@ func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
 
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	m.mu.Lock()
 	h := m.grace.pending[guest.ID]
 	delete(m.grace.pending, guest.ID)
@@ -444,7 +477,7 @@ func TestResumePlayer_WaitsUntilAClaimedExpiryFinishes(t *testing.T) {
 
 	returned := make(chan struct{})
 	go func() {
-		m.ResumePlayer(guest)
+		m.ResumePlayer(t.Context(), guest)
 		close(returned)
 	}()
 	select {
@@ -470,7 +503,7 @@ func TestResumePlayer_TakeoverWithoutPendingLeave(t *testing.T) {
 
 	m, l, _, guest := startedGame(t)
 
-	m.ResumePlayer(guest)
+	m.ResumePlayer(t.Context(), guest)
 	assert.Equal(t, l, m.FindLobbyByPlayer(guest), "zombie session still holds the seat")
 }
 
@@ -480,10 +513,10 @@ func TestDisconnectPlayer_UnseatedPlayerHoldsNothing(t *testing.T) {
 	m := newTestManager(t, nil)
 	p := mockPlayer("p1", testutil.UID(1))
 
-	m.DisconnectPlayer(p)
+	m.DisconnectPlayer(t.Context(), p)
 
 	assert.False(t, pendingGrace(m, p.ID), "a grace was armed for a seat that does not exist")
-	m.ResumePlayer(p)
+	m.ResumePlayer(t.Context(), p)
 	assert.Nil(t, m.FindLobbyByPlayer(p))
 }
 
@@ -499,7 +532,7 @@ func TestResumePlayer_RefusedOnceTheTimerHasFired(t *testing.T) {
 	m.mu.Unlock()
 	<-fired
 
-	m.ResumePlayer(guest)
+	m.ResumePlayer(t.Context(), guest)
 	assert.True(t, pendingGrace(m, guest.ID), "the refused resume took the hold from the expiry")
 	assert.True(t, l.HasPlayer(guest))
 }
@@ -510,9 +543,9 @@ func TestDisconnectPlayer_ASecondDropRestartsTheGrace(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		m, l, _, guest := startedGame(t)
-		m.DisconnectPlayer(guest)
+		m.DisconnectPlayer(t.Context(), guest)
 		time.Sleep(disconnectGrace / 2)
-		m.DisconnectPlayer(guest)
+		m.DisconnectPlayer(t.Context(), guest)
 
 		time.Sleep(disconnectGrace/2 + time.Second)
 		synctest.Wait()
@@ -530,10 +563,10 @@ func TestDisconnectPlayer_WaitingLobbyLeavesImmediately(t *testing.T) {
 
 	m, l := newTestLobby(t, 2)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	require.Equal(t, waiting, l.state)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 
 	assert.False(t, l.HasPlayer(guest), "nothing is lost by leaving a waiting lobby")
 	assert.Nil(t, m.FindLobbyByPlayer(guest))
@@ -546,7 +579,7 @@ func startedGame(t *testing.T) (*Manager, *Lobby, *game.Player, *game.Player) {
 	m, l := newTestLobby(t, 2)
 	leader := l.Snapshot().Leader.Player
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	require.NoError(t, m.ToggleReady(leader))
 	require.NoError(t, m.ToggleReady(guest))
 	require.NotNil(t, l.ActiveGame(), "the game did not start")
@@ -574,7 +607,7 @@ func TestLobby_IdleRemovalLeavesTheRoster(t *testing.T) {
 		leader, guest := mockPlayer("p1", testutil.UID(1)), mockPlayer("p2", testutil.UID(2))
 		l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mock"))
 		require.NoError(t, err)
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 		require.NoError(t, m.ToggleReady(leader))
 		require.NoError(t, m.ToggleReady(guest))
 		idler, other := leader, guest
@@ -600,7 +633,7 @@ func TestLobby_IdleRemovalReachesTheRosterWithNothingReadingTheFeed(t *testing.T
 	synctest.Test(t, func(t *testing.T) {
 		m, l := newTestLobby(t, 2)
 		leader, guest := l.Snapshot().Leader.Player, mockPlayer("p2", testutil.UID(2))
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 		engine := game.NewEngine(stubRules{}, []*game.Player{leader, guest}, m.seatHook(l))
 		require.NoError(t, engine.Start())
@@ -627,7 +660,7 @@ func TestDropSeat_LeavesAPlayerWhoMovedOnAlone(t *testing.T) {
 	m.LeaveLobby(guest)
 	next, err := m.CreateLobby(mockPlayer("p3", testutil.UID(3)), WithMaxPlayers(2), WithCardGame("mock"))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), next.Code(), guest)))
 
 	m.dropSeat(l, guest.ID)
 
@@ -642,7 +675,7 @@ func TestDisconnectPlayer_HeldSeatIsGivenUpWhenTheGameEnds(t *testing.T) {
 	t.Parallel()
 	m, l, leader, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	require.True(t, l.HasPlayer(guest), "a mid-game seat is held, not dropped")
 	require.True(t, pendingGrace(m, guest.ID))
 
@@ -663,7 +696,7 @@ func TestDisconnectPlayer_ReleasedHoldDoesNotFireIntoTheNextTable(t *testing.T) 
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		m, _, leader, guest := startedGame(t)
-		m.DisconnectPlayer(guest)
+		m.DisconnectPlayer(t.Context(), guest)
 		m.LeaveLobby(leader)
 		synctest.Wait()
 		require.Nil(t, m.FindLobbyByPlayer(guest), "the finished table gave the held seat up")
@@ -672,10 +705,10 @@ func TestDisconnectPlayer_ReleasedHoldDoesNotFireIntoTheNextTable(t *testing.T) 
 		host := mockPlayer("p3", testutil.UID(3))
 		next, err := m.CreateLobby(host, WithMaxPlayers(2), WithCardGame("mock"))
 		require.NoError(t, err)
-		require.NoError(t, joinErr(m.JoinLobbyByCode(next.Code(), guest)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), next.Code(), guest)))
 		require.NoError(t, m.ToggleReady(host))
 		require.NoError(t, m.ToggleReady(guest))
-		m.DisconnectPlayer(guest)
+		m.DisconnectPlayer(t.Context(), guest)
 
 		time.Sleep(disconnectGrace/2 + time.Second)
 		synctest.Wait()
@@ -691,7 +724,7 @@ func TestToggleReady_ReleasesHeldSeatsWhenReopening(t *testing.T) {
 	t.Parallel()
 	m, l, leader, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	require.True(t, l.HasPlayer(guest), "a mid-game seat is held, not dropped")
 	require.True(t, pendingGrace(m, guest.ID))
 
@@ -711,7 +744,7 @@ func TestFeedEnd_ReleasesHeldSeatsWhenFinished(t *testing.T) {
 	t.Parallel()
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	require.True(t, pendingGrace(m, guest.ID))
 
 	engine := l.ActiveGame()
@@ -733,7 +766,7 @@ func TestBeginShutdown_GivesUpSeatsHeldForAReconnect(t *testing.T) {
 	t.Parallel()
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	require.True(t, pendingGrace(m, guest.ID))
 
 	m.BeginShutdown()
@@ -750,7 +783,7 @@ func TestStopNewGames_KeepsAHoldThatExpiresInTheDrainWindow(t *testing.T) {
 	t.Parallel()
 	m, l, _, guest := startedGame(t)
 
-	m.DisconnectPlayer(guest)
+	m.DisconnectPlayer(t.Context(), guest)
 	m.StopNewGames()
 	m.expireLeaveGen(guest, 0)
 
@@ -992,7 +1025,7 @@ func TestFinalize_RefreshesTheSeatedPlayersRatings(t *testing.T) {
 	m := newTestManager(t, repo)
 	l, err := m.CreateLobby(leader, WithMaxPlayers(2), WithCardGame("mockgame"), WithRanked(true))
 	require.NoError(t, err)
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	events, err := l.Subscribe(leader.ID)
 	require.NoError(t, err)
 	require.NoError(t, m.ToggleReady(leader))

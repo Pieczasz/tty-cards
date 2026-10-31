@@ -20,7 +20,7 @@ func createTestState() *game.State {
 		{ID: "p3", Cards: []deck.Card{{Rank: deck.Four, Suit: deck.Clubs}, {Rank: deck.Jack, Suit: deck.Spades}}},
 	}
 	state := game.NewState(rules, players, deck.Standard())
-	state.Extra = &State{
+	extra := &State{
 		Pool:       0,
 		CurrentBet: 0,
 		MinRaise:   10,
@@ -30,6 +30,8 @@ func createTestState() *game.State {
 		Table:      make([]deck.Card, 0),
 		Seats:      seatsWithChips(map[string]uint{"p1": 1000, "p2": 1000, "p3": 1000}),
 	}
+	extra.handStartChips = chipsInPlay(extra)
+	state.Extra = extra
 	state.CurrentTurn = 0
 	state.Phase = game.Playing
 	return state
@@ -121,6 +123,20 @@ func TestRules_OnGameStart_RefusesAnEmptyTable(t *testing.T) {
 	t.Parallel()
 	state := game.NewState(&Rules{}, nil, nil)
 	require.ErrorContains(t, (&Rules{}).OnGameStart(state), "no players")
+	assert.Nil(t, state.Extra)
+}
+
+// MaxPlayers is what keeps one deck enough for every hand, so the rules hold the
+// line themselves rather than trust every caller to.
+func TestRules_OnGameStart_RefusesMoreThanMaxPlayers(t *testing.T) {
+	t.Parallel()
+	players := make([]*game.Player, MaxPlayers+1)
+	for i := range players {
+		players[i] = &game.Player{ID: fmt.Sprintf("p%d", i)}
+	}
+	state := game.NewState(&Rules{}, players, nil)
+
+	require.ErrorContains(t, (&Rules{}).OnGameStart(state), "seats at most")
 	assert.Nil(t, state.Extra)
 }
 
@@ -229,6 +245,7 @@ func TestRules_CheckWinCondition(t *testing.T) {
 		state := createTestState()
 		extra := gametest.Extra[*State](t, state)
 		extra.Pool = 150
+		extra.handStartChips = chipsInPlay(extra)
 		extra.Seats["p2"].Folded = true
 		extra.Seats["p3"].Folded = true
 		require.NoError(t, afterBettingAction(state, extra))

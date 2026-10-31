@@ -146,6 +146,7 @@ func tableWithChips(stacks ...uint) (*game.State, *State) {
 		players = append(players, &game.Player{ID: id})
 		extra.Seats[id] = &Seat{Chips: chips}
 	}
+	extra.handStartChips = chipsInPlay(extra)
 	state := game.NewState(&Rules{}, players, deck.Standard())
 	state.Extra = extra
 	state.Phase = game.Playing
@@ -220,6 +221,7 @@ func TestFinishHand_StampsTheHandAPlayerWentOutOn(t *testing.T) {
 	// A later hand must not restamp a player who was already out.
 	extra.HandNumber = 5
 	extra.Seats["p2"].Chips = 0
+	extra.handStartChips = chipsInPlay(extra)
 	finishHand(state, extra)
 	assert.Equal(t, map[string]int{"p1": 4, "p2": 5}, bustedAt(extra))
 }
@@ -388,4 +390,14 @@ func TestChipConservation_LogsThroughTheTableLogger(t *testing.T) {
 	require.Len(t, recs, 1)
 	assert.Equal(t, "poker chip conservation broken", recs[0]["msg"])
 	assert.Equal(t, gametest.SinkLobby, recs[0]["lobby"])
+}
+
+// The tripwire has no exemption for a State that skipped beginHand: its baseline is
+// zero, so every chip on the table is a chip from nowhere.
+func TestChipConservation_AZeroBaselineIsNotExempt(t *testing.T) {
+	t.Parallel()
+	state := game.NewState(&Rules{}, []*game.Player{{ID: "a"}, {ID: "b"}}, nil)
+	extra := &State{Seats: seatsWithChips(map[string]uint{"a": 100, "b": 100})}
+
+	require.ErrorIs(t, checkChipConservation(state, extra), errChipsBroken)
 }

@@ -85,7 +85,7 @@ func New(deps Deps) *router.Router {
 // separate from New because the ssh layer may only call it once the session owns its
 // tracker slot, and must run before the router's Init.
 func ResumeSeat(r *router.Router) {
-	r.Global.LobbyManager.ResumePlayer(views.SessionPlayer(r.Global))
+	r.Global.LobbyManager.ResumePlayer(r.Global.RequestContext(), views.SessionPlayer(r.Global))
 }
 
 // registerGameViews is where a seat reaches a view, so it is where the handle is held

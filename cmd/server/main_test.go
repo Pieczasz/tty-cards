@@ -152,7 +152,7 @@ func TestDrainServer_NoGameStartsInTheWindow(t *testing.T) {
 	table, err := manager.CreateLobby(leader, lobby.WithCardGame("gin_rummy"), lobby.WithMaxPlayers(2))
 	require.NoError(t, err)
 	t.Cleanup(func() { manager.RemoveLobby(table.Code()) })
-	_, err = manager.JoinLobbyByCode(table.Code(), guest)
+	_, err = manager.JoinLobbyByCode(t.Context(), table.Code(), guest)
 	require.NoError(t, err)
 	require.NoError(t, manager.ToggleReady(leader))
 
@@ -449,4 +449,17 @@ func TestStartStatsAPI_BindFailureIsReturned(t *testing.T) {
 		t.Cleanup(stop)
 	}
 	require.ErrorContains(t, err, "stats api listen")
+}
+
+// TestDrainBudgetFitsStopGracePeriod pins the drain arithmetic: the windows run one
+// after another, so raising any one of them, or adding one, must still leave room
+// under compose's SIGKILL for the db close and the last log writes.
+func TestDrainBudgetFitsStopGracePeriod(t *testing.T) {
+	t.Parallel()
+	// stopGracePeriod mirrors the backend's stop_grace_period in compose.yaml; CI's
+	// compose job fails when the two differ.
+	const stopGracePeriod = 80 * time.Second
+	const headroom = 3 * time.Second
+	drain := sshDrainTimeout + sessionDrainTimeout + apiDrainTimeout + 2*finalizeDrainTimeout + otelDrainTimeout
+	assert.LessOrEqual(t, drain+headroom, stopGracePeriod)
 }

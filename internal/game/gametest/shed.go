@@ -27,9 +27,6 @@ type ShedRules interface {
 // Shed describes one shedding game to the shared suite.
 type Shed struct {
 	Rules ShedRules
-	// MinPlayers and MaxPlayers are the game's seat range, as its catalog Module
-	// declares it.
-	MinPlayers, MaxPlayers int
 	// Deck is the game's full deck, which Table deals from.
 	Deck func() []deck.Card
 	// NewExtra is the rules' Extra for a table whose card in play is top.
@@ -247,8 +244,7 @@ func drawNeedsNoDiscard(t *testing.T, s Shed) {
 // Drawing is the only move ValidateAction accepts unconditionally, and on a dead board
 // it degrades into the forced pass the turn loop already handles.
 func timeoutDraws(t *testing.T, s Shed) {
-	assert.Equal(t, s.Draw, s.Rules.TimeoutAction(nil))
-
 	state := s.Table(t, 3, 3)
+	assert.Equal(t, s.Draw, s.Rules.TimeoutAction(state))
 	assert.NoError(t, s.Rules.ValidateAction(state, s.Rules.TimeoutAction(state)))
 }

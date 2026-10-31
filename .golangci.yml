@@ -83,6 +83,13 @@ linters:
       - text: '(slog|log)\.\w+'
         linters:
           - noctx
+      # revive's exported rule is kept on for the game package itself, the engine and
+      # Rules contract a new game is written against; elsewhere it would demand a
+      # comment on every Rules method implementation.
+      - path-except: ^internal/game/[^/]+\.go$
+        text: '^exported: '
+        linters:
+          - revive
       # Table-driven tests are legitimately long and repetitive, and a test's
       # branchiness is not a maintenance signal the way production code's is.
       - path: _test\.go
@@ -159,8 +166,6 @@ linters:
     revive:
       enable-default-rules: true
       rules:
-        - name: exported
-          disabled: true
         - name: package-comments
           disabled: true
     cyclop:

@@ -458,7 +458,7 @@ func TestUserRepository_UserProfile(t *testing.T) {
 	profile, err := repo.UserProfile(ctx, u.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "profile_user", profile.Username)
-	assert.Len(t, profile.PublicSSHKeys, 1)
+	assert.Empty(t, profile.PublicSSHKeys, "nothing reads the keys, so the profile does not load them")
 	assert.Len(t, profile.Rankings, 1)
 	assert.Equal(t, "ProfileGame", profile.Rankings[0].Game.Name)
 
@@ -657,7 +657,6 @@ func assertHistorySurvives(t *testing.T, database *gorm.DB, repo db.UserReposito
 	assert.Equal(t, db.AnonymisedUsername(f.leaver.ID), profile.Username)
 	assert.True(t, profile.LastSeenAt.IsZero())
 	assert.Empty(t, profile.Rankings)
-	assert.Empty(t, profile.PublicSSHKeys)
 }
 
 // Self-service erasure (GDPR art. 17). The account has to stop existing as an identity

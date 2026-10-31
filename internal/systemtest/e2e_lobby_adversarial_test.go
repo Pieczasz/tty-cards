@@ -45,22 +45,22 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 			"';DROP T",
 			"ÅÅÅÅÅÅÅÅ",
 		} {
-			err := joinErr(manager.JoinLobbyByCode(code, guest))
+			err := joinErr(manager.JoinLobbyByCode(t.Context(), code, guest))
 			require.ErrorIs(t, err, lobby.ErrRefused, "code %q", code)
 			require.ErrorContains(t, err, "invalid lobby code", "code %q", code)
 			_, findErr := manager.FindLobbyByCode(code)
 			require.ErrorIs(t, findErr, lobby.ErrRefused, "code %q", code)
 		}
 
-		err := joinErr(manager.JoinLobbyByCode("ZZZZZZZZ", guest))
+		err := joinErr(manager.JoinLobbyByCode(t.Context(), "ZZZZZZZZ", guest))
 		require.ErrorContains(t, err, "not found")
 		require.Nil(t, manager.FindLobbyByPlayer(guest))
 		require.Equal(t, 1, l.Snapshot().Players())
 
 		// The real code is case-sensitive: a lowercased copy is not a join.
 		lower := strings.ToLower(l.Code())
-		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(lower, guest)), "invalid lobby code")
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
+		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), lower, guest)), "invalid lobby code")
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 		require.True(t, l.HasPlayer(guest))
 	})
 
@@ -69,15 +69,15 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 		manager := newAdversarialManager(t)
 		ps := nPlayers(1, 4)
 		l := mustCreate(t, manager, ps[0], "poker", 2, false)
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), ps[1])))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[1])))
 
-		err := joinErr(manager.JoinLobbyByCode(l.Code(), ps[2]))
+		err := joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[2]))
 		require.ErrorIs(t, err, lobby.ErrRefused)
 		require.ErrorContains(t, err, "full")
 		require.Nil(t, manager.FindLobbyByPlayer(ps[2]))
 		require.Equal(t, 2, l.Snapshot().Players())
 
-		err = joinErr(manager.JoinLobbyByCode(l.Code(), ps[1]))
+		err = joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[1]))
 		require.ErrorIs(t, err, lobby.ErrRefused)
 		require.ErrorContains(t, err, "already in a lobby")
 		require.Equal(t, 2, l.Snapshot().Players())
@@ -95,10 +95,10 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 		require.NotContains(t, browseCodes(manager, guest), l.Code())
 		require.Empty(t, codesFor(manager, lobby.BrowseFilter{Slug: "poker"}))
 
-		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode("", guest)), "invalid lobby code")
+		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), "", guest)), "invalid lobby code")
 		require.Nil(t, manager.FindLobbyByPlayer(guest))
 
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 		require.True(t, l.HasPlayer(guest))
 		require.NotContains(t, browseCodes(manager, guest), l.Code(), "the code path must not publish the table")
 	})
@@ -108,7 +108,7 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 		manager := newAdversarialManager(t)
 		ps := nPlayers(1, 3)
 		l := mustCreate(t, manager, ps[0], "poker", 3, true)
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), ps[1])))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[1])))
 
 		require.NoError(t, l.SetMaxPlayers(ps[0], 4))
 		require.NoError(t, l.SetPrivate(ps[0], false))
@@ -148,7 +148,7 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 		prober := nPlayers(1, 1)[0]
 		var notFound, limited int
 		for range 15 {
-			err := joinErr(manager.JoinLobbyByCode("ZZZZZZZZ", prober))
+			err := joinErr(manager.JoinLobbyByCode(t.Context(), "ZZZZZZZZ", prober))
 			require.ErrorIs(t, err, lobby.ErrRefused)
 			if strings.Contains(err.Error(), "too many") {
 				limited++
@@ -161,11 +161,11 @@ func TestE2E_LobbyJoinRefusals(t *testing.T) {
 		require.Equal(t, 5, limited)
 
 		// A typo never spends that budget: it is rejected before the limiter.
-		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode("nope", prober)), "invalid lobby code")
+		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), "nope", prober)), "invalid lobby code")
 
 		host := nPlayers(2, 1)[0]
 		l := mustCreate(t, manager, host, "poker", 2, false)
-		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(l.Code(), prober)), "too many")
+		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), prober)), "too many")
 		require.False(t, l.HasPlayer(prober))
 		require.Nil(t, manager.FindLobbyByPlayer(prober))
 	})
@@ -208,7 +208,7 @@ func TestE2E_JoinRaces(t *testing.T) {
 		for range stampede {
 			wg.Go(func() {
 				<-start
-				if joinErr(manager.JoinLobbyByCode(l.Code(), guest)) == nil {
+				if joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), guest)) == nil {
 					okN <- 1
 				}
 			})
@@ -239,18 +239,16 @@ func TestE2E_JoinRaces(t *testing.T) {
 			var wg sync.WaitGroup
 			var mu sync.Mutex
 			var got []*lobby.Lobby
-			wg.Add(2)
 			for _, code := range []string{a.Code(), b.Code()} {
-				go func(code string) {
-					defer wg.Done()
-					joined, err := manager.JoinLobbyByCode(code, p)
+				wg.Go(func() {
+					joined, err := manager.JoinLobbyByCode(t.Context(), code, p)
 					if err != nil {
 						return
 					}
 					mu.Lock()
 					got = append(got, joined)
 					mu.Unlock()
-				}(code)
+				})
 			}
 			waitOrFail(t, &wg, 5*time.Second)
 			require.Lenf(t, got, 1, "iter %d: a player sits at one table", i)
@@ -279,21 +277,17 @@ func TestE2E_SettingsFlipWhileJoining(t *testing.T) {
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for _, g := range roster[1:] {
-		wg.Add(1)
-		go func(p *game.Player) {
-			defer wg.Done()
+	for _, p := range roster[1:] {
+		wg.Go(func() {
 			<-start
-			_ = joinErr(manager.JoinLobbyByCode(code, p))
-			_ = joinErr(manager.JoinLobbyByCode(code, p))
+			_ = joinErr(manager.JoinLobbyByCode(t.Context(), code, p))
+			_ = joinErr(manager.JoinLobbyByCode(t.Context(), code, p))
 			_ = l.SetPrivate(p, true)
 			_ = l.SetRanked(p, true)
 			_ = l.SetMaxPlayers(p, 9)
-		}(g)
+		})
 	}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-start
 		for _, limit := range []int{2, 4, 6, 9, 3} {
 			_ = l.SetMaxPlayers(leader, limit)
@@ -302,16 +296,15 @@ func TestE2E_SettingsFlipWhileJoining(t *testing.T) {
 			_ = l.SetPrivate(leader, false)
 			_ = l.SetRanked(leader, false)
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		<-start
 		for range 40 {
 			_ = manager.BrowseLobbies(leader, lobby.BrowseFilter{Slug: "poker", Mode: lobby.BrowseCasual})
 			_ = manager.BrowseLobbies(leader, lobby.BrowseFilter{Mode: lobby.BrowseRanked, OnlyWithRoom: true})
 			_, _ = manager.Stats()
 		}
-	}()
+	})
 	close(start)
 	waitOrFail(t, &wg, 10*time.Second)
 
@@ -341,18 +334,11 @@ func TestE2E_LeaderLeavePromotesAndCodeDies(t *testing.T) {
 	for i := range 20 {
 		ps := nPlayers(100+i*3, 3)
 		l := mustCreate(t, manager, ps[0], "poker", 4, false)
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), ps[1])))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[1])))
 		var wg sync.WaitGroup
 		var joined error
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.LeaveLobby(ps[0])
-		}()
-		go func() {
-			defer wg.Done()
-			joined = joinErr(manager.JoinLobbyByCode(l.Code(), ps[2]))
-		}()
+		wg.Go(func() { manager.LeaveLobby(ps[0]) })
+		wg.Go(func() { joined = joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), ps[2])) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.NoError(t, joined, "iter %d", i)
 
@@ -371,8 +357,8 @@ func TestE2E_LeaderLeavePromotesAndCodeDies(t *testing.T) {
 	ps := nPlayers(1, 3)
 	l := mustCreate(t, manager, ps[0], "poker", 4, false)
 	code := l.Code()
-	require.NoError(t, joinErr(manager.JoinLobbyByCode(code, ps[1])))
-	require.NoError(t, joinErr(manager.JoinLobbyByCode(code, ps[2])))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), code, ps[1])))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), code, ps[2])))
 	require.NoError(t, l.SetRanked(ps[0], true))
 
 	manager.LeaveLobby(ps[0])
@@ -399,7 +385,7 @@ func TestE2E_LeaderLeavePromotesAndCodeDies(t *testing.T) {
 	require.Zero(t, open)
 	for _, p := range ps {
 		require.Nil(t, manager.FindLobbyByPlayer(p))
-		require.Error(t, joinErr(manager.JoinLobbyByCode(code, p)))
+		require.Error(t, joinErr(manager.JoinLobbyByCode(t.Context(), code, p)))
 	}
 
 	fresh := mustCreate(t, manager, ps[0], "uno", 2, false)
@@ -417,9 +403,9 @@ func TestE2E_BrowseFiltersWhileTablesStart(t *testing.T) {
 	casual := mustCreate(t, manager, ps[0], "poker", 4, false)
 	ranked := mustCreate(t, manager, ps[1], "poker", 2, false)
 	require.NoError(t, ranked.SetRanked(ps[1], true))
-	require.NoError(t, joinErr(manager.JoinLobbyByCode(ranked.Code(), ps[2])))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), ranked.Code(), ps[2])))
 	uno := mustCreate(t, manager, ps[3], "uno", 4, false)
-	require.NoError(t, joinErr(manager.JoinLobbyByCode(uno.Code(), ps[4])))
+	require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), uno.Code(), ps[4])))
 	hearts := mustCreate(t, manager, ps[5], "hearts", 4, true)
 	t.Cleanup(func() {
 		releaseTables(t, manager, casual.Code(), ranked.Code(), uno.Code(), hearts.Code())
@@ -453,15 +439,13 @@ func TestE2E_BrowseFiltersWhileTablesStart(t *testing.T) {
 	require.NoError(t, manager.ToggleReady(ps[3]))
 
 	var browseWG sync.WaitGroup
-	browseWG.Add(1)
 	defer browseWG.Wait()
-	go func() {
-		defer browseWG.Done()
+	browseWG.Go(func() {
 		for range 100 {
 			_ = manager.BrowseLobbies(ps[3], lobby.BrowseFilter{})
 			_ = manager.GamesOnOffer()
 		}
-	}()
+	})
 
 	require.NoError(t, manager.ToggleReady(ps[4]))
 	_ = awaitGameStart(t, uno, events)
@@ -483,7 +467,7 @@ func TestE2E_BrowseFiltersWhileTablesStart(t *testing.T) {
 	require.False(t, offered["hearts"])
 
 	late := nPlayers(20, 1)[0]
-	require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(uno.Code(), late)), "not accepting")
+	require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), uno.Code(), late)), "not accepting")
 	require.Nil(t, manager.FindLobbyByPlayer(late))
 	require.Equal(t, 2, uno.Snapshot().Players())
 	require.True(t, uno.Snapshot().InGame)
@@ -510,31 +494,29 @@ func TestE2E_ConcurrentLobbyTraffic(t *testing.T) {
 	t.Cleanup(func() { releaseTables(t, manager, codes...) })
 
 	var wg sync.WaitGroup
-	for g := range 8 {
-		wg.Add(1)
-		go func(seed int) {
-			defer wg.Done()
+	for seed := range 8 {
+		wg.Go(func() {
 			rng := rand.New(rand.NewPCG(uint64(seed+1), 0xC0FFEE))
 			for range 40 {
 				p := everyone[rng.IntN(len(everyone))]
 				code := codes[rng.IntN(len(codes))]
 				switch rng.IntN(5) {
 				case 0:
-					_, _ = manager.JoinLobbyByCode(code, p)
+					_, _ = manager.JoinLobbyByCode(t.Context(), code, p)
 				case 1:
 					manager.LeaveLobby(p)
 				case 2:
 					_ = manager.ToggleReady(p)
 				case 3:
-					manager.DisconnectPlayer(p)
-					manager.ResumePlayer(p)
+					manager.DisconnectPlayer(t.Context(), p)
+					manager.ResumePlayer(t.Context(), p)
 				default:
 					_ = manager.BrowseLobbies(p, lobby.BrowseFilter{Slug: "poker", OnlyWithRoom: true})
 					_, _ = manager.Stats()
 					_ = manager.GamesOnOffer()
 				}
 			}
-		}(g)
+		})
 	}
 	waitOrFail(t, &wg, 20*time.Second)
 	assertSettled(t, manager, codes, everyone)
@@ -626,17 +608,10 @@ func TestE2E_ReconnectOverlap(t *testing.T) {
 	other := nPlayers(50, 1)[0]
 
 	for range 25 {
-		manager.DisconnectPlayer(guest)
+		manager.DisconnectPlayer(t.Context(), guest)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
+		wg.Go(func() { manager.ResumePlayer(t.Context(), guest) })
+		wg.Go(func() { manager.ResumePlayer(t.Context(), guest) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.Same(t, l, manager.FindLobbyByPlayer(guest))
 		require.True(t, l.HasPlayer(guest))
@@ -645,22 +620,15 @@ func TestE2E_ReconnectOverlap(t *testing.T) {
 
 	for range 25 {
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			manager.DisconnectPlayer(guest)
-		}()
-		go func() {
-			defer wg.Done()
-			manager.ResumePlayer(guest)
-		}()
+		wg.Go(func() { manager.DisconnectPlayer(t.Context(), guest) })
+		wg.Go(func() { manager.ResumePlayer(t.Context(), guest) })
 		waitOrFail(t, &wg, 5*time.Second)
 		require.Same(t, l, manager.FindLobbyByPlayer(guest))
 		require.Equal(t, 2, l.Snapshot().Players())
 		require.False(t, l.HasPlayer(other))
 	}
 
-	require.Error(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
+	require.Error(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	_, err := manager.CreateLobby(guest, lobby.WithCardGame("uno"))
 	require.ErrorIs(t, err, lobby.ErrRefused)
 	require.Same(t, l, manager.FindLobbyByPlayer(guest))
@@ -702,8 +670,8 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 
 		manager.LeaveLobby(leaver)
 		manager.LeaveLobby(leaver)
-		manager.DisconnectPlayer(leaver)
-		manager.ResumePlayer(leaver)
+		manager.DisconnectPlayer(t.Context(), leaver)
+		manager.ResumePlayer(t.Context(), leaver)
 		require.False(t, l.HasPlayer(leaver))
 		require.Nil(t, manager.FindLobbyByPlayer(leaver))
 		require.Nil(t, l.Seat(leaver.ID))
@@ -734,7 +702,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 		require.NotContains(t, browseCodes(manager, nil), l.Code())
 
 		late := nPlayers(40, 1)[0]
-		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(l.Code(), late)), "not accepting")
+		require.ErrorContains(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), late)), "not accepting")
 		require.Nil(t, manager.FindLobbyByPlayer(late))
 		require.Equal(t, 2, l.Snapshot().Players())
 
@@ -774,9 +742,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 		codes := make([]string, 0, tables)
 		errs := make([]error, 0)
 		for _, p := range players {
-			wg.Add(1)
-			go func(p *game.Player) {
-				defer wg.Done()
+			wg.Go(func() {
 				created, err := manager.CreateLobby(p,
 					lobby.WithCardGame("crazy_eights"),
 					lobby.WithPrivate(false),
@@ -797,7 +763,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 					return
 				}
 				codes = append(codes, created.Code())
-			}(p)
+			})
 		}
 		waitOrFail(t, &wg, 15*time.Second)
 		require.Empty(t, errs)
@@ -810,12 +776,10 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 
 		wg = sync.WaitGroup{}
 		for _, p := range players {
-			wg.Add(1)
-			go func(p *game.Player) {
-				defer wg.Done()
+			wg.Go(func() {
 				manager.LeaveLobby(p)
 				manager.LeaveLobby(p)
-			}(p)
+			})
 		}
 		waitOrFail(t, &wg, 10*time.Second)
 
@@ -830,7 +794,7 @@ func TestE2E_CrackPlayingAndSpamCreate(t *testing.T) {
 			_, err := manager.FindLobbyByCode(code)
 			require.ErrorContains(t, err, "not found")
 		}
-		require.Error(t, joinErr(manager.JoinLobbyByCode(codes[0], players[0])))
+		require.Error(t, joinErr(manager.JoinLobbyByCode(t.Context(), codes[0], players[0])))
 		require.Nil(t, manager.FindLobbyByPlayer(players[0]))
 
 		fresh := mustCreate(t, manager, players[0], "poker", 2, false)

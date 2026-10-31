@@ -63,7 +63,7 @@ func newBrowseFixture(b *testing.B, n int) browseFixture {
 		leader, guest := benchPlayer(2*i), benchPlayer(2*i+1)
 		l, err := m.CreateLobby(leader, WithCardGame(benchGames[i%len(benchGames)]), WithPrivate(i%4 == 2))
 		require.NoError(b, err)
-		require.NoError(b, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+		require.NoError(b, joinErr(m.JoinLobbyByCode(b.Context(), l.Code(), guest)))
 		switch i % 4 {
 		case 0, 1:
 			f.public = append(f.public, l)
@@ -167,7 +167,7 @@ func BenchmarkJoinUnderBrowse(b *testing.B) {
 
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := f.m.JoinLobbyByCode(table.Code(), joiner); err != nil {
+				if _, err := f.m.JoinLobbyByCode(b.Context(), table.Code(), joiner); err != nil {
 					b.Fatal(err)
 				}
 				f.m.LeaveLobby(joiner)

@@ -164,10 +164,6 @@ func afterBettingAction(state *game.State, extra *State) error {
 // it, a betting action or a leave: a lone contender takes the pot, an unfinished
 // round goes to the next seat after from that owes an action, and a finished one is
 // settled onto the next street or the showdown.
-//
-// A street that cannot be dealt is unwound by settleOrUnwind and the hand closed, so
-// the error only reports what already happened; the betting path hands it to the
-// engine, which ends the match on it.
 func resolveAfterChange(state *game.State, extra *State, from int) error {
 	live := contenders(state, extra)
 	if len(live) == 1 {
@@ -183,12 +179,11 @@ func resolveAfterChange(state *game.State, extra *State, from int) error {
 		}
 	}
 
-	err := settleOrUnwind(state, extra)
-	if err != nil || extra.HandComplete() {
-		if ferr := finishHand(state, extra); ferr != nil {
-			return ferr
-		}
+	if err := settleAndAdvance(state, extra); err != nil {
 		return err
+	}
+	if extra.HandComplete() {
+		return finishHand(state, extra)
 	}
 	state.SetTurn(firstToActPostflop(state, extra))
 	return nil

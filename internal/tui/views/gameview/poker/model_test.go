@@ -212,11 +212,11 @@ func TestRaise_AgainstAShortStackOffersExactlyTheirStack(t *testing.T) {
 	m.syncState()
 	require.True(t, m.canRaise())
 
-	_, _ = m.beginRaise()
+	m.beginRaise()
 	assert.Equal(t, uint(30), m.raiseAmount)
 	m.stepRaise(+1)
 	assert.Equal(t, uint(30), m.raiseAmount, "nothing past what the opponent can call")
 
-	_, _ = m.confirm()
+	m.confirm()
 	require.NoError(t, m.ActionErr, "the engine accepts the amount the view offered")
 }

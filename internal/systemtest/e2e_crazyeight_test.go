@@ -214,20 +214,18 @@ func TestCrazyEights_ConcurrentWrongSeatSpam(t *testing.T) {
 			if p.ID == onTurn {
 				continue
 			}
-			wg.Add(1)
-			go func(id string) {
-				defer wg.Done()
+			wg.Go(func() {
 				defer func() {
 					if recover() != nil {
 						panics.Add(1)
 					}
 				}()
-				if err := engine.SubmitAction(id, poker.ActionFold{}); err != nil {
+				if err := engine.SubmitAction(p.ID, poker.ActionFold{}); err != nil {
 					refused.Add(1)
 					return
 				}
 				applied.Add(1)
-			}(p.ID)
+			})
 		}
 	}
 	wg.Wait()
@@ -254,7 +252,7 @@ func TestCrazyEights_DisconnectAndLeaveConservesDeck(t *testing.T) {
 		advanceByTimeout(t, engine, 2)
 		p := players[idx]
 		if point%2 == 0 {
-			manager.DisconnectPlayer(p)
+			manager.DisconnectPlayer(t.Context(), p)
 			require.Truef(t, l.HasPlayer(p), "point %d: a dropped session keeps the seat", point)
 			assertCrazyEightsDeck(t, engine)
 			advanceByTimeout(t, engine, 1)

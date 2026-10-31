@@ -22,4 +22,4 @@ jobs:
         go-version: '1.27.3'
 
     - name: govulncheck
-      run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      run: make vulncheck

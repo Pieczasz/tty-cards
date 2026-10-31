@@ -41,30 +41,30 @@ func recordSpanResult(span trace.Span, err error) {
 const (
 	pgSerializationFailureCode = "40001"
 	pgDeadlockDetectedCode     = "40P01"
-	// finalizeAttempts bounds how often an aborted finalize is run again. The lock
+	// txAttempts bounds how often an aborted write is run again. The lock
 	// order makes an abort rare, so a third in a row means something is wrong.
-	finalizeAttempts = 3
+	txAttempts = 3
 )
 
 // isRetryableAbort is a transaction Postgres rolled back to break a conflict. Both
 // codes are raised before commit, so nothing was written and running it again is
 // safe; a dropped connection is not on the list, because it may have committed.
 func isRetryableAbort(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) &&
-		(pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == pgSerializationFailureCode || pgErr.Code == pgDeadlockDetectedCode)
 }
 
-// transactRetrying runs fn as one transaction, again when Postgres aborted it. Without
-// it an abort loses a finished match from history and Elo; fn must keep no state
-// across attempts it does not reset itself.
+// transactRetrying runs fn as one transaction, again when Postgres rolled it back to
+// break a conflict. Finalizes, casual results and erasures all run through it: without
+// it an abort loses a finished match, or an erasure the player already confirmed. fn
+// must keep no state across attempts it does not reset itself.
 func transactRetrying(ctx context.Context, conn *gorm.DB, fn func(tx *gorm.DB) error) error {
 	for attempt := 1; ; attempt++ {
 		err := conn.WithContext(ctx).Transaction(fn)
-		if attempt == finalizeAttempts || !isRetryableAbort(err) {
+		if attempt == txAttempts || !isRetryableAbort(err) {
 			return err //nolint:wrapcheck // the caller names the write
 		}
-		slog.WarnContext(ctx, "finalize aborted by postgres; retrying", "error", err, "attempt", attempt)
+		slog.WarnContext(ctx, "transaction aborted by postgres; retrying", "error", err, "attempt", attempt)
 	}
 }
 
@@ -239,25 +239,21 @@ func deltasOf(writes []rating.Write) map[uuid.UUID]int {
 }
 
 // seedRankingRows gives fetchRankings something to lock. A first-time (user_id, game_id)
-// has no row, so FOR UPDATE locks nothing and two concurrent finalizes both insert: one
-// hits 23505, rolls back and loses the match. Sorted by user_id because a conflicting
-// insert still waits on the inserting transaction, though the ordering that matters is
-// fetchRankings' - ON CONFLICT DO NOTHING takes no lock on an existing row.
+// has no row, so FOR UPDATE locks nothing and applyRatings has nothing to update. Row
+// order does not matter here: every writer of a user's rankings already holds that
+// user's seat lock (lockPairing or lockSeat, invariant 7), so two transactions that
+// share a user never interleave on these rows.
 //
 // Soft-deleted rankings are revived first: DO NOTHING leaves them invisible to the
 // default scope, and a missing row used to abort the whole table's finalize.
 func seedRankingRows(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) error {
-	// Sorted for the same reason fetchRankings orders: an UPDATE locks the rows its
-	// IN list yields, so two finalizes over overlapping seats would otherwise take
-	// the revived rows in opposite orders and Postgres would abort one.
-	sorted := sortedUserIDs(userIDs)
 	if err := tx.Unscoped().Model(&db.Ranking{}).
-		Where("user_id IN ? AND game_id = ? AND deleted_at IS NOT NULL", uuidStrings(sorted), gameID).
+		Where("user_id IN ? AND game_id = ? AND deleted_at IS NOT NULL", uuidStrings(userIDs), gameID).
 		Update("deleted_at", nil).Error; err != nil {
 		return fmt.Errorf("revive rankings: %w", err)
 	}
 	seeds := make([]db.Ranking, 0, len(userIDs))
-	for _, userID := range sorted {
+	for _, userID := range userIDs {
 		seeds = append(seeds, db.Ranking{UserID: userID, GameID: gameID, Elo: elo.ToUint32(elo.DefaultRating)})
 	}
 	if err := tx.Clauses(clause.OnConflict{
@@ -411,22 +407,18 @@ func repeatedPairCountLast24h(tx *gorm.DB, userIDs []uuid.UUID) (int, error) {
 		return 0, nil
 	}
 
+	// Only the seats sitting at this table matter: a past match's other players are
+	// not part of any pair being capped now.
 	var rows []db.MatchParticipant
-	if err := tx.Where("match_id IN ?", matchIDs).Find(&rows).Error; err != nil {
+	if err := tx.Select("match_id", "user_id").
+		Where("match_id IN ? AND user_id IN ?", matchIDs, uuidStrings(userIDs)).
+		Find(&rows).Error; err != nil {
 		return 0, fmt.Errorf("query pairing participants: %w", err)
 	}
 
-	here := make(map[uuid.UUID]struct{}, len(userIDs))
-	for _, id := range userIDs {
-		here[id] = struct{}{}
-	}
-	// Only the seats sitting at this table matter: a past match's other players are
-	// not part of any pair being capped now.
 	seats := make(map[uint][]uuid.UUID, len(matchIDs))
 	for _, row := range rows {
-		if _, ours := here[row.UserID]; ours {
-			seats[row.MatchID] = append(seats[row.MatchID], row.UserID)
-		}
+		seats[row.MatchID] = append(seats[row.MatchID], row.UserID)
 	}
 	return rating.WorstPairCount(slices.Collect(maps.Values(seats))), nil
 }
@@ -492,14 +484,11 @@ func likePrefix(prefix string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix) + "%"
 }
 
-func sortedUserIDs(userIDs []uuid.UUID) []uuid.UUID {
-	out := slices.Clone(userIDs)
-	slices.SortFunc(out, uuid.UUID.Compare)
-	return out
-}
-
+// uuidStrings is ids as query arguments. Every id is bound as its text form, the
+// same as the stduuid serializer writes: a raw uuid.UUID is a [16]byte with no
+// Valuer, which only works where Postgres infers a uuid parameter from the column
+// and breaks in an untyped spot such as SELECT ? or a COALESCE.
 func uuidStrings(ids []uuid.UUID) []string {
-	// Stdlib uuid.UUID has no database/sql Valuer; pgx will not encode it as uuid.
 	out := make([]string, len(ids))
 	for i, id := range ids {
 		out[i] = id.String()
@@ -542,13 +531,10 @@ func recordMatch(
 
 func fetchRankings(tx *gorm.DB, gameID uint, userIDs []uuid.UUID) (map[uuid.UUID]*db.Ranking, error) {
 	var rankings []db.Ranking
-	// FOR UPDATE: serialize concurrent finalize transactions to avoid lost Elo updates.
-	//
-	// ORDER BY user_id is what makes that safe rather than deadlock-prone: this is
-	// where the row locks are actually taken (the seed's ON CONFLICT DO NOTHING locks
-	// nothing when the row already exists, which is the common case), so without a
-	// fixed order two finalizes over overlapping seats can lock in opposite orders.
-	// Postgres then aborts one, and transactRetrying only runs it again so many times.
+	// The seat locks serialize every transaction that writes these users' rankings
+	// (lockPairing or lockSeat, invariant 7), so they, not this, are what stop lost
+	// Elo updates and deadlocks. FOR UPDATE with a fixed ORDER BY is a cheap backstop
+	// should a writer ever skip them, not the protocol.
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("user_id IN ? AND game_id = ?", uuidStrings(userIDs), gameID).
 		Order("user_id").Find(&rankings).Error; err != nil {

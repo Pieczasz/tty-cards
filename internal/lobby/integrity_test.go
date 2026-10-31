@@ -43,7 +43,7 @@ func TestLobby_SettingChangeUnreadiesTheTable(t *testing.T) {
 			m, l := newTestLobby(t, 4)
 			leader := l.Snapshot().Leader.Player
 			guest := mockPlayer("p2", testutil.UID(2))
-			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 			require.NoError(t, m.ToggleReady(guest))
 
 			ch, err := l.Subscribe("watcher")
@@ -78,7 +78,7 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 			c := mockPlayer("p3", testutil.UID(3))
 			holdout := mockPlayer("p4", testutil.UID(4))
 			for _, p := range []*game.Player{b, c, holdout} {
-				require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), p)))
+				require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), p)))
 			}
 			for _, p := range []*game.Player{leader, b, c} {
 				require.NoError(t, m.ToggleReady(p))
@@ -99,8 +99,8 @@ func TestLobby_RosterChangeUnreadiesTheTable(t *testing.T) {
 		leader := l.Snapshot().Leader.Player
 		b := mockPlayer("p2", testutil.UID(2))
 		c := mockPlayer("p3", testutil.UID(3))
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), b)))
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), c)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), b)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), c)))
 		require.NoError(t, m.ToggleReady(b))
 
 		m.LeaveLobby(leader)
@@ -117,7 +117,7 @@ func TestKick_ClearsTheTargetsGraceHold(t *testing.T) {
 	t.Parallel()
 	m, l := newTestLobby(t, 4)
 	guest := mockPlayer("p2", testutil.UID(2))
-	require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+	require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 
 	m.mu.Lock()
 	m.grace.arm(guest.ID, time.Hour, func(uint64) {})

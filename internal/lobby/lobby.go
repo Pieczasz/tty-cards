@@ -129,9 +129,21 @@ func setupDefaultOptions() *options {
 	}
 }
 
+// setStateLocked dirties the browse cache only when the table joins or leaves the
+// offered set: the cache holds that set and nothing else, so a private table's
+// games would otherwise force a rescan on every browse.
 func (l *Lobby) setStateLocked(s state) {
+	was := l.onOfferLocked()
 	l.state = s
-	l.cacheDirty.Store(true)
+	l.markOfferChangeLocked(was)
+}
+
+// markOfferChangeLocked sets cacheDirty when the table's on-offer status differs
+// from was. Set under l.mu, which publicLobbies' ordering relies on.
+func (l *Lobby) markOfferChangeLocked(was bool) {
+	if l.onOfferLocked() != was {
+		l.cacheDirty.Store(true)
+	}
 }
 
 func (l *Lobby) broadcastLocked(event Event) {
@@ -186,13 +198,14 @@ func (l *Lobby) withLeaderSettings(actor *game.Player, mutate func() error) erro
 		l.mu.Unlock()
 		return errSettingsLocked
 	}
+	was := l.onOfferLocked()
 	if err := mutate(); err != nil {
 		l.mu.Unlock()
 		return err
 	}
 
 	clear(l.ready)
-	l.cacheDirty.Store(true)
+	l.markOfferChangeLocked(was)
 
 	bc := l.broadcaster
 	l.mu.Unlock()

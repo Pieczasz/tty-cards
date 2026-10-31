@@ -20,6 +20,7 @@ import (
 	"github.com/Pieczasz/tty-cards/internal/catalog"
 	"github.com/Pieczasz/tty-cards/internal/config"
 	"github.com/Pieczasz/tty-cards/internal/db"
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/httpapi"
 	"github.com/Pieczasz/tty-cards/internal/lobby"
 	"github.com/Pieczasz/tty-cards/internal/observability"
@@ -35,8 +36,9 @@ import (
 // compose's stop_grace_period (80s) has to outlast the whole sequential drain:
 // ssh, then the session teardowns its Close sets off, then the stats api, then two
 // finalizer windows, then otel, whose three providers get 2s each
-// (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. Two drain windows, no outbox.
-// a match write gets windows rather than an outbox.
+// (otelsetup.Setup): 30 + 5 + 5 + 2x15 + 6 = 76s. A match write gets a second
+// finalizer window rather than an outbox. TestDrainBudgetFitsStopGracePeriod pins
+// the sum.
 const (
 	sshDrainTimeout = 30 * time.Second
 	// sessionDrainTimeout bounds the wait for session handlers after Close. Their
@@ -136,11 +138,13 @@ func runServers(ctx context.Context, cfg *config.Config, signals <-chan os.Signa
 	userRepo := repository.NewUserRepository(database)
 	// One catalog for both: the registry the manager checks a new table against, and
 	// the entries the menus offer and the routes render.
-	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database), catalog.NewRegistry())
+	games := catalog.Games
+	lobbyManager := lobby.NewManager(ctx, repository.NewMatchRepository(database),
+		game.NewRegistry(catalog.Modules(games)...))
 	defer waitForFinalizers(ctx, lobbyManager.WaitForFinalizers)
 
 	tracker := ssh.NewSessionTracker(cfg.MaxConnections)
-	server, err := newSSHServer(cfg, userRepo, lobbyManager, catalog.Games, tracker)
+	server, err := newSSHServer(cfg, userRepo, lobbyManager, games, tracker)
 	if err != nil {
 		return err
 	}

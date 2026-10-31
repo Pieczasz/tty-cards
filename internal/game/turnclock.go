@@ -74,12 +74,11 @@ func (e *Engine) onTurnTimeout(generation uint64) {
 	}
 	// The hook runs after the lock is released, on the timer goroutine. A panic
 	// here is the roster's, and nothing above this callback would catch it.
+	// The logger is set once at construction, so it is read without the lock.
 	defer func() {
 		if r := recover(); r != nil {
-			e.mu.Lock()
 			e.state.Logger().Error("idle-removal hook panicked",
 				"panic", r, "player_id", idle, "stack", string(debug.Stack()))
-			e.mu.Unlock()
 		}
 	}()
 	e.onIdleRemoved(idle)
@@ -96,12 +95,8 @@ func (e *Engine) expireTurn(generation uint64) (idle string) {
 	defer e.mu.Unlock()
 	// This is a time.AfterFunc goroutine: nothing above it recovers, so a panic in a
 	// rules hook here would take the whole process down: every table, for one game's
-	// defect. Deferred after the Lock, it runs before the unlock, as in SubmitAction.
-	defer func() {
-		if r := recover(); r != nil {
-			e.endOnRulesPanicLocked(r)
-		}
-	}()
+	// defect. A panic leaves idle "", so no seat is reported taken.
+	defer e.recoverRulesPanic(nil)
 
 	// A fired AfterFunc cannot be stopped: one that waited on the lock while the turn
 	// moved on, the table ended or the engine closed finds a newer generation.
@@ -176,12 +171,28 @@ func (e *Engine) takeIdleSeatLocked(playerID string) string {
 	return playerID
 }
 
+// recoverRulesPanic is the rules-panic recover of every entry point that runs rules
+// under the lock: Start, SubmitAction, RemovePlayer and expireTurn. It must be
+// deferred directly, after the Lock, so it runs before the unlock (recover returns nil
+// anywhere else). err, when non-nil, is the caller's named result and gets the line
+// the player reads.
+func (e *Engine) recoverRulesPanic(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	e.endOnRulesPanicLocked(r)
+	if err != nil {
+		*err = errRulesPanicked
+	}
+}
+
 // endOnRulesPanicLocked is the shared body of every recover. It ends the table without
 // asking the rules anything: the state a hook panicked on cannot be trusted to rank a
 // winner, and a second panic from Standings inside a recover would take the process
-// down. It does not check for Playing: a panic inside finishGameLocked's Standings call
-// has already set Finished without announcing it, and every rules hook runs only on a
-// table that was Playing. Nor for closed: a leave can still reach the rules on a
+// down. It does not check the phase: a panic inside finishGameLocked's Standings call
+// has already set Finished without announcing it, and a panic in OnGameStart ends a
+// table that was still Waiting. Nor for closed: a leave can still reach the rules on a
 // closed engine, and the reason has to be recorded even though the broadcast is lost.
 func (e *Engine) endOnRulesPanicLocked(r any) {
 	e.state.Logger().Error("rules panicked; ending the table as a rules error",

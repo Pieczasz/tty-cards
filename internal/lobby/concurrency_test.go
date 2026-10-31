@@ -100,11 +100,9 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 	)
 
 	for _, g := range guests {
-		wg.Add(1)
-		go func(g *guestRef) {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start // release all goroutines together to maximise contention
-			err := joinErr(m.JoinLobbyByCode(l.Code(), g.p))
+			err := joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g.p))
 			switch {
 			case err == nil:
 				g.joined = true
@@ -114,7 +112,7 @@ func TestConcurrent_JoinUpToCapacity(t *testing.T) {
 			default:
 				otherErrs.Add(1)
 			}
-		}(g)
+		})
 	}
 
 	runWithTimeout(t, 10*time.Second, func() {
@@ -161,7 +159,7 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 	l, err := m.CreateLobby(all[0], WithMaxPlayers(players), WithCardGame("testgame"))
 	require.NoError(t, err)
 	for _, g := range all[1:] {
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 	require.Equal(t, players, l.Snapshot().Players())
 
@@ -170,12 +168,10 @@ func TestConcurrent_LeaderAndGuestsLeaveSimultaneously(t *testing.T) {
 		wg    sync.WaitGroup
 	)
 	for _, p := range all {
-		wg.Add(1)
-		go func(p *game.Player) {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			m.LeaveLobby(p)
-		}(p)
+		})
 	}
 
 	runWithTimeout(t, 10*time.Second, func() {
@@ -224,17 +220,14 @@ func TestConcurrent_JoinRacingLastLeave(t *testing.T) {
 				gate    = make(chan struct{})
 				joinErr error
 			)
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-gate
-				_, joinErr = m.JoinLobbyByCode(code, joiner)
-			}()
-			go func() {
-				defer wg.Done()
+				_, joinErr = m.JoinLobbyByCode(t.Context(), code, joiner)
+			})
+			wg.Go(func() {
 				<-gate
 				m.LeaveLobby(leader)
-			}()
+			})
 			close(gate)
 			wg.Wait()
 
@@ -280,7 +273,7 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	l, err := m.CreateLobby(roster[0], WithMaxPlayers(members+1), WithCardGame("neverstarts"))
 	require.NoError(t, err)
 	for _, g := range roster[1:] {
-		require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 
 	var (
@@ -289,17 +282,15 @@ func TestConcurrent_ToggleReady(t *testing.T) {
 	)
 	for g := range togglers {
 		target := roster[g%len(roster)]
-		wg.Add(1)
-		go func(p *game.Player) {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			for range perGoTurns {
 				// Error is expected sometimes (e.g. "need at least N players" when the
 				// toggle briefly makes everyone ready). We only care that it never
 				// races or deadlocks; correctness of the ready map is checked after.
-				_ = m.ToggleReady(p)
+				_ = m.ToggleReady(target)
 			}
-		}(target)
+		})
 	}
 
 	runWithTimeout(t, 15*time.Second, func() {
@@ -355,23 +346,20 @@ func TestConcurrent_GraceExpiryRacesReconnect(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, _, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-gate
 				m.expireLeaveGen(guest, 0)
-			}()
-			go func() {
-				defer wg.Done()
+			})
+			wg.Go(func() {
 				<-gate
-				m.ResumePlayer(guest)
-			}()
+				m.ResumePlayer(t.Context(), guest)
+			})
 			close(gate)
 			wg.Wait()
 
@@ -390,7 +378,7 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, _, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
@@ -399,7 +387,7 @@ func TestConcurrent_ReconnectTwice(t *testing.T) {
 			for range 2 {
 				wg.Go(func() {
 					<-gate
-					m.ResumePlayer(guest)
+					m.ResumePlayer(t.Context(), guest)
 				})
 			}
 			close(gate)
@@ -421,23 +409,20 @@ func TestConcurrent_MatchEndsDuringTheGraceWindow(t *testing.T) {
 	runWithTimeout(t, 30*time.Second, func() {
 		for i := range iterations {
 			m, l, leader, guest := startedGame(t)
-			m.DisconnectPlayer(guest)
+			m.DisconnectPlayer(t.Context(), guest)
 
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-gate
 				m.LeaveLobby(leader) // last player out finishes the engine
-			}()
-			go func() {
-				defer wg.Done()
+			})
+			wg.Go(func() {
 				<-gate
-				m.ResumePlayer(guest)
-			}()
+				m.ResumePlayer(t.Context(), guest)
+			})
 			close(gate)
 			wg.Wait()
 
@@ -468,17 +453,14 @@ func TestConcurrent_DisconnectDuringShutdown(t *testing.T) {
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-gate
-				m.DisconnectPlayer(guest)
-			}()
-			go func() {
-				defer wg.Done()
+				m.DisconnectPlayer(t.Context(), guest)
+			})
+			wg.Go(func() {
 				<-gate
 				m.BeginShutdown()
-			}()
+			})
 			close(gate)
 			wg.Wait()
 
@@ -506,16 +488,15 @@ func TestConcurrent_KickRacesLeaveAndJoin(t *testing.T) {
 			require.NoError(t, err)
 			elsewhere, err := m.CreateLobby(other, WithMaxPlayers(4), WithCardGame("testgame"))
 			require.NoError(t, err)
-			require.NoError(t, joinErr(m.JoinLobbyByCode(table.Code(), target)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), table.Code(), target)))
 
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Add(3)
-			go func() { defer wg.Done(); <-gate; _ = m.Kick(host, target) }()
-			go func() { defer wg.Done(); <-gate; m.LeaveLobby(target) }()
-			go func() { defer wg.Done(); <-gate; _ = joinErr(m.JoinLobbyByCode(elsewhere.Code(), target)) }()
+			wg.Go(func() { <-gate; _ = m.Kick(host, target) })
+			wg.Go(func() { <-gate; m.LeaveLobby(target) })
+			wg.Go(func() { <-gate; _ = joinErr(m.JoinLobbyByCode(t.Context(), elsewhere.Code(), target)) })
 			close(gate)
 			wg.Wait()
 
@@ -551,21 +532,18 @@ func TestConcurrent_BrowseCacheNeverSwallowsAnInvalidation(t *testing.T) {
 	m := newTestManager(t, nil)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for range tables * 10 {
 			m.BrowseLobbies(nil, BrowseFilter{Limit: MaxBrowseLimit})
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for i := range tables {
 			_, err := m.CreateLobby(mockPlayer(fmt.Sprintf("p%d", i), testutil.UID(uint64(i+1))),
 				WithPrivate(false), WithCardGame("testgame"))
 			assert.NoError(t, err)
 		}
-	}()
+	})
 	runWithTimeout(t, 30*time.Second, wg.Wait)
 
 	assert.Len(t, m.BrowseLobbies(nil, BrowseFilter{Limit: MaxBrowseLimit}), tables,
@@ -586,14 +564,14 @@ func TestConcurrent_WaitingDropCannotBeStartedInto(t *testing.T) {
 			m, l := newTestLobby(t, 2)
 			leader := l.Snapshot().Leader.Player
 			guest := mockPlayer("p2", testutil.UID(2))
-			require.NoError(t, joinErr(m.JoinLobbyByCode(l.Code(), guest)))
+			require.NoError(t, joinErr(m.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 			require.NoError(t, m.ToggleReady(guest))
 
 			var (
 				wg   sync.WaitGroup
 				gate = make(chan struct{})
 			)
-			wg.Go(func() { <-gate; m.DisconnectPlayer(guest) })
+			wg.Go(func() { <-gate; m.DisconnectPlayer(t.Context(), guest) })
 			wg.Go(func() { <-gate; _ = m.ToggleReady(leader) })
 			close(gate)
 			wg.Wait()

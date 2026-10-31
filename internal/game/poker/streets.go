@@ -69,17 +69,6 @@ func settleAndAdvance(state *game.State, extra *State) error {
 	return nil
 }
 
-// settleOrUnwind is settleAndAdvance for callers that cannot finish the hand on a
-// failure: a street that cannot be dealt leaves chips no showdown will ever award, so
-// the pool goes back to whoever put it in before the error is passed on.
-func settleOrUnwind(state *game.State, extra *State) error {
-	if err := settleAndAdvance(state, extra); err != nil {
-		refundContributions(extra)
-		return err
-	}
-	return nil
-}
-
 // advanceStreet burns, deals what the next street needs and moves Phase onto it. It
 // reports false once there is no street left to deal, which is the showdown.
 func advanceStreet(state *game.State, extra *State) (bool, error) {
@@ -194,11 +183,10 @@ func buildSidePots(extra *State, live []*game.Player) []Pot {
 		prev = lvl
 		// A level always has at least one contributor sitting exactly on it - every
 		// level is somebody's contribution - and lvl > prev, so amount is never zero.
-		amount += orphan
-		orphan = 0
 		if len(eligible) == 0 {
-			// Dead money carries forward to the next pot layer.
-			orphan = amount
+			// Eligibility only shrinks as the levels rise, so no pot forms above this
+			// one: dead money above every contender rides with the last live layer.
+			orphan += amount
 			continue
 		}
 		slices.Sort(eligible) // stable pot eligibility order
@@ -338,19 +326,6 @@ func handScores(extra *State, players []*game.Player) map[string]int {
 func awardUncontested(extra *State, winner *game.Player) {
 	refundUncalled(extra)
 	extra.Seats[winner.ID].Chips += extra.Pool
-	extra.Pool = 0
-	extra.Pots = nil
-}
-
-// refundContributions unwinds the hand, handing every chip in the pool back to whoever
-// put it in. It is the only honest exit from a hand that cannot be played out - a deal
-// that runs the deck dry leaves chips no showdown will ever award, and finishHand would
-// otherwise strand them. Nothing has been paid at that point, so Pool is still
-// exactly the sum of the contributions.
-func refundContributions(extra *State) {
-	for _, seat := range extra.Seats {
-		seat.Chips += seat.Contributed
-	}
 	extra.Pool = 0
 	extra.Pots = nil
 }

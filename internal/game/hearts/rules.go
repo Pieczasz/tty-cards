@@ -69,14 +69,8 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	extra.HandNumber++
 	extra.DealerIndex = dealer
 
-	state.Deck = deck.New(deck.Standard())
-	state.Deck.Shuffle()
-	for _, p := range state.Players {
-		cards, ok := state.Deck.DrawN(cardsPerHand)
-		if !ok {
-			return errNotEnoughCards
-		}
-		p.Cards = cards
+	if err := state.Deal(deck.Standard(), cardsPerHand); err != nil {
+		return fmt.Errorf("deal hearts: %w", err)
 	}
 
 	extra.PassDirection = PassDirection((extra.HandNumber - 1) % passDirectionCount) //nolint:gosec // G115: a value in 0..3 always fits
@@ -91,8 +85,6 @@ func beginHand(state *game.State, extra *State, dealer int) error {
 	state.SetTurn(dealer)
 	return nil
 }
-
-var errNotEnoughCards = errors.New("not enough cards to deal")
 
 func (r *Rules) ValidateAction(state *game.State, action game.Action) error {
 	extra := extraOf(state)
@@ -292,7 +284,7 @@ func (r *Rules) TurnDuration(state *game.State) time.Duration {
 		// The between-hands prompt is a decision, not a play, and it needs longer
 		// than a turn. Every other phase returns zero, which means "engine default"
 		// rather than "no clock".
-		return handOverTurnDuration
+		return game.NextHandTurnDuration
 	case PhaseTrickPlay:
 	}
 	return 0

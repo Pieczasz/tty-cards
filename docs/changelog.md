@@ -245,6 +245,11 @@ unnoticed for so long.
   production (warnings and slow queries).
 - A failed interrupted-match finalize now logs as `finalize interrupted match`,
   once, instead of `finalize ranked match: finalize ranked match: ...`.
+- **A player's drop and reconnect lines carry their session's trace.**
+  `session dropped mid-game, holding the seat` and `player reconnected inside
+  the grace window` were logged under the process context, so filtering Loki by
+  the session's trace_id never found them. Join-outcome metrics are recorded
+  under the session too.
 - **`scripts/restore.sh` no longer drops the live database first.** It restores
   into `<DB_NAME>_restore` and swaps that in only once `pg_restore` succeeds; a
   truncated or corrupt archive used to leave an empty database behind.
@@ -259,6 +264,8 @@ unnoticed for so long.
   can no longer reach the Docker daemon.
 - govulncheck also runs weekly on `main`, and Dependabot now updates the Go
   modules.
+- `make vulncheck` runs govulncheck locally at the version CI uses; the
+  govulncheck and deadcode versions live only in the `Makefile`.
 
 ### Changed - tables and lobbies
 
@@ -305,6 +312,9 @@ unnoticed for so long.
 - The release of held seats at hand end only gives up the holds it found. A
   player who reconnected, started the next game and dropped again in that moment
   keeps their new 90-second hold instead of being forfeited at once.
+- **Lobby codes no longer contain 0, 1, 8 or 9.** They are eight characters of
+  A-Z and 2-7, so an O or an I in a code is always the letter. Typing a code
+  works as before.
 
 ### Changed - terminal UI
 
@@ -397,6 +407,14 @@ unnoticed for so long.
 - `idx_matches_ranked_created` indexes the day's ranked matches, so the
   anti-farm check no longer reads a veteran's whole history on every ranked
   result.
+- **A login no longer waits for a ranked result to save.** Stamping last-seen
+  took the same per-player lock a ranked finalize holds, so a player reconnecting
+  while their table's result was being written sat on a frozen screen. The stamp
+  is now one conditional update that still skips an erased account.
+- Migration `000002` drops two indexes nothing could use (operators: it applies
+  on start, no volume rebuild): the raw `users.username` unique, implied by the
+  case-insensitive one, and `match_participants(user_id)`, a prefix of
+  `(user_id, match_id DESC)`. Registering and saving a result maintain two fewer.
 - The `lobby.SessionAPI` interface is gone; views take the manager directly. It
   had one implementation and one consumer.
 - **Registering a game twice, or a half-declared one, panics at boot**
@@ -428,4 +446,9 @@ unnoticed for so long.
   a bot's own error was hidden behind the timeout message.
 - CI additionally builds the Docker image for amd64 and arm64 and validates
   `compose.yaml` and `nginx.conf`. Lint is pinned to golangci-lint v2.15.0.
+- Integration tests run on the same digest-pinned postgres image as
+  `compose.yaml`, and CI fails when the two differ: a bump of compose's `db`
+  image must also change `postgresImage` in `internal/testutil/db.go`.
+- The image's certs stage runs on the build platform, so a multi-arch build no
+  longer emulates it. The image itself is unchanged.
 

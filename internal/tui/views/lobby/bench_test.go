@@ -47,7 +47,7 @@ func BenchmarkLobbyView_Render(b *testing.B) {
 		lobby.WithCardGame(testGameSlug))
 	require.NoError(b, err)
 	for _, g := range seats[1:] {
-		_, err := manager.JoinLobbyByCode(l.Code(), g)
+		_, err := manager.JoinLobbyByCode(b.Context(), l.Code(), g)
 		require.NoError(b, err)
 	}
 

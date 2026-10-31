@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -102,8 +103,10 @@ func (d *graceTimers) tryCancel(id string) (cancelled, blocked bool, done <-chan
 // DisconnectPlayer is what a dropped session calls instead of LeaveLobby: a seat
 // in a running game is kept for disconnectGrace so the player can reconnect, while
 // a seat in a waiting lobby is given up immediately (nothing is lost by leaving).
-// During shutdown the grace is skipped so the drain still forfeits cleanly.
-func (m *Manager) DisconnectPlayer(p *game.Player) {
+// During shutdown the grace is skipped so the drain still forfeits cleanly. ctx is
+// the dropped session's, for its log line only: it is cancelled by now, so the
+// grace timer runs on the manager's own context.
+func (m *Manager) DisconnectPlayer(ctx context.Context, p *game.Player) {
 	if p == nil {
 		return
 	}
@@ -143,7 +146,7 @@ func (m *Manager) DisconnectPlayer(p *game.Player) {
 	}
 	m.grace.arm(p.ID, disconnectGrace, func(gen uint64) { m.expireLeaveGen(p, gen) })
 	m.mu.Unlock()
-	slog.InfoContext(m.appCtx, "session dropped mid-game, holding the seat",
+	slog.InfoContext(ctx, "session dropped mid-game, holding the seat",
 		"player_id", p.ID, "grace", disconnectGrace.String())
 }
 
@@ -174,8 +177,9 @@ func (m *Manager) expireLeaveGen(p *game.Player, gen uint64) {
 // its seat. Routing back to the table is the caller's: the seat stays indexed, and
 // FindLobbyByPlayer finds it. An expiry already running is not cancelled; this
 // waits until that leave has finished, so the caller does not sit the player back
-// down into a seat that is on its way out.
-func (m *Manager) ResumePlayer(p *game.Player) {
+// down into a seat that is on its way out. ctx is the reconnecting session's, so
+// its log line joins that session's trace.
+func (m *Manager) ResumePlayer(ctx context.Context, p *game.Player) {
 	if p == nil {
 		return
 	}
@@ -183,7 +187,7 @@ func (m *Manager) ResumePlayer(p *game.Player) {
 	cancelled, blocked, done := m.grace.tryCancel(p.ID)
 	m.mu.Unlock()
 	if cancelled {
-		slog.InfoContext(m.appCtx, "player reconnected inside the grace window", "player_id", p.ID)
+		slog.InfoContext(ctx, "player reconnected inside the grace window", "player_id", p.ID)
 		return
 	}
 	if blocked && done != nil {

@@ -61,7 +61,9 @@ func (b *BoundEngine) Submit(action Action) error {
 // moments.
 //
 // The *State is unredacted and live: treat it as read-only, copy anything kept past
-// the callback, and filter anything reaching the screen.
+// the callback, and filter anything reaching the screen. fn runs under the engine
+// lock, which is not reentrant, so it must not call any BoundEngine or Engine method:
+// that deadlocks the table and every timer waiting on it.
 func (b *BoundEngine) Frame(fn func(*State)) (StateSnapshot, []deck.Card, time.Duration) {
 	if b == nil {
 		return StateSnapshot{}, nil, 0

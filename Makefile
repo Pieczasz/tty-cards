@@ -1,4 +1,4 @@
-.PHONY: build test test-short test-integration lint fmt fix deadcode semgrep cover clean ci loadtest backup restore restore-drill install-tools migrate-create migrate-up migrate-down
+.PHONY: build test test-short test-integration lint fmt fix deadcode vulncheck semgrep cover clean ci loadtest backup restore restore-drill install-tools migrate-create migrate-up migrate-down
 
 ci: fmt fix lint deadcode semgrep cover build
 
@@ -18,10 +18,20 @@ lint:
 	golangci-lint run
 	golangci-lint run --build-tags=integration
 
+# The tools' versions live here only: CI runs these targets, so a bump cannot reach
+# one and not the other. They are not go.mod tool directives, which would pull
+# x/tools and x/vuln into the module graph the server's own dependencies resolve in.
+DEADCODE = go run golang.org/x/tools/cmd/deadcode@v0.50.0
+GOVULNCHECK = go run golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
 # Tests count as roots: the engine's WithTurnTimeout and the two figlet-cache hooks
 # exist for them. Anything unreachable from main AND from every test is dead.
 deadcode:
-	@out=$$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./...); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
+	@out=$$($(DEADCODE) -test ./...) || exit 1; if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
+
+# Known vulnerabilities the code can reach, not just ones somewhere in go.sum.
+vulncheck:
+	$(GOVULNCHECK) ./...
 
 # Project invariants golangci-lint cannot express (.semgrep/tty-cards.yml). The rule
 # tests run first: a rule that stopped matching would otherwise pass as a clean tree.
@@ -93,7 +103,7 @@ migrate-up:
 	migrate -path internal/db/migrations -database "$$DB_DSN" up
 
 # One step, and only after a typed yes: DB_DSN stays exported for migrate-up, and
-# with a single init migration one step down is every table.
+# once the database is down to 000001 one step down is every table.
 migrate-down:
 	@read -p "Roll back the newest migration on \$$DB_DSN? Type yes: " ok; [ "$$ok" = yes ]
 	migrate -path internal/db/migrations -database "$$DB_DSN" down 1

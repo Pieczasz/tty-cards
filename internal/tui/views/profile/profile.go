@@ -86,7 +86,6 @@ type model struct {
 
 // New builds the profile screen with one game filter per game on offer.
 func New(global router.GlobalContext) tea.Model {
-	global.EnsureTheme()
 	// The first is "All": no slug, so it matches every match.
 	gameFilters := append([]game.Module{{Name: filterAllGames}}, global.Games...)
 	return &model{

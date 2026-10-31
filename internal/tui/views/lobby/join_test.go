@@ -74,7 +74,7 @@ func TestJoin_RefreshDropsTablesThatStarted(t *testing.T) {
 	m := newManager(t)
 	l := openPublicTable(t, m, "host", testutil.UID(1), testGameSlug, lobby.WithMaxPlayers(2))
 	guest := &game.Player{ID: "guest", UserID: testutil.UID(2), Name: "guest"}
-	_, err := m.JoinLobbyByCode(l.Code(), guest)
+	_, err := m.JoinLobbyByCode(t.Context(), l.Code(), guest)
 	require.NoError(t, err)
 
 	view := newJoinModel(t, m)

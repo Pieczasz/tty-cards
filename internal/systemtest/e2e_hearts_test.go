@@ -308,10 +308,10 @@ func TestHearts_CreateLobbyRequiresFourPlayers(t *testing.T) {
 
 	for i := 2; i <= 4; i++ {
 		guest := newPlayer(testutil.UID(i), fmt.Sprintf("p%d", i))
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), guest)))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), guest)))
 	}
 	extra := newPlayer(testutil.UID(5), "extra")
-	require.ErrorIs(t, joinErr(manager.JoinLobbyByCode(l.Code(), extra)), lobby.ErrRefused)
+	require.ErrorIs(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), extra)), lobby.ErrRefused)
 	require.Equal(t, 4, l.Snapshot().Players())
 	require.False(t, l.HasPlayer(extra))
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,8 +31,8 @@ const (
 )
 
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolationCode
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == pgUniqueViolationCode
 }
 
 type bestPlayersCacheEntry struct {
@@ -276,15 +275,15 @@ func (q *UserRepository) storeBestPlayers(gameSlug string, gen uint64, rankings 
 	}
 }
 
-// UserProfile is the account with its keys and rankings.
+// UserProfile is the account with its rankings and their games. Not its keys: the
+// profile screen never shows them, so loading them cost a query per open.
 func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *db.User, err error) {
 	ctx, span := tracer.Start(ctx, "db.UserProfile",
 		trace.WithAttributes(attribute.String("user_id", userID.String())))
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	var user db.User
-	err = q.db.WithContext(ctx).Preload("PublicSSHKeys").
-		Preload("Rankings.Game").
+	err = q.db.WithContext(ctx).Preload("Rankings.Game").
 		Where("id = ?", userID.String()).
 		First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -302,9 +301,11 @@ func (q *UserRepository) UserProfile(ctx context.Context, userID uuid.UUID) (_ *
 // timestamp matters. Updating by id, not the preloaded structs: those carry rankings
 // and the user association, and GORM's save hooks would rewrite every one of them.
 //
-// It takes the same seat advisory lock as DeleteAccount and skips the stamp once the
-// username is already anonymised, so a displacing login during erasure cannot
-// deadlock on users/public_keys order or restore last_seen_at after GDPR null-out.
+// One conditional UPDATE and no seat lock: a login must not queue behind a ranked
+// finalize for a stamp it treats as non-fatal. The users row lock is what orders it
+// against an erasure: under READ COMMITTED the UPDATE waits on eraseUser's FOR UPDATE
+// and then re-checks its WHERE against the anonymised row, so it cannot restore
+// last_seen_at after the GDPR null-out. Both take users before public_keys.
 func (q *UserRepository) UpdateUserActivity(
 	ctx context.Context, userID uuid.UUID, keyID uint,
 ) (err error) {
@@ -312,23 +313,14 @@ func (q *UserRepository) UpdateUserActivity(
 	defer func() { recordSpanResult(span, err); span.End() }()
 
 	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockSeat(tx, userID); err != nil {
-			return err
-		}
-		var user db.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "username").Where("id = ?", userID).Take(&user).Error; err != nil {
-			return fmt.Errorf("lock user for activity: %w", err)
-		}
-		if strings.HasPrefix(strings.ToLower(user.Username), db.AnonymisedPrefix) {
-			return nil
-		}
 		now := time.Now()
-		if err := tx.Model(&db.User{}).Where("id = ?", userID).
-			Update("LastSeenAt", now).Error; err != nil {
-			return fmt.Errorf("update last seen: %w", err)
+		res := tx.Model(&db.User{}).
+			Where("id = ? AND username NOT LIKE ?", userID.String(), likePrefix(db.AnonymisedPrefix)).
+			Update("LastSeenAt", now)
+		if res.Error != nil {
+			return fmt.Errorf("update last seen: %w", res.Error)
 		}
-		if keyID == 0 {
+		if res.RowsAffected == 0 || keyID == 0 {
 			return nil
 		}
 		if err := tx.Model(&db.PublicSSHKey{}).Where("id = ?", keyID).
@@ -397,15 +389,15 @@ func (q *UserRepository) DeleteAccount(ctx context.Context, userID uuid.UUID) (e
 
 // eraseUser is DeleteAccount inside its transaction.
 func eraseUser(tx *gorm.DB, userID uuid.UUID) error {
-	// The seat lock a ranked finalize (and UpdateUserActivity) holds for this user:
-	// without it a finalize that read the name before this commit seeds a ranking for
-	// the erased account, and it is back on the leaderboard. Lock the users row next
-	// so activity cannot UPDATE users while we still hold keys/rankings deletes.
+	// The seat lock a ranked finalize holds for this user: without it a finalize that
+	// read the name before this commit seeds a ranking for the erased account, and it
+	// is back on the leaderboard. The users row lock comes next: it is what an
+	// UpdateUserActivity waits on, so the stamp re-reads the anonymised name and skips.
 	if err := lockSeat(tx, userID); err != nil {
 		return err
 	}
 	if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("id = ?", userID).Take(&db.User{}).Error; err != nil {
+		Select("id").Where("id = ?", userID.String()).Take(&db.User{}).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return db.ErrUserNotFound
 		}

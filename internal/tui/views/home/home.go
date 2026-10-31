@@ -26,7 +26,6 @@ type nameBannerKey struct {
 
 // New builds the home screen.
 func New(global router.GlobalContext) tea.Model {
-	global.EnsureTheme()
 	return &model{global: global}
 }
 

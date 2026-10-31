@@ -169,7 +169,8 @@ services:
     # OTel flush = 76s),
     # with headroom for the db close and final log writes, so a redeploy cannot
     # SIGKILL the process while a ranked match is still being persisted or
-    # telemetry flushed. cmd/server's shutdown timeout constants depend on this number.
+    # telemetry flushed. cmd/server's shutdown timeout constants depend on this number,
+    # and TestDrainBudgetFitsStopGracePeriod mirrors it.
     stop_grace_period: 80s
     depends_on:
       db:

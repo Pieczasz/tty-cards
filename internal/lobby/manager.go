@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/big"
 	"regexp"
 	"slices"
 	"sync"
@@ -27,13 +26,6 @@ const (
 	finalizeTimeout     = 15 * time.Second
 	joinRateLimitCount  = 10
 	joinRateLimitWindow = time.Second
-	// maxLobbySubscribers is deliberately not maxPlayers: that setting is raised by
-	// SetMaxPlayers long after the broadcaster exists, and a reconnecting player
-	// briefly holds two subscriptions, so a table sized to its seats hands
-	// ErrAtCapacity - a lobby view that never updates - to a player who joined
-	// legitimately. This is the largest roster any game allows plus the same
-	// headroom the engine keeps, which no raise can outgrow.
-	maxLobbySubscribers = 10 + 8
 )
 
 var lobbyCodePattern = regexp.MustCompile(`^[A-Z0-9]{8}$`)
@@ -55,8 +47,10 @@ type Manager struct {
 	// marking itself in-game included. It is atomic rather than guarded by m.mu
 	// because each lobby shares it (Lobby.cacheDirty) and sets it under its own lock,
 	// where taking the manager lock would invert the manager-then-lobby order.
-	cacheDirty  atomic.Bool
-	matchRepo   db.MatchRepository
+	cacheDirty atomic.Bool
+	matchRepo  db.MatchRepository
+	// appCtx is the process lifetime: the parent of timers, watchers and finalize,
+	// which outlive any session. A session's own lines log under its ctx instead.
 	appCtx      context.Context
 	joinLimiter *ratelimit.SlidingWindow
 	// gateMu makes counting a new game's watcher and closing the gate on new games
@@ -99,9 +93,6 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.R
 	if games == nil {
 		panic("lobby.NewManager: nil game registry")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return &Manager{
 		lobbies:     make(map[string]*Lobby),
 		playerLobby: make(map[string]*Lobby),
@@ -113,20 +104,13 @@ func NewManager(ctx context.Context, matchRepo db.MatchRepository, games *game.R
 	}
 }
 
-const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-var charsetLen = big.NewInt(int64(len(charset)))
-
 // generateLobbyCodeLocked is a fresh code no open lobby holds. Caller holds m.mu.
+// rand.Text is base32 (A-Z, 2-7), a subset of what lobbyCodePattern accepts, and
+// it has no 0 or 1, so an O or I in a code is always the letter. Eight characters
+// are 40 bits, which the join rate limiter makes unguessable.
 func (m *Manager) generateLobbyCodeLocked() (string, error) {
-	raw := make([]byte, lobbyCodeLength)
 	for range lobbyCodeAttempts {
-		for i := range raw {
-			// crypto/rand cannot fail on Go 1.24+: a broken source crashes the process.
-			n, _ := rand.Int(rand.Reader, charsetLen)
-			raw[i] = charset[n.Int64()]
-		}
-		if code := string(raw); m.lobbies[code] == nil {
+		if code := rand.Text()[:lobbyCodeLength]; m.lobbies[code] == nil {
 			return code, nil
 		}
 	}
@@ -173,6 +157,12 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 		return nil, err
 	}
 
+	// The feed is sized from the game's MaxPlayers, not options.maxPlayers:
+	// SetMaxPlayers raises that long after the broadcaster exists, and no raise
+	// passes the game's own ceiling. A reconnecting player briefly holds two
+	// subscriptions, so this is the engine's own 2n+8: a feed sized to the seats
+	// would hand ErrAtCapacity - a lobby view that never updates - to a legitimate
+	// player.
 	lobby := &Lobby{
 		cacheDirty:  &m.cacheDirty,
 		game:        mod,
@@ -181,7 +171,7 @@ func (m *Manager) CreateLobby(leader *game.Player, opts ...Option) (*Lobby, erro
 		options:     options,
 		code:        code,
 		ready:       make(map[string]bool),
-		broadcaster: broadcaster.New[Event](maxLobbySubscribers),
+		broadcaster: broadcaster.New[Event](2*mod.MaxPlayers + 8),
 		playerSubs:  make(map[string][]<-chan Event),
 		createdAt:   time.Now(),
 	}
@@ -222,9 +212,9 @@ func (m *Manager) ToggleReady(p *game.Player) error {
 }
 
 // JoinLobbyByCode seats p as a guest and returns the lobby it joined, so the caller
-// does not look the code up a second time - by when the table may be gone.
-func (m *Manager) JoinLobbyByCode(code string, p *game.Player) (*Lobby, error) {
-	ctx := m.appCtx
+// does not look the code up a second time - by when the table may be gone. ctx is
+// the session's, and carries only the outcome metric to its trace.
+func (m *Manager) JoinLobbyByCode(ctx context.Context, code string, p *game.Player) (*Lobby, error) {
 	if !validCode(code) {
 		observability.LobbyJoin(ctx, "invalid_code")
 		return nil, errInvalidCode
@@ -316,8 +306,7 @@ func (m *Manager) reserveWatcher() (canStart bool, release func()) {
 	if !m.admitGame() {
 		return false, func() {}
 	}
-	var once sync.Once
-	return true, func() { once.Do(m.watchers.Done) }
+	return true, sync.OnceFunc(m.watchers.Done)
 }
 
 // heldLocks is the manager lock and, once lockLobby runs, that lobby's lock.

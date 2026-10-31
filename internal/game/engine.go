@@ -20,8 +20,14 @@ import (
 var (
 	errClosed = errors.New("game is closed")
 	errNoGame = errors.New("no active game")
+	// errRulesPanicked is what the player reads when the rules panicked on their move.
+	errRulesPanicked = errors.New("the game hit an internal error and has ended")
 )
 
+// Engine runs one table. Every method takes one lock that covers the State, the turn
+// clock and the end of the match, so the rules run under it and a move, a timeout
+// and a leave can never interleave. Views reach it only through BoundEngine; the
+// event feed tells them when to read it again.
 type Engine struct {
 	mu          sync.Mutex
 	state       *State
@@ -130,12 +136,7 @@ func NewEngine(rules Rules, players []*Player, opts ...EngineOption) *Engine {
 func (e *Engine) Start() (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	defer func() {
-		if r := recover(); r != nil {
-			e.endOnRulesPanicLocked(r)
-			err = errors.New("the game hit an internal error and has ended")
-		}
-	}()
+	defer e.recoverRulesPanic(&err)
 
 	if e.closed {
 		return errClosed
@@ -156,8 +157,9 @@ func (e *Engine) Start() (err error) {
 		return fmt.Errorf("set up game: %w", err)
 	}
 	e.state.Phase = Playing
+	// No event: the lobby subscribes only once Start returns, and announces the
+	// table itself (lobby.EventGameStarted).
 	e.settleTurnLocked()
-	e.broadcaster.Broadcast(Event{Type: EventGameStarted})
 	return nil
 }
 
@@ -166,12 +168,7 @@ func (e *Engine) Start() (err error) {
 func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	defer func() {
-		if r := recover(); r != nil {
-			e.endOnRulesPanicLocked(r)
-			err = errors.New("the game hit an internal error and has ended")
-		}
-	}()
+	defer e.recoverRulesPanic(&err)
 	current, err := e.checkTurnLocked(playerID, action)
 	if err != nil {
 		return err
@@ -187,11 +184,7 @@ func (e *Engine) SubmitAction(playerID string, action Action) (err error) {
 func (e *Engine) RemovePlayer(playerID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	defer func() {
-		if r := recover(); r != nil {
-			e.endOnRulesPanicLocked(r)
-		}
-	}()
+	defer e.recoverRulesPanic(nil)
 	e.removePlayerLocked(playerID)
 }
 

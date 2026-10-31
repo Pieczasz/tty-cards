@@ -68,7 +68,6 @@ func listenToLobbyBroadcaster(ch <-chan lobby.Event) tea.Cmd {
 // New is the waiting room for activeLobby, subscribed to its feed. A nil lobby is a
 // view that goes straight home.
 func New(global router.GlobalContext, activeLobby *lobby.Lobby) tea.Model {
-	global.EnsureTheme()
 	m := &model{global: global, currentLobby: activeLobby}
 	if activeLobby == nil {
 		return m

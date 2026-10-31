@@ -21,8 +21,9 @@ import (
 )
 
 // postgresImage is the server every integration test runs against: the Postgres 18
-// floor uuidv7() sets.
-const postgresImage = "postgres:18-alpine"
+// floor uuidv7() sets, pinned to the multi-arch digest compose deploys so the suite
+// tests the database that ships. CI fails when the two differ.
+const postgresImage = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
 
 // requireContainer fails the test on a container start error, or skips it when the
 // error says Docker itself is missing.

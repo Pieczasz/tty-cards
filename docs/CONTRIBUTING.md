@@ -45,7 +45,8 @@ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 - **`make semgrep`** - the `CLAUDE.md` invariants a linter cannot express, in
   `.semgrep/tty-cards.yml`: the turn cursor moves only through `SetTurn` /
   `OverrideTurn`; TUI code never calls `Engine.WithState`, `SubmitAction` or the
-  two-argument `Frame`; rules code never names, builds, binds or drives an
+  two-argument `Frame`, nor reads `State.Players`, `State.Deck`, `Player.Cards` or
+  `PendingPasses` off the live state; rules code never names, builds, binds or drives an
   `Engine`, and game code logs through `State.Logger()`, never bare `slog`; recover helpers are deferred directly; no client address
   on a span or metric, and none in an info/debug log; the DSN and DB password
   never reach a log, print or error; a `Subscribe` error is never dropped; boolean
@@ -105,9 +106,10 @@ charges only the leavers.
 If a lone remaining seat still has a hand to play out (poker's all-in leaver still
 contests the pot), return `game.LeaveKeepsHandOpen`, or the engine hands that seat a
 forfeit win; otherwise `game.LeaveSettled`.
-A shedding game should reuse package `internal/game/shed` (embed `shed.State`, and
-call `shed.Deal`, `shed.ValidatePlay`, `shed.DrawInto`, `shed.OpenDiscard`,
-`shed.HandEmptyOrAllPassed`, `shed.Leave`, `shed.Standings`) rather than copy it.
+Deal the opening hands with `State.Deal`. A shedding game should reuse package
+`internal/game/shed` (embed `shed.State`, and call `shed.ValidatePlay`,
+`shed.DrawInto`, `shed.OpenDiscard`, `shed.HandEmptyOrAllPassed`, `shed.Leave`,
+`shed.Standings`) rather than copy it.
 Name who acts next with `State.SetTurn` / `State.OverrideTurn`, never by writing
 `CurrentTurn` and `OverrideNextTurn` by hand, and keep a seat on turn for the rest
 of the same turn (gin's draw before its discard) with `State.ContinueTurn`, the one
@@ -115,7 +117,8 @@ way a turn keeps its clock; refuse a foreign action with
 `game.ErrUnknownAction` - from `ValidateAction` and, through a `default:` arm, from
 `ApplyAction` too, so a move added to one switch and forgotten in the other is not a
 silent no-op - and a move between hands with `game.ErrHandOver`, and gate
-the between-hands deal with `game.ValidateNextHand`. `internal/game` imports from an
+the between-hands deal with `game.ValidateNextHand` and clock it with
+`game.NextHandTurnDuration`. `internal/game` imports from an
 allow-list (`depguard` `game-is-pure`: stdlib, `deck`, `broadcaster`,
 `internal/game/...`, `uuid`), so a rules package that needs anything else is a
 decision to discuss first.
@@ -155,7 +158,9 @@ Copy anything you keep past `Sync` (`maps.Clone`, `HandResult.Clone`), in one pu
 `readTable(state, ...)` that returns a value you assign once `Sync` returns, as
 poker, hearts and gin rummy do. The
 `*State` you get is live and unredacted - filtering what the player may see is
-your job, and it should be a named function so a reviewer can find it. Where
+your job, and it should be a named function so a reviewer can find it (semgrep's
+`tui-reads-hidden-cards` fails a view that reads the seats, the stock or anyone's
+cards off it directly). Where
 what a seat may see is a rule of the game, that function lives in the rules
 package (`poker.SeatsFor`), not the view.
 
@@ -273,9 +278,8 @@ maintenance signal.)
 ## Database migrations
 
 Schema changes are SQL files in `internal/db/migrations/`, applied with
-[golang-migrate](https://github.com/golang-migrate/migrate). There is a single
-`000001_init` pair today: the project has never shipped, so upgrade migrations
-are deleted rather than kept as archaeology.
+[golang-migrate](https://github.com/golang-migrate/migrate). `000001_init` is
+the squashed base schema; every change since is a new numbered pair on top of it.
 
 - **Up *and* down, always.** `make migrate-create` writes both.
 - **No GORM AutoMigrate.** `testutil.SetupTestDB` replays these same files, up,
@@ -284,9 +288,8 @@ are deleted rather than kept as archaeology.
 - **Say so when a down loses data.** Mark it `-- LOSSY.` and say what is lost.
 - Compose runs them automatically before the backend starts.
 - Put the *reason* in the file as a SQL comment.
-- Until there is a real deploy to keep alive, prefer rewriting `000001` over
-  stacking a new version (recreate the Postgres volume; a checksum change will
-  otherwise refuse to start).
+- Never edit an applied migration: a database already past it would never see
+  the change. Add the next number with `make migrate-create`.
 
 ## Commits and pull requests
 

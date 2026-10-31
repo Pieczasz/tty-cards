@@ -222,7 +222,7 @@ func startFilledLobby(
 	)
 	require.NoError(t, err)
 	for _, g := range players[1:] {
-		require.NoError(t, joinErr(manager.JoinLobbyByCode(l.Code(), g)))
+		require.NoError(t, joinErr(manager.JoinLobbyByCode(t.Context(), l.Code(), g)))
 	}
 	events, err := l.Subscribe(players[0].ID)
 	require.NoError(t, err)

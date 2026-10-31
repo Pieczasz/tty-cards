@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Pieczasz/tty-cards/internal/game"
 	"github.com/Pieczasz/tty-cards/internal/tui/styles"
 	"github.com/Pieczasz/tty-cards/internal/tui/tuitest"
 
@@ -169,6 +170,7 @@ func TestTick_KeepsTheIdleCheckComing(t *testing.T) {
 func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 	t.Parallel()
 
+	reseated := &game.Player{ID: "alice", Name: "alice"}
 	tests := []struct {
 		name   string
 		msg    tea.Msg
@@ -197,6 +199,14 @@ func TestRouter_TerminalMessagesUpdateGlobalAndFallThrough(t *testing.T) {
 			verify: func(t *testing.T, r *Router) {
 				t.Helper()
 				assert.True(t, r.Global.Palette().Dark)
+			},
+		},
+		{
+			name: "a reseated player replaces the session's",
+			msg:  PlayerUpdatedMsg{Player: reseated},
+			verify: func(t *testing.T, r *Router) {
+				t.Helper()
+				assert.Same(t, reseated, r.Global.Player)
 			},
 		},
 	}

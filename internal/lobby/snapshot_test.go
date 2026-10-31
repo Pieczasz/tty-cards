@@ -23,7 +23,7 @@ func TestLobby_Snapshot(t *testing.T) {
 	guest := mockPlayer("guest", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithCardGame("testgame"), WithMaxPlayers(3), WithPrivate(false), WithRanked(true))
 	require.NoError(t, err)
-	_, err = m.JoinLobbyByCode(l.Code(), guest)
+	_, err = m.JoinLobbyByCode(t.Context(), l.Code(), guest)
 	require.NoError(t, err)
 	require.NoError(t, m.ToggleReady(guest))
 
@@ -56,7 +56,7 @@ func TestLobby_SnapshotDoesNotAlias(t *testing.T) {
 	first := mockPlayer("first", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithCardGame("testgame"), WithMaxPlayers(4))
 	require.NoError(t, err)
-	_, err = m.JoinLobbyByCode(l.Code(), first)
+	_, err = m.JoinLobbyByCode(t.Context(), l.Code(), first)
 	require.NoError(t, err)
 
 	before := l.Snapshot()
@@ -65,7 +65,7 @@ func TestLobby_SnapshotDoesNotAlias(t *testing.T) {
 	assert.True(t, seated, "a write to the copy reached the roster")
 
 	before = l.Snapshot()
-	_, err = m.JoinLobbyByCode(l.Code(), mockPlayer("second", testutil.UID(3)))
+	_, err = m.JoinLobbyByCode(t.Context(), l.Code(), mockPlayer("second", testutil.UID(3)))
 	require.NoError(t, err)
 	require.NoError(t, m.ToggleReady(first))
 	require.NoError(t, l.SetRanked(leader, true))
@@ -88,7 +88,7 @@ func TestLobby_SnapshotIsConsistentUnderChurn(t *testing.T) {
 	anchor := mockPlayer("anchor", testutil.UID(2))
 	l, err := m.CreateLobby(leader, WithCardGame("testgame"), WithMaxPlayers(10))
 	require.NoError(t, err)
-	_, err = m.JoinLobbyByCode(l.Code(), anchor)
+	_, err = m.JoinLobbyByCode(t.Context(), l.Code(), anchor)
 	require.NoError(t, err)
 
 	churners := []*game.Player{leader}
@@ -101,7 +101,7 @@ func TestLobby_SnapshotIsConsistentUnderChurn(t *testing.T) {
 	for _, p := range churners {
 		writers.Go(func() {
 			for range 200 {
-				_, _ = m.JoinLobbyByCode(l.Code(), p)
+				_, _ = m.JoinLobbyByCode(t.Context(), l.Code(), p)
 				_ = m.ToggleReady(p)
 				m.LeaveLobby(p)
 			}

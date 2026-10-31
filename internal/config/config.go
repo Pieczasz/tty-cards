@@ -66,7 +66,12 @@ type Config struct {
 	RegistrationGlobalLimit int
 }
 
-func (c *Config) IsProduction() bool  { return c.Env == envProduction }
+// IsProduction reports ENV=production, which turns on the checks a staging or
+// development boot may skip, such as a required database password.
+func (c *Config) IsProduction() bool { return c.Env == envProduction }
+
+// IsDevelopment reports ENV=development, the only environment allowed a
+// plaintext database and an empty PROXY_TRUSTED_CIDRS.
 func (c *Config) IsDevelopment() bool { return c.Env == envDevelopment }
 
 // Load reads the environment (and .env outside production) into a validated Config.

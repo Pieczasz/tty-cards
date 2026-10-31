@@ -26,6 +26,32 @@ rules:
           - pattern: $S.CurrentTurn--
           - pattern: $S.OverrideNextTurn = $X
 
+  - id: rules-write-engine-owned-state
+    languages: [go]
+    severity: ERROR
+    message: >-
+      State.Phase, Players, LeftPlayers and Rules are the engine's (the Rules
+      contract). A rules set ends a match through CheckWinCondition or an ApplyAction
+      error: a Phase written by hand skips endGameLocked, so there is no winner, no
+      EventGameEnded and the match is never finalized. The seats move only through
+      Engine.RemovePlayer. Tests and gametest are exempt: they rig tables.
+    paths:
+      include:
+        - /internal/game/*/
+      exclude:
+        - /internal/game/gametest/
+        - "*_test.go"
+    pattern-either:
+      # Qualified, because each multi-hand game's Extra has a Phase of its own.
+      - patterns:
+          - pattern: $S.Phase = game.$P
+          - metavariable-regex:
+              metavariable: $P
+              regex: ^(Waiting|Playing|Finished)$
+      - pattern: $S.Players = $X
+      - pattern: $S.LeftPlayers = $X
+      - pattern: $S.Rules = $X
+
   - id: tui-uses-server-engine-api
     languages: [go]
     severity: ERROR
@@ -50,6 +76,35 @@ rules:
       # A regex because semgrep cannot match a bare Go type; comment-only lines are
       # skipped so the rule can still be explained where it applies.
       - pattern-regex: (?m)^(?!\s*//).*?\bgame\.(Engine|NewEngine|Bind)\b
+
+  - id: tui-reads-hidden-cards
+    languages: [go]
+    severity: ERROR
+    message: >-
+      BoundEngine.Frame and Session.Sync hand a view the live, unredacted *game.State:
+      every seat's cards, the stock and hearts' pending passes. A view reads its own
+      hand from the frame and anything about other seats through a redacting helper in
+      the rules package (poker's SeatsFor) or a scalar off Extra. Reading
+      State.Players, State.Deck, Player.Cards or PendingPasses here can draw one
+      player's hidden cards on every screen. Tests are exempt: they set up the table.
+    paths:
+      include:
+        - /internal/tui/
+      exclude:
+        - "*_test.go"
+    pattern-either:
+      # Typed, so the redacted StateSnapshot.Players and a lobby entry's Players stay
+      # allowed: only the live engine types are the leak.
+      - pattern: "($S : *game.State).Players"
+      - pattern: "($S : *game.State).Deck"
+      - pattern: "($P : *game.Player).Cards"
+      # semgrep infers no type for a range variable, so a seat taken off LeftPlayers
+      # is matched by where it came from.
+      - patterns:
+          - pattern-inside: |
+              for $K, $P := range ($S : *game.State).$F { ... }
+          - pattern: $P.Cards
+      - pattern: $X.PendingPasses
 
   - id: rules-package-reaches-the-engine
     languages: [go]
