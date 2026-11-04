@@ -375,7 +375,7 @@ services:
   # publish a port: Grafana is the only one an operator ever opens, and it is reached
   # on loopback (below) through an SSH tunnel to the host.
   alloy:
-    image: grafana/alloy:v1.8.3@sha256:ab04df3936e4d71d31b6f55e0c58a7e749091f59635dd8c2bc731ba1b6c93701
+    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
     restart: unless-stopped
     mem_limit: 256m
     cpus: 0.4
