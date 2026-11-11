@@ -4,7 +4,7 @@
 # its Alpine base is rebuilt, so the tag alone does not describe what was built. The
 # tag is kept alongside for readability - update both together, with
 # `docker buildx imagetools inspect golang:<tag> --format '{{.Manifest.Digest}}'`.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS builder
 
 WORKDIR /code
 
