@@ -16,8 +16,8 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pires/go-proxyproto v0.16.0
 	github.com/stretchr/testify v1.12.1
-	github.com/testcontainers/testcontainers-go v0.44.0
-	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
+	github.com/testcontainers/testcontainers-go v0.45.0
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0
 	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0
@@ -83,7 +83,6 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
-	github.com/lib/pq v1.12.3 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
 	github.com/magiconair/properties v1.18.12 // indirect
